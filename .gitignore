@@ -1,0 +1,6 @@
+# Secretos: se versiona sólo el ejemplo de cada archivo (.env.ejemplo, config.ejemplo.ini).
+.env
+*/config/config.ini
+
+# Dependencias: se instalan con composer install.
+*/vendor/

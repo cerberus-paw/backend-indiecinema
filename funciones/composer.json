@@ -1,0 +1,21 @@
+{
+    "name": "cerberus-paw/funciones",
+    "description": "Subsistema funciones de IndieCinema: reservas, cobro con Mercado Pago, comprobante y asistencia.",
+    "type": "project",
+    "repositories": [
+        { "type": "path", "url": "../nucleo" },
+        { "type": "path", "url": "../../frontend-indiecinema" }
+    ],
+    "require": {
+        "php": "^8.4",
+        "cerberus-paw/nucleo": "@dev"
+    },
+    "autoload": {
+        "psr-4": {
+            "IndieCinema\\Funciones\\": "src/"
+        }
+    },
+    "config": {
+        "sort-packages": true
+    }
+}

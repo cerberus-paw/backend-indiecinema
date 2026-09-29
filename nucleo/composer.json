@@ -6,10 +6,21 @@
         "php": "^8.4",
         "twig/twig": "^3.0"
     },
+    "require-dev": {
+        "phpunit/phpunit": "^12.0"
+    },
     "autoload": {
         "psr-4": {
             "IndieCinema\\Nucleo\\": "src/"
         }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "IndieCinema\\Nucleo\\Pruebas\\": "tests/"
+        }
+    },
+    "scripts": {
+        "pruebas": "phpunit"
     },
     "config": {
         "sort-packages": true

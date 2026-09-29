@@ -4,3 +4,7 @@
 
 # Dependencias: se instalan con composer install.
 */vendor/
+
+# Caché de PHPUnit.
+.phpunit.result.cache
+.phpunit.cache/

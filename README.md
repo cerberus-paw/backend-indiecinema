@@ -55,6 +55,17 @@ todo el sitio se vea igual aunque lo sirvan subsistemas distintos.
 
 ## Decisiones
 
+- **Núcleo propio con Twig, sin framework.** La arquitectura dejaba abierto «un núcleo propio y
+  Twig o Laravel». Los docentes pidieron trabajar con lo mínimo de librerías («vanilla»), así que
+  el ruteo, los controladores, el middleware, el acceso a la base y el manejo de errores los
+  escribimos nosotros. Sólo usamos una librería donde reinventarla sería un riesgo o no suma nada:
+
+  | Librería | Para qué | Por qué no la escribimos |
+  |---|---|---|
+  | `twig/twig` | Plantillas | Escapa el HTML por defecto, que es el control contra XSS que prometimos, y es el motor de las plantillas del paquete front |
+  | `psr/log` | Interfaz del registro de errores (PSR-3) | Son sólo interfaces; el registro que escribe el log es nuestro |
+  | `phpunit/phpunit` | Pruebas del núcleo | Sólo en desarrollo, no llega al servidor |
+
 - **El núcleo es un paquete de Composer dentro del monorepo** (`nucleo/`, instalado con un
   repositorio `path`). Cuentas, programación y funciones usan el mismo código, así un error se
   arregla una sola vez.

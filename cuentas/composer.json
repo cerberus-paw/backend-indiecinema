@@ -1,0 +1,21 @@
+{
+    "name": "cerberus-paw/cuentas",
+    "description": "Subsistema cuentas de IndieCinema: registro, sesión, roles y perfil.",
+    "type": "project",
+    "repositories": [
+        { "type": "path", "url": "../nucleo" },
+        { "type": "path", "url": "../../frontend-indiecinema" }
+    ],
+    "require": {
+        "php": "^8.4",
+        "cerberus-paw/nucleo": "@dev"
+    },
+    "autoload": {
+        "psr-4": {
+            "IndieCinema\\Cuentas\\": "src/"
+        }
+    },
+    "config": {
+        "sort-packages": true
+    }
+}

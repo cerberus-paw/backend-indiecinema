@@ -1,0 +1,86 @@
+# IndieCinema: nginx adelante, un contenedor PHP por subsistema y un MySQL con un esquema por
+# subsistema. Es el mismo archivo en desarrollo y en el VPS; lo que cambia está en .env y en el
+# config.ini de cada subsistema, que no se versionan.
+#
+# Sólo nginx publica un puerto: MySQL y los subsistemas quedan en la red interna, así desde
+# afuera no se llega ni a la base ni a las rutas /interno/.
+#
+# Los subsistemas se montan en /src con la misma disposición que en el disco
+# (backend-indiecinema/<subsistema> y, al lado, frontend-indiecinema): así las rutas relativas
+# de los repositorios «path» de Composer valen igual adentro y afuera del contenedor.
+
+name: indiecinema
+
+x-subsistema: &subsistema
+  build: ./php
+  restart: unless-stopped
+  security_opt: ["no-new-privileges:true"]
+  networks: [interna]
+  depends_on: [mysql]
+
+services:
+  nginx:
+    image: nginx:stable-alpine
+    # Es el único punto de entrada y, si cae, caen todos: se reinicia solo.
+    restart: unless-stopped
+    ports: ["${PUERTO_HTTP:-8080}:80"]
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      # Los estáticos del paquete front los sirve nginx directamente en /estaticos/.
+      - ../frontend-indiecinema/estaticos:/srv/estaticos:ro
+    networks: [interna]
+    depends_on: [cuentas, programacion]
+
+  # Cada subsistema monta sólo su carpeta, el núcleo y el front: nunca la de otro, así un
+  # subsistema comprometido no lee el config.ini (ni los secretos) de los demás.
+  cuentas:
+    <<: *subsistema
+    working_dir: /src/backend-indiecinema/cuentas
+    environment:
+      APACHE_DOCUMENT_ROOT: /src/backend-indiecinema/cuentas/public
+    volumes:
+      - ./cuentas:/src/backend-indiecinema/cuentas
+      - ./nucleo:/src/backend-indiecinema/nucleo:ro
+      - ../frontend-indiecinema:/src/frontend-indiecinema:ro
+
+  programacion:
+    <<: *subsistema
+    working_dir: /src/backend-indiecinema/programacion
+    environment:
+      APACHE_DOCUMENT_ROOT: /src/backend-indiecinema/programacion/public
+    volumes:
+      - ./programacion:/src/backend-indiecinema/programacion
+      - ./nucleo:/src/backend-indiecinema/nucleo:ro
+      - ../frontend-indiecinema:/src/frontend-indiecinema:ro
+      # Imágenes de salas y afiches: fuera del webroot, las entrega un controlador.
+      - archivos-programacion:/var/indiecinema/archivos
+
+  # funciones se suma acá cuando arranque, igual que programación (con su volumen propio
+  # sólo si guarda archivos).
+
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_CLAVE_ROOT:?falta MYSQL_CLAVE_ROOT en .env}
+      # Las lee el script de mysql/init para crear un usuario por subsistema.
+      MYSQL_CLAVE_MIGRACIONES: ${MYSQL_CLAVE_MIGRACIONES:?falta MYSQL_CLAVE_MIGRACIONES en .env}
+      MYSQL_CLAVE_CUENTAS: ${MYSQL_CLAVE_CUENTAS:?falta MYSQL_CLAVE_CUENTAS en .env}
+      MYSQL_CLAVE_PROGRAMACION: ${MYSQL_CLAVE_PROGRAMACION:?falta MYSQL_CLAVE_PROGRAMACION en .env}
+    volumes:
+      - datos-mysql:/var/lib/mysql
+      # Corre una sola vez, con la base vacía: esquemas, usuarios y permisos.
+      - ./mysql/init:/docker-entrypoint-initdb.d:ro
+      # Las migraciones se aplican desde acá y no desde los subsistemas: el usuario que puede
+      # crear y alterar tablas nunca está en un contenedor de la aplicación.
+      - ./mysql/herramientas:/herramientas:ro
+      - ./cuentas/migraciones:/migraciones/cuentas:ro
+      - ./programacion/migraciones:/migraciones/programacion:ro
+    networks: [interna]
+
+networks:
+  interna:
+
+volumes:
+  datos-mysql:
+  archivos-programacion:

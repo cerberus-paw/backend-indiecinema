@@ -1,0 +1,22 @@
+{#
+  Página de error de respaldo. No extiende la base del paquete front a propósito: tiene que
+  poder mostrarse aunque el front no esté instalado o sea justo lo que falló. El front puede
+  reemplazarla con su propio error.html.twig.
+#}
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ estado }} · IndieCinema</title>
+</head>
+<body>
+  <main>
+    <h1>{{ mensaje }}</h1>
+    <p><a href="/">Volver al inicio</a></p>
+    {% if detalle %}
+      <pre>{{ detalle }}</pre>
+    {% endif %}
+  </main>
+</body>
+</html>

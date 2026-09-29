@@ -1,0 +1,161 @@
+<?php
+
+declare(strict_types=1);
+
+namespace IndieCinema\Nucleo\Http;
+
+use IndieCinema\Nucleo\Ruteo\Ruta;
+
+/**
+ * La petición HTTP que atiende el subsistema.
+ *
+ * Es inmutable: el router (y después el middleware) devuelven copias con lo que agregan, así
+ * nadie cambia la petición a mitad de camino.
+ */
+final class Peticion
+{
+    /** @var array<string, string> */
+    private readonly array $cabeceras;
+
+    private ?Ruta $rutaResuelta = null;
+
+    /** @var array<string, string> */
+    private array $parametros = [];
+
+    /**
+     * @param string                $ruta      la ruta sin el prefijo del subsistema, que nginx ya sacó
+     * @param array<string, mixed>  $consulta  los parámetros de la URL
+     * @param array<string, mixed>  $cuerpo    los campos del formulario, o el JSON ya decodificado
+     * @param array<string, string> $cabeceras
+     * @param array<string, string> $cookies
+     * @param array<string, mixed>  $archivos
+     */
+    public function __construct(
+        private readonly string $metodo,
+        private readonly string $ruta,
+        private readonly array $consulta = [],
+        private readonly array $cuerpo = [],
+        array $cabeceras = [],
+        private readonly array $cookies = [],
+        private readonly array $archivos = [],
+    ) {
+        $this->cabeceras = array_change_key_case($cabeceras, CASE_LOWER);
+    }
+
+    public static function desdeGlobales(): self
+    {
+        $cabeceras = [];
+        foreach ($_SERVER as $clave => $valor) {
+            if (str_starts_with($clave, 'HTTP_')) {
+                $cabeceras[str_replace('_', '-', substr($clave, 5))] = (string) $valor;
+            }
+        }
+        // Estas dos no llegan con el prefijo HTTP_.
+        foreach (['CONTENT_TYPE', 'CONTENT_LENGTH'] as $clave) {
+            if (isset($_SERVER[$clave])) {
+                $cabeceras[str_replace('_', '-', $clave)] = (string) $_SERVER[$clave];
+            }
+        }
+
+        $cuerpo = $_POST;
+        // Las APIs internas mandan JSON, que PHP no pone en $_POST.
+        if (str_contains(strtolower($cabeceras['CONTENT-TYPE'] ?? ''), 'application/json')) {
+            $json = json_decode((string) file_get_contents('php://input'), true);
+            $cuerpo = is_array($json) ? $json : [];
+        }
+
+        return new self(
+            strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? 'GET')),
+            self::normalizarRuta((string) (parse_url((string) ($_SERVER['REQUEST_URI'] ?? '/'), PHP_URL_PATH) ?: '/')),
+            $_GET,
+            $cuerpo,
+            $cabeceras,
+            $_COOKIE,
+            $_FILES,
+        );
+    }
+
+    /**
+     * «/salas/» y «/salas» son la misma ruta, y la raíz siempre es «/».
+     */
+    public static function normalizarRuta(string $ruta): string
+    {
+        return '/' . trim(rawurldecode($ruta), '/');
+    }
+
+    public function metodo(): string
+    {
+        return $this->metodo;
+    }
+
+    public function ruta(): string
+    {
+        return $this->ruta;
+    }
+
+    public function consulta(string $clave, mixed $porDefecto = null): mixed
+    {
+        return $this->consulta[$clave] ?? $porDefecto;
+    }
+
+    public function campo(string $clave, mixed $porDefecto = null): mixed
+    {
+        return $this->cuerpo[$clave] ?? $porDefecto;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function cuerpo(): array
+    {
+        return $this->cuerpo;
+    }
+
+    public function cabecera(string $nombre): ?string
+    {
+        return $this->cabeceras[strtolower($nombre)] ?? null;
+    }
+
+    public function cookie(string $nombre): ?string
+    {
+        return $this->cookies[$nombre] ?? null;
+    }
+
+    public function archivo(string $nombre): mixed
+    {
+        return $this->archivos[$nombre] ?? null;
+    }
+
+    /**
+     * Un parámetro de la ruta, como el {id} de «/salas/{id}».
+     */
+    public function parametro(string $nombre): ?string
+    {
+        return $this->parametros[$nombre] ?? null;
+    }
+
+    public function rutaResuelta(): ?Ruta
+    {
+        return $this->rutaResuelta;
+    }
+
+    /**
+     * @param array<string, string> $parametros
+     */
+    public function conRuta(Ruta $ruta, array $parametros): self
+    {
+        $copia = clone $this;
+        $copia->rutaResuelta = $ruta;
+        $copia->parametros = $parametros;
+
+        return $copia;
+    }
+
+    /**
+     * Si el que llama espera JSON: el JavaScript propio y las APIs internas.
+     */
+    public function aceptaJson(): bool
+    {
+        return str_contains(strtolower($this->cabecera('Accept') ?? ''), 'application/json');
+    }
+}

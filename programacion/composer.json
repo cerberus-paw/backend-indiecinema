@@ -1,6 +1,6 @@
 {
     "name": "cerberus-paw/programacion",
-    "description": "Subsistema programación de IndieCinema: salas, catálogo, funciones, votación y cartelera.",
+    "description": "Subsistema programación de IndieCinema: catálogo, salas, funciones, cartelera, votación de títulos y rankings.",
     "type": "project",
     "repositories": [
         { "type": "path", "url": "../nucleo" },

@@ -29,7 +29,7 @@ services:
       # Los estáticos del paquete front los sirve nginx directamente en /estaticos/.
       - ../frontend-indiecinema/estaticos:/srv/estaticos:ro
     networks: [interna]
-    depends_on: [cuentas, programacion]
+    depends_on: [cuentas, programacion, funciones]
 
   # Cada subsistema monta sólo su carpeta, el núcleo y el front: nunca la de otro, así un
   # subsistema comprometido no lee el config.ini (ni los secretos) de los demás.
@@ -52,11 +52,19 @@ services:
       - ./programacion:/src/backend-indiecinema/programacion
       - ./nucleo:/src/backend-indiecinema/nucleo:ro
       - ../frontend-indiecinema:/src/frontend-indiecinema:ro
-      # Imágenes de salas y afiches: fuera del webroot, las entrega un controlador.
+      # Imagen de la sala y afiche de la obra: fuera del webroot, las entrega un controlador.
       - archivos-programacion:/var/indiecinema/archivos
 
-  # funciones se suma acá cuando arranque, igual que programación (con su volumen propio
-  # sólo si guarda archivos).
+  # Nadie le sube archivos a funciones, así que no tiene volumen propio.
+  funciones:
+    <<: *subsistema
+    working_dir: /src/backend-indiecinema/funciones
+    environment:
+      APACHE_DOCUMENT_ROOT: /src/backend-indiecinema/funciones/public
+    volumes:
+      - ./funciones:/src/backend-indiecinema/funciones
+      - ./nucleo:/src/backend-indiecinema/nucleo:ro
+      - ../frontend-indiecinema:/src/frontend-indiecinema:ro
 
   mysql:
     image: mysql:8.4
@@ -67,6 +75,7 @@ services:
       MYSQL_CLAVE_MIGRACIONES: ${MYSQL_CLAVE_MIGRACIONES:?falta MYSQL_CLAVE_MIGRACIONES en .env}
       MYSQL_CLAVE_CUENTAS: ${MYSQL_CLAVE_CUENTAS:?falta MYSQL_CLAVE_CUENTAS en .env}
       MYSQL_CLAVE_PROGRAMACION: ${MYSQL_CLAVE_PROGRAMACION:?falta MYSQL_CLAVE_PROGRAMACION en .env}
+      MYSQL_CLAVE_FUNCIONES: ${MYSQL_CLAVE_FUNCIONES:?falta MYSQL_CLAVE_FUNCIONES en .env}
     volumes:
       - datos-mysql:/var/lib/mysql
       # Corre una sola vez, con la base vacía: esquemas, usuarios y permisos.
@@ -76,6 +85,7 @@ services:
       - ./mysql/herramientas:/herramientas:ro
       - ./cuentas/migraciones:/migraciones/cuentas:ro
       - ./programacion/migraciones:/migraciones/programacion:ro
+      - ./funciones/migraciones:/migraciones/funciones:ro
     networks: [interna]
 
 networks:

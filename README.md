@@ -21,9 +21,9 @@ backend-indiecinema/
 │   ├── init/              esquemas, usuarios y permisos; corre una vez, con la base vacía
 │   └── herramientas/      aplicar migraciones y cargar datos de prueba
 ├── nucleo/                MVC común: ruteo, middleware, base de datos, vistas y errores
-├── cuentas/               /cuenta/   registro, sesión, roles y perfil
-├── programacion/          /          salas, catálogo, funciones, votación y cartelera
-└── funciones/             /funcion/  reservas, cobro con Mercado Pago, comprobante y asistencia
+├── cuentas/               /cuenta/   registro, sesión, roles, perfil y seguidos
+├── programacion/          /          catálogo, salas, funciones, cartelera, votación y rankings
+└── funciones/             /funcion/  acuerdo de fecha, reservas, cobro, asistencia y calificaciones
 ```
 
 Moderación y beneficios se suman en la Entrega 4 con la misma forma.
@@ -75,6 +75,10 @@ todo el sitio se vea igual aunque lo sirvan subsistemas distintos.
 - **Cada contenedor monta sólo lo suyo**: su carpeta, el núcleo y el front. Ningún subsistema ve
   el `config.ini` de otro, así que si uno queda comprometido no se lleva los secretos de los
   demás; la credencial de Mercado Pago existe sólo en funciones.
+- **Los archivos subidos van a un volumen del subsistema dueño**, fuera del webroot, y los entrega
+  un controlador. La E2 sólo nombraba la documentación de las salas, que es de moderación; la E3
+  suma la imagen de la sala y el afiche de la obra, así que programación ya tiene el suyo. Cuentas
+  y moderación suman el propio cuando guarden archivos (la foto de perfil, la documentación).
 - **Sólo nginx publica un puerto.** MySQL y los subsistemas están en la red interna: desde
   afuera no se llega a la base ni a las rutas `/interno/`.
 - **Las migraciones se aplican desde el contenedor de MySQL.** El usuario con permiso para crear
@@ -100,7 +104,8 @@ cd backend-indiecinema
 cp .env.ejemplo .env                     # y cambiar las claves
 cp cuentas/config/config.ejemplo.ini cuentas/config/config.ini
 cp programacion/config/config.ejemplo.ini programacion/config/config.ini
-(cd cuentas && composer install) && (cd programacion && composer install)
+cp funciones/config/config.ejemplo.ini funciones/config/config.ini
+composer install -d cuentas && composer install -d programacion && composer install -d funciones
 docker compose up -d
 ```
 

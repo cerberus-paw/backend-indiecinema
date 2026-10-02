@@ -3,8 +3,16 @@
     "description": "Subsistema funciones de IndieCinema: acuerdo de fecha, reservas con cupo, cobro con Mercado Pago, asistencia y calificaciones.",
     "type": "project",
     "repositories": [
-        { "type": "path", "url": "../nucleo" },
-        { "type": "path", "url": "../../frontend-indiecinema" }
+        {
+            "type": "path",
+            "url": "../nucleo",
+            "options": { "versions": { "cerberus-paw/nucleo": "dev-main" } }
+        },
+        {
+            "type": "path",
+            "url": "../../frontend-indiecinema",
+            "options": { "versions": { "cerberus-paw/frontend-indiecinema": "dev-main" } }
+        }
     ],
     "require": {
         "php": "^8.4",

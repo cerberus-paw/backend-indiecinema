@@ -1,0 +1,21 @@
+{#
+  Plantilla base de respaldo, sin estilos. La que ve el usuario es la del paquete front
+  (frontend-indiecinema/plantillas/base.html.twig), que tiene prioridad sobre ésta: esta existe
+  para que un subsistema pueda mostrar sus páginas aunque el front todavía no esté instalado.
+
+  Las páginas llenan dos bloques, que la base del front también tiene que tener:
+  «titulo» (sólo el nombre de la página) y «contenido».
+#}
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block titulo %}{% endblock %} · IndieCinema</title>
+</head>
+<body>
+  <main>
+    {% block contenido %}{% endblock %}
+  </main>
+</body>
+</html>

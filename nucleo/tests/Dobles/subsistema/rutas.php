@@ -12,6 +12,7 @@ return static function (Router $router): void {
     $router->get('/plantilla', [ControladorDePrueba::class, 'plantilla']);
     $router->get('/redirige', [ControladorDePrueba::class, 'redirige']);
     $router->get('/falla', [ControladorDePrueba::class, 'falla']);
+    $router->get('/esqueleto', [ControladorDePrueba::class, 'esqueleto']);
     $router->get('/organizador', [ControladorDePrueba::class, 'hola'], Rol::Organizador);
     $router->post('/formulario', [ControladorDePrueba::class, 'hola']);
     $router->interna('POST', '/interno/prueba', [ControladorDePrueba::class, 'hola'], ['programacion']);

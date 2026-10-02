@@ -16,7 +16,7 @@ backend-indiecinema/
 ├── docker-compose.yml     nginx, un contenedor PHP por subsistema y MySQL
 ├── .env.ejemplo           puerto y claves de MySQL (copiar a .env)
 ├── nginx/conf.d/          ruteo por prefijo, validación de sesión y límites de intentos
-├── php/                   Dockerfile común a los subsistemas (php:8-apache)
+├── php/                   Dockerfile común a los subsistemas (php:8.4-apache, sin root)
 ├── mysql/
 │   ├── init/              esquemas, usuarios y permisos; corre una vez, con la base vacía
 │   └── herramientas/      aplicar migraciones y cargar datos de prueba
@@ -78,6 +78,12 @@ todo el sitio se vea igual aunque lo sirvan subsistemas distintos.
 - **Cada contenedor monta sólo lo suyo**: su carpeta, el núcleo y el front. Ningún subsistema ve
   el `config.ini` de otro, así que si uno queda comprometido no se lleva los secretos de los
   demás; la credencial de Mercado Pago existe sólo en funciones.
+- **Los subsistemas corren sin privilegios.** Una sola imagen para los tres (`php:8.4-apache`,
+  la versión mínima que pide `composer.json`) con Apache entero como `www-data`, que por eso
+  escucha en el 8080. En el compose, sin ninguna capacidad de root y con el sistema de archivos de
+  sólo lectura: el código se monta así y sólo se puede escribir en el volumen de archivos subidos
+  y en `/tmp`. PHP usa `php.ini-production` también en desarrollo; el detalle de los errores en
+  pantalla lo decide `config.ini`.
 - **Los archivos subidos van a un volumen del subsistema dueño**, fuera del webroot, y los entrega
   un controlador. La E2 sólo nombraba la documentación de las salas, que es de moderación; la E3
   suma la imagen de la sala y el afiche de la obra, así que programación ya tiene el suyo. Cuentas

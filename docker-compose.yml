@@ -11,10 +11,17 @@
 
 name: indiecinema
 
+# Seguridad por capa (sistema operativo): Apache corre como www-data (php/Dockerfile), sin
+# ninguna capacidad de root y con el sistema de archivos de sólo lectura salvo lo que montan
+# acá. Si alguien ejecutara código en un subsistema, no puede instalar nada ni tocar la imagen.
 x-subsistema: &subsistema
   build: ./php
   restart: unless-stopped
   security_opt: ["no-new-privileges:true"]
+  cap_drop: [ALL]
+  read_only: true
+  # Lo único que escribe Apache (su pid y sus bloqueos) y PHP (los archivos que se están subiendo).
+  tmpfs: [/tmp, /var/run/apache2, /var/lock/apache2]
   networks: [interna]
   depends_on: [mysql]
 
@@ -39,7 +46,7 @@ services:
     environment:
       APACHE_DOCUMENT_ROOT: /src/backend-indiecinema/cuentas/public
     volumes:
-      - ./cuentas:/src/backend-indiecinema/cuentas
+      - ./cuentas:/src/backend-indiecinema/cuentas:ro
       - ./nucleo:/src/backend-indiecinema/nucleo:ro
       - ../frontend-indiecinema:/src/frontend-indiecinema:ro
 
@@ -49,7 +56,7 @@ services:
     environment:
       APACHE_DOCUMENT_ROOT: /src/backend-indiecinema/programacion/public
     volumes:
-      - ./programacion:/src/backend-indiecinema/programacion
+      - ./programacion:/src/backend-indiecinema/programacion:ro
       - ./nucleo:/src/backend-indiecinema/nucleo:ro
       - ../frontend-indiecinema:/src/frontend-indiecinema:ro
       # Imagen de la sala y afiche de la obra: fuera del webroot, las entrega un controlador.
@@ -62,7 +69,7 @@ services:
     environment:
       APACHE_DOCUMENT_ROOT: /src/backend-indiecinema/funciones/public
     volumes:
-      - ./funciones:/src/backend-indiecinema/funciones
+      - ./funciones:/src/backend-indiecinema/funciones:ro
       - ./nucleo:/src/backend-indiecinema/nucleo:ro
       - ../frontend-indiecinema:/src/frontend-indiecinema:ro
 

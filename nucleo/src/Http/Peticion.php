@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace IndieCinema\Nucleo\Http;
 
 use IndieCinema\Nucleo\Ruteo\Ruta;
+use IndieCinema\Nucleo\Seguridad\Usuario;
 
 /**
  * La petición HTTP que atiende el subsistema.
@@ -21,6 +22,10 @@ final class Peticion
 
     /** @var array<string, string> */
     private array $parametros = [];
+
+    private ?Usuario $usuario = null;
+
+    private ?string $tokenCsrf = null;
 
     /**
      * @param string                $ruta      la ruta sin el prefijo del subsistema, que nginx ya sacó
@@ -147,6 +152,39 @@ final class Peticion
         $copia = clone $this;
         $copia->rutaResuelta = $ruta;
         $copia->parametros = $parametros;
+
+        return $copia;
+    }
+
+    /**
+     * Quien hace la petición, o null si no inició sesión. Lo arma el middleware con las cabeceras
+     * de nginx.
+     */
+    public function usuario(): ?Usuario
+    {
+        return $this->usuario;
+    }
+
+    public function conUsuario(?Usuario $usuario): self
+    {
+        $copia = clone $this;
+        $copia->usuario = $usuario;
+
+        return $copia;
+    }
+
+    /**
+     * El token CSRF que llevan los formularios de esta página. Null en las rutas /interno/.
+     */
+    public function tokenCsrf(): ?string
+    {
+        return $this->tokenCsrf;
+    }
+
+    public function conTokenCsrf(string $token): self
+    {
+        $copia = clone $this;
+        $copia->tokenCsrf = $token;
 
         return $copia;
     }

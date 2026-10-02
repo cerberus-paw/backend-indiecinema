@@ -1,0 +1,1 @@
+{{ usuario ? usuario.nombre : 'visitante' }}|{{ csrf }}|{{ ruta_actual }}|{{ usuario and usuario.alcanza('organizador') ? 'panel' : 'sin panel' }}

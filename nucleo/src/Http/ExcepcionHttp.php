@@ -29,9 +29,26 @@ final class ExcepcionHttp extends RuntimeException
         return new self(400, $mensaje);
     }
 
+    /**
+     * 401: la ruta pide un rol y no hay sesión.
+     */
+    public static function sinSesion(): self
+    {
+        return new self(401, 'Tenés que ingresar para ver esta página.');
+    }
+
     public static function prohibida(): self
     {
         return new self(403, 'No tenés permiso para entrar acá.');
+    }
+
+    /**
+     * El token del formulario no coincide con el de la cookie: o el pedido viene de otro sitio, o
+     * la cookie se perdió (por ejemplo, al cerrar el navegador) y la página quedó vieja.
+     */
+    public static function csrfInvalido(): self
+    {
+        return new self(403, 'La página venció. Volvé a cargarla y probá de nuevo.');
     }
 
     public static function noEncontrada(): self

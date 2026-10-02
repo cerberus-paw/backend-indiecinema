@@ -40,6 +40,7 @@ final class Aplicacion
      */
     public function __construct(string $raiz, Configuracion $configuracion, ?LoggerInterface $log = null)
     {
+        $configuracion->verificarQueNoQuedenValoresDeEjemplo();
         $subsistema = (string) $configuracion->requerir('app.subsistema');
         $this->log = $log ?? new Log($subsistema);
         $this->prefijo = rtrim((string) $configuracion->obtener('app.prefijo', ''), '/');

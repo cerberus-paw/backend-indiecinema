@@ -9,6 +9,7 @@ use IndieCinema\Nucleo\Http\ExcepcionHttp;
 use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Vista;
+use Psr\Log\LoggerInterface;
 use Throwable;
 
 /**
@@ -22,7 +23,7 @@ final class ManejadorDeErrores
     /**
      * @param bool $mostrarDetalle sólo en desarrollo: agrega el error completo a la página
      */
-    public function __construct(private readonly bool $mostrarDetalle)
+    public function __construct(private readonly LoggerInterface $log, private readonly bool $mostrarDetalle)
     {
     }
 
@@ -50,7 +51,12 @@ final class ManejadorDeErrores
             $cabeceras = $error->cabeceras;
             $detalle = null;
         } else {
-            error_log(sprintf('%s %s: %s', $peticion->metodo(), $peticion->ruta(), $error));
+            $this->log->error('{metodo} {ruta}: {mensaje}', [
+                'metodo' => $peticion->metodo(),
+                'ruta' => $peticion->ruta(),
+                'mensaje' => $error->getMessage(),
+                'exception' => $error,
+            ]);
             $estado = 500;
             $mensaje = self::MENSAJE_INTERNO;
             $cabeceras = [];
@@ -80,7 +86,7 @@ final class ManejadorDeErrores
             return Respuesta::html($html, $estado);
         } catch (Throwable $falla) {
             // Si falla hasta la plantilla de error, texto plano y nunca el detalle.
-            error_log('No se pudo mostrar la página de error: ' . $falla);
+            $this->log->error('No se pudo mostrar la página de error.', ['exception' => $falla]);
 
             return (new Respuesta($mensaje, $estado))->conCabecera('Content-Type', 'text/plain; charset=utf-8');
         }

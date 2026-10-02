@@ -92,6 +92,14 @@ todo el sitio se vea igual aunque lo sirvan subsistemas distintos.
 - **CSRF con doble envío:** el token está en la cookie `csrf` y en cada formulario (campo
   `_csrf`, o la cabecera `X-CSRF-Token` desde JavaScript), y un POST pasa sólo si coinciden. Los
   subsistemas no guardan sesión, así que no hay dónde tener el token del lado del servidor.
+- **A la base sólo se llega con consultas preparadas.** `BaseDeDatos` del núcleo no tiene un
+  método para mandar SQL armado a mano: cada consulta lleva los valores aparte, y las preparadas
+  son del servidor (sin emulación) y de una sola sentencia. Los repositorios la reciben por el
+  constructor, y la conexión se abre recién cuando alguno la pide.
+- **El log va a la salida de errores**, así lo muestra `docker compose logs` sin archivos ni
+  volúmenes. Una línea por pedido con método, patrón de la ruta (`/salas/{id}`), estado y
+  duración, y los errores con su traza. Sin datos personales: ni la consulta de la URL, ni el
+  cuerpo, las cookies, la IP o el usuario. Del contexto sólo se escribe lo que nombra el mensaje.
 - **Las migraciones se aplican desde el contenedor de MySQL.** El usuario con permiso para crear
   y alterar tablas nunca está en un contenedor de la aplicación; cada subsistema se conecta con un
   usuario que sólo lee y escribe datos de su propio esquema.
@@ -135,3 +143,20 @@ env ROL=organizador NOMBRE="Salvador Baez" php -S localhost:8080 herramientas/se
 ```
 
 Necesita los `config.ini` y el `composer install` de cada subsistema, como arriba.
+
+## Pruebas del núcleo
+
+```
+composer install -d nucleo
+composer pruebas -d nucleo
+```
+
+Las de `BaseDeDatos` corren contra un MySQL de verdad: sin la variable `PRUEBAS_MYSQL_HOST` se
+saltean. Para correrlas, uno descartable:
+
+```
+docker run -d --rm --name mysql-pruebas -e MYSQL_ROOT_PASSWORD=pruebas -e MYSQL_DATABASE=pruebas -p 127.0.0.1:3307:3306 mysql:8.4
+# tarda unos segundos en aceptar conexiones
+env PRUEBAS_MYSQL_HOST=127.0.0.1 PRUEBAS_MYSQL_PUERTO=3307 PRUEBAS_MYSQL_CLAVE=pruebas composer pruebas -d nucleo
+docker stop mysql-pruebas
+```

@@ -4,6 +4,7 @@
     "type": "library",
     "require": {
         "php": "^8.4",
+        "psr/log": "^3.0",
         "twig/twig": "^3.0"
     },
     "require-dev": {

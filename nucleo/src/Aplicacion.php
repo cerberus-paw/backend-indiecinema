@@ -13,6 +13,7 @@ use IndieCinema\Nucleo\Seguridad\ControlDeAcceso;
 use IndieCinema\Nucleo\Seguridad\Identificacion;
 use IndieCinema\Nucleo\Seguridad\ProteccionCsrf;
 use LogicException;
+use Psr\Log\LoggerInterface;
 use Throwable;
 
 /**
@@ -30,24 +31,29 @@ final class Aplicacion
     private readonly Identificacion $identificacion;
     private readonly ControlDeAcceso $controlDeAcceso;
     private readonly ProteccionCsrf $csrf;
+    private readonly LoggerInterface $log;
     private readonly string $prefijo;
 
     /**
-     * @param string $raiz la carpeta del subsistema
+     * @param string               $raiz la carpeta del subsistema
+     * @param LoggerInterface|null $log  para las pruebas; si no, el log a la salida de errores
      */
-    public function __construct(string $raiz, Configuracion $configuracion)
+    public function __construct(string $raiz, Configuracion $configuracion, ?LoggerInterface $log = null)
     {
         $subsistema = (string) $configuracion->requerir('app.subsistema');
+        $this->log = $log ?? new Log($subsistema);
         $this->prefijo = rtrim((string) $configuracion->obtener('app.prefijo', ''), '/');
-        $this->errores = new ManejadorDeErrores($configuracion->enDesarrollo());
+        $this->errores = new ManejadorDeErrores($this->log, $configuracion->enDesarrollo());
         $this->vista = new Vista(self::directoriosDePlantillas($subsistema), $this->prefijo, $configuracion->enDesarrollo());
-        $this->identificacion = new Identificacion((string) $configuracion->requerir('nginx.secreto'));
+        $this->identificacion = new Identificacion((string) $configuracion->requerir('nginx.secreto'), $this->log);
         $this->controlDeAcceso = new ControlDeAcceso();
         $this->csrf = new ProteccionCsrf();
 
         $this->contenedor = new Contenedor();
         $this->contenedor->registrar(Configuracion::class, $configuracion);
         $this->contenedor->registrar(Vista::class, $this->vista);
+        $this->contenedor->registrar(LoggerInterface::class, $this->log);
+        $this->contenedor->fabrica(BaseDeDatos::class, static fn (): BaseDeDatos => BaseDeDatos::conectar($configuracion));
 
         $this->router = new Router();
         $declararRutas = require $raiz . '/rutas.php';
@@ -61,11 +67,13 @@ final class Aplicacion
     public static function iniciar(string $raiz): void
     {
         ini_set('display_errors', '0');
+        // El nombre sale de la carpeta y no de la configuración, que puede ser justo lo que falla.
+        $log = new Log(basename($raiz));
         try {
-            $aplicacion = new self($raiz, Configuracion::desdeArchivo($raiz . '/config/config.ini'));
+            $aplicacion = new self($raiz, Configuracion::desdeArchivo($raiz . '/config/config.ini'), $log);
             $aplicacion->errores->instalar();
         } catch (Throwable $error) {
-            error_log('El subsistema no arrancó: ' . $error);
+            $log->critical('El subsistema no arrancó: {mensaje}', ['mensaje' => $error->getMessage(), 'exception' => $error]);
             http_response_code(500);
             echo 'Error interno.';
 
@@ -83,6 +91,7 @@ final class Aplicacion
      */
     public function atender(Peticion $peticion): Respuesta
     {
+        $inicio = hrtime(true);
         try {
             $peticion = $this->csrf->asignarToken($this->identificacion->identificar($peticion));
             $this->vista->compartirPeticion($peticion);
@@ -96,8 +105,25 @@ final class Aplicacion
         } catch (Throwable $error) {
             $respuesta = $this->errores->respuestaPara($error, $peticion, $this->vista);
         }
+        $respuesta = $this->csrf->guardarToken($peticion, $respuesta);
+        $this->registrarPedido($peticion, $respuesta, $inicio);
 
-        return $this->csrf->guardarToken($peticion, $respuesta);
+        return $respuesta;
+    }
+
+    /**
+     * Una línea por pedido con el método, la ruta, el estado y cuánto tardó. La ruta va como
+     * patrón (/salas/{id}) si existe, y nunca la consulta (?q=…), el cuerpo, las cookies, la IP ni
+     * el usuario: el log sirve para ver qué falla o qué anda lento, no quién hizo qué.
+     */
+    private function registrarPedido(Peticion $peticion, Respuesta $respuesta, int $inicio): void
+    {
+        $this->log->info('{metodo} {ruta} {estado} {duracion} ms', [
+            'metodo' => $peticion->metodo(),
+            'ruta' => $peticion->rutaResuelta()?->patron ?? $peticion->ruta(),
+            'estado' => $respuesta->estado(),
+            'duracion' => intdiv(hrtime(true) - $inicio, 1_000_000),
+        ]);
     }
 
     private function despachar(Peticion $peticion): Respuesta

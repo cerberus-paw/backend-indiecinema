@@ -8,6 +8,7 @@ use IndieCinema\Nucleo\Aplicacion;
 use IndieCinema\Nucleo\Configuracion;
 use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
+use IndieCinema\Nucleo\Log;
 use PHPUnit\Framework\TestCase;
 
 final class AplicacionTest extends TestCase
@@ -15,12 +16,27 @@ final class AplicacionTest extends TestCase
     private const SECRETO = 'secreto-de-nginx';
     private const TOKEN = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 
+    /** @var resource */
+    private $salidaDelLog;
+
+    protected function setUp(): void
+    {
+        $this->salidaDelLog = fopen('php://memory', 'w+');
+    }
+
     private function aplicacion(string $entorno = 'produccion'): Aplicacion
     {
         return new Aplicacion(__DIR__ . '/Dobles/subsistema', new Configuracion([
             'app' => ['subsistema' => 'prueba', 'prefijo' => '/cuenta', 'entorno' => $entorno],
             'nginx' => ['secreto' => self::SECRETO],
-        ]));
+        ]), new Log('prueba', $this->salidaDelLog));
+    }
+
+    private function log(): string
+    {
+        rewind($this->salidaDelLog);
+
+        return (string) stream_get_contents($this->salidaDelLog);
     }
 
     /**
@@ -80,23 +96,19 @@ final class AplicacionTest extends TestCase
         self::assertSame('GET', $respuesta->cabecera('Allow'));
     }
 
-    public function testUnErrorEnProduccionNoMuestraElDetalle(): void
+    public function testUnErrorEnProduccionNoMuestraElDetalleYQuedaEnElLog(): void
     {
-        // El error tiene que quedar en el log aunque el usuario no vea el detalle.
-        $this->expectErrorLog();
-
         $respuesta = $this->pedir('GET', '/falla');
 
         self::assertSame(500, $respuesta->estado());
         self::assertStringContainsString('Algo salió mal', $respuesta->cuerpo());
         self::assertStringNotContainsString('detalle interno', $respuesta->cuerpo());
+        self::assertStringContainsString('prueba.ERROR GET /falla: detalle interno', $this->log());
+        self::assertStringContainsString('ControladorDePrueba->falla', $this->log());
     }
 
     public function testUnErrorEnDesarrolloMuestraElDetalle(): void
     {
-        // El error tiene que quedar en el log aunque el usuario no vea el detalle.
-        $this->expectErrorLog();
-
         $respuesta = $this->pedir('GET', '/falla', entorno: 'desarrollo');
 
         self::assertSame(500, $respuesta->estado());
@@ -105,13 +117,27 @@ final class AplicacionTest extends TestCase
 
     public function testQuienPideJsonRecibeElErrorEnJson(): void
     {
-        // El error tiene que quedar en el log aunque el usuario no vea el detalle.
-        $this->expectErrorLog();
-
         $respuesta = $this->pedir('GET', '/falla', ['Accept' => 'application/json']);
 
         self::assertSame(500, $respuesta->estado());
         self::assertSame('{"error":"Algo salió mal. Probá de nuevo en un rato."}', $respuesta->cuerpo());
+    }
+
+    public function testCadaPedidoDejaUnaLineaConElPatronDeLaRutaYSinLaConsulta(): void
+    {
+        $peticion = new Peticion('GET', '/salas/42', ['q' => 'algo personal'], cookies: ['csrf' => self::TOKEN]);
+        $this->aplicacion()->atender($peticion);
+
+        self::assertMatchesRegularExpression('#^\[[^\]]+\] prueba\.INFO GET /salas/\{id\} 200 \d+ ms\n$#', $this->log());
+        self::assertStringNotContainsString('algo personal', $this->log());
+        self::assertStringNotContainsString(self::TOKEN, $this->log());
+    }
+
+    public function testUnaRutaInexistenteQuedaEnElLogTalCual(): void
+    {
+        $this->pedir('GET', '/no-existe');
+
+        self::assertStringContainsString('prueba.INFO GET /no-existe 404', $this->log());
     }
 
     public function testLasPlantillasEscapanElHtml(): void
@@ -162,12 +188,11 @@ final class AplicacionTest extends TestCase
 
     public function testLasCabecerasDeIdentidadSinElSecretoNoDanAcceso(): void
     {
-        // Queda en el log: es alguien de la red interna haciéndose pasar por otro.
-        $this->expectErrorLog();
-
         $respuesta = $this->pedir('GET', '/organizador', self::sesion('administrador', 'otro-secreto'));
 
         self::assertSame(401, $respuesta->estado());
+        // Queda en el log: es alguien de la red interna haciéndose pasar por otro.
+        self::assertStringContainsString('prueba.WARNING Cabeceras de identidad sin el secreto de nginx', $this->log());
     }
 
     public function testLaPrimeraVisitaRecibeLaCookieCsrf(): void

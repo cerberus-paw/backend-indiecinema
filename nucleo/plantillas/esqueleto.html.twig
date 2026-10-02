@@ -1,0 +1,25 @@
+{#
+  Página de prueba del esqueleto (IC-16): muestra que el subsistema arranca con el núcleo, la
+  plantilla base y la sesión. Se ve con la base del front si está instalado. La reemplaza la
+  pantalla real de cada subsistema.
+#}
+{% extends 'base.html.twig' %}
+
+{% block titulo %}Prueba de {{ subsistema }}{% endblock %}
+
+{% block contenido %}
+  <h1>Subsistema {{ subsistema }}</h1>
+  <dl>
+    <dt>Prefijo</dt>
+    <dd>{{ prefijo ?: '(la raíz)' }}</dd>
+    <dt>Sesión</dt>
+    <dd>
+      {% if usuario %}
+        {{ usuario.nombre ?? 'Sin nombre' }}, {{ usuario.rol.value }}
+      {% else %}
+        Sin sesión
+      {% endif %}
+    </dd>
+  </dl>
+  <p><a href="/">Programación</a> · <a href="/cuenta/">Cuentas</a></p>
+{% endblock %}

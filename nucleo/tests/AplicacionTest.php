@@ -250,4 +250,16 @@ final class AplicacionTest extends TestCase
         self::assertSame(200, $respuesta->estado());
         self::assertSame([], $respuesta->cookies());
     }
+
+    public function testSinElFrontLaPaginaDePruebaUsaLaBaseDelNucleo(): void
+    {
+        // En desarrollo, para que una variable mal escrita en las plantillas haga fallar la prueba.
+        $sinSesion = $this->pedir('GET', '/esqueleto', entorno: 'desarrollo');
+        $conSesion = $this->pedir('GET', '/esqueleto', self::sesion('organizador') + ['X-Usuario-Nombre' => 'Salvador'], 'desarrollo');
+
+        self::assertSame(200, $sinSesion->estado());
+        self::assertStringContainsString('<title>Prueba de prueba · IndieCinema</title>', $sinSesion->cuerpo());
+        self::assertStringContainsString('Sin sesión', $sinSesion->cuerpo());
+        self::assertStringContainsString('Salvador, organizador', $conSesion->cuerpo());
+    }
 }

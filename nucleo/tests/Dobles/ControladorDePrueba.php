@@ -34,6 +34,11 @@ final class ControladorDePrueba extends Controlador
         ]);
     }
 
+    public function esqueleto(Peticion $peticion): Respuesta
+    {
+        return $this->vista('esqueleto.html.twig', ['subsistema' => 'prueba']);
+    }
+
     public function redirige(Peticion $peticion): Respuesta
     {
         return $this->redirigir('/destino');

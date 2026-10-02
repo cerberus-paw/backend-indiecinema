@@ -20,6 +20,7 @@ backend-indiecinema/
 ├── mysql/
 │   ├── init/              esquemas, usuarios y permisos; corre una vez, con la base vacía
 │   └── herramientas/      aplicar migraciones y cargar datos de prueba
+├── herramientas/          servidor de desarrollo sin Docker
 ├── nucleo/                MVC común: ruteo, middleware, base de datos, vistas y errores
 ├── cuentas/               /cuenta/   registro, sesión, roles, perfil y seguidos
 ├── programacion/          /          catálogo, salas, funciones, cartelera, votación y rankings
@@ -70,7 +71,9 @@ todo el sitio se vea igual aunque lo sirvan subsistemas distintos.
   repositorio `path`). Cuentas, programación y funciones usan el mismo código, así un error se
   arregla una sola vez.
 - **El front es la carpeta hermana.** Los dos repositorios se clonan uno al lado del otro y cada
-  subsistema instala `../../frontend-indiecinema` como paquete. Para cada entrega, los dos se
+  subsistema instala `../../frontend-indiecinema` como paquete. Los dos paquetes `path` se
+  declaran como `dev-main`: si no, Composer anota en el `composer.lock` la rama en la que está
+  cada uno, y el lock cambiaría (y chocaría) en cada rama. Para cada entrega, los dos se
   etiquetan (`entrega-N`) y se despliegan en esa etiqueta.
 - **Cada contenedor monta sólo lo suyo**: su carpeta, el núcleo y el front. Ningún subsistema ve
   el `config.ini` de otro, así que si uno queda comprometido no se lleva los secretos de los
@@ -118,3 +121,17 @@ docker compose up -d
 ```
 
 El sitio queda en http://localhost:8080.
+
+### Sin Docker
+
+Para ver las pantallas rápido, `herramientas/servidor-local.php` hace con el servidor de PHP lo que
+hace nginx: manda cada prefijo a su subsistema, sirve `/estaticos/` desde el front y bloquea
+`/interno/`. Con `ROL` simula una sesión, para probar el menú según el rol sin pasar por el inicio
+de sesión. Sólo sirve para desarrollo.
+
+```
+php -S localhost:8080 herramientas/servidor-local.php
+env ROL=organizador NOMBRE="Salvador Baez" php -S localhost:8080 herramientas/servidor-local.php
+```
+
+Necesita los `config.ini` y el `composer install` de cada subsistema, como arriba.

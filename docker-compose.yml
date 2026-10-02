@@ -33,8 +33,10 @@ services:
     ports: ["${PUERTO_HTTP:-8080}:80"]
     volumes:
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
-      # Los estáticos del paquete front los sirve nginx directamente en /estaticos/.
-      - ../frontend-indiecinema/estaticos:/srv/estaticos:ro
+      # Los estáticos del paquete front los sirve nginx directamente en /estaticos/. Se monta el
+      # repositorio entero y no sólo estaticos/: si esa carpeta todavía no existe, Docker la
+      # crearía vacía y con dueño root dentro del clon del front.
+      - ../frontend-indiecinema:/srv/frontend-indiecinema:ro
     networks: [interna]
     depends_on: [cuentas, programacion, funciones]
 

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace IndieCinema\Nucleo\Seguridad;
 
 use IndieCinema\Nucleo\Http\Peticion;
+use Psr\Log\LoggerInterface;
 
 /**
  * Arma el usuario de la petición con las cabeceras que agrega nginx después de validar la cookie
@@ -27,7 +28,7 @@ final class Identificacion
      */
     public const CABECERA_NOMBRE = 'X-Usuario-Nombre';
 
-    public function __construct(private readonly string $secreto)
+    public function __construct(private readonly string $secreto, private readonly LoggerInterface $log)
     {
     }
 
@@ -44,7 +45,10 @@ final class Identificacion
             // Desde afuera nginx las descarta: si llegan sin el secreto, alguien de la red interna
             // está intentando hacerse pasar por otro.
             if ($id !== '') {
-                error_log("Cabeceras de identidad sin el secreto de nginx en {$peticion->metodo()} {$peticion->ruta()}: se ignoran.");
+                $this->log->warning('Cabeceras de identidad sin el secreto de nginx en {metodo} {ruta}: se ignoran.', [
+                    'metodo' => $peticion->metodo(),
+                    'ruta' => $peticion->ruta(),
+                ]);
             }
 
             return null;

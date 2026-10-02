@@ -6,6 +6,11 @@
          failOnWarning="true"
          failOnRisky="true"
          displayDetailsOnTestsThatTriggerWarnings="true">
+    <php>
+        <!-- Con los argumentos completos en las trazas, para que ConexionFallidaTest vea la clave si se filtrara. -->
+        <ini name="zend.exception_ignore_args" value="0"/>
+        <ini name="zend.exception_string_param_max_len" value="1000"/>
+    </php>
     <testsuites>
         <testsuite name="nucleo">
             <directory>tests</directory>

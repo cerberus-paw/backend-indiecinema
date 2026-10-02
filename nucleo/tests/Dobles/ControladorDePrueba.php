@@ -44,6 +44,25 @@ final class ControladorDePrueba extends Controlador
         return $this->redirigir('/destino');
     }
 
+    /**
+     * Devuelve lo que recibió, para ver qué le llega a una ruta interna.
+     */
+    public function eco(Peticion $peticion): Respuesta
+    {
+        return $this->json([
+            'llamador' => $peticion->llamador(),
+            'q' => $peticion->consulta('q'),
+            'cuerpo' => $peticion->cuerpo(),
+        ]);
+    }
+
+    public function lento(Peticion $peticion): Respuesta
+    {
+        usleep(600_000);
+
+        return $this->json(['tarde' => true]);
+    }
+
     public function falla(Peticion $peticion): Respuesta
     {
         throw new RuntimeException('detalle interno que no tiene que ver el usuario');

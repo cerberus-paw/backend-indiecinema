@@ -114,6 +114,14 @@ todo el sitio se vea igual aunque lo sirvan subsistemas distintos.
   `entorno = "produccion"` el subsistema no arranca si queda alguno, así un valor de ejemplo
   (que es público) no llega al VPS. Cada `config.ini` tiene además las URL internas de los otros
   subsistemas (`[subsistemas]`), para las llamadas a `/interno/`.
+- **La API interna se autoriza con el token de quien llama.** `ClienteInterno` del núcleo manda
+  `X-Llamador` con el nombre del subsistema y su token en `Authorization: Bearer`; del otro lado,
+  la ruta `/interno/` pasa sólo si el token es el de ese llamador y si la ruta lo declara entre los
+  suyos (si no, 403). Cada subsistema guarda en `[llamadores]` el SHA-256 del token de los otros y
+  no el token: si uno queda comprometido, lo que lee en su `config.ini` no le sirve para hacerse
+  pasar por otro. nginx también es un llamador, de `/interno/sesion` en cuentas. Si el otro
+  subsistema no responde en dos segundos, la página corta con un 503 en lugar de quedar colgada.
+  `GET /interno/estado` responde quién es y a quién reconoció, para probar la conexión.
 - **Las tareas programadas las dispara el cron del servidor** con
   `docker compose exec -T <subsistema> php bin/<tarea>.php`, en lugar de sumar un contenedor
   sólo para eso.

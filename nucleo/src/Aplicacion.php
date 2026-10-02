@@ -6,10 +6,12 @@ namespace IndieCinema\Nucleo;
 
 use Composer\InstalledVersions;
 use IndieCinema\Nucleo\Errores\ManejadorDeErrores;
+use IndieCinema\Nucleo\Http\ClienteInterno;
 use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Ruteo\Router;
 use IndieCinema\Nucleo\Seguridad\ControlDeAcceso;
+use IndieCinema\Nucleo\Seguridad\ControlDeLlamadores;
 use IndieCinema\Nucleo\Seguridad\Identificacion;
 use IndieCinema\Nucleo\Seguridad\ProteccionCsrf;
 use LogicException;
@@ -30,6 +32,7 @@ final class Aplicacion
     private readonly ManejadorDeErrores $errores;
     private readonly Identificacion $identificacion;
     private readonly ControlDeAcceso $controlDeAcceso;
+    private readonly ControlDeLlamadores $controlDeLlamadores;
     private readonly ProteccionCsrf $csrf;
     private readonly LoggerInterface $log;
     private readonly string $prefijo;
@@ -48,6 +51,9 @@ final class Aplicacion
         $this->vista = new Vista(self::directoriosDePlantillas($subsistema), $this->prefijo, $configuracion->enDesarrollo());
         $this->identificacion = new Identificacion((string) $configuracion->requerir('nginx.secreto'), $this->log);
         $this->controlDeAcceso = new ControlDeAcceso();
+        /** @var array<string, string> $huellas */
+        $huellas = $configuracion->seccion('llamadores');
+        $this->controlDeLlamadores = new ControlDeLlamadores($huellas, $this->log);
         $this->csrf = new ProteccionCsrf();
 
         $this->contenedor = new Contenedor();
@@ -55,6 +61,7 @@ final class Aplicacion
         $this->contenedor->registrar(Vista::class, $this->vista);
         $this->contenedor->registrar(LoggerInterface::class, $this->log);
         $this->contenedor->fabrica(BaseDeDatos::class, static fn (): BaseDeDatos => BaseDeDatos::conectar($configuracion));
+        $this->contenedor->fabrica(ClienteInterno::class, fn (): ClienteInterno => ClienteInterno::desdeConfiguracion($configuracion, $this->log));
 
         $this->router = new Router();
         $declararRutas = require $raiz . '/rutas.php';
@@ -87,8 +94,9 @@ final class Aplicacion
     /**
      * El middleware de la E2 (sección 5) corre acá, antes del controlador y en este orden:
      * quién es el usuario y su token CSRF, que valen aunque la ruta no exista (la página de error
-     * también muestra el encabezado con la sesión); después el rol mínimo de la ruta y el token de
-     * los formularios. Así ninguna ruta puede saltearlo.
+     * también muestra el encabezado con la sesión); después, en las rutas /interno/, el token del
+     * subsistema que llama, y en las demás el rol mínimo de la ruta y el token de los formularios.
+     * Así ninguna ruta puede saltearlo.
      */
     public function atender(Peticion $peticion): Respuesta
     {
@@ -98,7 +106,7 @@ final class Aplicacion
             $this->vista->compartirPeticion($peticion);
 
             [$ruta, $parametros] = $this->router->resolver($peticion->metodo(), $peticion->ruta());
-            $peticion = $peticion->conRuta($ruta, $parametros);
+            $peticion = $this->controlDeLlamadores->autenticar($peticion->conRuta($ruta, $parametros));
             $this->controlDeAcceso->verificar($peticion);
             $this->csrf->verificar($peticion);
 

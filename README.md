@@ -152,9 +152,9 @@ Sin PHP en la máquina, Composer corre en un contenedor. Monta la carpeta que co
 repositorios, porque el núcleo y el front se instalan desde rutas relativas:
 
 ```
-for s in cuentas programacion funciones; do
-  docker run --rm -u "$(id -u):$(id -g)" -v "$PWD/..:/app" -w "/app/backend-indiecinema/$s" composer:2 install
-done
+docker run --rm -u "$(id -u):$(id -g)" -v "$PWD/..:/app" -w /app/backend-indiecinema/cuentas composer:2 install
+docker run --rm -u "$(id -u):$(id -g)" -v "$PWD/..:/app" -w /app/backend-indiecinema/programacion composer:2 install
+docker run --rm -u "$(id -u):$(id -g)" -v "$PWD/..:/app" -w /app/backend-indiecinema/funciones composer:2 install
 ```
 
 ### Qué queda andando

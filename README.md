@@ -123,21 +123,86 @@ todo el sitio se vea igual aunque lo sirvan subsistemas distintos.
 
 ## Levantar el entorno
 
-Requisitos: Docker con Docker Compose, y PHP 8.4 o superior con Composer.
+Requisitos: Docker con Docker Compose y Git. PHP y Composer no hacen falta en la máquina (ver
+abajo cómo correr Composer con Docker), aunque con PHP 8.4 o superior se puede usar el servidor
+sin Docker y correr las pruebas.
+
+Los dos repositorios van uno al lado del otro: cada subsistema instala el front desde la carpeta
+hermana.
 
 ```
 git clone https://github.com/cerberus-paw/backend-indiecinema.git
 git clone https://github.com/cerberus-paw/frontend-indiecinema.git
 cd backend-indiecinema
-cp .env.ejemplo .env                     # y cambiar las claves
+
+cp .env.ejemplo .env
 cp cuentas/config/config.ejemplo.ini cuentas/config/config.ini
 cp programacion/config/config.ejemplo.ini programacion/config/config.ini
 cp funciones/config/config.ejemplo.ini funciones/config/config.ini
+
 composer install -d cuentas && composer install -d programacion && composer install -d funciones
-docker compose up -d
+docker compose up -d --build
 ```
 
-El sitio queda en http://localhost:8080.
+En desarrollo los ejemplos sirven tal cual. En el VPS hay que cambiar cada `cambiar` (con
+`entorno = "produccion"` el subsistema no arranca si queda alguno), y la clave de cada usuario de
+MySQL tiene que ser la misma en `.env` y en el `config.ini` de su subsistema.
+
+Sin PHP en la máquina, Composer corre en un contenedor. Monta la carpeta que contiene a los dos
+repositorios, porque el núcleo y el front se instalan desde rutas relativas:
+
+```
+docker run --rm -u "$(id -u):$(id -g)" -v "$PWD/..:/app" -w /app/backend-indiecinema/cuentas composer:2 install
+docker run --rm -u "$(id -u):$(id -g)" -v "$PWD/..:/app" -w /app/backend-indiecinema/programacion composer:2 install
+docker run --rm -u "$(id -u):$(id -g)" -v "$PWD/..:/app" -w /app/backend-indiecinema/funciones composer:2 install
+```
+
+### Qué queda andando
+
+| URL | Qué es |
+|---|---|
+| http://localhost:8080/ | programación (catálogo, salas, cartelera) |
+| http://localhost:8080/cuenta/ | cuentas |
+| http://localhost:8080/funcion/ | funciones (403 hasta que tenga su `public/index.php`) |
+| http://localhost:8080/estaticos/… | CSS, JavaScript e imágenes del paquete front |
+
+Las rutas `/interno/` dan 404 desde afuera: sólo se llaman entre subsistemas, por la red del
+compose (`http://cuentas:8080/interno/…`). MySQL no publica ningún puerto.
+
+Si el 8080 está ocupado, se cambia `PUERTO_HTTP` en `.env`. Si nginx ya se había creado con el
+puerto ocupado, queda andando pero sin el puerto abierto («no se pudo conectar» en el navegador),
+y un `up` no lo arregla: hay que recrearlo con `docker compose up -d --force-recreate nginx`.
+
+### Día a día
+
+```
+docker compose logs -f programacion       # el log de un subsistema: una línea por pedido y los errores
+docker compose up -d --build              # después de cambiar php/Dockerfile o php/php.ini
+docker compose restart nginx              # después de cambiar nginx/conf.d/
+docker compose down                       # apagar todo (los datos de MySQL quedan)
+```
+
+El código PHP se monta en los contenedores, así que un cambio se ve al recargar la página, sin
+reiniciar nada. Un cambio en `composer.json` necesita otro `composer install` del subsistema.
+
+### La base de datos
+
+La primera vez que arranca MySQL, con el volumen vacío, corre los scripts de `mysql/init/`: crean
+un esquema y un usuario por subsistema, con permisos sólo sobre sus datos (IC-18). Después, las
+tablas las crean las migraciones de cada subsistema (`<subsistema>/migraciones/`), que se aplican
+desde el contenedor de MySQL con el usuario de migraciones (IC-19), y los datos de prueba se
+cargan igual (IC-20).
+
+Hoy esas tres partes están vacías: MySQL arranca, pero sin esquemas ni usuarios de los
+subsistemas, así que las páginas que usan la base todavía no andan.
+
+Los scripts de `mysql/init/` corren sólo con el volumen vacío. Para empezar de cero (se pierden
+los datos):
+
+```
+docker compose down -v
+docker compose up -d
+```
 
 ### Sin Docker
 

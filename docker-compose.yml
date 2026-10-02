@@ -80,6 +80,9 @@ services:
     restart: unless-stopped
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_CLAVE_ROOT:?falta MYSQL_CLAVE_ROOT en .env}
+      # root sólo desde adentro del contenedor de MySQL (donde corren las migraciones), nunca
+      # desde la red: un subsistema comprometido no puede ni intentar entrar como root.
+      MYSQL_ROOT_HOST: localhost
       # Las lee el script de mysql/init para crear un usuario por subsistema.
       MYSQL_CLAVE_MIGRACIONES: ${MYSQL_CLAVE_MIGRACIONES:?falta MYSQL_CLAVE_MIGRACIONES en .env}
       MYSQL_CLAVE_CUENTAS: ${MYSQL_CLAVE_CUENTAS:?falta MYSQL_CLAVE_CUENTAS en .env}

@@ -14,6 +14,9 @@ use RuntimeException;
  */
 final class Configuracion
 {
+    /** Lo que dicen los config.ejemplo.ini en cada clave y token. */
+    public const VALOR_DE_EJEMPLO = 'cambiar';
+
     /**
      * @param array<string, array<string, mixed>> $secciones
      */
@@ -63,5 +66,30 @@ final class Configuracion
     public function enDesarrollo(): bool
     {
         return $this->obtener('app.entorno') === 'desarrollo';
+    }
+
+    /**
+     * Fuera de desarrollo, el subsistema no arranca si quedó algún valor del ejemplo: así una
+     * clave o un secreto de mentira, que están en el repositorio, no llegan al VPS.
+     *
+     * @throws RuntimeException con las claves que faltan cambiar, nunca con sus valores
+     */
+    public function verificarQueNoQuedenValoresDeEjemplo(): void
+    {
+        if ($this->enDesarrollo()) {
+            return;
+        }
+
+        $deEjemplo = [];
+        foreach ($this->secciones as $seccion => $valores) {
+            foreach ((array) $valores as $nombre => $valor) {
+                if ($valor === self::VALOR_DE_EJEMPLO) {
+                    $deEjemplo[] = "{$seccion}.{$nombre}";
+                }
+            }
+        }
+        if ($deEjemplo !== []) {
+            throw new RuntimeException('Quedan valores de ejemplo en config.ini: ' . implode(', ', $deEjemplo) . '.');
+        }
     }
 }

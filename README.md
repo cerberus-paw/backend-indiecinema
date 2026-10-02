@@ -110,7 +110,10 @@ todo el sitio se vea igual aunque lo sirvan subsistemas distintos.
   y alterar tablas nunca está en un contenedor de la aplicación; cada subsistema se conecta con un
   usuario que sólo lee y escribe datos de su propio esquema.
 - **Los secretos no se versionan.** Cada subsistema tiene su `config.ini` y compose lee `.env`;
-  en el repositorio están sólo los ejemplos.
+  en el repositorio están sólo los ejemplos, con `cambiar` en cada clave, token y secreto. Con
+  `entorno = "produccion"` el subsistema no arranca si queda alguno, así un valor de ejemplo
+  (que es público) no llega al VPS. Cada `config.ini` tiene además las URL internas de los otros
+  subsistemas (`[subsistemas]`), para las llamadas a `/interno/`.
 - **Las tareas programadas las dispara el cron del servidor** con
   `docker compose exec -T <subsistema> php bin/<tarea>.php`, en lugar de sumar un contenedor
   sólo para eso.

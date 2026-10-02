@@ -169,7 +169,9 @@ docker run --rm -u "$(id -u):$(id -g)" -v "$PWD/..:/app" -w /app/backend-indieci
 Las rutas `/interno/` dan 404 desde afuera: sólo se llaman entre subsistemas, por la red del
 compose (`http://cuentas:8080/interno/…`). MySQL no publica ningún puerto.
 
-Si el 8080 está ocupado, se cambia `PUERTO_HTTP` en `.env`.
+Si el 8080 está ocupado, se cambia `PUERTO_HTTP` en `.env`. Si nginx ya se había creado con el
+puerto ocupado, queda andando pero sin el puerto abierto («no se pudo conectar» en el navegador),
+y un `up` no lo arregla: hay que recrearlo con `docker compose up -d --force-recreate nginx`.
 
 ### Día a día
 

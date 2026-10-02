@@ -27,6 +27,8 @@ final class Peticion
 
     private ?string $tokenCsrf = null;
 
+    private ?string $llamador = null;
+
     /**
      * @param string                $ruta      la ruta sin el prefijo del subsistema, que nginx ya sacó
      * @param array<string, mixed>  $consulta  los parámetros de la URL
@@ -59,6 +61,15 @@ final class Peticion
         foreach (['CONTENT_TYPE', 'CONTENT_LENGTH'] as $clave) {
             if (isset($_SERVER[$clave])) {
                 $cabeceras[str_replace('_', '-', $clave)] = (string) $_SERVER[$clave];
+            }
+        }
+        // Apache no pone Authorization en $_SERVER (se la esconde a los scripts), y es la que
+        // trae el token de las llamadas a /interno/. getallheaders() sí la tiene.
+        if (!isset($cabeceras['AUTHORIZATION']) && function_exists('getallheaders')) {
+            foreach (getallheaders() as $nombre => $valor) {
+                if (strcasecmp((string) $nombre, 'Authorization') === 0) {
+                    $cabeceras['AUTHORIZATION'] = (string) $valor;
+                }
             }
         }
 
@@ -185,6 +196,23 @@ final class Peticion
     {
         $copia = clone $this;
         $copia->tokenCsrf = $token;
+
+        return $copia;
+    }
+
+    /**
+     * En una ruta /interno/, el subsistema que llama (ya autenticado por su token); null en las
+     * demás.
+     */
+    public function llamador(): ?string
+    {
+        return $this->llamador;
+    }
+
+    public function conLlamador(string $llamador): self
+    {
+        $copia = clone $this;
+        $copia->llamador = $llamador;
 
         return $copia;
     }

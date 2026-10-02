@@ -50,6 +50,16 @@ final class Configuracion
     }
 
     /**
+     * Una sección entera, como [subsistemas] o [llamadores]; vacía si no está.
+     *
+     * @return array<string, mixed>
+     */
+    public function seccion(string $nombre): array
+    {
+        return (array) ($this->secciones[$nombre] ?? []);
+    }
+
+    /**
      * Un valor obligatorio. Si falta, el subsistema no arranca, en lugar de fallar más adelante
      * en medio de una petición.
      */
@@ -80,10 +90,12 @@ final class Configuracion
             return;
         }
 
+        // En [llamadores] va el SHA-256 de cada token, así que el ejemplo tiene el de «cambiar».
+        $ejemplos = [self::VALOR_DE_EJEMPLO, hash('sha256', self::VALOR_DE_EJEMPLO)];
         $deEjemplo = [];
         foreach ($this->secciones as $seccion => $valores) {
             foreach ((array) $valores as $nombre => $valor) {
-                if ($valor === self::VALOR_DE_EJEMPLO) {
+                if (in_array($valor, $ejemplos, true)) {
                     $deEjemplo[] = "{$seccion}.{$nombre}";
                 }
             }

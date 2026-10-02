@@ -15,6 +15,8 @@ final class AplicacionTest extends TestCase
 {
     private const SECRETO = 'secreto-de-nginx';
     private const TOKEN = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    private const TOKEN_PROGRAMACION = 'token-de-programacion';
+    private const TOKEN_FUNCIONES = 'token-de-funciones';
 
     /** @var resource */
     private $salidaDelLog;
@@ -29,6 +31,10 @@ final class AplicacionTest extends TestCase
         return new Aplicacion(__DIR__ . '/Dobles/subsistema', new Configuracion([
             'app' => ['subsistema' => 'prueba', 'prefijo' => '/cuenta', 'entorno' => $entorno],
             'nginx' => ['secreto' => self::SECRETO],
+            'llamadores' => [
+                'programacion' => hash('sha256', self::TOKEN_PROGRAMACION),
+                'funciones' => hash('sha256', self::TOKEN_FUNCIONES),
+            ],
         ]), new Log('prueba', $this->salidaDelLog));
     }
 
@@ -63,6 +69,16 @@ final class AplicacionTest extends TestCase
     private static function sesion(string $rol, string $secreto = self::SECRETO): array
     {
         return ['X-Nginx-Secreto' => $secreto, 'X-Usuario-Id' => 'u-1', 'X-Rol' => $rol];
+    }
+
+    /**
+     * Las cabeceras con las que un subsistema llama a una ruta /interno/ de otro.
+     *
+     * @return array<string, string>
+     */
+    private static function llamada(string $llamador, string $token): array
+    {
+        return ['X-Llamador' => $llamador, 'Authorization' => "Bearer {$token}", 'Accept' => 'application/json'];
     }
 
     public function testDespachaAlControladorConSusDependencias(): void
@@ -270,10 +286,66 @@ final class AplicacionTest extends TestCase
 
     public function testUnaRutaInternaNoUsaTokenCsrf(): void
     {
-        $respuesta = $this->pedir('POST', '/interno/prueba');
+        $respuesta = $this->pedir('POST', '/interno/prueba', self::llamada('programacion', self::TOKEN_PROGRAMACION));
 
         self::assertSame(200, $respuesta->estado());
         self::assertSame([], $respuesta->cookies());
+    }
+
+    public function testUnaRutaInternaSinTokenDa403YQuedaEnElLog(): void
+    {
+        $respuesta = $this->pedir('GET', '/interno/eco', ['X-Llamador' => 'programacion', 'Accept' => 'application/json']);
+
+        self::assertSame(403, $respuesta->estado());
+        self::assertSame('{"error":"No tenés permiso para entrar acá."}', $respuesta->cuerpo());
+        self::assertStringContainsString('WARNING Llamada a GET /interno/eco sin el token de «programacion»', $this->log());
+    }
+
+    public function testUnaRutaInternaConElTokenDeOtroDa403(): void
+    {
+        $respuesta = $this->pedir('GET', '/interno/eco', self::llamada('programacion', self::TOKEN_FUNCIONES));
+
+        self::assertSame(403, $respuesta->estado());
+        self::assertStringNotContainsString(self::TOKEN_FUNCIONES, $this->log());
+    }
+
+    public function testUnLlamadorDesconocidoDa403(): void
+    {
+        $respuesta = $this->pedir('GET', '/interno/eco', self::llamada('moderacion', self::TOKEN_PROGRAMACION));
+
+        self::assertSame(403, $respuesta->estado());
+    }
+
+    public function testUnaRutaInternaRechazaAUnLlamadorQueNoDeclara(): void
+    {
+        // Funciones tiene un token válido, pero /interno/eco sólo acepta a programación.
+        $respuesta = $this->pedir('GET', '/interno/eco', self::llamada('funciones', self::TOKEN_FUNCIONES));
+
+        self::assertSame(403, $respuesta->estado());
+        self::assertStringContainsString('funciones llamó a GET /interno/eco, que no lo acepta', $this->log());
+    }
+
+    public function testElControladorSabeQuienLlama(): void
+    {
+        $respuesta = $this->pedir('GET', '/interno/eco', self::llamada('programacion', self::TOKEN_PROGRAMACION));
+
+        self::assertSame(200, $respuesta->estado());
+        self::assertSame('programacion', json_decode($respuesta->cuerpo(), true)['llamador']);
+    }
+
+    public function testElEstadoInternoDiceQuienRespondeYAQuienReconocio(): void
+    {
+        $respuesta = $this->pedir('GET', '/interno/estado', self::llamada('funciones', self::TOKEN_FUNCIONES));
+
+        self::assertSame('{"subsistema":"prueba","llamador":"funciones"}', $respuesta->cuerpo());
+    }
+
+    public function testFueraDeLasRutasInternasNoHayLlamador(): void
+    {
+        // Las cabeceras de llamador en una ruta común no cambian nada: la autoriza el rol.
+        $respuesta = $this->pedir('GET', '/organizador', self::llamada('programacion', self::TOKEN_PROGRAMACION));
+
+        self::assertSame(401, $respuesta->estado());
     }
 
     public function testSinElFrontLaPaginaDePruebaUsaLaBaseDelNucleo(): void

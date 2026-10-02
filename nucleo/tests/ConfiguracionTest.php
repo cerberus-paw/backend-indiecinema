@@ -53,11 +53,30 @@ final class ConfiguracionTest extends TestCase
         self::assertNull($configuracion->obtener("subsistemas.{$subsistema}"));
     }
 
+    /**
+     * Copiando los tres ejemplos, cada uno acepta el token de los otros (todos «cambiar»).
+     */
+    #[DataProvider('subsistemas')]
+    public function testElEjemploAceptaElTokenDeEjemploDeLosOtros(string $subsistema): void
+    {
+        $llamadores = self::ejemplo($subsistema)->seccion('llamadores');
+        $esperados = array_values(array_diff(['cuentas', 'programacion', 'funciones'], [$subsistema]));
+        if ($subsistema === 'cuentas') {
+            $esperados[] = 'nginx';
+        }
+
+        self::assertSame($esperados, array_keys($llamadores));
+        foreach ($llamadores as $huella) {
+            self::assertSame(hash('sha256', (string) self::ejemplo($subsistema)->requerir('interno.token')), $huella);
+        }
+    }
+
     public function testEnProduccionNoArrancaConValoresDeEjemploYNombraSoloLasClaves(): void
     {
         $configuracion = new Configuracion([
             'app' => ['entorno' => 'produccion'],
             'base' => ['usuario' => 'programacion', 'clave' => 'cambiar'],
+            'llamadores' => ['cuentas' => hash('sha256', 'cambiar'), 'funciones' => hash('sha256', 'un-token-de-verdad')],
             'nginx' => ['secreto' => 'cambiar'],
         ]);
 
@@ -65,7 +84,10 @@ final class ConfiguracionTest extends TestCase
             $configuracion->verificarQueNoQuedenValoresDeEjemplo();
             self::fail('Arrancó con valores de ejemplo.');
         } catch (RuntimeException $error) {
-            self::assertSame('Quedan valores de ejemplo en config.ini: base.clave, nginx.secreto.', $error->getMessage());
+            self::assertSame(
+                'Quedan valores de ejemplo en config.ini: base.clave, llamadores.cuentas, nginx.secreto.',
+                $error->getMessage(),
+            );
         }
     }
 

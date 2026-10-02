@@ -63,4 +63,12 @@ final class ExcepcionHttp extends RuntimeException
     {
         return new self(405, 'Esta página no acepta ese tipo de pedido.', ['Allow' => implode(', ', $permitidos)]);
     }
+
+    /**
+     * 503: otro subsistema, del que depende esta página, no responde.
+     */
+    public static function servicioNoDisponible(): self
+    {
+        return new self(503, 'Una parte del sitio no está respondiendo. Probá de nuevo en un rato.');
+    }
 }

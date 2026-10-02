@@ -9,6 +9,9 @@ use IndieCinema\Nucleo\Errores\ManejadorDeErrores;
 use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Ruteo\Router;
+use IndieCinema\Nucleo\Seguridad\ControlDeAcceso;
+use IndieCinema\Nucleo\Seguridad\Identificacion;
+use IndieCinema\Nucleo\Seguridad\ProteccionCsrf;
 use LogicException;
 use Throwable;
 
@@ -24,6 +27,9 @@ final class Aplicacion
     private readonly Contenedor $contenedor;
     private readonly Vista $vista;
     private readonly ManejadorDeErrores $errores;
+    private readonly Identificacion $identificacion;
+    private readonly ControlDeAcceso $controlDeAcceso;
+    private readonly ProteccionCsrf $csrf;
     private readonly string $prefijo;
 
     /**
@@ -35,6 +41,9 @@ final class Aplicacion
         $this->prefijo = rtrim((string) $configuracion->obtener('app.prefijo', ''), '/');
         $this->errores = new ManejadorDeErrores($configuracion->enDesarrollo());
         $this->vista = new Vista(self::directoriosDePlantillas($subsistema), $this->prefijo, $configuracion->enDesarrollo());
+        $this->identificacion = new Identificacion((string) $configuracion->requerir('nginx.secreto'));
+        $this->controlDeAcceso = new ControlDeAcceso();
+        $this->csrf = new ProteccionCsrf();
 
         $this->contenedor = new Contenedor();
         $this->contenedor->registrar(Configuracion::class, $configuracion);
@@ -66,15 +75,29 @@ final class Aplicacion
         $aplicacion->atender(Peticion::desdeGlobales())->enviar();
     }
 
+    /**
+     * El middleware de la E2 (sección 5) corre acá, antes del controlador y en este orden:
+     * quién es el usuario y su token CSRF, que valen aunque la ruta no exista (la página de error
+     * también muestra el encabezado con la sesión); después el rol mínimo de la ruta y el token de
+     * los formularios. Así ninguna ruta puede saltearlo.
+     */
     public function atender(Peticion $peticion): Respuesta
     {
         try {
-            [$ruta, $parametros] = $this->router->resolver($peticion->metodo(), $peticion->ruta());
+            $peticion = $this->csrf->asignarToken($this->identificacion->identificar($peticion));
+            $this->vista->compartirPeticion($peticion);
 
-            return $this->despachar($peticion->conRuta($ruta, $parametros));
+            [$ruta, $parametros] = $this->router->resolver($peticion->metodo(), $peticion->ruta());
+            $peticion = $peticion->conRuta($ruta, $parametros);
+            $this->controlDeAcceso->verificar($peticion);
+            $this->csrf->verificar($peticion);
+
+            $respuesta = $this->despachar($peticion);
         } catch (Throwable $error) {
-            return $this->errores->respuestaPara($error, $peticion, $this->vista);
+            $respuesta = $this->errores->respuestaPara($error, $peticion, $this->vista);
         }
+
+        return $this->csrf->guardarToken($peticion, $respuesta);
     }
 
     private function despachar(Peticion $peticion): Respuesta

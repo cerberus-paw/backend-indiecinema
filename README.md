@@ -81,6 +81,14 @@ todo el sitio se vea igual aunque lo sirvan subsistemas distintos.
   y moderación suman el propio cuando guarden archivos (la foto de perfil, la documentación).
 - **Sólo nginx publica un puerto.** MySQL y los subsistemas están en la red interna: desde
   afuera no se llega a la base ni a las rutas `/interno/`.
+- **La sesión llega en cabeceras de nginx.** Después de validar la cookie con cuentas, nginx
+  manda `X-Usuario-Id`, `X-Rol` y `X-Usuario-Nombre`, más `X-Nginx-Secreto` con el secreto de
+  ese subsistema; sin el secreto, el núcleo ignora las otras. El nombre no estaba en la E2, que
+  decía pedírselo a cuentas: el encabezado lo muestra en todas las páginas y sería una llamada
+  más por cada una. Va codificado con `rawurlencode()`.
+- **CSRF con doble envío:** el token está en la cookie `csrf` y en cada formulario (campo
+  `_csrf`, o la cabecera `X-CSRF-Token` desde JavaScript), y un POST pasa sólo si coinciden. Los
+  subsistemas no guardan sesión, así que no hay dónde tener el token del lado del servidor.
 - **Las migraciones se aplican desde el contenedor de MySQL.** El usuario con permiso para crear
   y alterar tablas nunca está en un contenedor de la aplicación; cada subsistema se conecta con un
   usuario que sólo lee y escribe datos de su propio esquema.

@@ -27,7 +27,7 @@ final class ControladorDePrueba extends Controlador
 
     public function plantilla(Peticion $peticion): Respuesta
     {
-        return $this->vista($peticion, 'error.html.twig', [
+        return $this->vista('error.html.twig', [
             'estado' => 200,
             'mensaje' => '<script>alert(1)</script>',
             'detalle' => null,

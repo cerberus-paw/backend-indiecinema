@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace IndieCinema\Nucleo;
 
+use IndieCinema\Nucleo\Http\Peticion;
 use Twig\Environment;
 use Twig\Loader\FilesystemLoader;
 use Twig\TwigFunction;
@@ -31,9 +32,26 @@ final class Vista
             'strict_variables' => $depuracion,
         ]);
         $this->twig->addGlobal('prefijo', $this->prefijo);
+        // Twig no deja agregar variables globales después de la primera plantilla, sólo cambiarlas:
+        // por eso se declaran acá y compartirPeticion() les pone el valor de cada petición.
+        $this->twig->addGlobal('usuario', null);
+        $this->twig->addGlobal('csrf', null);
+        $this->twig->addGlobal('ruta_actual', '/');
         // Los links se arman con el prefijo: en cuentas, «{{ ruta('/ingresar') }}» es
         // «/cuenta/ingresar»; en programación, que está en la raíz, queda igual.
         $this->twig->addFunction(new TwigFunction('ruta', fn (string $ruta): string => $this->prefijo . $ruta));
+    }
+
+    /**
+     * Lo que recibe toda plantilla además de sus datos: el usuario (null sin sesión), el token
+     * CSRF para los formularios y la ruta actual. Son globales y no datos de cada vista para que
+     * también los tengan las páginas de error, que se ven con el mismo encabezado.
+     */
+    public function compartirPeticion(Peticion $peticion): void
+    {
+        $this->twig->addGlobal('usuario', $peticion->usuario());
+        $this->twig->addGlobal('csrf', $peticion->tokenCsrf());
+        $this->twig->addGlobal('ruta_actual', $peticion->ruta());
     }
 
     /**

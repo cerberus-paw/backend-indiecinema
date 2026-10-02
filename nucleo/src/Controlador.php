@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace IndieCinema\Nucleo;
 
-use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
 use LogicException;
 
@@ -33,15 +32,17 @@ abstract class Controlador
     }
 
     /**
+     * El usuario, el token CSRF y la ruta actual no hace falta pasarlos: los tiene toda plantilla.
+     *
      * @param array<string, mixed> $datos
      */
-    protected function vista(Peticion $peticion, string $plantilla, array $datos = [], int $estado = 200): Respuesta
+    protected function vista(string $plantilla, array $datos = [], int $estado = 200): Respuesta
     {
         if ($this->vista === null) {
             throw new LogicException(static::class . ' respondió sin pasar por la aplicación.');
         }
 
-        return Respuesta::html($this->vista->renderizar($plantilla, $datos + $this->datosComunes($peticion)), $estado);
+        return Respuesta::html($this->vista->renderizar($plantilla, $datos), $estado);
     }
 
     /**
@@ -55,15 +56,5 @@ abstract class Controlador
     protected function json(mixed $datos, int $estado = 200): Respuesta
     {
         return Respuesta::json($datos, $estado);
-    }
-
-    /**
-     * Lo que recibe toda plantilla además de sus datos.
-     *
-     * @return array<string, mixed>
-     */
-    private function datosComunes(Peticion $peticion): array
-    {
-        return ['ruta_actual' => $peticion->ruta()];
     }
 }

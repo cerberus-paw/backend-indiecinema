@@ -16,6 +16,9 @@ use DateTimeImmutable;
  */
 final readonly class Sesion
 {
+    /** La cookie con el identificador, la misma para todos los subsistemas. */
+    public const COOKIE = 'sesion';
+
     /** Cuánto dura desde que se abre, use o no use el sitio. */
     public const DURACION = 'P7D';
 

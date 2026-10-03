@@ -7,6 +7,7 @@ namespace IndieCinema\Cuentas\Servicios;
 use DateTimeImmutable;
 use DateTimeZone;
 use IndieCinema\Cuentas\Modelo\Sesion;
+use IndieCinema\Cuentas\Modelo\SesionAbierta;
 use IndieCinema\Cuentas\Repositorios\RepositorioDeSesiones;
 
 /**
@@ -20,14 +21,16 @@ final class ServicioDeSesiones
     }
 
     /**
-     * @return string el identificador para la cookie; en la base queda sólo su huella
+     * Una sesión nueva, con un identificador nuevo: nunca se reusa uno que ya tenía el navegador.
+     * En la base queda sólo su huella.
      */
-    public function abrir(string $usuarioId): string
+    public function abrir(string $usuarioId): SesionAbierta
     {
         $identificador = Sesion::nuevoIdentificador();
-        $this->sesiones->agregar(Sesion::nueva((string) Sesion::huellaDe($identificador), $usuarioId, self::ahora()));
+        $sesion = Sesion::nueva((string) Sesion::huellaDe($identificador), $usuarioId, self::ahora());
+        $this->sesiones->agregar($sesion);
 
-        return $identificador;
+        return new SesionAbierta($identificador, $sesion);
     }
 
     /**

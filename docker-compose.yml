@@ -31,8 +31,23 @@ services:
     # Es el único punto de entrada y, si cae, caen todos: se reinicia solo.
     restart: unless-stopped
     ports: ["${PUERTO_HTTP:-8080}:80"]
+    environment:
+      # Las plantillas de nginx/templates/ toman sólo estas variables de .env (envsubst): el resto
+      # de los «$» son variables de nginx y quedan como están.
+      NGINX_ENVSUBST_FILTER: "^NGINX_(SECRETO|TOKEN)_"
+      # El secreto que nginx comparte con cada subsistema (X-Nginx-Secreto): el mismo que [nginx]
+      # secreto de su config.ini.
+      NGINX_SECRETO_CUENTAS: ${NGINX_SECRETO_CUENTAS:?falta NGINX_SECRETO_CUENTAS en .env}
+      NGINX_SECRETO_PROGRAMACION: ${NGINX_SECRETO_PROGRAMACION:?falta NGINX_SECRETO_PROGRAMACION en .env}
+      NGINX_SECRETO_FUNCIONES: ${NGINX_SECRETO_FUNCIONES:?falta NGINX_SECRETO_FUNCIONES en .env}
+      # Con el que nginx llama a /interno/sesion de cuentas: su SHA-256 va en [llamadores] nginx
+      # del config.ini de cuentas.
+      NGINX_TOKEN_INTERNO: ${NGINX_TOKEN_INTERNO:?falta NGINX_TOKEN_INTERNO en .env}
+    # Vacío al arrancar: ahí deja la imagen las plantillas ya completas, y tapa el default.conf que
+    # trae, que si no atendería los pedidos a localhost.
+    tmpfs: [/etc/nginx/conf.d]
     volumes:
-      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./nginx/templates:/etc/nginx/templates:ro
       # Los estáticos del paquete front los sirve nginx directamente en /estaticos/. Se monta el
       # repositorio entero y no sólo estaticos/: si esa carpeta todavía no existe, Docker la
       # crearía vacía y con dueño root dentro del clon del front.

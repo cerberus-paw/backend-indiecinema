@@ -275,8 +275,9 @@ composer pruebas -d programacion
 
 Las que tocan la base corren contra un MySQL de verdad: sin la variable `PRUEBAS_MYSQL_HOST` se
 saltean. En programación son las de punta a punta (rutas, roles, token CSRF, plantillas del front
-y la tabla de la migración); en cuentas, las restricciones de las tablas usuario y rol (correo
-único, roles sin repetir y sólo de un usuario que existe). Para correrlas, uno descartable:
+y la tabla de la migración); en cuentas, el registro de punta a punta y las restricciones de las
+tablas usuario y rol (correo único, roles sin repetir y sólo de un usuario que existe). Para
+correrlas, uno descartable:
 
 ```
 docker run -d --rm --name mysql-pruebas -e MYSQL_ROOT_PASSWORD=pruebas -e MYSQL_DATABASE=pruebas -p 127.0.0.1:3307:3306 mysql:8.4

@@ -118,9 +118,12 @@ final class SalasDelOrganizadorTest extends TestCase
         return $this->pedir('POST', $url, $usuario, $rol, $cambios + ['_csrf' => self::CSRF] + FormularioDeSalaTest::camposValidos(), $archivos);
     }
 
-    private function crearSala(string $organizador): string
+    /**
+     * @param array<string, string> $cambios
+     */
+    private function crearSala(string $organizador, array $cambios = []): string
     {
-        $respuesta = $this->enviar('/organizador/salas/nueva', $organizador);
+        $respuesta = $this->enviar('/organizador/salas/nueva', $organizador, $cambios);
         self::assertSame(303, $respuesta->estado());
         preg_match('#^/organizador/salas/([^/]+)/editar\?guardada=1$#', (string) $respuesta->cabecera('Location'), $coincidencia);
 
@@ -298,6 +301,36 @@ final class SalasDelOrganizadorTest extends TestCase
             'WARNING ' . self::OTRO_ORGANIZADOR . " quiso editar la sala {$id}, que no es suya",
             (string) stream_get_contents($this->salidaDelLog),
         );
+    }
+
+    public function testMisSalasMuestraSoloLasDelOrganizador(): void
+    {
+        $propias = [$this->crearSala(self::ORGANIZADORA, ['nombre' => 'El Galpón']), $this->crearSala(self::ORGANIZADORA, ['nombre' => 'La Terraza'])];
+        $ajena = $this->crearSala(self::OTRO_ORGANIZADOR, ['nombre' => 'El Sótano']);
+        $this->base->ejecutar('UPDATE sala SET habilitada = TRUE WHERE id = ?', [$propias[0]]);
+
+        $respuesta = $this->pedir('GET', '/organizador/salas', self::ORGANIZADORA);
+
+        self::assertSame(200, $respuesta->estado());
+        foreach ($propias as $id) {
+            self::assertStringContainsString("/organizador/salas/{$id}/editar", $respuesta->cuerpo());
+            self::assertStringContainsString("/salas/{$id}/imagen", $respuesta->cuerpo());
+        }
+        self::assertStringContainsString('La Terraza', $respuesta->cuerpo());
+        self::assertStringContainsString('PUBLICADA', $respuesta->cuerpo());
+        self::assertStringContainsString('ESPERA HABILITACIÓN', $respuesta->cuerpo());
+        self::assertStringNotContainsString('El Sótano', $respuesta->cuerpo());
+        self::assertStringNotContainsString($ajena, $respuesta->cuerpo());
+    }
+
+    public function testMisSalasSinNingunaInvitaACargarLaPrimera(): void
+    {
+        $this->crearSala(self::OTRO_ORGANIZADOR);
+
+        $respuesta = $this->pedir('GET', '/organizador/salas', self::ORGANIZADORA);
+
+        self::assertStringContainsString('Todavía no cargaste ninguna sala.', $respuesta->cuerpo());
+        self::assertSame(403, $this->pedir('GET', '/organizador/salas', self::ORGANIZADORA, 'espectador')->estado());
     }
 
     public function testUnaSalaQueNoExisteDa404(): void

@@ -16,7 +16,9 @@ use IndieCinema\Programacion\Controladores\SalasDelOrganizador;
 return static function (Router $router): void {
     $router->get('/', [Inicio::class, 'mostrar']);
 
-    // Alta y edición de la sala propia. Que la sala sea del que la edita lo controla el servicio.
+    // «Mis salas», alta y edición de la sala propia. Que la sala sea del que la edita lo
+    // controla el servicio.
+    $router->get('/organizador/salas', [SalasDelOrganizador::class, 'listar'], Rol::Organizador);
     $router->get('/organizador/salas/nueva', [SalasDelOrganizador::class, 'nueva'], Rol::Organizador);
     $router->post('/organizador/salas/nueva', [SalasDelOrganizador::class, 'crear'], Rol::Organizador);
     $router->get('/organizador/salas/{id}/editar', [SalasDelOrganizador::class, 'editar'], Rol::Organizador);

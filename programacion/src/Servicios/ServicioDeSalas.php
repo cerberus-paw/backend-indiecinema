@@ -27,6 +27,14 @@ final class ServicioDeSalas
     ) {
     }
 
+    /**
+     * @return list<Sala>
+     */
+    public function delOrganizador(Usuario $organizador): array
+    {
+        return $this->salas->delOrganizador($organizador->id);
+    }
+
     public function crear(Usuario $organizador, DatosDeSala $datos, ImagenSubida $imagen): Sala
     {
         $sala = Sala::nueva($organizador->id, $datos, $this->archivos->guardar($imagen));

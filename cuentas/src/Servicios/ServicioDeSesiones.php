@@ -6,8 +6,10 @@ namespace IndieCinema\Cuentas\Servicios;
 
 use DateTimeImmutable;
 use DateTimeZone;
+use IndieCinema\Cuentas\Modelo\EstadoCuenta;
 use IndieCinema\Cuentas\Modelo\Sesion;
 use IndieCinema\Cuentas\Modelo\SesionAbierta;
+use IndieCinema\Cuentas\Modelo\SesionDeUsuario;
 use IndieCinema\Cuentas\Repositorios\RepositorioDeSesiones;
 
 /**
@@ -34,26 +36,37 @@ final class ServicioDeSesiones
     }
 
     /**
-     * La sesión del identificador de la cookie, si existe y sigue viva; si no, null. Una vencida
-     * se borra, y cada uso queda anotado.
+     * La sesión del identificador de la cookie con su usuario, si existe, sigue viva y la cuenta
+     * está activa; si no, null. Una vencida se borra.
+     *
+     * Se llama en cada pedido del sitio: además de la consulta, sólo escribe para anotar el uso,
+     * y como mucho una vez cada pocos minutos.
      */
-    public function validar(?string $identificador): ?Sesion
+    public function validar(?string $identificador): ?SesionDeUsuario
     {
         $huella = $identificador === null ? null : Sesion::huellaDe($identificador);
-        $sesion = $huella === null ? null : $this->sesiones->buscar($huella);
-        if ($sesion === null) {
+        $deUsuario = $huella === null ? null : $this->sesiones->buscar($huella);
+        if ($deUsuario === null) {
             return null;
         }
 
+        $sesion = $deUsuario->sesion;
         $ahora = self::ahora();
         if (!$sesion->sigueViva($ahora)) {
             $this->sesiones->borrar($sesion->huella);
 
             return null;
         }
-        $this->sesiones->marcarUso($sesion->huella, $ahora);
+        // Al suspender se borran las sesiones; esto cubre un cambio que no haya pasado por el
+        // repositorio de usuarios.
+        if ($deUsuario->estado !== EstadoCuenta::Activa || $deUsuario->rol() === null) {
+            return null;
+        }
+        if ($sesion->hayQueAnotarUso($ahora)) {
+            $this->sesiones->marcarUso($sesion->huella, $ahora);
+        }
 
-        return $sesion;
+        return $deUsuario;
     }
 
     public function cerrar(string $identificador): void

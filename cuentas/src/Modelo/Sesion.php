@@ -22,6 +22,12 @@ final readonly class Sesion
     /** Cuánto dura desde que se abre, use o no use el sitio. */
     public const DURACION = 'P7D';
 
+    /**
+     * Cada cuánto se anota el último uso: la sesión se valida en cada pedido, y escribir en cada
+     * uno sería una consulta más por página para un dato que no necesita tanta precisión.
+     */
+    public const ANOTAR_USO_CADA = 'PT5M';
+
     /** 32 bytes de random_bytes, en hexadecimal: lo que viaja en la cookie. */
     private const FORMATO_DEL_IDENTIFICADOR = '/^[0-9a-f]{64}\z/';
 
@@ -54,6 +60,14 @@ final readonly class Sesion
     public static function huellaDe(string $identificador): ?string
     {
         return preg_match(self::FORMATO_DEL_IDENTIFICADOR, $identificador) === 1 ? hash('sha256', $identificador) : null;
+    }
+
+    /**
+     * Si pasó bastante desde el último uso anotado como para anotar este.
+     */
+    public function hayQueAnotarUso(DateTimeImmutable $ahora): bool
+    {
+        return $ahora >= $this->usadaEn->add(new DateInterval(self::ANOTAR_USO_CADA));
     }
 
     /**

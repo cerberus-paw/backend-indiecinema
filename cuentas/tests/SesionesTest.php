@@ -54,7 +54,7 @@ final class SesionesTest extends TestCase
 
         self::assertSame([['huella' => hash('sha256', $identificador)]], $this->base->filas('SELECT huella FROM sesion'));
         self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM sesion WHERE huella = ?', [$identificador]));
-        self::assertSame($usuario, $this->servicio->validar($identificador)?->usuarioId);
+        self::assertSame($usuario, $this->servicio->validar($identificador)?->sesion->usuarioId);
         self::assertSame(1, $this->base->valor('SELECT COUNT(*) FROM sesion WHERE vence_en = creada_en + INTERVAL 7 DAY'));
     }
 

@@ -6,8 +6,11 @@ namespace IndieCinema\Cuentas\Repositorios;
 
 use DateTimeImmutable;
 use DateTimeZone;
+use IndieCinema\Cuentas\Modelo\EstadoCuenta;
 use IndieCinema\Cuentas\Modelo\Sesion;
+use IndieCinema\Cuentas\Modelo\SesionDeUsuario;
 use IndieCinema\Nucleo\BaseDeDatos;
+use IndieCinema\Nucleo\Seguridad\Rol;
 
 /**
  * Las sesiones en el esquema de cuentas. Las fechas van y vienen en UTC, como las escribe la
@@ -27,19 +30,38 @@ final class RepositorioDeSesiones
         );
     }
 
-    public function buscar(string $huella): ?Sesion
+    /**
+     * La sesión con el nombre, el estado y los roles de su usuario, en una sola consulta: se hace
+     * en cada pedido del sitio. Va por la clave primaria de sesion y de usuario y por la de rol,
+     * que empieza por usuario_id.
+     */
+    public function buscar(string $huella): ?SesionDeUsuario
     {
         $fila = $this->base->fila(
-            'SELECT huella, usuario_id, creada_en, usada_en, vence_en FROM sesion WHERE huella = ?',
+            "SELECT sesion.huella, sesion.usuario_id, sesion.creada_en, sesion.usada_en, sesion.vence_en,
+                usuario.nombre, usuario.estado, GROUP_CONCAT(rol.tipo SEPARATOR ',') AS roles
+             FROM sesion
+             JOIN usuario ON usuario.id = sesion.usuario_id
+             LEFT JOIN rol ON rol.usuario_id = sesion.usuario_id
+             WHERE sesion.huella = ?
+             GROUP BY sesion.huella",
             [$huella],
         );
+        if ($fila === null) {
+            return null;
+        }
 
-        return $fila === null ? null : new Sesion(
-            (string) $fila['huella'],
-            (string) $fila['usuario_id'],
-            self::fecha($fila['creada_en']),
-            self::fecha($fila['usada_en']),
-            self::fecha($fila['vence_en']),
+        return new SesionDeUsuario(
+            new Sesion(
+                (string) $fila['huella'],
+                (string) $fila['usuario_id'],
+                self::fecha($fila['creada_en']),
+                self::fecha($fila['usada_en']),
+                self::fecha($fila['vence_en']),
+            ),
+            (string) $fila['nombre'],
+            EstadoCuenta::from((string) $fila['estado']),
+            array_map(Rol::from(...), array_values(array_filter(explode(',', (string) $fila['roles'])))),
         );
     }
 

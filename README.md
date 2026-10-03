@@ -15,7 +15,7 @@ cada subsistema instala como paquete de Composer.
 backend-indiecinema/
 ├── docker-compose.yml     nginx, un contenedor PHP por subsistema y MySQL
 ├── .env.ejemplo           puerto y claves de MySQL (copiar a .env)
-├── nginx/conf.d/          ruteo por prefijo, validación de sesión y límites de intentos
+├── nginx/templates/       ruteo por prefijo, validación de sesión y límites de intentos (con los secretos de .env)
 ├── php/                   Dockerfile común a los subsistemas (php:8.4-apache, sin root)
 ├── mysql/
 │   ├── init/              esquemas, usuarios y permisos; corre una vez, con la base vacía
@@ -90,9 +90,12 @@ todo el sitio se vea igual aunque lo sirvan subsistemas distintos.
   y moderación suman el propio cuando guarden archivos (la foto de perfil, la documentación).
 - **Sólo nginx publica un puerto.** MySQL y los subsistemas están en la red interna: desde
   afuera no se llega a la base ni a las rutas `/interno/`.
-- **La sesión llega en cabeceras de nginx.** Después de validar la cookie con cuentas, nginx
-  manda `X-Usuario-Id`, `X-Rol` y `X-Usuario-Nombre`, más `X-Nginx-Secreto` con el secreto de
-  ese subsistema; sin el secreto, el núcleo ignora las otras. El nombre no estaba en la E2, que
+- **La sesión llega en cabeceras de nginx.** En cada pedido a un subsistema, nginx hace un
+  `auth_request` a `/interno/sesion` de cuentas, que valida la cookie, y manda `X-Usuario-Id`,
+  `X-Rol` y `X-Usuario-Nombre`, más `X-Nginx-Secreto` con el secreto de ese subsistema; sin el
+  secreto, el núcleo ignora las otras. Las que manda el navegador se reemplazan. Los secretos y el
+  token con el que nginx llama a cuentas salen de `.env`: la configuración de nginx son plantillas
+  (`nginx/templates/`) que la imagen completa al arrancar. El nombre no estaba en la E2, que
   decía pedírselo a cuentas: el encabezado lo muestra en todas las páginas y sería una llamada
   más por cada una. Va codificado con `rawurlencode()`.
 - **La sesión es nuestra y vive en la base de cuentas**, no en `session_start()`: los subsistemas
@@ -162,7 +165,9 @@ docker compose up -d --build
 
 En desarrollo los ejemplos sirven tal cual. En el VPS hay que cambiar cada `cambiar` (con
 `entorno = "produccion"` el subsistema no arranca si queda alguno), y la clave de cada usuario de
-MySQL tiene que ser la misma en `.env` y en el `config.ini` de su subsistema.
+MySQL tiene que ser la misma en `.env` y en el `config.ini` de su subsistema, y lo mismo el
+secreto de nginx de cada uno (`NGINX_SECRETO_*` y `[nginx] secreto`). El token de nginx
+(`NGINX_TOKEN_INTERNO`) va en `.env`, y su SHA-256 en `[llamadores] nginx` de cuentas.
 
 Sin PHP en la máquina, Composer corre en un contenedor. Monta la carpeta que contiene a los dos
 repositorios, porque el núcleo y el front se instalan desde rutas relativas:
@@ -194,7 +199,8 @@ y un `up` no lo arregla: hay que recrearlo con `docker compose up -d --force-rec
 ```
 docker compose logs -f programacion       # el log de un subsistema: una línea por pedido y los errores
 docker compose up -d --build              # después de cambiar php/Dockerfile o php/php.ini
-docker compose restart nginx              # después de cambiar nginx/conf.d/
+docker compose restart nginx              # después de cambiar nginx/templates/
+docker compose up -d                      # después de cambiar .env (recrea lo que cambió)
 docker compose down                       # apagar todo (los datos de MySQL quedan)
 ```
 
@@ -296,13 +302,13 @@ env PRUEBAS_MYSQL_HOST=127.0.0.1 PRUEBAS_MYSQL_PUERTO=3307 PRUEBAS_MYSQL_CLAVE=p
 docker stop mysql-pruebas
 ```
 
-### Probar una ruta con sesión antes de que exista el inicio de sesión
+### Probar con sesión
 
-nginx descarta las cabeceras de identidad que llegan de afuera, así que desde el navegador todavía
-no se puede entrar como organizador. Mientras tanto se le pide la página directo al subsistema,
-desde adentro de su contenedor, con el secreto de nginx de su `config.ini` (en el ejemplo,
-`cambiar`):
+Se crea una cuenta en http://localhost:8080/cuenta/registro y se entra en
+http://localhost:8080/cuenta/ingresar, siempre por `localhost`: sin HTTPS, los navegadores sólo
+aceptan la cookie `Secure` de la sesión ahí. Todo usuario nace espectador; para probar como
+organizador, se le suma el rol en la base y se recarga la página (el rol se lee en cada pedido):
 
 ```
-docker compose exec programacion curl -s -H 'X-Nginx-Secreto: cambiar' -H 'X-Usuario-Id: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' -H 'X-Rol: organizador' localhost:8080/organizador/salas/nueva
+docker compose exec mysql mysql -uroot -p cuentas -e "INSERT INTO rol (usuario_id, tipo) SELECT id, 'organizador' FROM usuario WHERE correo = 'vos@ejemplo.com'"
 ```

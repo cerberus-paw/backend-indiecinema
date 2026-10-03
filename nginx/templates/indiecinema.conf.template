@@ -1,6 +1,11 @@
 # IndieCinema: el único punto de entrada. Manda cada prefijo a su subsistema, que recibe la ruta
 # sin el prefijo (E2, sección 3), sirve los estáticos del paquete front y no deja llegar desde
 # afuera a las rutas /interno/.
+#
+# Es una plantilla: al arrancar, la imagen de nginx reemplaza las ${NGINX_SECRETO_*} y
+# ${NGINX_TOKEN_*} con las de .env (envsubst, con el filtro del compose) y la deja en
+# /etc/nginx/conf.d/. Así los secretos no se versionan. Las variables de nginx ($host,
+# $subsistema…) no se tocan.
 
 # El DNS de Docker, consultado en cada pedido y no una sola vez al arrancar: si se recrea un
 # subsistema (cambia su IP), nginx lo sigue encontrando sin reiniciarse.
@@ -27,6 +32,24 @@ server {
         return 404;
     }
 
+    # El auth_request de cada pedido (subsistema.inc): le pregunta a cuentas de quién es la cookie,
+    # identificándose como el llamador nginx. «internal»: desde afuera no existe.
+    location = /_sesion {
+        internal;
+        set $cuentas cuentas;
+        proxy_pass http://$cuentas:8080/interno/sesion;
+        proxy_http_version 1.1;
+        # Sólo hace falta la cookie: el cuerpo del pedido original no viaja.
+        proxy_pass_request_body off;
+        proxy_set_header Content-Length "";
+        proxy_set_header X-Llamador nginx;
+        proxy_set_header Authorization "Bearer ${NGINX_TOKEN_INTERNO}";
+        proxy_set_header X-Usuario-Id "";
+        proxy_set_header X-Rol "";
+        proxy_set_header X-Usuario-Nombre "";
+        proxy_set_header X-Nginx-Secreto "";
+    }
+
     location ^~ /estaticos/ {
         alias /srv/frontend-indiecinema/estaticos/;
         expires 1h;
@@ -37,6 +60,7 @@ server {
     }
     location /cuenta/ {
         set $subsistema cuentas;
+        set $secreto "${NGINX_SECRETO_CUENTAS}";
         rewrite ^/cuenta(/.*)$ $1 break;
         include conf.d/subsistema.inc;
     }
@@ -46,12 +70,14 @@ server {
     }
     location /funcion/ {
         set $subsistema funciones;
+        set $secreto "${NGINX_SECRETO_FUNCIONES}";
         rewrite ^/funcion(/.*)$ $1 break;
         include conf.d/subsistema.inc;
     }
 
     location / {
         set $subsistema programacion;
+        set $secreto "${NGINX_SECRETO_PROGRAMACION}";
         # Sin cambiar nada, para que programación reciba la ruta ya normalizada (sin «..» ni
         # caracteres codificados de más), igual que los otros dos.
         rewrite ^(.*)$ $1 break;

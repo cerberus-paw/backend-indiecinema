@@ -11,7 +11,7 @@
  * - /interno/ da 404, como desde afuera.
  * - Con la variable ROL simula una sesión: manda las cabeceras de identidad con el secreto de
  *   cada subsistema, como nginx después del auth_request. Sirve para probar el menú según el rol
- *   mientras no esté el inicio de sesión de cuentas (IC-29 a IC-31):
+ *   sin pasar por el inicio de sesión de cuentas:
  *
  *     env ROL=organizador NOMBRE="Salvador Baez" php -S localhost:8080 herramientas/servidor-local.php
  */

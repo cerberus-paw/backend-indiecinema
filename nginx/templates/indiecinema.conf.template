@@ -11,6 +11,17 @@
 # subsistema (cambia su IP), nginx lo sigue encontrando sin reiniciarse.
 resolver 127.0.0.11 valid=10s ipv6=off;
 
+# Límite de intentos contra la fuerza bruta (capa de red): inicio de sesión y registro, por IP.
+# Cuentan sólo los POST: abrir o recargar el formulario no gasta intentos. Con la clave vacía
+# (cualquier otro método) limit_req no limita. Cada ruta tiene su zona, así fallar al ingresar no
+# gasta los intentos de registro. 10 MB alcanzan para unas 160.000 IP.
+map $request_method $ip_si_es_post {
+    POST $binary_remote_addr;
+    default "";
+}
+limit_req_zone $ip_si_es_post zone=ingresar:10m rate=5r/m;
+limit_req_zone $ip_si_es_post zone=registro:10m rate=5r/m;
+
 server {
     listen 80;
     server_name _;
@@ -21,6 +32,9 @@ server {
 
     # Lo que admite PHP (php/php.ini): una imagen de 5 MB más el resto del formulario.
     client_max_body_size 6m;
+
+    # Al pasarse del límite, 429 Too Many Requests (por defecto sería 503, que dice otra cosa).
+    limit_req_status 429;
 
     add_header X-Content-Type-Options nosniff always;
     add_header X-Frame-Options DENY always;
@@ -57,6 +71,23 @@ server {
 
     location = /cuenta {
         return 301 /cuenta/;
+    }
+    # 5 por minuto por IP con un margen chico: pasan 4 seguidos y después uno cada 12 segundos.
+    # Expresiones regulares y no «=»: el núcleo atiende igual /ingresar/, con la barra final, y
+    # con una ruta exacta ese pedido se saltearía el límite. Las barras dobles las une nginx.
+    location ~ ^/cuenta/ingresar/?$ {
+        limit_req zone=ingresar burst=3 nodelay;
+        set $subsistema cuentas;
+        set $secreto "${NGINX_SECRETO_CUENTAS}";
+        rewrite ^/cuenta(/.*)$ $1 break;
+        include conf.d/subsistema.inc;
+    }
+    location ~ ^/cuenta/registro/?$ {
+        limit_req zone=registro burst=3 nodelay;
+        set $subsistema cuentas;
+        set $secreto "${NGINX_SECRETO_CUENTAS}";
+        rewrite ^/cuenta(/.*)$ $1 break;
+        include conf.d/subsistema.inc;
     }
     location /cuenta/ {
         set $subsistema cuentas;

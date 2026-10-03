@@ -106,6 +106,10 @@ todo el sitio se vea igual aunque lo sirvan subsistemas distintos.
   `RepositorioDeUsuarios`) borra sus sesiones en la misma transacción, y al volver a entrar los
   datos que manda nginx ya están al día. No usamos triggers porque, con el log binario de MySQL,
   crearlos pide un privilegio de administrador que el usuario de migraciones no tiene.
+- **Límite de intentos en nginx.** Ingresar y registrarse admiten 5 POST por minuto por IP, con un
+  margen de 3 seguidos; al pasarse, 429. Es el control contra la fuerza bruta en la capa de red:
+  frena antes de llegar a PHP y a Argon2id, que es caro a propósito. Cuentan sólo los POST (abrir
+  el formulario no gasta intentos) y cada ruta tiene su cuenta.
 - **CSRF con doble envío:** el token está en la cookie `csrf` y en cada formulario (campo
   `_csrf`, o la cabecera `X-CSRF-Token` desde JavaScript), y un POST pasa sólo si coinciden. Los
   subsistemas no guardan sesión, así que no hay dónde tener el token del lado del servidor.

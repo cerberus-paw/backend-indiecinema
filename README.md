@@ -195,14 +195,23 @@ reiniciar nada. Un cambio en `composer.json` necesita otro `composer install` de
 
 ### La base de datos
 
-La primera vez que arranca MySQL, con el volumen vacío, corre los scripts de `mysql/init/`: crean
-un esquema y un usuario por subsistema, con permisos sólo sobre sus datos (IC-18). Después, las
-tablas las crean las migraciones de cada subsistema (`<subsistema>/migraciones/`), que se aplican
-desde el contenedor de MySQL con el usuario de migraciones (IC-19), y los datos de prueba se
-cargan igual (IC-20).
+La primera vez que arranca MySQL, con el volumen vacío, corre `mysql/init/`: crea los esquemas
+`cuentas`, `programacion` y `funciones`, cada uno con un usuario del mismo nombre que sólo puede
+leer y escribir datos de su esquema (`SELECT`, `INSERT`, `UPDATE`, `DELETE`). Las claves son las
+`MYSQL_CLAVE_*` de `.env`, las mismas que van en `[base] clave` de cada `config.ini`. `root` sólo
+entra desde adentro del contenedor de MySQL, nunca desde la red.
 
-Hoy esas tres partes están vacías: MySQL arranca, pero sin esquemas ni usuarios de los
-subsistemas, así que las páginas que usan la base todavía no andan.
+Las tablas las crean las migraciones de cada subsistema (`<subsistema>/migraciones/`), que se
+aplican desde el contenedor de MySQL con un usuario aparte, y los datos de prueba se cargan
+igual. Esas dos partes todavía no están, así que por ahora los esquemas están vacíos.
+
+Para ver los permisos de un usuario o probar que no puede salir de su esquema:
+
+```
+docker compose exec mysql mysql -uroot -p -e "SHOW GRANTS FOR 'programacion'@'%'"
+docker compose exec mysql mysql -h127.0.0.1 -uprogramacion -p -e "SELECT * FROM cuentas.usuario"
+#   ERROR 1142 (42000): SELECT command denied to user 'programacion'…
+```
 
 Los scripts de `mysql/init/` corren sólo con el volumen vacío. Para empezar de cero (se pierden
 los datos):

@@ -1,0 +1,14 @@
+# Configuración de gitleaks (lo corre el CI en cada PR): las reglas que trae, más las de los
+# secretos propios de IndieCinema que esas reglas no conocen.
+
+[extend]
+useDefault = true
+
+# Las credenciales de Mercado Pago (Checkout Pro, en funciones): el access token de producción
+# (APP_USR-…) y el de prueba (TEST-…). Gitleaks no tiene una regla para Mercado Pago, y con el
+# access token se puede cobrar y devolver plata en nombre de la cuenta.
+[[rules]]
+id = "mercadopago-access-token"
+description = "Access token de Mercado Pago"
+regex = '''\b(?:APP_USR|TEST)-\d{10,20}-\d{6}-[0-9a-f]{32}-\d{6,12}\b'''
+keywords = ["app_usr-", "test-"]

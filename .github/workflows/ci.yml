@@ -1,0 +1,115 @@
+# Integración continua: en cada PR y en cada push a main. Son los controles de la etapa de
+# desarrollo que prometió la E1 (seguridad en el ciclo de vida): ningún secreto en el repositorio,
+# dependencias revisadas con composer audit y las pruebas pasando antes de integrar un cambio.
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Sólo lee el código: ningún trabajo necesita escribir en el repositorio.
+permissions:
+  contents: read
+
+# Un push nuevo al mismo PR cancela la corrida anterior, que ya no sirve.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  secretos:
+    name: Secretos (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      # Con todo el historial: un secreto que se agregó y después se borró sigue en un commit.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      # La imagen y no gitleaks-action, que en repositorios de una organización pide licencia.
+      # --redact: si encuentra algo, el log de la corrida (que es público) no lo muestra.
+      - name: Buscar secretos en todo el historial
+        run: docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.30.1 git /repo --no-banner --redact --verbose
+
+  pruebas:
+    name: Pruebas de ${{ matrix.paquete }}
+    runs-on: ubuntu-latest
+    strategy:
+      # Que falle uno no corta los otros: se ve de una vez todo lo que está roto.
+      fail-fast: false
+      matrix:
+        paquete: [nucleo, cuentas, programacion]
+    # Las pruebas que tocan la base corren contra un MySQL de verdad, como en el README.
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: pruebas
+          MYSQL_DATABASE: pruebas
+        ports: ["3306:3306"]
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -ppruebas"
+          --health-interval=5s --health-timeout=5s --health-retries=24
+    env:
+      PRUEBAS_MYSQL_HOST: 127.0.0.1
+      PRUEBAS_MYSQL_PUERTO: 3306
+      PRUEBAS_MYSQL_CLAVE: pruebas
+    steps:
+      # Los dos repositorios uno al lado del otro, como en la máquina de cada uno: los subsistemas
+      # instalan el front desde ../../frontend-indiecinema. El front es siempre el de main, así que
+      # un PR que necesita un cambio del front pasa después de mergear el del front.
+      - uses: actions/checkout@v7
+        with:
+          path: backend-indiecinema
+      - uses: actions/checkout@v7
+        with:
+          repository: cerberus-paw/frontend-indiecinema
+          ref: main
+          path: frontend-indiecinema
+      # La misma versión menor que la imagen de los subsistemas (php/Dockerfile).
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+          extensions: pdo_mysql, mbstring, fileinfo
+          coverage: none
+          tools: composer:v2
+      - name: Instalar dependencias
+        working-directory: backend-indiecinema/${{ matrix.paquete }}
+        run: composer install --no-interaction --no-progress
+      - name: Correr las pruebas
+        working-directory: backend-indiecinema/${{ matrix.paquete }}
+        run: composer pruebas
+
+  dependencias:
+    name: Dependencias (composer audit)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        paquete: [nucleo, cuentas, programacion, funciones]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+          coverage: none
+          tools: composer:v2
+      # Sobre el composer.lock, que es lo que se instala en el VPS: no hace falta instalar nada.
+      - name: Buscar vulnerabilidades conocidas
+        working-directory: ${{ matrix.paquete }}
+        run: composer audit --locked --no-interaction
+
+  nginx:
+    name: Configuración de nginx
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # Con los valores de ejemplo de .env, como en desarrollo: valida el compose y después que
+      # nginx acepte las plantillas ya completas (nginx -t), que ninguna prueba de PHP cubre.
+      - name: Validar el compose
+        run: |
+          cp .env.ejemplo .env
+          docker compose config --quiet
+      - name: Validar la configuración de nginx
+        run: docker compose run --rm --no-deps nginx nginx -t

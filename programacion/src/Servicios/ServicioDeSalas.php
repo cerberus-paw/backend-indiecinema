@@ -28,6 +28,16 @@ final class ServicioDeSalas
     }
 
     /**
+     * Las que puede ver cualquiera, con o sin sesión.
+     *
+     * @return list<Sala>
+     */
+    public function publicadas(): array
+    {
+        return $this->salas->publicadas();
+    }
+
+    /**
      * @return list<Sala>
      */
     public function delOrganizador(Usuario $organizador): array

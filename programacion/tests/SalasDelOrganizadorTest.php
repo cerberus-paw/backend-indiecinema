@@ -333,6 +333,35 @@ final class SalasDelOrganizadorTest extends TestCase
         self::assertSame(403, $this->pedir('GET', '/organizador/salas', self::ORGANIZADORA, 'espectador')->estado());
     }
 
+    public function testElListadoPublicoMuestraSoloLasHabilitadasYSinSesion(): void
+    {
+        $habilitada = $this->crearSala(self::ORGANIZADORA, ['nombre' => 'El Galpón', 'localidad' => 'Mercedes']);
+        $this->crearSala(self::ORGANIZADORA, ['nombre' => 'La Terraza']);
+        $deBaja = $this->crearSala(self::OTRO_ORGANIZADOR, ['nombre' => 'El Sótano']);
+        $this->base->ejecutar('UPDATE sala SET habilitada = TRUE WHERE id IN (?, ?)', [$habilitada, $deBaja]);
+        $this->base->ejecutar('UPDATE sala SET dada_de_baja_en = NOW() WHERE id = ?', [$deBaja]);
+
+        $respuesta = $this->pedir('GET', '/salas', null);
+
+        self::assertSame(200, $respuesta->estado());
+        self::assertStringContainsString('El Galpón', $respuesta->cuerpo());
+        self::assertStringContainsString('Mercedes', $respuesta->cuerpo());
+        self::assertStringContainsString('60 butacas', $respuesta->cuerpo());
+        self::assertStringContainsString("/salas/{$habilitada}/imagen", $respuesta->cuerpo());
+        self::assertStringNotContainsString('La Terraza', $respuesta->cuerpo());
+        self::assertStringNotContainsString('El Sótano', $respuesta->cuerpo());
+        // Es público: no muestra ni el estado ni el botón de editar.
+        self::assertStringNotContainsString('/editar', $respuesta->cuerpo());
+
+        // Y la foto que lista se ve sin sesión.
+        self::assertSame(200, $this->pedir('GET', "/salas/{$habilitada}/imagen", null)->estado());
+    }
+
+    public function testElListadoPublicoSinSalas(): void
+    {
+        self::assertStringContainsString('Todavía no hay salas publicadas.', $this->pedir('GET', '/salas', null)->cuerpo());
+    }
+
     public function testUnaSalaQueNoExisteDa404(): void
     {
         self::assertSame(404, $this->pedir('GET', '/organizador/salas/' . Uuid::nuevo() . '/editar', self::ORGANIZADORA)->estado());

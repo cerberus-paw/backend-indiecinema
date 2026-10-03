@@ -12,11 +12,12 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * Las tablas usuario y rol tal como las dejan las migraciones, contra un MySQL de verdad: lo que
- * se prueba son las restricciones de la base, no las de la aplicación. Sin las variables
- * PRUEBAS_MYSQL_* se saltea; el README dice cómo levantar uno con Docker.
+ * se prueba son las restricciones de la base, no las de la aplicación.
  */
 final class MigracionesTest extends TestCase
 {
+    use ConBaseDePruebas;
+
     private const CLAVE_DUPLICADA = 1062;
     private const FALTA_EL_PADRE = 1452;
     private const VALOR_INVALIDO = 1265;
@@ -25,24 +26,7 @@ final class MigracionesTest extends TestCase
 
     protected function setUp(): void
     {
-        if (getenv('PRUEBAS_MYSQL_HOST') === false) {
-            self::markTestSkipped('Sin PRUEBAS_MYSQL_HOST no hay MySQL para probar.');
-        }
-
-        $this->base = BaseDeDatos::conectar(new Configuracion([
-            'base' => [
-                'host' => getenv('PRUEBAS_MYSQL_HOST'),
-                'puerto' => (int) (getenv('PRUEBAS_MYSQL_PUERTO') ?: 3306),
-                'esquema' => getenv('PRUEBAS_MYSQL_ESQUEMA') ?: 'pruebas',
-                'usuario' => getenv('PRUEBAS_MYSQL_USUARIO') ?: 'root',
-                'clave' => (string) getenv('PRUEBAS_MYSQL_CLAVE'),
-            ],
-        ]));
-        $this->base->ejecutar('DROP TABLE IF EXISTS rol');
-        $this->base->ejecutar('DROP TABLE IF EXISTS usuario');
-        foreach (glob(dirname(__DIR__) . '/migraciones/*.sql') ?: [] as $migracion) {
-            $this->base->ejecutar((string) file_get_contents($migracion));
-        }
+        $this->base = self::baseConTablasNuevas(new Configuracion(['base' => self::baseDePruebas()]));
     }
 
     private function registrar(string $correo, string $rol = 'espectador'): string

@@ -55,6 +55,15 @@ final class FormularioDeRegistro
     }
 
     /**
+     * El correo estaba bien escrito pero ya es de otra cuenta: lo dice la base al guardar.
+     */
+    public function marcarCorreoRegistrado(): void
+    {
+        $this->errores['email'] = 'Ya hay una cuenta con este correo.';
+        $this->datos = null;
+    }
+
+    /**
      * @param array<string, mixed> $campos
      */
     private function validar(array $campos): void

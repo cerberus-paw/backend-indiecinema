@@ -12,8 +12,8 @@ use IndieCinema\Programacion\Servicios\ServicioDeSalas;
 use LogicException;
 
 /**
- * Alta y edición de la sala, en /organizador/salas/…. Las rutas piden el rol de organizador y el
- * núcleo ya controló el token CSRF de los POST antes de llegar acá.
+ * «Mis salas», alta y edición de la sala, en /organizador/salas/…. Las rutas piden el rol de
+ * organizador y el núcleo ya controló el token CSRF de los POST antes de llegar acá.
  */
 final class SalasDelOrganizador extends Controlador
 {
@@ -21,6 +21,13 @@ final class SalasDelOrganizador extends Controlador
 
     public function __construct(private readonly ServicioDeSalas $servicio)
     {
+    }
+
+    public function listar(Peticion $peticion): Respuesta
+    {
+        $salas = $this->servicio->delOrganizador(self::organizador($peticion));
+
+        return $this->vista('mis_salas.html.twig', ['salas' => array_map(TarjetaDeSala::datos(...), $salas)]);
     }
 
     public function nueva(Peticion $peticion): Respuesta

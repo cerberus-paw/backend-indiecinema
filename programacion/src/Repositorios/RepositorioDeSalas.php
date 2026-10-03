@@ -31,6 +31,21 @@ final class RepositorioDeSalas
         return $fila === null ? null : self::sala($fila);
     }
 
+    /**
+     * Las salas de un organizador, de la más nueva a la más vieja.
+     *
+     * @return list<Sala>
+     */
+    public function delOrganizador(string $organizadorId): array
+    {
+        return array_map(self::sala(...), $this->base->filas(
+            'SELECT ' . self::COLUMNAS . ' FROM sala
+             WHERE organizador_id = ? AND dada_de_baja_en IS NULL
+             ORDER BY creada_en DESC, nombre',
+            [$organizadorId],
+        ));
+    }
+
     public function agregar(Sala $sala): void
     {
         $datos = $sala->datos;

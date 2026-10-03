@@ -316,3 +316,20 @@ organizador, se le suma el rol en la base y se recarga la página (el rol se lee
 ```
 docker compose exec mysql mysql -uroot -p cuentas -e "INSERT INTO rol (usuario_id, tipo) SELECT id, 'organizador' FROM usuario WHERE correo = 'vos@ejemplo.com'"
 ```
+
+### Integración continua
+
+En cada PR y en cada push a `main`, GitHub Actions (`.github/workflows/ci.yml`) corre:
+
+- **gitleaks** sobre todo el historial, con las reglas que trae más las de `.gitleaks.toml` (el
+  access token de Mercado Pago, que gitleaks no conoce). Si encuentra algo, el log no lo muestra.
+- **Las pruebas** del núcleo, cuentas y programación contra un MySQL 8.4, con el front de `main`
+  al lado: un PR que necesita un cambio del front pasa después de mergear el del front.
+- **`composer audit`** sobre el `composer.lock` de cada subsistema y del núcleo.
+- **La configuración**: que el compose sea válido y que nginx acepte las plantillas (`nginx -t`).
+
+gitleaks se corre igual en la máquina antes de subir algo:
+
+```
+docker run --rm -v $PWD:/repo ghcr.io/gitleaks/gitleaks:v8.30.1 git /repo --redact
+```

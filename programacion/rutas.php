@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 use IndieCinema\Nucleo\Http\EstadoInterno;
 use IndieCinema\Nucleo\Ruteo\Router;
+use IndieCinema\Nucleo\Seguridad\Rol;
 use IndieCinema\Programacion\Controladores\Inicio;
+use IndieCinema\Programacion\Controladores\SalasDelOrganizador;
 
 /*
  * Las rutas de programación, sin el prefijo que saca nginx. Cada una declara su rol mínimo; el
@@ -12,6 +14,12 @@ use IndieCinema\Programacion\Controladores\Inicio;
  */
 return static function (Router $router): void {
     $router->get('/', [Inicio::class, 'mostrar']);
+
+    // Alta y edición de la sala propia. Que la sala sea del que la edita lo controla el servicio.
+    $router->get('/organizador/salas/nueva', [SalasDelOrganizador::class, 'nueva'], Rol::Organizador);
+    $router->post('/organizador/salas/nueva', [SalasDelOrganizador::class, 'crear'], Rol::Organizador);
+    $router->get('/organizador/salas/{id}/editar', [SalasDelOrganizador::class, 'editar'], Rol::Organizador);
+    $router->post('/organizador/salas/{id}/editar', [SalasDelOrganizador::class, 'actualizar'], Rol::Organizador);
 
     // Para comprobar que los otros subsistemas llegan hasta acá con su token.
     $router->interna('GET', '/interno/estado', [EstadoInterno::class, 'mostrar'], ['cuentas', 'funciones']);

@@ -18,13 +18,15 @@ final class Sala
         public readonly string $id,
         public readonly string $organizadorId,
         public private(set) DatosDeSala $datos,
+        /** El nombre del archivo en el volumen, o null si no tiene. */
+        public private(set) ?string $imagen = null,
         public readonly bool $habilitada = false,
     ) {
     }
 
-    public static function nueva(string $organizadorId, DatosDeSala $datos): self
+    public static function nueva(string $organizadorId, DatosDeSala $datos, string $imagen): self
     {
-        return new self(Uuid::nuevo(), $organizadorId, $datos);
+        return new self(Uuid::nuevo(), $organizadorId, $datos, $imagen);
     }
 
     public function esDe(string $usuarioId): bool
@@ -32,8 +34,21 @@ final class Sala
         return hash_equals($this->organizadorId, $usuarioId);
     }
 
+    /**
+     * Si no está habilitada, sólo la ve su organizador: todavía no es pública.
+     */
+    public function laPuedeVer(?string $usuarioId): bool
+    {
+        return $this->habilitada || ($usuarioId !== null && $this->esDe($usuarioId));
+    }
+
     public function cambiarDatos(DatosDeSala $datos): void
     {
         $this->datos = $datos;
+    }
+
+    public function cambiarImagen(string $imagen): void
+    {
+        $this->imagen = $imagen;
     }
 }

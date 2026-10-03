@@ -5,6 +5,7 @@ declare(strict_types=1);
 use IndieCinema\Nucleo\Http\EstadoInterno;
 use IndieCinema\Nucleo\Ruteo\Router;
 use IndieCinema\Nucleo\Seguridad\Rol;
+use IndieCinema\Programacion\Controladores\ImagenDeSala;
 use IndieCinema\Programacion\Controladores\Inicio;
 use IndieCinema\Programacion\Controladores\SalasDelOrganizador;
 
@@ -20,6 +21,8 @@ return static function (Router $router): void {
     $router->post('/organizador/salas/nueva', [SalasDelOrganizador::class, 'crear'], Rol::Organizador);
     $router->get('/organizador/salas/{id}/editar', [SalasDelOrganizador::class, 'editar'], Rol::Organizador);
     $router->post('/organizador/salas/{id}/editar', [SalasDelOrganizador::class, 'actualizar'], Rol::Organizador);
+    // Pública si la sala está habilitada; si no, sólo para su organizador (lo decide el servicio).
+    $router->get('/salas/{id}/imagen', [ImagenDeSala::class, 'mostrar']);
 
     // Para comprobar que los otros subsistemas llegan hasta acá con su token.
     $router->interna('GET', '/interno/estado', [EstadoInterno::class, 'mostrar'], ['cuentas', 'funciones']);

@@ -12,6 +12,7 @@ use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Log;
 use IndieCinema\Nucleo\Uuid;
 use IndieCinema\Programacion\Pruebas\Controladores\FormularioDeSalaTest;
+use IndieCinema\Programacion\Pruebas\Dobles\Imagenes;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -28,6 +29,7 @@ final class SalasDelOrganizadorTest extends TestCase
 
     private Configuracion $configuracion;
     private BaseDeDatos $base;
+    private string $carpeta;
 
     /** @var resource */
     private $salidaDelLog;
@@ -38,8 +40,10 @@ final class SalasDelOrganizadorTest extends TestCase
             self::markTestSkipped('Sin PRUEBAS_MYSQL_HOST no hay MySQL para probar.');
         }
 
+        $this->carpeta = sys_get_temp_dir() . '/archivos-' . bin2hex(random_bytes(4));
         $this->configuracion = new Configuracion([
             'app' => ['subsistema' => 'programacion', 'entorno' => 'produccion'],
+            'archivos' => ['carpeta' => $this->carpeta],
             'base' => [
                 'host' => getenv('PRUEBAS_MYSQL_HOST'),
                 'puerto' => (int) (getenv('PRUEBAS_MYSQL_PUERTO') ?: 3306),
@@ -57,12 +61,38 @@ final class SalasDelOrganizadorTest extends TestCase
         $this->salidaDelLog = fopen('php://memory', 'w+');
     }
 
-    /**
-     * @param array<string, mixed> $cuerpo
-     */
-    private function pedir(string $metodo, string $url, ?string $usuario, string $rol = 'organizador', array $cuerpo = []): Respuesta
+    protected function tearDown(): void
     {
-        $cabeceras = $usuario === null ? [] : ['X-Nginx-Secreto' => self::SECRETO, 'X-Usuario-Id' => $usuario, 'X-Rol' => $rol];
+        array_map('unlink', glob("{$this->carpeta}/salas/*") ?: []);
+        @rmdir("{$this->carpeta}/salas");
+        @rmdir($this->carpeta);
+    }
+
+    /**
+     * @return list<string> las imágenes guardadas en el volumen
+     */
+    private function imagenesGuardadas(): array
+    {
+        return array_map('basename', glob("{$this->carpeta}/salas/*") ?: []);
+    }
+
+    /**
+     * @param array<string, mixed>                $cuerpo
+     * @param array<string, array<string, mixed>> $archivos
+     * @param array<string, string>               $cabeceras
+     */
+    private function pedir(
+        string $metodo,
+        string $url,
+        ?string $usuario,
+        string $rol = 'organizador',
+        array $cuerpo = [],
+        array $archivos = [],
+        array $cabeceras = [],
+    ): Respuesta {
+        if ($usuario !== null) {
+            $cabeceras += ['X-Nginx-Secreto' => self::SECRETO, 'X-Usuario-Id' => $usuario, 'X-Rol' => $rol];
+        }
         parse_str((string) parse_url($url, PHP_URL_QUERY), $consulta);
         $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion, new Log('programacion', $this->salidaDelLog));
 
@@ -73,15 +103,19 @@ final class SalasDelOrganizadorTest extends TestCase
             $cuerpo,
             $cabeceras,
             ['csrf' => self::CSRF],
+            $archivos,
         ));
     }
 
     /**
      * @param array<string, string> $cambios
+     * @param ?string               $imagen  de tests/Dobles/imagenes, o null para no mandar ninguna
      */
-    private function enviar(string $url, ?string $usuario, array $cambios = [], string $rol = 'organizador'): Respuesta
+    private function enviar(string $url, ?string $usuario, array $cambios = [], string $rol = 'organizador', ?string $imagen = 'sala.png'): Respuesta
     {
-        return $this->pedir('POST', $url, $usuario, $rol, $cambios + ['_csrf' => self::CSRF] + FormularioDeSalaTest::camposValidos());
+        $archivos = $imagen === null ? [] : ['imagen' => Imagenes::subida($imagen)];
+
+        return $this->pedir('POST', $url, $usuario, $rol, $cambios + ['_csrf' => self::CSRF] + FormularioDeSalaTest::camposValidos(), $archivos);
     }
 
     private function crearSala(string $organizador): string
@@ -98,7 +132,7 @@ final class SalasDelOrganizadorTest extends TestCase
      */
     private function fila(string $id): ?array
     {
-        return $this->base->fila('SELECT organizador_id, nombre, capacidad, habilitada FROM sala WHERE id = ?', [$id]);
+        return $this->base->fila('SELECT organizador_id, nombre, capacidad, imagen, habilitada FROM sala WHERE id = ?', [$id]);
     }
 
     public function testUnOrganizadorVeElFormularioDeAlta(): void
@@ -131,10 +165,14 @@ final class SalasDelOrganizadorTest extends TestCase
         $id = $this->crearSala(self::ORGANIZADORA);
 
         self::assertTrue(Uuid::esValido($id));
+        $fila = $this->fila($id);
         self::assertSame(
             ['organizador_id' => self::ORGANIZADORA, 'nombre' => 'Cine Club El Galpón', 'capacidad' => 60, 'habilitada' => 0],
-            $this->fila($id),
+            array_diff_key($fila ?? [], ['imagen' => true]),
         );
+        // La imagen quedó en el volumen con un nombre al azar, no con el que mandó el navegador.
+        self::assertMatchesRegularExpression('/^[0-9a-f]{32}\.png$/', (string) $fila['imagen']);
+        self::assertSame([$fila['imagen']], $this->imagenesGuardadas());
 
         $edicion = $this->pedir('GET', "/organizador/salas/{$id}/editar?guardada=1", self::ORGANIZADORA);
         self::assertSame(200, $edicion->estado());
@@ -174,6 +212,73 @@ final class SalasDelOrganizadorTest extends TestCase
         self::assertSame("/organizador/salas/{$id}/editar?guardada=1", $respuesta->cabecera('Location'));
         self::assertSame('El Galpón Nuevo', $this->fila($id)['nombre'] ?? null);
         self::assertSame(80, $this->fila($id)['capacidad'] ?? null);
+    }
+
+    public function testUnPdfConNombreDeJpgNoSeGuarda(): void
+    {
+        $respuesta = $this->enviar('/organizador/salas/nueva', self::ORGANIZADORA, imagen: 'documento.jpg');
+
+        self::assertSame(422, $respuesta->estado());
+        self::assertStringContainsString('La foto tiene que ser JPG, PNG o WebP.', $respuesta->cuerpo());
+        self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM sala'));
+        self::assertSame([], $this->imagenesGuardadas());
+    }
+
+    public function testElAltaSinFotoNoSeGuarda(): void
+    {
+        $respuesta = $this->enviar('/organizador/salas/nueva', self::ORGANIZADORA, imagen: null);
+
+        self::assertSame(422, $respuesta->estado());
+        self::assertStringContainsString('Falta la foto de la sala.', $respuesta->cuerpo());
+    }
+
+    public function testAlEditarUnaFotoNuevaReemplazaALaAnteriorYSinFotoQuedaLaQueEstaba(): void
+    {
+        $id = $this->crearSala(self::ORGANIZADORA);
+        $primera = $this->fila($id)['imagen'] ?? null;
+
+        $this->enviar("/organizador/salas/{$id}/editar", self::ORGANIZADORA, imagen: 'sala.webp');
+        $segunda = $this->fila($id)['imagen'] ?? null;
+        self::assertNotSame($primera, $segunda);
+        self::assertSame([$segunda], $this->imagenesGuardadas());
+
+        $this->enviar("/organizador/salas/{$id}/editar", self::ORGANIZADORA, ['nombre' => 'Otro nombre'], imagen: null);
+        self::assertSame($segunda, $this->fila($id)['imagen'] ?? null);
+        self::assertSame([$segunda], $this->imagenesGuardadas());
+    }
+
+    public function testLaFotoDeUnaSalaSinHabilitarSoloLaVeSuOrganizador(): void
+    {
+        $id = $this->crearSala(self::ORGANIZADORA);
+
+        self::assertSame(404, $this->pedir('GET', "/salas/{$id}/imagen", null)->estado());
+        self::assertSame(404, $this->pedir('GET', "/salas/{$id}/imagen", self::OTRO_ORGANIZADOR)->estado());
+
+        $propia = $this->pedir('GET', "/salas/{$id}/imagen", self::ORGANIZADORA);
+        self::assertSame(200, $propia->estado());
+        self::assertSame('image/png', $propia->cabecera('Content-Type'));
+        self::assertSame(file_get_contents(Imagenes::ruta('sala.png')), $propia->cuerpo());
+    }
+
+    public function testLaFotoDeUnaSalaHabilitadaEsPublicaYSeCachea(): void
+    {
+        $id = $this->crearSala(self::ORGANIZADORA);
+        $this->base->ejecutar('UPDATE sala SET habilitada = TRUE WHERE id = ?', [$id]);
+
+        $respuesta = $this->pedir('GET', "/salas/{$id}/imagen", null);
+        self::assertSame(200, $respuesta->estado());
+
+        $otraVez = $this->pedir('GET', "/salas/{$id}/imagen", null, cabeceras: ['If-None-Match' => (string) $respuesta->cabecera('ETag')]);
+        self::assertSame(304, $otraVez->estado());
+        self::assertSame('', $otraVez->cuerpo());
+    }
+
+    public function testLaFotoDeUnaSalaDadaDeBajaNoSeVe(): void
+    {
+        $id = $this->crearSala(self::ORGANIZADORA);
+        $this->base->ejecutar('UPDATE sala SET habilitada = TRUE, dada_de_baja_en = NOW() WHERE id = ?', [$id]);
+
+        self::assertSame(404, $this->pedir('GET', "/salas/{$id}/imagen", self::ORGANIZADORA)->estado());
     }
 
     public function testOtroOrganizadorNoVeNiGuardaLaSalaAjena(): void

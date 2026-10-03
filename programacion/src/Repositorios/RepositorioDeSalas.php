@@ -15,7 +15,7 @@ use IndieCinema\Programacion\Modelo\Sala;
 final class RepositorioDeSalas
 {
     private const COLUMNAS = 'id, organizador_id, nombre, descripcion, direccion, localidad, capacidad,
-        peliculas_por_funcion, duracion_funcion, tiempo_entre_funciones, habilitada';
+        peliculas_por_funcion, duracion_funcion, tiempo_entre_funciones, imagen, habilitada';
 
     public function __construct(private readonly BaseDeDatos $base)
     {
@@ -36,12 +36,12 @@ final class RepositorioDeSalas
         $datos = $sala->datos;
         $this->base->ejecutar(
             'INSERT INTO sala (id, organizador_id, nombre, descripcion, direccion, localidad, capacidad,
-                peliculas_por_funcion, duracion_funcion, tiempo_entre_funciones)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                peliculas_por_funcion, duracion_funcion, tiempo_entre_funciones, imagen)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             [
                 $sala->id, $sala->organizadorId, $datos->nombre, $datos->descripcion, $datos->direccion,
                 $datos->localidad, $datos->capacidad, $datos->peliculasPorFuncion, $datos->duracionFuncion,
-                $datos->tiempoEntreFunciones,
+                $datos->tiempoEntreFunciones, $sala->imagen,
             ],
         );
     }
@@ -54,11 +54,12 @@ final class RepositorioDeSalas
         $datos = $sala->datos;
         $this->base->ejecutar(
             'UPDATE sala SET nombre = ?, descripcion = ?, direccion = ?, localidad = ?, capacidad = ?,
-                peliculas_por_funcion = ?, duracion_funcion = ?, tiempo_entre_funciones = ?
+                peliculas_por_funcion = ?, duracion_funcion = ?, tiempo_entre_funciones = ?, imagen = ?
              WHERE id = ?',
             [
                 $datos->nombre, $datos->descripcion, $datos->direccion, $datos->localidad, $datos->capacidad,
-                $datos->peliculasPorFuncion, $datos->duracionFuncion, $datos->tiempoEntreFunciones, $sala->id,
+                $datos->peliculasPorFuncion, $datos->duracionFuncion, $datos->tiempoEntreFunciones, $sala->imagen,
+                $sala->id,
             ],
         );
     }
@@ -81,6 +82,7 @@ final class RepositorioDeSalas
                 (int) $fila['duracion_funcion'],
                 (int) $fila['tiempo_entre_funciones'],
             ),
+            $fila['imagen'] === null ? null : (string) $fila['imagen'],
             (bool) $fila['habilitada'],
         );
     }

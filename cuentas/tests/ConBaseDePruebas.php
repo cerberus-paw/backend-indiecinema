@@ -40,6 +40,7 @@ trait ConBaseDePruebas
     private static function baseConTablasNuevas(Configuracion $configuracion): BaseDeDatos
     {
         $base = BaseDeDatos::conectar($configuracion);
+        $base->ejecutar('DROP TABLE IF EXISTS sesion');
         $base->ejecutar('DROP TABLE IF EXISTS rol');
         $base->ejecutar('DROP TABLE IF EXISTS usuario');
         foreach (glob(dirname(__DIR__) . '/migraciones/*.sql') ?: [] as $migracion) {

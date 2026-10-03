@@ -261,19 +261,36 @@ env ROL=organizador NOMBRE="Salvador Baez" php -S localhost:8080 herramientas/se
 
 Necesita los `config.ini` y el `composer install` de cada subsistema, como arriba.
 
-## Pruebas del núcleo
+## Pruebas
+
+El núcleo y programación tienen las suyas (las de programación necesitan el `composer install`
+de arriba, que trae PHPUnit):
 
 ```
 composer install -d nucleo
 composer pruebas -d nucleo
+composer pruebas -d programacion
 ```
 
-Las de `BaseDeDatos` corren contra un MySQL de verdad: sin la variable `PRUEBAS_MYSQL_HOST` se
-saltean. Para correrlas, uno descartable:
+Las que tocan la base corren contra un MySQL de verdad: sin la variable `PRUEBAS_MYSQL_HOST` se
+saltean. En programación son las de punta a punta (rutas, roles, token CSRF, plantillas del front
+y la tabla de la migración). Para correrlas, uno descartable:
 
 ```
 docker run -d --rm --name mysql-pruebas -e MYSQL_ROOT_PASSWORD=pruebas -e MYSQL_DATABASE=pruebas -p 127.0.0.1:3307:3306 mysql:8.4
 # tarda unos segundos en aceptar conexiones
 env PRUEBAS_MYSQL_HOST=127.0.0.1 PRUEBAS_MYSQL_PUERTO=3307 PRUEBAS_MYSQL_CLAVE=pruebas composer pruebas -d nucleo
+env PRUEBAS_MYSQL_HOST=127.0.0.1 PRUEBAS_MYSQL_PUERTO=3307 PRUEBAS_MYSQL_CLAVE=pruebas composer pruebas -d programacion
 docker stop mysql-pruebas
+```
+
+### Probar una ruta con sesión antes de que exista el inicio de sesión
+
+nginx descarta las cabeceras de identidad que llegan de afuera, así que desde el navegador todavía
+no se puede entrar como organizador. Mientras tanto se le pide la página directo al subsistema,
+desde adentro de su contenedor, con el secreto de nginx de su `config.ini` (en el ejemplo,
+`cambiar`):
+
+```
+docker compose exec programacion curl -s -H 'X-Nginx-Secreto: cambiar' -H 'X-Usuario-Id: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' -H 'X-Rol: organizador' localhost:8080/organizador/salas/nueva
 ```

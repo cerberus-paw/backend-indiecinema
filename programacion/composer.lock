@@ -4,8 +4,25 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "853ce43b30bb63ecdccc0d6491d68dd6",
+    "content-hash": "f3df46bbfd58a0fc28dc7997a2b2d218",
     "packages": [
+        {
+            "name": "cerberus-paw/frontend-indiecinema",
+            "version": "dev-main",
+            "dist": {
+                "type": "path",
+                "url": "../../frontend-indiecinema",
+                "reference": "be1d82dd71e211ec7b20f187cc955fbfc0cc9242"
+            },
+            "type": "library",
+            "license": [
+                "proprietary"
+            ],
+            "description": "Plantillas Twig y recursos estáticos de IndieCinema para los subsistemas.",
+            "transport-options": {
+                "relative": true
+            }
+        },
         {
             "name": "cerberus-paw/nucleo",
             "version": "dev-main",
@@ -417,6 +434,7 @@
     "aliases": [],
     "minimum-stability": "stable",
     "stability-flags": {
+        "cerberus-paw/frontend-indiecinema": 20,
         "cerberus-paw/nucleo": 20
     },
     "prefer-stable": false,

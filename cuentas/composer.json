@@ -16,6 +16,7 @@
     ],
     "require": {
         "php": "^8.4",
+        "cerberus-paw/frontend-indiecinema": "@dev",
         "cerberus-paw/nucleo": "@dev"
     },
     "autoload": {

@@ -46,6 +46,20 @@ final class RepositorioDeSalas
         ));
     }
 
+    /**
+     * Las que se ven en el sitio: habilitadas y no dadas de baja, por nombre.
+     *
+     * @return list<Sala>
+     */
+    public function publicadas(): array
+    {
+        return array_map(self::sala(...), $this->base->filas(
+            'SELECT ' . self::COLUMNAS . ' FROM sala
+             WHERE habilitada = TRUE AND dada_de_baja_en IS NULL
+             ORDER BY nombre',
+        ));
+    }
+
     public function agregar(Sala $sala): void
     {
         $datos = $sala->datos;

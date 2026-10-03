@@ -201,9 +201,27 @@ leer y escribir datos de su esquema (`SELECT`, `INSERT`, `UPDATE`, `DELETE`). La
 `MYSQL_CLAVE_*` de `.env`, las mismas que van en `[base] clave` de cada `config.ini`. `root` sólo
 entra desde adentro del contenedor de MySQL, nunca desde la red.
 
-Las tablas las crean las migraciones de cada subsistema (`<subsistema>/migraciones/`), que se
-aplican desde el contenedor de MySQL con un usuario aparte, y los datos de prueba se cargan
-igual. Esas dos partes todavía no están, así que por ahora los esquemas están vacíos.
+Las tablas las crean las migraciones de cada subsistema, con un usuario aparte (`migraciones`)
+que es el único con permiso para crear y alterar tablas, sólo entra desde adentro del contenedor
+de MySQL y la aplicación nunca usa. Con la base recién creada se aplican solas; las que se sumen
+después, con:
+
+```
+docker compose exec mysql bash /herramientas/migrar.sh                # los tres subsistemas
+docker compose exec mysql bash /herramientas/migrar.sh programacion   # uno solo
+```
+
+- Van en `<subsistema>/migraciones/`, con nombres como `001_tabla_sala.sql`, y se aplican en
+  orden. Cada una corre con el esquema de su subsistema como base, así que no hace falta
+  nombrarlo (`CREATE TABLE sala …`).
+- Lo aplicado se anota en el esquema `control_migraciones`, que ningún subsistema ve: correr el
+  comando de nuevo no hace nada si no hay migraciones nuevas.
+- Una migración aplicada no se edita: el comando lo detecta y frena. El cambio va en una nueva.
+- MySQL no deshace un `CREATE` ni un `ALTER`: si una migración falla a mitad de camino, no se
+  anota, y hay que revisar qué quedó antes de correrla de nuevo. Conviene una sola cosa por
+  migración.
+
+Los datos de prueba todavía no están.
 
 Para ver los permisos de un usuario o probar que no puede salir de su esquema:
 

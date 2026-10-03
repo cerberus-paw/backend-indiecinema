@@ -19,10 +19,21 @@
         "cerberus-paw/frontend-indiecinema": "@dev",
         "cerberus-paw/nucleo": "@dev"
     },
+    "require-dev": {
+        "phpunit/phpunit": "^12.0"
+    },
     "autoload": {
         "psr-4": {
             "IndieCinema\\Cuentas\\": "src/"
         }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "IndieCinema\\Cuentas\\Pruebas\\": "tests/"
+        }
+    },
+    "scripts": {
+        "pruebas": "phpunit"
     },
     "config": {
         "sort-packages": true

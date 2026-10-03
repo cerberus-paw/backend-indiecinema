@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace IndieCinema\Programacion\Pruebas\Controladores;
 
 use IndieCinema\Programacion\Controladores\FormularioDeSala;
+use IndieCinema\Programacion\Pruebas\Dobles\Imagenes;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
@@ -109,5 +110,77 @@ final class FormularioDeSalaTest extends TestCase
         $formulario = FormularioDeSala::desdeCampos(['localidad' => "Luj\xe1n"] + self::camposValidos());
 
         self::assertSame(['localidad'], array_keys($formulario->errores));
+    }
+
+    /**
+     * @return iterable<string, array{string, string}>
+     */
+    public static function imagenesValidas(): iterable
+    {
+        yield 'JPG' => ['sala.jpg', 'jpg'];
+        yield 'PNG' => ['sala.png', 'png'];
+        yield 'WebP' => ['sala.webp', 'webp'];
+    }
+
+    #[DataProvider('imagenesValidas')]
+    public function testAceptaJpgPngYWebpYLaExtensionSaleDelContenido(string $archivo, string $extension): void
+    {
+        // El navegador dice «foto.jpg» e «image/jpeg» para las tres.
+        $formulario = FormularioDeSala::desdeCampos(self::camposValidos(), Imagenes::subida($archivo), imagenObligatoria: true);
+
+        self::assertSame([], $formulario->errores);
+        self::assertSame($extension, $formulario->imagen?->extension);
+    }
+
+    /**
+     * @return iterable<string, array{string, string}>
+     */
+    public static function imagenesInvalidas(): iterable
+    {
+        yield 'un PDF que se llama .jpg' => ['documento.jpg', 'La foto tiene que ser JPG, PNG o WebP.'];
+        yield 'un PNG que no se puede leer' => ['roto.png', 'La foto tiene que ser JPG, PNG o WebP.'];
+        yield 'una de 9000 × 9000' => ['enorme.png', 'La foto puede medir hasta 8000 píxeles de lado.'];
+    }
+
+    #[DataProvider('imagenesInvalidas')]
+    public function testRechazaLoQueNoEsUnaImagenAceptable(string $archivo, string $mensaje): void
+    {
+        $formulario = FormularioDeSala::desdeCampos(self::camposValidos(), Imagenes::subida($archivo), imagenObligatoria: true);
+
+        self::assertSame(['imagen' => $mensaje], $formulario->errores);
+        self::assertNull($formulario->datos());
+        self::assertNull($formulario->imagen);
+    }
+
+    public function testRechazaUnaImagenDeMasDe5Mb(): void
+    {
+        // Lo que PHP marca cuando pasa upload_max_filesize…
+        $grande = ['error' => UPLOAD_ERR_INI_SIZE] + Imagenes::subida('sala.png');
+        self::assertSame(['imagen' => 'La foto puede pesar hasta 5 MB.'], FormularioDeSala::desdeCampos(self::camposValidos(), $grande)->errores);
+
+        // …y si igual llegara, se mide el archivo.
+        $subida = Imagenes::subida('sala.png');
+        file_put_contents($subida['tmp_name'], str_repeat("\0", 5 * 1024 * 1024), FILE_APPEND);
+        self::assertSame(['imagen' => 'La foto puede pesar hasta 5 MB.'], FormularioDeSala::desdeCampos(self::camposValidos(), $subida)->errores);
+    }
+
+    public function testEnElAltaLaImagenEsObligatoriaYAlEditarNo(): void
+    {
+        $sinArchivo = ['name' => '', 'type' => '', 'tmp_name' => '', 'error' => UPLOAD_ERR_NO_FILE, 'size' => 0];
+
+        self::assertSame(['imagen' => 'Falta la foto de la sala.'], FormularioDeSala::desdeCampos(self::camposValidos(), $sinArchivo, imagenObligatoria: true)->errores);
+        self::assertSame(['imagen' => 'Falta la foto de la sala.'], FormularioDeSala::desdeCampos(self::camposValidos(), null, imagenObligatoria: true)->errores);
+
+        $edicion = FormularioDeSala::desdeCampos(self::camposValidos(), $sinArchivo);
+        self::assertNotNull($edicion->datos());
+        self::assertNull($edicion->imagen);
+    }
+
+    public function testSiOtroCampoFallaLaImagenNoSeUsa(): void
+    {
+        $formulario = FormularioDeSala::desdeCampos(['capacidad' => '0'] + self::camposValidos(), Imagenes::subida('sala.png'));
+
+        self::assertSame(['capacidad'], array_keys($formulario->errores));
+        self::assertNull($formulario->imagen);
     }
 }

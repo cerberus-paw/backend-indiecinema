@@ -30,12 +30,12 @@ final class Peticion
     private ?string $llamador = null;
 
     /**
-     * @param string                $ruta      la ruta sin el prefijo del subsistema, que nginx ya sacó
-     * @param array<string, mixed>  $consulta  los parámetros de la URL
-     * @param array<string, mixed>  $cuerpo    los campos del formulario, o el JSON ya decodificado
-     * @param array<string, string> $cabeceras
-     * @param array<string, string> $cookies
-     * @param array<string, mixed>  $archivos
+     * @param string                              $ruta      la ruta sin el prefijo del subsistema, que nginx ya sacó
+     * @param array<string, mixed>                $consulta  los parámetros de la URL
+     * @param array<string, mixed>                $cuerpo    los campos del formulario, o el JSON ya decodificado
+     * @param array<string, string>               $cabeceras
+     * @param array<string, string>               $cookies
+     * @param array<string, array<string, mixed>> $archivos  los subidos, como los arma PHP (ver archivo())
      */
     public function __construct(
         private readonly string $metodo,
@@ -87,8 +87,25 @@ final class Peticion
             $cuerpo,
             $cabeceras,
             $_COOKIE,
-            $_FILES,
+            self::archivosSubidos($_FILES),
         );
+    }
+
+    /**
+     * Sólo los archivos que el navegador subió en este pedido, de a uno por campo. Así el resto
+     * del código puede mover el archivo temporal sin move_uploaded_file(), que en las pruebas no
+     * anda, sin riesgo de que le hagan mover otro archivo del servidor.
+     *
+     * @param array<string, mixed> $archivos
+     *
+     * @return array<string, array{name: string, type: string, tmp_name: string, error: int, size: int}>
+     */
+    private static function archivosSubidos(array $archivos): array
+    {
+        return array_filter($archivos, static fn (mixed $archivo): bool => is_array($archivo)
+            && is_string($archivo['tmp_name'] ?? null)
+            && is_int($archivo['error'] ?? null)
+            && ($archivo['error'] !== UPLOAD_ERR_OK || is_uploaded_file($archivo['tmp_name'])));
     }
 
     /**
@@ -137,7 +154,13 @@ final class Peticion
         return $this->cookies[$nombre] ?? null;
     }
 
-    public function archivo(string $nombre): mixed
+    /**
+     * Un archivo subido, como lo arma PHP (name, type, tmp_name, error, size), o null si el campo
+     * no vino. Un campo con varios archivos (imagen[]) no llega.
+     *
+     * @return array{name: string, type: string, tmp_name: string, error: int, size: int}|null
+     */
+    public function archivo(string $nombre): ?array
     {
         return $this->archivos[$nombre] ?? null;
     }

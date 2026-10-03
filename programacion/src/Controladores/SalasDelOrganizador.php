@@ -30,13 +30,13 @@ final class SalasDelOrganizador extends Controlador
 
     public function crear(Peticion $peticion): Respuesta
     {
-        $formulario = FormularioDeSala::desdeCampos($peticion->cuerpo());
+        $formulario = FormularioDeSala::desdeCampos($peticion->cuerpo(), $peticion->archivo('imagen'), imagenObligatoria: true);
         $datos = $formulario->datos();
-        if ($datos === null) {
+        if ($datos === null || $formulario->imagen === null) {
             return $this->formulario(null, ['formulario' => $formulario], 422);
         }
 
-        $sala = $this->servicio->crear(self::organizador($peticion), $datos);
+        $sala = $this->servicio->crear(self::organizador($peticion), $datos, $formulario->imagen);
 
         // 303 a la edición: recargar no la vuelve a crear, y el organizador ve lo que guardó.
         return $this->redirigir("/organizador/salas/{$sala->id}/editar?guardada=1");
@@ -60,12 +60,12 @@ final class SalasDelOrganizador extends Controlador
         // los datos estaban bien.
         $sala = $this->servicio->paraEditar((string) $peticion->parametro('id'), self::organizador($peticion));
 
-        $formulario = FormularioDeSala::desdeCampos($peticion->cuerpo());
+        $formulario = FormularioDeSala::desdeCampos($peticion->cuerpo(), $peticion->archivo('imagen'));
         $datos = $formulario->datos();
         if ($datos === null) {
             return $this->formulario($sala->id, ['formulario' => $formulario], 422);
         }
-        $this->servicio->actualizar($sala, $datos);
+        $this->servicio->actualizar($sala, $datos, $formulario->imagen);
 
         return $this->redirigir("/organizador/salas/{$sala->id}/editar?guardada=1");
     }

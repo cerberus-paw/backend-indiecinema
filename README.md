@@ -223,12 +223,20 @@ docker compose exec mysql bash /herramientas/migrar.sh programacion   # uno solo
 
 Los datos de prueba todavía no están.
 
-Para ver los permisos de un usuario o probar que no puede salir de su esquema:
+Para comprobar que ningún subsistema sale de su esquema: entra con el usuario de cada uno e
+intenta leer los esquemas de los otros, crear y borrar tablas y leer el control de migraciones.
+Todo tiene que dar `command denied`; si algo pasa, sale con error.
 
 ```
-docker compose exec mysql mysql -uroot -p -e "SHOW GRANTS FOR 'programacion'@'%'"
-docker compose exec mysql mysql -h127.0.0.1 -uprogramacion -p -e "SELECT * FROM cuentas.usuario"
-#   ERROR 1142 (42000): SELECT command denied to user 'programacion'…
+docker compose exec mysql bash /herramientas/comprobar-aislamiento.sh
+```
+
+Lo mismo desde la aplicación de programación, con su propia conexión (es lo que se muestra en la
+demo):
+
+```
+docker compose exec programacion php -r 'require "vendor/autoload.php"; $base = IndieCinema\Nucleo\BaseDeDatos::conectar(IndieCinema\Nucleo\Configuracion::desdeArchivo("config/config.ini")); try { $base->filas("SELECT * FROM cuentas.usuario"); } catch (PDOException $e) { echo $e->getMessage(), PHP_EOL; }'
+#   SQLSTATE[42000]: Syntax error or access violation: 1142 SELECT command denied to user 'programacion'@… for table 'usuario'
 ```
 
 Los scripts de `mysql/init/` corren sólo con el volumen vacío. Para empezar de cero (se pierden

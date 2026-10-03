@@ -50,7 +50,7 @@ final class SesionesTest extends TestCase
     {
         $usuario = $this->usuario();
 
-        $identificador = $this->servicio->abrir($usuario);
+        $identificador = $this->servicio->abrir($usuario)->identificador;
 
         self::assertSame([['huella' => hash('sha256', $identificador)]], $this->base->filas('SELECT huella FROM sesion'));
         self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM sesion WHERE huella = ?', [$identificador]));
@@ -60,7 +60,7 @@ final class SesionesTest extends TestCase
 
     public function testCadaUsoQuedaAnotado(): void
     {
-        $identificador = $this->servicio->abrir($this->usuario());
+        $identificador = $this->servicio->abrir($this->usuario())->identificador;
         $this->base->ejecutar('UPDATE sesion SET usada_en = creada_en - INTERVAL 1 HOUR');
 
         $this->servicio->validar($identificador);
@@ -70,7 +70,7 @@ final class SesionesTest extends TestCase
 
     public function testUnaSesionVencidaNoSeAceptaYSeBorra(): void
     {
-        $identificador = $this->servicio->abrir($this->usuario());
+        $identificador = $this->servicio->abrir($this->usuario())->identificador;
         $this->base->ejecutar('UPDATE sesion SET vence_en = UTC_TIMESTAMP() - INTERVAL 1 SECOND');
 
         self::assertNull($this->servicio->validar($identificador));
@@ -79,7 +79,7 @@ final class SesionesTest extends TestCase
 
     public function testBorrarLaFilaCierraLaSesionEnElPedidoSiguiente(): void
     {
-        $identificador = $this->servicio->abrir($this->usuario());
+        $identificador = $this->servicio->abrir($this->usuario())->identificador;
         self::assertNotNull($this->servicio->validar($identificador));
 
         $this->base->ejecutar('DELETE FROM sesion');
@@ -90,8 +90,8 @@ final class SesionesTest extends TestCase
     public function testCerrarSoloCierraEsaSesion(): void
     {
         $usuario = $this->usuario();
-        $celular = $this->servicio->abrir($usuario);
-        $computadora = $this->servicio->abrir($usuario);
+        $celular = $this->servicio->abrir($usuario)->identificador;
+        $computadora = $this->servicio->abrir($usuario)->identificador;
 
         $this->servicio->cerrar($celular);
 
@@ -125,7 +125,7 @@ final class SesionesTest extends TestCase
         $this->usuarios->quitarRol($ana, Rol::Organizador);
         self::assertSame(0, $this->sesionesDe($ana));
 
-        $identificador = $this->servicio->abrir($ana);
+        $identificador = $this->servicio->abrir($ana)->identificador;
         $this->usuarios->cambiarEstado($ana, EstadoCuenta::Suspendida);
         self::assertNull($this->servicio->validar($identificador));
 

@@ -29,6 +29,30 @@ final class RepositorioDeUsuarios
     }
 
     /**
+     * El usuario con ese correo, sin distinguir mayúsculas (lo hace la columna), o null.
+     */
+    public function buscarPorCorreo(string $correo): ?Usuario
+    {
+        $fila = $this->base->fila(
+            'SELECT id, nombre, correo, contrasena_hash, estado FROM usuario WHERE correo = ?',
+            [$correo],
+        );
+        if ($fila === null) {
+            return null;
+        }
+        $roles = $this->base->filas('SELECT tipo FROM rol WHERE usuario_id = ?', [$fila['id']]);
+
+        return new Usuario(
+            (string) $fila['id'],
+            (string) $fila['nombre'],
+            (string) $fila['correo'],
+            (string) $fila['contrasena_hash'],
+            EstadoCuenta::from((string) $fila['estado']),
+            array_map(static fn (array $rol): Rol => Rol::from((string) $rol['tipo']), $roles),
+        );
+    }
+
+    /**
      * El usuario y sus roles juntos: un usuario sin rol no tiene que quedar en la base.
      *
      * @throws CorreoYaRegistrado

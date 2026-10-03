@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use IndieCinema\Cuentas\Controladores\Ingreso;
 use IndieCinema\Cuentas\Controladores\Inicio;
 use IndieCinema\Cuentas\Controladores\Registro;
 use IndieCinema\Nucleo\Http\EstadoInterno;
@@ -17,6 +18,10 @@ return static function (Router $router): void {
     // Sin sesión: es para el visitante que todavía no tiene cuenta.
     $router->get('/registro', [Registro::class, 'mostrar']);
     $router->post('/registro', [Registro::class, 'registrar']);
+    $router->get('/ingresar', [Ingreso::class, 'mostrar']);
+    $router->post('/ingresar', [Ingreso::class, 'ingresar']);
+    // Sin rol mínimo: trabaja con la cookie, y sin sesión válida igual la borra.
+    $router->post('/salir', [Ingreso::class, 'salir']);
 
     // Para comprobar que los otros subsistemas llegan hasta acá con su token.
     $router->interna('GET', '/interno/estado', [EstadoInterno::class, 'mostrar'], ['programacion', 'funciones']);

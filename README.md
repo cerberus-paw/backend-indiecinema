@@ -239,7 +239,27 @@ docker compose exec mysql bash /herramientas/migrar.sh programacion   # uno solo
   anota, y hay que revisar qué quedó antes de correrla de nuevo. Conviene una sola cosa por
   migración.
 
-Los datos de prueba todavía no están.
+#### Datos de prueba
+
+Un administrador, un organizador y dos espectadores, para la demo y para probar cada rol sin
+registrarse. Se cargan con la conexión de cuentas, como cualquier registro (Argon2id, un UUID, el
+usuario y sus roles juntos), y sólo con `entorno = "desarrollo"` en su `config.ini`: estas
+contraseñas son públicas. Correrlo de nuevo agrega sólo los que falten:
+
+```
+docker compose exec cuentas php herramientas/datos-de-prueba.php
+```
+
+| Rol | Nombre | Correo | Contraseña |
+|---|---|---|---|
+| administrador | Ana Administradora | `administrador@indiecinema.test` | `administrador2026` |
+| organizador | Omar Organizador | `organizador@indiecinema.test` | `organizador2026` |
+| espectador | Eva Espectadora | `eva@indiecinema.test` | `espectador2026` |
+| espectador | Elías Espectador | `elias@indiecinema.test` | `espectador2026` |
+
+Todos tienen además el rol de espectador, como cualquier cuenta. El primer administrador sale de
+acá: la web no asigna ese rol. Los correos son del dominio `.test`, que está reservado y no llega
+a ninguna casilla.
 
 Para comprobar que ningún subsistema sale de su esquema: entra con el usuario de cada uno e
 intenta leer los esquemas de los otros, crear y borrar tablas y leer el control de migraciones.
@@ -308,10 +328,11 @@ docker stop mysql-pruebas
 
 ### Probar con sesión
 
-Se crea una cuenta en http://localhost:8080/cuenta/registro y se entra en
-http://localhost:8080/cuenta/ingresar, siempre por `localhost`: sin HTTPS, los navegadores sólo
-aceptan la cookie `Secure` de la sesión ahí. Todo usuario nace espectador; para probar como
-organizador, se le suma el rol en la base y se recarga la página (el rol se lee en cada pedido):
+Se entra en http://localhost:8080/cuenta/ingresar con uno de los [datos de prueba](#datos-de-prueba)
+o con una cuenta creada en http://localhost:8080/cuenta/registro, siempre por `localhost`: sin
+HTTPS, los navegadores sólo aceptan la cookie `Secure` de la sesión ahí. Todo usuario nace
+espectador; para probar otro rol con una cuenta propia, se le suma en la base y se recarga la
+página (el rol se lee en cada pedido):
 
 ```
 docker compose exec mysql mysql -uroot -p cuentas -e "INSERT INTO rol (usuario_id, tipo) SELECT id, 'organizador' FROM usuario WHERE correo = 'vos@ejemplo.com'"

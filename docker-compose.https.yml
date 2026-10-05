@@ -1,0 +1,26 @@
+# Lo que el VPS suma al compose para atender por HTTPS. Se activa desde .env, así los comandos son
+# los mismos que en desarrollo:
+#
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.https.yml
+#   DOMINIO=indiecinema.ejemplo.org
+#
+# nginx termina el TLS con el certificado de Let's Encrypt que saca y renueva certbot en el
+# servidor (README, «HTTPS en el VPS»). En desarrollo no se usa: sin HTTPS los navegadores aceptan
+# las cookies Secure en localhost, y con eso alcanza para probar.
+
+services:
+  nginx:
+    # El 80 sigue publicado por el compose base (PUERTO_HTTP=80): redirige a HTTPS y atiende el
+    # desafío de Let's Encrypt.
+    ports: ["443:443"]
+    environment:
+      NGINX_SERVIDOR: https
+      # El nombre del certificado: el server_name, la carpeta de /etc/letsencrypt/live y a dónde
+      # redirige el 80.
+      NGINX_DOMINIO: ${DOMINIO:?falta DOMINIO en .env}
+    volumes:
+      # De sólo lectura: la clave privada la escribe certbot, en el servidor. nginx la lee al
+      # arrancar y en cada «nginx -s reload», que es lo que corre certbot después de renovar.
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      # Donde certbot deja el desafío de cada renovación, que Let's Encrypt viene a buscar por HTTP.
+      - /var/www/certbot:/var/www/certbot:ro

@@ -1,0 +1,47 @@
+# El VPS: el sitio sólo por HTTPS (E1, seguridad en la capa de red). nginx termina el TLS con el
+# certificado de Let's Encrypt que saca y renueva certbot en el servidor, y que llega montado de
+# sólo lectura por docker-compose.https.yml, el mismo que elige esta variante.
+
+# Por HTTP no se atiende el sitio: todo va a HTTPS, salvo el desafío con el que Let's Encrypt
+# comprueba en cada renovación que el dominio es nuestro, que llega por el puerto 80.
+server {
+    listen 80;
+    server_name _;
+    server_tokens off;
+
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+    # Al dominio del certificado y no a $host: quien entra por la IP también termina en el nombre
+    # correcto, y la redirección no depende de una cabecera que manda el cliente.
+    location / {
+        return 301 https://${NGINX_DOMINIO}$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name ${NGINX_DOMINIO};
+
+    ssl_certificate /etc/letsencrypt/live/${NGINX_DOMINIO}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${NGINX_DOMINIO}/privkey.pem;
+
+    # TLS 1.2 y 1.3, y en 1.2 sólo cifrados con secreto hacia adelante (ECDHE) y autenticados
+    # (GCM o ChaCha20): la configuración «intermedia» de Mozilla. En 1.3 todos lo son.
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305;
+    ssl_prefer_server_ciphers off;
+    # Reanudar una sesión TLS ahorra el saludo completo. Con la caché del servidor y sin tickets,
+    # que dependen de una clave que nginx no rota sola.
+    ssl_session_cache shared:tls:10m;
+    ssl_session_timeout 1d;
+    ssl_session_tickets off;
+
+    # HSTS: durante un año el navegador ni intenta HTTP con este dominio, así nadie en el medio le
+    # saca el HTTPS a quien ya entró una vez. Va acá, al mismo nivel que las cabeceras de
+    # sitio.inc: dentro de una location, esa location dejaría de heredar las otras.
+    add_header Strict-Transport-Security "max-age=31536000" always;
+
+    include conf.d/sitio.inc;
+}

@@ -14,6 +14,7 @@ cada subsistema instala como paquete de Composer.
 ```
 backend-indiecinema/
 ├── docker-compose.yml     nginx, un contenedor PHP por subsistema y MySQL
+├── docker-compose.https.yml  HTTPS en el VPS (se activa desde .env)
 ├── .env.ejemplo           puerto y claves de MySQL (copiar a .env)
 ├── nginx/templates/       ruteo por prefijo, validación de sesión y límites de intentos (con los secretos de .env)
 ├── php/                   Dockerfile común a los subsistemas (php:8.4-apache, sin root)
@@ -90,6 +91,10 @@ todo el sitio se vea igual aunque lo sirvan subsistemas distintos.
   y moderación suman el propio cuando guarden archivos (la foto de perfil, la documentación).
 - **Sólo nginx publica un puerto.** MySQL y los subsistemas están en la red interna: desde
   afuera no se llega a la base ni a las rutas `/interno/`.
+- **El HTTPS lo termina el mismo nginx, sólo en el VPS** (`docker-compose.https.yml`): sigue
+  siendo el único punto de entrada y ve la IP real de cada cliente, que es la que cuenta el
+  límite de intentos. El certificado es de Let's Encrypt y lo renueva certbot en el servidor; el
+  puerto 80 sólo redirige y las respuestas llevan HSTS.
 - **La sesión llega en cabeceras de nginx.** En cada pedido a un subsistema, nginx hace un
   `auth_request` a `/interno/sesion` de cuentas, que valida la cookie, y manda `X-Usuario-Id`,
   `X-Rol` y `X-Usuario-Nombre`, más `X-Nginx-Secreto` con el secreto de ese subsistema; sin el
@@ -283,6 +288,27 @@ los datos):
 ```
 docker compose down -v
 docker compose up -d
+```
+
+### HTTPS en el VPS
+
+Con un dominio que apunte al servidor y los puertos 80 y 443 abiertos. El primer certificado se
+saca con nginx detenido, porque todavía no tiene uno con el que arrancar en HTTPS:
+
+```
+sudo apt install certbot && sudo mkdir -p /var/www/certbot
+docker compose stop nginx
+sudo certbot certonly --standalone -d indiecinema.ejemplo.org
+```
+
+En `.env` van `PUERTO_HTTP=80`, `COMPOSE_FILE=docker-compose.yml:docker-compose.https.yml` y
+`DOMINIO=indiecinema.ejemplo.org`; después, `docker compose up -d`. Para que las renovaciones
+anden con nginx en marcha y lo recarguen al terminar:
+
+```
+sudo certbot reconfigure --cert-name indiecinema.ejemplo.org --webroot -w /var/www/certbot \
+  --deploy-hook "docker compose --project-directory $PWD exec -T nginx nginx -s reload"
+sudo certbot renew --dry-run
 ```
 
 ### Sin Docker

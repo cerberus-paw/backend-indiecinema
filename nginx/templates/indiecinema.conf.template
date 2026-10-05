@@ -6,6 +6,9 @@
 # ${NGINX_TOKEN_*} con las de .env (envsubst, con el filtro del compose) y la deja en
 # /etc/nginx/conf.d/. Así los secretos no se versionan. Las variables de nginx ($host,
 # $subsistema…) no se tocan.
+#
+# Está en tres partes: acá, lo que vale para todo nginx; en servidor-http.inc o servidor-https.inc,
+# quién escucha; y en sitio.inc, el sitio, que es el mismo en los dos casos.
 
 # El DNS de Docker, consultado en cada pedido y no una sola vez al arrancar: si se recrea un
 # subsistema (cambia su IP), nginx lo sigue encontrando sin reiniciarse.
@@ -22,96 +25,7 @@ map $request_method $ip_si_es_post {
 limit_req_zone $ip_si_es_post zone=ingresar:10m rate=5r/m;
 limit_req_zone $ip_si_es_post zone=registro:10m rate=5r/m;
 
-server {
-    listen 80;
-    server_name _;
-    server_tokens off;
-    # Redirecciones con la ruta sola (Location: /cuenta/), sin host ni puerto: detrás del puerto
-    # publicado por Docker (8080) o del HTTPS del VPS, nginx no sabe cuál vio el navegador.
-    absolute_redirect off;
-
-    # Lo que admite PHP (php/php.ini): una imagen de 5 MB más el resto del formulario.
-    client_max_body_size 6m;
-
-    # Al pasarse del límite, 429 Too Many Requests (por defecto sería 503, que dice otra cosa).
-    limit_req_status 429;
-
-    add_header X-Content-Type-Options nosniff always;
-    add_header X-Frame-Options DENY always;
-    add_header Referrer-Policy strict-origin-when-cross-origin always;
-
-    # Las rutas /interno/ son para la red del compose: desde afuera no existen, con o sin prefijo.
-    # Es una expresión regular para que gane sobre los prefijos de abajo (que no llevan ^~).
-    location ~ ^/(cuenta/|funcion/)?interno(/|$) {
-        return 404;
-    }
-
-    # El auth_request de cada pedido (subsistema.inc): le pregunta a cuentas de quién es la cookie,
-    # identificándose como el llamador nginx. «internal»: desde afuera no existe.
-    location = /_sesion {
-        internal;
-        set $cuentas cuentas;
-        proxy_pass http://$cuentas:8080/interno/sesion;
-        proxy_http_version 1.1;
-        # Sólo hace falta la cookie: el cuerpo del pedido original no viaja.
-        proxy_pass_request_body off;
-        proxy_set_header Content-Length "";
-        proxy_set_header X-Llamador nginx;
-        proxy_set_header Authorization "Bearer ${NGINX_TOKEN_INTERNO}";
-        proxy_set_header X-Usuario-Id "";
-        proxy_set_header X-Rol "";
-        proxy_set_header X-Usuario-Nombre "";
-        proxy_set_header X-Nginx-Secreto "";
-    }
-
-    location ^~ /estaticos/ {
-        alias /srv/frontend-indiecinema/estaticos/;
-        expires 1h;
-    }
-
-    location = /cuenta {
-        return 301 /cuenta/;
-    }
-    # 5 por minuto por IP con un margen chico: pasan 4 seguidos y después uno cada 12 segundos.
-    # Expresiones regulares y no «=»: el núcleo atiende igual /ingresar/, con la barra final, y
-    # con una ruta exacta ese pedido se saltearía el límite. Las barras dobles las une nginx.
-    location ~ ^/cuenta/ingresar/?$ {
-        limit_req zone=ingresar burst=3 nodelay;
-        set $subsistema cuentas;
-        set $secreto "${NGINX_SECRETO_CUENTAS}";
-        rewrite ^/cuenta(/.*)$ $1 break;
-        include conf.d/subsistema.inc;
-    }
-    location ~ ^/cuenta/registro/?$ {
-        limit_req zone=registro burst=3 nodelay;
-        set $subsistema cuentas;
-        set $secreto "${NGINX_SECRETO_CUENTAS}";
-        rewrite ^/cuenta(/.*)$ $1 break;
-        include conf.d/subsistema.inc;
-    }
-    location /cuenta/ {
-        set $subsistema cuentas;
-        set $secreto "${NGINX_SECRETO_CUENTAS}";
-        rewrite ^/cuenta(/.*)$ $1 break;
-        include conf.d/subsistema.inc;
-    }
-
-    location = /funcion {
-        return 301 /funcion/;
-    }
-    location /funcion/ {
-        set $subsistema funciones;
-        set $secreto "${NGINX_SECRETO_FUNCIONES}";
-        rewrite ^/funcion(/.*)$ $1 break;
-        include conf.d/subsistema.inc;
-    }
-
-    location / {
-        set $subsistema programacion;
-        set $secreto "${NGINX_SECRETO_PROGRAMACION}";
-        # Sin cambiar nada, para que programación reciba la ruta ya normalizada (sin «..» ni
-        # caracteres codificados de más), igual que los otros dos.
-        rewrite ^(.*)$ $1 break;
-        include conf.d/subsistema.inc;
-    }
-}
+# Quién escucha: en desarrollo, HTTP en el 80; en el VPS, HTTPS en el 443 y el 80 sólo redirige
+# (docker-compose.https.yml pone NGINX_SERVIDOR en https). Las dos variantes quedan en conf.d,
+# pero nginx lee sólo la que se incluye acá: por eso en desarrollo no hace falta un certificado.
+include conf.d/servidor-${NGINX_SERVIDOR}.inc;

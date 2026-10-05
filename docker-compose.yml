@@ -1,6 +1,7 @@
 # IndieCinema: nginx adelante, un contenedor PHP por subsistema y un MySQL con un esquema por
 # subsistema. Es el mismo archivo en desarrollo y en el VPS; lo que cambia está en .env y en el
-# config.ini de cada subsistema, que no se versionan.
+# config.ini de cada subsistema, que no se versionan. El VPS suma docker-compose.https.yml (también
+# desde .env), con el que nginx atiende por HTTPS.
 #
 # Sólo nginx publica un puerto: MySQL y los subsistemas quedan en la red interna, así desde
 # afuera no se llega ni a la base ni a las rutas /interno/.
@@ -32,9 +33,12 @@ services:
     restart: unless-stopped
     ports: ["${PUERTO_HTTP:-8080}:80"]
     environment:
-      # Las plantillas de nginx/templates/ toman sólo estas variables de .env (envsubst): el resto
-      # de los «$» son variables de nginx y quedan como están.
-      NGINX_ENVSUBST_FILTER: "^NGINX_(SECRETO|TOKEN)_"
+      # Las plantillas de nginx/templates/ toman sólo estas variables (envsubst): el resto de los
+      # «$» son variables de nginx y quedan como están.
+      NGINX_ENVSUBST_FILTER: "^NGINX_(SECRETO_|TOKEN_|SERVIDOR|DOMINIO)"
+      # La variante de servidor que incluye indiecinema.conf: http acá; https en
+      # docker-compose.https.yml.
+      NGINX_SERVIDOR: http
       # El secreto que nginx comparte con cada subsistema (X-Nginx-Secreto): el mismo que [nginx]
       # secreto de su config.ini.
       NGINX_SECRETO_CUENTAS: ${NGINX_SECRETO_CUENTAS:?falta NGINX_SECRETO_CUENTAS en .env}

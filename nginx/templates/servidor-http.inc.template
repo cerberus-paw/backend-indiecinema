@@ -1,0 +1,8 @@
+# Desarrollo: el sitio por HTTP, en el puerto que publica el compose (PUERTO_HTTP). Sin HTTPS los
+# navegadores sólo aceptan las cookies Secure en localhost, que es donde se prueba.
+server {
+    listen 80;
+    server_name _;
+
+    include conf.d/sitio.inc;
+}

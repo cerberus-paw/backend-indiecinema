@@ -113,3 +113,16 @@ jobs:
           docker compose config --quiet
       - name: Validar la configuración de nginx
         run: docker compose run --rm --no-deps nginx nginx -t
+      # La variante del VPS, que en desarrollo nginx no lee. Con un certificado autofirmado donde
+      # iría el de Let's Encrypt: alcanza para que nginx lo encuentre y acepte la configuración.
+      - name: Validar la configuración de nginx con HTTPS
+        env:
+          COMPOSE_FILE: docker-compose.yml:docker-compose.https.yml
+          DOMINIO: indiecinema.test
+        run: |
+          sudo mkdir -p /etc/letsencrypt/live/$DOMINIO /var/www/certbot
+          sudo openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=$DOMINIO" \
+            -keyout /etc/letsencrypt/live/$DOMINIO/privkey.pem \
+            -out /etc/letsencrypt/live/$DOMINIO/fullchain.pem
+          docker compose config --quiet
+          docker compose run --rm --no-deps nginx nginx -t

@@ -1,0 +1,150 @@
+<?php
+
+declare(strict_types=1);
+
+namespace IndieCinema\Programacion\Repositorios;
+
+use DateTimeImmutable;
+use IndieCinema\Nucleo\BaseDeDatos;
+use IndieCinema\Programacion\Modelo\EstadoFuncion;
+use IndieCinema\Programacion\Modelo\Funcion;
+
+/**
+ * Las funciones y sus obras en el esquema de programación.
+ *
+ * En funcion_obra quedan todas las candidatas de la votación, y al cerrarla las que se proyectan
+ * pasan a elegidas: las demás siguen ahí, para el historial de la votación. La función del
+ * modelo, en cambio, tiene una sola lista: las candidatas mientras está en votación y después las
+ * elegidas. Al leerla, si tiene elegidas son ésas; si no, todavía está en votación (o se canceló
+ * en votación) y son las candidatas.
+ */
+final class RepositorioDeFunciones
+{
+    private const COLUMNAS = 'id, sala_id, precio_base, cupo, estado, fecha_hora';
+
+    public function __construct(private readonly BaseDeDatos $base)
+    {
+    }
+
+    public function buscar(string $id): ?Funcion
+    {
+        $fila = $this->base->fila('SELECT ' . self::COLUMNAS . ' FROM funcion WHERE id = ?', [$id]);
+        if ($fila === null) {
+            return null;
+        }
+        $obras = $this->base->filas(
+            'SELECT funcion_id, obra_id, estado FROM funcion_obra WHERE funcion_id = ? ORDER BY obra_id',
+            [$id],
+        );
+
+        return self::funcion($fila, $obras);
+    }
+
+    /**
+     * Las funciones de una sala: primero las que tienen fecha, de la más próxima a la más lejana, y
+     * después las que todavía no la tienen, de la más nueva a la más vieja.
+     *
+     * @return list<Funcion>
+     */
+    public function deLaSala(string $salaId): array
+    {
+        $filas = $this->base->filas(
+            'SELECT ' . self::COLUMNAS . ' FROM funcion
+             WHERE sala_id = ?
+             ORDER BY fecha_hora IS NULL, fecha_hora, creada_en DESC, id',
+            [$salaId],
+        );
+        // Las obras de todas en una sola consulta, en vez de una por función.
+        $obras = [];
+        foreach ($this->base->filas(
+            'SELECT fo.funcion_id, fo.obra_id, fo.estado FROM funcion_obra fo
+             JOIN funcion f ON f.id = fo.funcion_id
+             WHERE f.sala_id = ?
+             ORDER BY fo.obra_id',
+            [$salaId],
+        ) as $obra) {
+            $obras[$obra['funcion_id']][] = $obra;
+        }
+
+        return array_map(static fn (array $fila): Funcion => self::funcion($fila, $obras[$fila['id']] ?? []), $filas);
+    }
+
+    /**
+     * La función y sus obras juntas: una función sin obras no tiene que quedar en la base.
+     */
+    public function agregar(Funcion $funcion): void
+    {
+        $estadoDeLasObras = $funcion->estado === EstadoFuncion::EnVotacionTitulos ? 'candidata' : 'elegida';
+        $this->base->enTransaccion(function (BaseDeDatos $base) use ($funcion, $estadoDeLasObras): void {
+            $base->ejecutar(
+                'INSERT INTO funcion (id, sala_id, precio_base, cupo, estado, fecha_hora) VALUES (?, ?, ?, ?, ?, ?)',
+                [
+                    $funcion->id, $funcion->salaId, self::precio($funcion->precioBase), $funcion->cupo,
+                    $funcion->estado, $funcion->fechaHora,
+                ],
+            );
+            foreach ($funcion->obrasIds as $obraId) {
+                $base->ejecutar(
+                    'INSERT INTO funcion_obra (funcion_id, obra_id, estado) VALUES (?, ?, ?)',
+                    [$funcion->id, $obraId, $estadoDeLasObras],
+                );
+            }
+        });
+    }
+
+    /**
+     * Guarda lo que cambia con el ciclo de vida: el estado, la fecha y, al cerrar la votación,
+     * cuáles de las candidatas quedaron elegidas. La sala, el precio y el cupo no cambian por acá.
+     *
+     * Una cancelada no toca sus obras: cancelar() no las cambia, y si se canceló en votación,
+     * sus obras son las candidatas y no tienen que quedar elegidas. Por eso cada cambio de estado
+     * se guarda antes del siguiente.
+     */
+    public function guardar(Funcion $funcion): void
+    {
+        $this->base->enTransaccion(function (BaseDeDatos $base) use ($funcion): void {
+            $base->ejecutar(
+                'UPDATE funcion SET estado = ?, fecha_hora = ? WHERE id = ?',
+                [$funcion->estado, $funcion->fechaHora, $funcion->id],
+            );
+            if (in_array($funcion->estado, [EstadoFuncion::EnVotacionTitulos, EstadoFuncion::Cancelada], true)) {
+                return;
+            }
+            // Las obras de la función son un subconjunto de las candidatas (lo controla
+            // cerrarVotacionTitulos()), así que alcanza con marcarlas.
+            $marcas = implode(', ', array_fill(0, count($funcion->obrasIds), '?'));
+            $base->ejecutar(
+                "UPDATE funcion_obra SET estado = 'elegida' WHERE funcion_id = ? AND obra_id IN ({$marcas})",
+                [$funcion->id, ...$funcion->obrasIds],
+            );
+        });
+    }
+
+    /**
+     * El precio como texto con dos decimales, para que la columna DECIMAL lo guarde exacto y no
+     * pase por la conversión de un float.
+     */
+    private static function precio(float $precio): string
+    {
+        return number_format($precio, 2, '.', '');
+    }
+
+    /**
+     * @param array<string, mixed>       $fila
+     * @param list<array<string, mixed>> $obras las filas de funcion_obra de esta función
+     */
+    private static function funcion(array $fila, array $obras): Funcion
+    {
+        $elegidas = array_filter($obras, static fn (array $obra): bool => $obra['estado'] === 'elegida');
+
+        return new Funcion(
+            (string) $fila['id'],
+            (string) $fila['sala_id'],
+            array_values(array_map(static fn (array $obra): string => (string) $obra['obra_id'], $elegidas ?: $obras)),
+            (float) $fila['precio_base'],
+            (int) $fila['cupo'],
+            EstadoFuncion::from((string) $fila['estado']),
+            $fila['fecha_hora'] === null ? null : new DateTimeImmutable((string) $fila['fecha_hora']),
+        );
+    }
+}

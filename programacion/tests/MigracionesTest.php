@@ -106,12 +106,79 @@ final class MigracionesTest extends TestCase
         $this->base->ejecutar('INSERT INTO obra_genero (obra_id, genero_id) VALUES (?, ?)', [$obraId, $generoId]);
     }
 
+    /**
+     * @return string el id de la sala
+     */
+    private function insertarSala(): string
+    {
+        $id = Uuid::nuevo();
+        $this->base->ejecutar(
+            'INSERT INTO sala (id, organizador_id, nombre, descripcion, direccion, localidad, capacidad,'
+            . ' peliculas_por_funcion, duracion_funcion, tiempo_entre_funciones, habilitada)'
+            . ' VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [$id, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'Cine Club El Galpón', 'Un galpón con proyector.', 'Av. San Martín 450', 'Luján', 60, 2, 120, 15, 1],
+        );
+
+        return $id;
+    }
+
+    /**
+     * @return string el id de la obra
+     */
+    private function insertarOtraObra(): string
+    {
+        $datos = $this->obraValida();
+        $this->insertarObra($datos);
+
+        return $datos['id'];
+    }
+
+    /**
+     * Una función recién creada: en votación de títulos y sin fecha.
+     *
+     * @return array<string, mixed>
+     */
+    private function funcionValida(string $salaId): array
+    {
+        return [
+            'id' => Uuid::nuevo(),
+            'sala_id' => $salaId,
+            'estado' => 'en_votacion_titulos',
+            'fecha_hora' => null,
+            'precio_base' => '3500.00',
+            'cupo' => 40,
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $datos
+     */
+    private function insertarFuncion(array $datos): void
+    {
+        $this->base->ejecutar(
+            'INSERT INTO funcion (id, sala_id, estado, fecha_hora, precio_base, cupo) VALUES (?, ?, ?, ?, ?, ?)',
+            [$datos['id'], $datos['sala_id'], $datos['estado'], $datos['fecha_hora'], $datos['precio_base'], $datos['cupo']],
+        );
+    }
+
+    private function agregarObra(string $funcionId, string $obraId, ?string $estado = null): void
+    {
+        if ($estado === null) {
+            $this->base->ejecutar('INSERT INTO funcion_obra (funcion_id, obra_id) VALUES (?, ?)', [$funcionId, $obraId]);
+
+            return;
+        }
+        $this->base->ejecutar('INSERT INTO funcion_obra (funcion_id, obra_id, estado) VALUES (?, ?, ?)', [$funcionId, $obraId, $estado]);
+    }
+
     public function testLasMigracionesSeAplicanDesdeCeroYCreanLasTablas(): void
     {
         self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM sala'));
         self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM obra'));
         self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM genero'));
         self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM obra_genero'));
+        self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM funcion'));
+        self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM funcion_obra'));
     }
 
     public function testLaObraQuedaGuardadaConSusValoresYTimestamps(): void
@@ -281,5 +348,189 @@ final class MigracionesTest extends TestCase
 
         $this->assertRechaza(self::REFERENCIADO, fn () => $this->base->ejecutar('DELETE FROM genero WHERE id = ?', [$drama]));
         self::assertSame(1, $this->base->valor('SELECT COUNT(*) FROM genero'));
+    }
+
+    public function testLaFuncionQuedaGuardadaEnVotacionYSinFecha(): void
+    {
+        $datos = $this->funcionValida($this->insertarSala());
+        $this->base->ejecutar(
+            'INSERT INTO funcion (id, sala_id, precio_base, cupo) VALUES (?, ?, ?, ?)',
+            [$datos['id'], $datos['sala_id'], $datos['precio_base'], $datos['cupo']],
+        );
+
+        $guardada = $this->base->fila('SELECT * FROM funcion WHERE id = ?', [$datos['id']]);
+        self::assertNotNull($guardada);
+        self::assertSame($datos['sala_id'], $guardada['sala_id']);
+        self::assertSame('en_votacion_titulos', $guardada['estado']);
+        self::assertNull($guardada['fecha_hora']);
+        self::assertSame('3500.00', $guardada['precio_base']);
+        self::assertSame(40, $guardada['cupo']);
+    }
+
+    public function testNoSeGuardaUnaFuncionSinSala(): void
+    {
+        $deSalaInexistente = $this->funcionValida(Uuid::nuevo());
+        $this->assertRechaza(self::REFERENCIA_INEXISTENTE, fn () => $this->insertarFuncion($deSalaInexistente));
+
+        $sinSala = $this->funcionValida(Uuid::nuevo());
+        $sinSala['sala_id'] = null;
+        $this->assertRechaza([self::CAMPO_OBLIGATORIO, self::COLUMNA_NO_NULA], fn () => $this->insertarFuncion($sinSala));
+
+        self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM funcion'));
+    }
+
+    public function testLaFechaPuedeQuedarVaciaHastaQueLaFuncionSePrograma(): void
+    {
+        $salaId = $this->insertarSala();
+        foreach (['en_votacion_titulos', 'en_acuerdo_fecha', 'cancelada'] as $estado) {
+            $datos = $this->funcionValida($salaId);
+            $datos['estado'] = $estado;
+            $this->insertarFuncion($datos);
+        }
+
+        self::assertSame(3, $this->base->valor('SELECT COUNT(*) FROM funcion WHERE fecha_hora IS NULL'));
+    }
+
+    public function testUnaFuncionProgramadaOFinalizadaSiempreTieneFecha(): void
+    {
+        $salaId = $this->insertarSala();
+        foreach (['programada', 'finalizada'] as $estado) {
+            $sinFecha = $this->funcionValida($salaId);
+            $sinFecha['estado'] = $estado;
+            $this->assertRechaza(self::RESTRICCION_CHECK, fn () => $this->insertarFuncion($sinFecha));
+
+            $conFecha = $this->funcionValida($salaId);
+            $conFecha['estado'] = $estado;
+            $conFecha['fecha_hora'] = '2026-10-24 20:30:00';
+            $this->insertarFuncion($conFecha);
+        }
+
+        self::assertSame(2, $this->base->valor('SELECT COUNT(*) FROM funcion'));
+    }
+
+    public function testNoSePasaAProgramadaSinFijarLaFecha(): void
+    {
+        $datos = $this->funcionValida($this->insertarSala());
+        $datos['estado'] = 'en_acuerdo_fecha';
+        $this->insertarFuncion($datos);
+
+        $this->assertRechaza(
+            self::RESTRICCION_CHECK,
+            fn () => $this->base->ejecutar('UPDATE funcion SET estado = ? WHERE id = ?', ['programada', $datos['id']]),
+        );
+        self::assertSame('en_acuerdo_fecha', $this->base->valor('SELECT estado FROM funcion WHERE id = ?', [$datos['id']]));
+
+        $this->base->ejecutar(
+            'UPDATE funcion SET estado = ?, fecha_hora = ? WHERE id = ?',
+            ['programada', '2026-10-24 20:30:00', $datos['id']],
+        );
+        self::assertSame('programada', $this->base->valor('SELECT estado FROM funcion WHERE id = ?', [$datos['id']]));
+    }
+
+    public function testLaBaseRechazaUnEstadoDeFuncionFueraDelEnum(): void
+    {
+        $datos = $this->funcionValida($this->insertarSala());
+        $datos['estado'] = 'suspendida';
+
+        $this->assertRechaza(self::VALOR_INVALIDO, fn () => $this->insertarFuncion($datos));
+        self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM funcion'));
+    }
+
+    public function testLaBaseRechazaUnCupoCeroOUnPrecioNegativo(): void
+    {
+        $salaId = $this->insertarSala();
+
+        $cupoCero = $this->funcionValida($salaId);
+        $cupoCero['cupo'] = 0;
+        $this->assertRechaza(self::RESTRICCION_CHECK, fn () => $this->insertarFuncion($cupoCero));
+
+        $precioNegativo = $this->funcionValida($salaId);
+        $precioNegativo['precio_base'] = '-0.01';
+        $this->assertRechaza(self::RESTRICCION_CHECK, fn () => $this->insertarFuncion($precioNegativo));
+
+        self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM funcion'));
+    }
+
+    public function testLaFuncionPuedeSerALaGorra(): void
+    {
+        $datos = $this->funcionValida($this->insertarSala());
+        $datos['precio_base'] = '0';
+        $this->insertarFuncion($datos);
+
+        self::assertSame('0.00', $this->base->valor('SELECT precio_base FROM funcion WHERE id = ?', [$datos['id']]));
+    }
+
+    public function testCadaObraSeMarcaComoCandidataOElegida(): void
+    {
+        $funcion = $this->funcionValida($this->insertarSala());
+        $this->insertarFuncion($funcion);
+        $obraId = $this->insertarOtraObra();
+
+        $this->agregarObra($funcion['id'], $obraId);
+        $estado = 'SELECT estado FROM funcion_obra WHERE funcion_id = ? AND obra_id = ?';
+        self::assertSame('candidata', $this->base->valor($estado, [$funcion['id'], $obraId]));
+
+        $this->base->ejecutar(
+            'UPDATE funcion_obra SET estado = ? WHERE funcion_id = ? AND obra_id = ?',
+            ['elegida', $funcion['id'], $obraId],
+        );
+        self::assertSame('elegida', $this->base->valor($estado, [$funcion['id'], $obraId]));
+
+        $this->assertRechaza(self::VALOR_INVALIDO, fn () => $this->agregarObra($funcion['id'], $this->insertarOtraObra(), 'descartada'));
+    }
+
+    public function testNoSeGuardaUnaFuncionConUnaObraInexistente(): void
+    {
+        $funcion = $this->funcionValida($this->insertarSala());
+        $this->insertarFuncion($funcion);
+        $obraId = $this->insertarOtraObra();
+
+        $this->assertRechaza(self::REFERENCIA_INEXISTENTE, fn () => $this->agregarObra($funcion['id'], Uuid::nuevo()));
+        $this->assertRechaza(self::REFERENCIA_INEXISTENTE, fn () => $this->agregarObra(Uuid::nuevo(), $obraId));
+        self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM funcion_obra'));
+    }
+
+    public function testUnaObraNoEstaDosVecesEnLaMismaFuncion(): void
+    {
+        $funcion = $this->funcionValida($this->insertarSala());
+        $this->insertarFuncion($funcion);
+        $obraId = $this->insertarOtraObra();
+        $this->agregarObra($funcion['id'], $obraId);
+
+        $this->assertRechaza(self::REPETIDO, fn () => $this->agregarObra($funcion['id'], $obraId, 'elegida'));
+        self::assertSame(1, $this->base->valor('SELECT COUNT(*) FROM funcion_obra'));
+    }
+
+    public function testUnaSalaConFuncionesNoSePuedeBorrar(): void
+    {
+        $salaId = $this->insertarSala();
+        $this->insertarFuncion($this->funcionValida($salaId));
+
+        $this->assertRechaza(self::REFERENCIADO, fn () => $this->base->ejecutar('DELETE FROM sala WHERE id = ?', [$salaId]));
+        self::assertSame(1, $this->base->valor('SELECT COUNT(*) FROM funcion'));
+    }
+
+    public function testUnaObraQueEstuvoEnUnaFuncionNoSePuedeBorrar(): void
+    {
+        $funcion = $this->funcionValida($this->insertarSala());
+        $this->insertarFuncion($funcion);
+        $obraId = $this->insertarOtraObra();
+        $this->agregarObra($funcion['id'], $obraId);
+
+        $this->assertRechaza(self::REFERENCIADO, fn () => $this->base->ejecutar('DELETE FROM obra WHERE id = ?', [$obraId]));
+        self::assertSame(1, $this->base->valor('SELECT COUNT(*) FROM funcion_obra'));
+    }
+
+    public function testAlBorrarUnaFuncionSeVanSusObrasPeroNoLasObras(): void
+    {
+        $funcion = $this->funcionValida($this->insertarSala());
+        $this->insertarFuncion($funcion);
+        $obraId = $this->insertarOtraObra();
+        $this->agregarObra($funcion['id'], $obraId);
+
+        $this->base->ejecutar('DELETE FROM funcion WHERE id = ?', [$funcion['id']]);
+
+        self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM funcion_obra'));
+        self::assertSame(1, $this->base->valor('SELECT COUNT(*) FROM obra WHERE id = ?', [$obraId]));
     }
 }

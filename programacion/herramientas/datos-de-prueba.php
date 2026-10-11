@@ -3,7 +3,8 @@
 /*
  * Carga los datos de demostración de programación (los géneros, cuatro salas habilitadas, doce
  * obras con afiche y quince funciones futuras) con la conexión y el usuario del subsistema, por
- * los mismos repositorios que usa la web:
+ * los mismos repositorios que usa la web, y copia las fotos de las salas y los afiches al volumen
+ * de archivos:
  *
  *     docker compose exec programacion php herramientas/datos-de-prueba.php
  *

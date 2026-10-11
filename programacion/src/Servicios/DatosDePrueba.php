@@ -31,6 +31,7 @@ use RuntimeException;
  *
  * cargar() los guarda con los repositorios, como cualquier alta: los géneros, las salas, las
  * obras con sus géneros y las funciones con sus obras, en ese orden por las claves foráneas.
+ * Después copia las fotos de las salas y los afiches al volumen de archivos.
  */
 final class DatosDePrueba
 {
@@ -558,11 +559,17 @@ final class DatosDePrueba
         private readonly RepositorioDeSalas $salas,
         private readonly RepositorioDeObras $obras,
         private readonly RepositorioDeFunciones $funciones,
+        private readonly ArchivosDeSalas $fotosDeSalas,
+        private readonly string $carpetaDeAfiches,
     ) {
     }
 
     /**
      * Sólo en desarrollo, como los usuarios de prueba de cuentas.
+     *
+     * Las fotos de las salas van adonde las guarda el formulario (ArchivosDeSalas). Los afiches,
+     * a la carpeta afiches del mismo volumen: todavía nada los muestra, pero así quedan donde los
+     * va a buscar la página de la obra.
      *
      * @throws RuntimeException fuera de desarrollo
      */
@@ -576,14 +583,15 @@ final class DatosDePrueba
         if (!$configuracion->enDesarrollo()) {
             throw new RuntimeException('Los datos de prueba se cargan sólo con entorno = "desarrollo".');
         }
+        $carpeta = rtrim((string) $configuracion->obtener('archivos.carpeta', '/var/indiecinema/archivos'), '/');
 
-        return new self($generos, $salas, $obras, $funciones);
+        return new self($generos, $salas, $obras, $funciones, new ArchivosDeSalas($configuracion), "{$carpeta}/afiches");
     }
 
     /**
-     * Agrega lo que falte, buscando cada cosa por su id. Correrlo de nuevo no duplica nada ni toca
-     * lo que ya está: si alguien cambió algo a mano para probar, queda como lo dejó, y una función
-     * que ya estaba conserva la fecha con la que se cargó.
+     * Agrega lo que falte, buscando cada cosa por su id y cada imagen por su nombre. Correrlo de
+     * nuevo no duplica nada ni toca lo que ya está: si alguien cambió algo a mano para probar,
+     * queda como lo dejó, y una función que ya estaba conserva la fecha con la que se cargó.
      *
      * No va todo en una transacción, porque cada repositorio abre la suya: si se corta a mitad de
      * camino, correrlo de nuevo completa lo que faltó.
@@ -599,7 +607,49 @@ final class DatosDePrueba
             'salas' => self::agregarLasQueFalten(self::salas(), $this->salas->buscar(...), $this->salas->agregar(...)),
             'obras' => self::agregarLasQueFalten(self::obras(), $this->obras->buscar(...), $this->obras->agregar(...)),
             'funciones' => self::agregarLasQueFalten(self::funciones($hoy), $this->funciones->buscar(...), $this->funciones->agregar(...)),
+            'fotos' => self::contarCopias(array_map(
+                fn (array $sala): bool => $this->fotosDeSalas->copiar(self::rutaSala($sala['imagen']), $sala['imagen']),
+                self::SALAS,
+            )),
+            'afiches' => self::contarCopias(array_map(
+                fn (array $obra): bool => $this->copiarAfiche($obra['afiche']),
+                self::OBRAS,
+            )),
         ];
+    }
+
+    /**
+     * Como ArchivosDeSalas::copiar(): si ya está, lo deja como está.
+     *
+     * @return bool si lo copió
+     */
+    private function copiarAfiche(string $nombre): bool
+    {
+        $destino = "{$this->carpetaDeAfiches}/{$nombre}";
+        if (is_file($destino)) {
+            return false;
+        }
+        if (!is_dir($this->carpetaDeAfiches) && !mkdir($this->carpetaDeAfiches, 0750, true) && !is_dir($this->carpetaDeAfiches)) {
+            throw new RuntimeException("No se pudo crear {$this->carpetaDeAfiches}.");
+        }
+        if (!copy(self::rutaAfiche($nombre), $destino)) {
+            throw new RuntimeException("No se pudo copiar {$nombre} a {$this->carpetaDeAfiches}.");
+        }
+        chmod($destino, 0640);
+
+        return true;
+    }
+
+    /**
+     * @param list<bool> $copiadas
+     *
+     * @return array{agregadas: int, yaEstaban: int}
+     */
+    private static function contarCopias(array $copiadas): array
+    {
+        $agregadas = count(array_filter($copiadas));
+
+        return ['agregadas' => $agregadas, 'yaEstaban' => count($copiadas) - $agregadas];
     }
 
     /**

@@ -12,14 +12,15 @@ use IndieCinema\Programacion\Repositorios\RepositorioDeFunciones;
 use IndieCinema\Programacion\Repositorios\RepositorioDeGeneros;
 use IndieCinema\Programacion\Repositorios\RepositorioDeObras;
 use IndieCinema\Programacion\Repositorios\RepositorioDeSalas;
+use IndieCinema\Programacion\Servicios\ArchivosDeSalas;
 use IndieCinema\Programacion\Servicios\DatosDePrueba;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
 
 /**
- * La carga de los datos de demostración contra un MySQL de verdad: que deje el sitio con salas
- * habilitadas, obras con afiche y funciones futuras, que correrla de nuevo no duplique nada y que
- * nunca corra fuera de desarrollo.
+ * La carga de los datos de demostración contra un MySQL de verdad y una carpeta temporal en lugar
+ * del volumen: que deje el sitio con salas habilitadas, obras con afiche y funciones futuras, que
+ * correrla de nuevo no duplique nada y que nunca corra fuera de desarrollo.
  */
 final class CargaDeDatosDePruebaTest extends TestCase
 {
@@ -29,14 +30,27 @@ final class CargaDeDatosDePruebaTest extends TestCase
 
     private Configuracion $configuracion;
     private BaseDeDatos $base;
+    private string $carpeta;
 
     protected function setUp(): void
     {
+        // Antes de saltearla: tearDown() corre igual y la usa.
+        $this->carpeta = sys_get_temp_dir() . '/archivos-' . bin2hex(random_bytes(4));
         $this->configuracion = new Configuracion([
             'app' => ['entorno' => 'desarrollo'],
+            'archivos' => ['carpeta' => $this->carpeta],
             'base' => self::baseDePruebas(),
         ]);
         $this->base = self::baseConTablasNuevas($this->configuracion);
+    }
+
+    protected function tearDown(): void
+    {
+        foreach (['salas', 'afiches'] as $subcarpeta) {
+            array_map('unlink', glob("{$this->carpeta}/{$subcarpeta}/*") ?: []);
+            @rmdir("{$this->carpeta}/{$subcarpeta}");
+        }
+        @rmdir($this->carpeta);
     }
 
     private function datos(?Configuracion $configuracion = null): DatosDePrueba
@@ -70,6 +84,8 @@ final class CargaDeDatosDePruebaTest extends TestCase
             'salas' => ['agregadas' => 4, 'yaEstaban' => 0],
             'obras' => ['agregadas' => 12, 'yaEstaban' => 0],
             'funciones' => ['agregadas' => 15, 'yaEstaban' => 0],
+            'fotos' => ['agregadas' => 4, 'yaEstaban' => 0],
+            'afiches' => ['agregadas' => 12, 'yaEstaban' => 0],
         ], $this->datos()->cargar());
 
         $generosPorObra = array_sum(array_map(static fn (array $obra): int => count($obra['generos']), DatosDePrueba::OBRAS));
@@ -92,8 +108,8 @@ final class CargaDeDatosDePruebaTest extends TestCase
         $resultado = $this->datos()->cargar(new DateTimeImmutable('tomorrow'));
 
         self::assertSame($antes, $this->filas());
-        self::assertSame([0, 0, 0, 0], array_column($resultado, 'agregadas'));
-        self::assertSame([8, 4, 12, 15], array_column($resultado, 'yaEstaban'));
+        self::assertSame([0, 0, 0, 0, 0, 0], array_column($resultado, 'agregadas'));
+        self::assertSame([8, 4, 12, 15, 4, 12], array_column($resultado, 'yaEstaban'));
     }
 
     public function testCompletaLoQueFaltaSinTocarLoQueYaEsta(): void
@@ -158,6 +174,32 @@ final class CargaDeDatosDePruebaTest extends TestCase
         }
     }
 
+    public function testCopiaLasFotosDeLasSalasYLosAfichesAlVolumen(): void
+    {
+        $this->datos()->cargar();
+        $fotos = new ArchivosDeSalas($this->configuracion);
+
+        foreach (DatosDePrueba::SALAS as $sala) {
+            // Como la entrega el controlador de imágenes de sala.
+            self::assertSame(file_get_contents(DatosDePrueba::rutaSala($sala['imagen'])), $fotos->contenido($sala['imagen']));
+        }
+        foreach (DatosDePrueba::OBRAS as $obra) {
+            self::assertFileEquals(DatosDePrueba::rutaAfiche($obra['afiche']), "{$this->carpeta}/afiches/{$obra['afiche']}");
+        }
+    }
+
+    public function testNoPisaUnaImagenQueYaEsta(): void
+    {
+        $afiche = DatosDePrueba::OBRAS[0]['afiche'];
+        mkdir("{$this->carpeta}/afiches", 0750, true);
+        file_put_contents("{$this->carpeta}/afiches/{$afiche}", 'cambiada a mano');
+
+        $resultado = $this->datos()->cargar();
+
+        self::assertSame(['agregadas' => 11, 'yaEstaban' => 1], $resultado['afiches']);
+        self::assertStringEqualsFile("{$this->carpeta}/afiches/{$afiche}", 'cambiada a mano');
+    }
+
     public function testNoSeCarganFueraDeDesarrollo(): void
     {
         $produccion = new Configuracion(['app' => ['entorno' => 'produccion'], 'base' => self::baseDePruebas()]);
@@ -169,5 +211,6 @@ final class CargaDeDatosDePruebaTest extends TestCase
             self::assertStringContainsString('desarrollo', $error->getMessage());
         }
         self::assertSame(array_fill_keys(self::TABLAS, 0), $this->filas());
+        self::assertDirectoryDoesNotExist($this->carpeta);
     }
 }

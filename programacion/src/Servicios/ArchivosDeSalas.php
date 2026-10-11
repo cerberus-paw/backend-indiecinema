@@ -53,6 +53,29 @@ final class ArchivosDeSalas
         return $nombre;
     }
 
+    /**
+     * Copia una imagen que ya tiene su nombre, como las de los datos de prueba. Si ya hay una con
+     * ese nombre, la deja como está.
+     *
+     * @return bool si la copió
+     */
+    public function copiar(string $origen, string $nombre): bool
+    {
+        $destino = $this->ruta($nombre);
+        if (is_file($destino)) {
+            return false;
+        }
+        if (!is_dir($this->carpeta) && !mkdir($this->carpeta, 0750, true) && !is_dir($this->carpeta)) {
+            throw new RuntimeException("No se pudo crear {$this->carpeta}.");
+        }
+        if (!copy($origen, $destino)) {
+            throw new RuntimeException("No se pudo copiar {$nombre} a {$this->carpeta}.");
+        }
+        chmod($destino, 0640);
+
+        return true;
+    }
+
     public function borrar(string $nombre): void
     {
         $ruta = $this->ruta($nombre);

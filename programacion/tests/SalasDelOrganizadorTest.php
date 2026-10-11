@@ -55,8 +55,11 @@ final class SalasDelOrganizadorTest extends TestCase
         ]);
         $this->base = BaseDeDatos::conectar($this->configuracion);
         // Cada aplicación abre su conexión, así que no sirve una tabla temporal: se rehace la real.
+        $this->base->ejecutar('DROP TABLE IF EXISTS obra');
         $this->base->ejecutar('DROP TABLE IF EXISTS sala');
-        $this->base->ejecutar((string) file_get_contents(dirname(__DIR__) . '/migraciones/001_tabla_sala.sql'));
+        foreach (glob(dirname(__DIR__) . '/migraciones/*.sql') ?: [] as $migracion) {
+            $this->base->ejecutar((string) file_get_contents($migracion));
+        }
 
         $this->salidaDelLog = fopen('php://memory', 'w+');
     }

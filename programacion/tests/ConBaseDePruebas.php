@@ -40,6 +40,9 @@ trait ConBaseDePruebas
     private static function baseConTablasNuevas(Configuracion $configuracion): BaseDeDatos
     {
         $base = BaseDeDatos::conectar($configuracion);
+        // Al revés de como se crean, para que ninguna quede apuntada por una clave foránea.
+        $base->ejecutar('DROP TABLE IF EXISTS obra_genero');
+        $base->ejecutar('DROP TABLE IF EXISTS genero');
         $base->ejecutar('DROP TABLE IF EXISTS obra');
         $base->ejecutar('DROP TABLE IF EXISTS sala');
         foreach (glob(dirname(__DIR__) . '/migraciones/*.sql') ?: [] as $migracion) {

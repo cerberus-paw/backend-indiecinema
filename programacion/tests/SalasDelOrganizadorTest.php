@@ -17,11 +17,13 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * El alta y la edición de punta a punta: la aplicación entera con las rutas de programación, las
- * plantillas del paquete front y un MySQL de verdad con la tabla de la migración. Sin las
+ * plantillas del paquete front y un MySQL de verdad con las tablas de las migraciones. Sin las
  * variables PRUEBAS_MYSQL_* se saltea; el README dice cómo levantar uno con Docker.
  */
 final class SalasDelOrganizadorTest extends TestCase
 {
+    use ConBaseDePruebas;
+
     private const SECRETO = 'secreto-de-nginx';
     private const CSRF = 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc';
     private const ORGANIZADORA = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -36,30 +38,15 @@ final class SalasDelOrganizadorTest extends TestCase
 
     protected function setUp(): void
     {
-        if (getenv('PRUEBAS_MYSQL_HOST') === false) {
-            self::markTestSkipped('Sin PRUEBAS_MYSQL_HOST no hay MySQL para probar.');
-        }
-
+        // Antes de saltearla: tearDown() corre igual y la usa.
         $this->carpeta = sys_get_temp_dir() . '/archivos-' . bin2hex(random_bytes(4));
         $this->configuracion = new Configuracion([
             'app' => ['subsistema' => 'programacion', 'entorno' => 'produccion'],
             'archivos' => ['carpeta' => $this->carpeta],
-            'base' => [
-                'host' => getenv('PRUEBAS_MYSQL_HOST'),
-                'puerto' => (int) (getenv('PRUEBAS_MYSQL_PUERTO') ?: 3306),
-                'esquema' => getenv('PRUEBAS_MYSQL_ESQUEMA') ?: 'pruebas',
-                'usuario' => getenv('PRUEBAS_MYSQL_USUARIO') ?: 'root',
-                'clave' => (string) getenv('PRUEBAS_MYSQL_CLAVE'),
-            ],
+            'base' => self::baseDePruebas(),
             'nginx' => ['secreto' => self::SECRETO],
         ]);
-        $this->base = BaseDeDatos::conectar($this->configuracion);
-        // Cada aplicación abre su conexión, así que no sirve una tabla temporal: se rehace la real.
-        $this->base->ejecutar('DROP TABLE IF EXISTS obra');
-        $this->base->ejecutar('DROP TABLE IF EXISTS sala');
-        foreach (glob(dirname(__DIR__) . '/migraciones/*.sql') ?: [] as $migracion) {
-            $this->base->ejecutar((string) file_get_contents($migracion));
-        }
+        $this->base = self::baseConTablasNuevas($this->configuracion);
 
         $this->salidaDelLog = fopen('php://memory', 'w+');
     }

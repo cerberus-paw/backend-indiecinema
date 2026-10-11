@@ -38,6 +38,22 @@ final class DatosDePruebaTest extends TestCase
         }
     }
 
+    /**
+     * El id es el de Omar Organizador en los datos de prueba de cuentas, que tiene su propia
+     * prueba con el mismo valor: si cambia en un lado, tiene que cambiar en el otro, o el
+     * organizador de prueba deja de ver sus salas.
+     */
+    public function testLasSalasYLasObrasSonDelOrganizadorDePruebaDeCuentas(): void
+    {
+        self::assertSame('00000000-0000-4000-8000-000000000002', DatosDePrueba::ORGANIZADOR_DEFECTO_ID);
+        foreach (DatosDePrueba::SALAS as $sala) {
+            self::assertSame(DatosDePrueba::ORGANIZADOR_DEFECTO_ID, $sala['organizador_id']);
+        }
+        foreach (DatosDePrueba::OBRAS as $obra) {
+            self::assertSame(DatosDePrueba::ORGANIZADOR_DEFECTO_ID, $obra['dueno_id']);
+        }
+    }
+
     public function testHayDoceObrasConAficheQueCumplenLasReglasDeLaObra(): void
     {
         $obras = DatosDePrueba::OBRAS;

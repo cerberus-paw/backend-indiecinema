@@ -68,7 +68,7 @@ final class Funcion
      *
      * @param list<string> $obrasElegidas
      *
-     * @throws ReglaIncumplida si no está en votación, o si las elegidas no son candidatas
+     * @throws ReglaIncumplida si no está en votación, o si las elegidas no son candidatas o se repiten
      */
     public function cerrarVotacionTitulos(array $obrasElegidas): void
     {
@@ -76,11 +76,14 @@ final class Funcion
         if ($obrasElegidas === []) {
             throw new ReglaIncumplida('Hay que elegir al menos una obra.');
         }
+        if (count(array_unique($obrasElegidas)) !== count($obrasElegidas)) {
+            throw new ReglaIncumplida('Una obra no puede estar dos veces en la misma función.');
+        }
         if (array_diff($obrasElegidas, $this->obrasIds) !== []) {
             throw new ReglaIncumplida('Sólo se pueden elegir obras que estaban en la votación.');
         }
 
-        $this->obrasIds = array_values(array_unique($obrasElegidas));
+        $this->obrasIds = array_values($obrasElegidas);
         $this->estado = EstadoFuncion::EnAcuerdoFecha;
     }
 

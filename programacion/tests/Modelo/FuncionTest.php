@@ -99,6 +99,7 @@ final class FuncionTest extends TestCase
         yield 'ninguna' => [[]];
         yield 'una que no era candidata' => [['eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee']];
         yield 'una candidata y una que no' => [[self::OBRA, 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee']];
+        yield 'una candidata repetida' => [[self::OBRA, self::OBRA]];
     }
 
     /**

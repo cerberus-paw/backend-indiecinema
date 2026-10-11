@@ -41,6 +41,8 @@ trait ConBaseDePruebas
     {
         $base = BaseDeDatos::conectar($configuracion);
         // Al revés de como se crean, para que ninguna quede apuntada por una clave foránea.
+        $base->ejecutar('DROP TABLE IF EXISTS funcion_obra');
+        $base->ejecutar('DROP TABLE IF EXISTS funcion');
         $base->ejecutar('DROP TABLE IF EXISTS obra_genero');
         $base->ejecutar('DROP TABLE IF EXISTS genero');
         $base->ejecutar('DROP TABLE IF EXISTS obra');

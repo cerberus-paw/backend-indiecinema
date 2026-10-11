@@ -247,9 +247,12 @@ docker compose exec mysql bash /herramientas/migrar.sh programacion   # uno solo
 #### Datos de prueba
 
 Un administrador, un organizador y dos espectadores, para la demo y para probar cada rol sin
-registrarse. Se cargan con la conexión de cuentas, como cualquier registro (Argon2id, un UUID, el
-usuario y sus roles juntos), y sólo con `entorno = "desarrollo"` en su `config.ini`: estas
-contraseñas son públicas. Correrlo de nuevo agrega sólo los que falten:
+registrarse. Se cargan con la conexión de cuentas, como cualquier registro (Argon2id, el usuario y
+sus roles juntos), y sólo con `entorno = "desarrollo"` en su `config.ini`: estas contraseñas son
+públicas. Correrlo de nuevo agrega sólo los que falten. A diferencia del registro, cada uno tiene un
+id fijo, porque los datos de programación ponen salas y obras a nombre del organizador; si la base
+ya tenía estos usuarios con otro id, de antes de que fuera fijo, hay que borrarlos y volver a
+cargarlos:
 
 ```
 docker compose exec cuentas php herramientas/datos-de-prueba.php

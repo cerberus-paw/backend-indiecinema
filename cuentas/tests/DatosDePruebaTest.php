@@ -60,6 +60,15 @@ final class DatosDePruebaTest extends TestCase
         ], $roles);
     }
 
+    public function testCadaUsuarioQuedaConSuIdFijo(): void
+    {
+        $this->cargar();
+
+        foreach (DatosDePrueba::USUARIOS as $datos) {
+            $this->assertSame($datos['id'], $this->usuarios->buscarPorCorreo($datos['correo'])?->id);
+        }
+    }
+
     public function testGuardaLasContrasenasConArgon2id(): void
     {
         $this->cargar();

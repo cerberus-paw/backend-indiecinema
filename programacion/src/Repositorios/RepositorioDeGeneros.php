@@ -20,7 +20,17 @@ final class RepositorioDeGeneros
     {
         $fila = $this->base->fila('SELECT id, nombre, descripcion FROM genero WHERE id = ?', [$id]);
 
-        return $fila === null ? null : new Genero((string) $fila['id'], (string) $fila['nombre'], (string) $fila['descripcion']);
+        return $fila === null ? null : self::genero($fila);
+    }
+
+    /**
+     * Todos, por nombre: son pocos, y el filtro de la cartelera los ofrece a todos.
+     *
+     * @return list<Genero>
+     */
+    public function todos(): array
+    {
+        return array_map(self::genero(...), $this->base->filas('SELECT id, nombre, descripcion FROM genero ORDER BY nombre'));
     }
 
     public function agregar(Genero $genero): void
@@ -29,5 +39,13 @@ final class RepositorioDeGeneros
             'INSERT INTO genero (id, nombre, descripcion) VALUES (?, ?, ?)',
             [$genero->id, $genero->nombre, $genero->descripcion],
         );
+    }
+
+    /**
+     * @param array<string, mixed> $fila
+     */
+    private static function genero(array $fila): Genero
+    {
+        return new Genero((string) $fila['id'], (string) $fila['nombre'], (string) $fila['descripcion']);
     }
 }

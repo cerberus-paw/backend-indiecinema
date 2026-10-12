@@ -60,17 +60,21 @@ final class RepositorioDeSalas
         ));
     }
 
+    /**
+     * Guarda la sala como está. Una del formulario llega sin habilitar (Sala::nueva()); una de los
+     * datos de prueba, ya habilitada.
+     */
     public function agregar(Sala $sala): void
     {
         $datos = $sala->datos;
         $this->base->ejecutar(
             'INSERT INTO sala (id, organizador_id, nombre, descripcion, direccion, localidad, capacidad,
-                peliculas_por_funcion, duracion_funcion, tiempo_entre_funciones, imagen)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                peliculas_por_funcion, duracion_funcion, tiempo_entre_funciones, imagen, habilitada)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             [
                 $sala->id, $sala->organizadorId, $datos->nombre, $datos->descripcion, $datos->direccion,
                 $datos->localidad, $datos->capacidad, $datos->peliculasPorFuncion, $datos->duracionFuncion,
-                $datos->tiempoEntreFunciones, $sala->imagen,
+                $datos->tiempoEntreFunciones, $sala->imagen, $sala->habilitada,
             ],
         );
     }

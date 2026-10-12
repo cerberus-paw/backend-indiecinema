@@ -5,13 +5,19 @@ declare(strict_types=1);
 namespace IndieCinema\Programacion\Servicios;
 
 use DateTimeImmutable;
+use IndieCinema\Nucleo\Configuracion;
 use IndieCinema\Programacion\Modelo\DatosDeSala;
 use IndieCinema\Programacion\Modelo\EstadoFuncion;
 use IndieCinema\Programacion\Modelo\Funcion;
+use IndieCinema\Programacion\Modelo\Genero;
 use IndieCinema\Programacion\Modelo\Obra;
 use IndieCinema\Programacion\Modelo\OrigenCopia;
 use IndieCinema\Programacion\Modelo\Sala;
 use IndieCinema\Programacion\Modelo\TipoObra;
+use IndieCinema\Programacion\Repositorios\RepositorioDeFunciones;
+use IndieCinema\Programacion\Repositorios\RepositorioDeGeneros;
+use IndieCinema\Programacion\Repositorios\RepositorioDeObras;
+use IndieCinema\Programacion\Repositorios\RepositorioDeSalas;
 use RuntimeException;
 
 /**
@@ -22,6 +28,10 @@ use RuntimeException;
  *
  * Sin datos personales reales: salas con nombres culturales y direcciones ficticias,
  * organizadores del dominio reservado .test, y autores históricos del cine.
+ *
+ * cargar() los guarda con los repositorios, como cualquier alta: los géneros, las salas, las
+ * obras con sus géneros y las funciones con sus obras, en ese orden por las claves foráneas.
+ * Después copia las fotos de las salas y los afiches al volumen de archivos.
  */
 final class DatosDePrueba
 {
@@ -544,6 +554,126 @@ final class DatosDePrueba
         ],
     ];
 
+    private function __construct(
+        private readonly RepositorioDeGeneros $generos,
+        private readonly RepositorioDeSalas $salas,
+        private readonly RepositorioDeObras $obras,
+        private readonly RepositorioDeFunciones $funciones,
+        private readonly ArchivosDeSalas $fotosDeSalas,
+        private readonly string $carpetaDeAfiches,
+    ) {
+    }
+
+    /**
+     * Sólo en desarrollo, como los usuarios de prueba de cuentas.
+     *
+     * Las fotos de las salas van adonde las guarda el formulario (ArchivosDeSalas). Los afiches,
+     * a la carpeta afiches del mismo volumen: todavía nada los muestra, pero así quedan donde los
+     * va a buscar la página de la obra.
+     *
+     * @throws RuntimeException fuera de desarrollo
+     */
+    public static function para(
+        Configuracion $configuracion,
+        RepositorioDeGeneros $generos,
+        RepositorioDeSalas $salas,
+        RepositorioDeObras $obras,
+        RepositorioDeFunciones $funciones,
+    ): self {
+        if (!$configuracion->enDesarrollo()) {
+            throw new RuntimeException('Los datos de prueba se cargan sólo con entorno = "desarrollo".');
+        }
+        $carpeta = rtrim((string) $configuracion->obtener('archivos.carpeta', '/var/indiecinema/archivos'), '/');
+
+        return new self($generos, $salas, $obras, $funciones, new ArchivosDeSalas($configuracion), "{$carpeta}/afiches");
+    }
+
+    /**
+     * Agrega lo que falte, buscando cada cosa por su id y cada imagen por su nombre. Correrlo de
+     * nuevo no duplica nada ni toca lo que ya está: si alguien cambió algo a mano para probar,
+     * queda como lo dejó, y una función que ya estaba conserva la fecha con la que se cargó.
+     *
+     * No va todo en una transacción, porque cada repositorio abre la suya: si se corta a mitad de
+     * camino, correrlo de nuevo completa lo que faltó.
+     *
+     * @param DateTimeImmutable $hoy desde cuándo se cuentan las fechas de las funciones nuevas
+     *
+     * @return array<string, array{agregadas: int, yaEstaban: int}> por cada tipo de dato
+     */
+    public function cargar(DateTimeImmutable $hoy = new DateTimeImmutable('today')): array
+    {
+        return [
+            'generos' => self::agregarLasQueFalten(self::generos(), $this->generos->buscar(...), $this->generos->agregar(...)),
+            'salas' => self::agregarLasQueFalten(self::salas(), $this->salas->buscar(...), $this->salas->agregar(...)),
+            'obras' => self::agregarLasQueFalten(self::obras(), $this->obras->buscar(...), $this->obras->agregar(...)),
+            'funciones' => self::agregarLasQueFalten(self::funciones($hoy), $this->funciones->buscar(...), $this->funciones->agregar(...)),
+            'fotos' => self::contarCopias(array_map(
+                fn (array $sala): bool => $this->fotosDeSalas->copiar(self::rutaSala($sala['imagen']), $sala['imagen']),
+                self::SALAS,
+            )),
+            'afiches' => self::contarCopias(array_map(
+                fn (array $obra): bool => $this->copiarAfiche($obra['afiche']),
+                self::OBRAS,
+            )),
+        ];
+    }
+
+    /**
+     * Como ArchivosDeSalas::copiar(): si ya está, lo deja como está.
+     *
+     * @return bool si lo copió
+     */
+    private function copiarAfiche(string $nombre): bool
+    {
+        $destino = "{$this->carpetaDeAfiches}/{$nombre}";
+        if (is_file($destino)) {
+            return false;
+        }
+        if (!is_dir($this->carpetaDeAfiches) && !mkdir($this->carpetaDeAfiches, 0750, true) && !is_dir($this->carpetaDeAfiches)) {
+            throw new RuntimeException("No se pudo crear {$this->carpetaDeAfiches}.");
+        }
+        if (!copy(self::rutaAfiche($nombre), $destino)) {
+            throw new RuntimeException("No se pudo copiar {$nombre} a {$this->carpetaDeAfiches}.");
+        }
+        chmod($destino, 0640);
+
+        return true;
+    }
+
+    /**
+     * @param list<bool> $copiadas
+     *
+     * @return array{agregadas: int, yaEstaban: int}
+     */
+    private static function contarCopias(array $copiadas): array
+    {
+        $agregadas = count(array_filter($copiadas));
+
+        return ['agregadas' => $agregadas, 'yaEstaban' => count($copiadas) - $agregadas];
+    }
+
+    /**
+     * @template T of object
+     *
+     * @param list<T>              $todas
+     * @param callable(string): ?T $buscar
+     * @param callable(T): void    $agregar
+     *
+     * @return array{agregadas: int, yaEstaban: int}
+     */
+    private static function agregarLasQueFalten(array $todas, callable $buscar, callable $agregar): array
+    {
+        $agregadas = 0;
+        foreach ($todas as $una) {
+            if ($buscar($una->id) === null) {
+                $agregar($una);
+                $agregadas++;
+            }
+        }
+
+        return ['agregadas' => $agregadas, 'yaEstaban' => count($todas) - $agregadas];
+    }
+
     /**
      * Carpeta raíz de los archivos de prueba en el subsistema.
      */
@@ -570,6 +700,16 @@ final class DatosDePrueba
     public static function rutaSala(string $nombre): string
     {
         return self::carpetaSalas() . '/' . $nombre;
+    }
+
+    /**
+     * Devuelve los 8 géneros como objetos de dominio.
+     *
+     * @return list<Genero>
+     */
+    public static function generos(): array
+    {
+        return array_map(static fn (array $g): Genero => new Genero($g['id'], $g['nombre'], $g['descripcion']), self::GENEROS);
     }
 
     /**

@@ -55,4 +55,10 @@ final class TarjetaDeFuncionTest extends TestCase
     {
         self::assertSame($texto, TarjetaDeFuncion::precio($precio));
     }
+
+    public function testFormateaFechaHora(): void
+    {
+        self::assertSame('Sáb 24 oct · 20:30', TarjetaDeFuncion::fecha(new DateTimeImmutable('2026-10-24 20:30:00')));
+        self::assertSame('Dom 1 nov · 18:00', TarjetaDeFuncion::fecha(new DateTimeImmutable('2026-11-01 18:00:00')));
+    }
 }

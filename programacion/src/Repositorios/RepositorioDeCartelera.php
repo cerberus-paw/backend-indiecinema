@@ -112,7 +112,7 @@ final class RepositorioDeCartelera
                 WHERE fo.funcion_id = f.id AND fo.estado = 'elegida'
                     AND (o.titulo LIKE ? ESCAPE '!' OR o.director LIKE ? ESCAPE '!')
             ))";
-            $patron = '%' . self::literalParaLike($filtros->texto) . '%';
+            $patron = Like::contiene($filtros->texto);
             array_push($parametros, $patron, $patron, $patron);
         }
         if ($filtros->localidad !== null) {
@@ -137,16 +137,6 @@ final class RepositorioDeCartelera
         }
 
         return [implode(' AND ', $condiciones), $parametros];
-    }
-
-    /**
-     * El texto para buscarlo tal cual dentro de un LIKE: sin esto, un «%» o un «_» del visitante
-     * serían comodines. El escape es «!» y no la barra, que cambia de significado con el modo
-     * NO_BACKSLASH_ESCAPES de MySQL.
-     */
-    private static function literalParaLike(string $texto): string
-    {
-        return str_replace(['!', '%', '_'], ['!!', '!%', '!_'], $texto);
     }
 
     /**

@@ -34,11 +34,13 @@ final class ServicioDeSalas
     /**
      * Las que puede ver cualquiera, con o sin sesión.
      *
+     * @param ?string $texto si viene, sólo las que lo tienen en el nombre o la localidad
+     *
      * @return list<Sala>
      */
-    public function publicadas(): array
+    public function publicadas(?string $texto = null): array
     {
-        return $this->salas->publicadas();
+        return $this->salas->publicadas($texto);
     }
 
     /**

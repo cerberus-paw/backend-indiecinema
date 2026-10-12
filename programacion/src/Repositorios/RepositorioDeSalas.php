@@ -49,14 +49,27 @@ final class RepositorioDeSalas
     /**
      * Las que se ven en el sitio: habilitadas y no dadas de baja, por nombre.
      *
+     * @param ?string $texto si viene, sólo las que lo tienen en el nombre o la localidad. Como en
+     *                       la cartelera, sin distinguir mayúsculas ni tildes, y lo que escribe el
+     *                       visitante va como parámetro, con los comodines de LIKE escapados.
+     *
      * @return list<Sala>
      */
-    public function publicadas(): array
+    public function publicadas(?string $texto = null): array
     {
+        $texto = trim((string) $texto);
+        $busqueda = '';
+        $parametros = [];
+        if ($texto !== '') {
+            $busqueda = "AND (nombre LIKE ? ESCAPE '!' OR localidad LIKE ? ESCAPE '!')";
+            $parametros = [Like::contiene($texto), Like::contiene($texto)];
+        }
+
         return array_map(self::sala(...), $this->base->filas(
-            'SELECT ' . self::COLUMNAS . ' FROM sala
-             WHERE habilitada = TRUE AND dada_de_baja_en IS NULL
-             ORDER BY nombre',
+            'SELECT ' . self::COLUMNAS . " FROM sala
+             WHERE habilitada = TRUE AND dada_de_baja_en IS NULL {$busqueda}
+             ORDER BY nombre",
+            $parametros,
         ));
     }
 

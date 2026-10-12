@@ -413,8 +413,8 @@ saltean. En programación son las de punta a punta (rutas, roles, token CSRF, pl
 las tablas de las migraciones, con las restricciones de sala, obra y sus géneros, y función y sus
 obras, los repositorios de obras, de funciones y de géneros, y la cartelera con cada filtro, el
 paginado e intentos de inyección SQL, y `/cartelera` con los filtros por la URL, los parámetros
-inválidos y el 404, y `/cartelera.csv` con los mismos filtros, y la ficha de la sala, con quién la
-ve y sus próximas funciones); en cuentas, el registro de punta a punta y las restricciones de las
+inválidos y el 404, y `/cartelera.csv` con los mismos filtros, la ficha de la sala, con quién la
+ve y sus próximas funciones, y el buscador del listado de salas); en cuentas, el registro de punta a punta y las restricciones de las
 tablas usuario y rol (correo único, roles sin repetir y sólo de un usuario que existe). Para correrlas, uno descartable:
 
 ```

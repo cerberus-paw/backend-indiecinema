@@ -67,6 +67,9 @@ final class DatosDePruebaTest extends TestCase
         foreach (DatosDePrueba::USUARIOS as $datos) {
             $this->assertSame($datos['id'], $this->usuarios->buscarPorCorreo($datos['correo'])?->id);
         }
+        // Los datos de prueba de programación ponen sus salas y obras a nombre de este id, y lo
+        // controlan en su propia prueba: si cambia acá, tiene que cambiar allá.
+        $this->assertSame('00000000-0000-4000-8000-000000000002', $this->usuarios->buscarPorCorreo('organizador@indiecinema.test')?->id);
     }
 
     public function testGuardaLasContrasenasConArgon2id(): void

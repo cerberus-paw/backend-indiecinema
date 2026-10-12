@@ -19,7 +19,8 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * Las salas de los datos de demostración, de punta a punta: después de la carga, el organizador
- * de prueba las ve en «Mis salas» y el listado público deja de estar vacío, con su foto. Es la
+ * de prueba las ve en «Mis salas», el listado público deja de estar vacío, con su foto, y la ficha
+ * de cada sala muestra sus próximas funciones. Es la
  * aplicación entera con las rutas de programación, las plantillas del paquete front y un MySQL de
  * verdad; sin las variables PRUEBAS_MYSQL_* se saltea.
  */
@@ -129,6 +130,99 @@ final class SalasDeLosDatosDePruebaTest extends TestCase
 
         self::assertSame(200, $respuesta->estado());
         self::assertStringContainsString('value="' . htmlspecialchars($sala['nombre']) . '"', $respuesta->cuerpo());
+    }
+
+    /**
+     * @return list<string> los ids de las funciones de los datos de prueba en esa sala
+     */
+    private static function funcionesDe(string $salaId): array
+    {
+        return array_values(array_map(
+            static fn (array $funcion): string => $funcion['id'],
+            array_filter(DatosDePrueba::FUNCIONES, static fn (array $funcion): bool => $funcion['sala_id'] === $salaId),
+        ));
+    }
+
+    public function testLaFichaDeUnaSalaMuestraSusDatosYSusProximasFunciones(): void
+    {
+        $this->cargarLosDatos();
+        $sala = DatosDePrueba::SALAS[0];
+
+        $respuesta = $this->pedir("/salas/{$sala['id']}");
+
+        self::assertSame(200, $respuesta->estado(), $respuesta->cuerpo());
+        $cuerpo = $respuesta->cuerpo();
+        self::assertStringContainsString('<h1 class="ficha-sala-nombre">' . htmlspecialchars($sala['nombre']) . '</h1>', $cuerpo);
+        self::assertStringContainsString(htmlspecialchars("{$sala['direccion']} · {$sala['localidad']}"), $cuerpo);
+        self::assertStringContainsString("{$sala['capacidad']} butacas", $cuerpo);
+        self::assertStringContainsString(htmlspecialchars($sala['descripcion']), $cuerpo);
+        self::assertStringContainsString("src=\"/salas/{$sala['id']}/imagen\"", $cuerpo);
+        self::assertStringNotContainsString('Todavía no está publicada', $cuerpo);
+        // Una tarjeta por cada función de la sala, y cada una enlaza a su ficha.
+        $funciones = self::funcionesDe($sala['id']);
+        self::assertNotEmpty($funciones);
+        self::assertSame(count($funciones), substr_count($cuerpo, '<article class="tarjeta-funcion'));
+        foreach ($funciones as $funcion) {
+            self::assertStringContainsString("href=\"/cartelera/{$funcion}\"", $cuerpo);
+        }
+        // Los encabezados no saltan niveles: h1 la sala, h2 las funciones, h3 cada una.
+        preg_match_all('#<h([1-6])[ >]#', $cuerpo, $niveles);
+        $anterior = 0;
+        foreach (array_map('intval', $niveles[1]) as $nivel) {
+            self::assertLessThanOrEqual($anterior + 1, $nivel, 'Un encabezado salta un nivel.');
+            $anterior = $nivel;
+        }
+    }
+
+    public function testDesdeUnaFuncionSeLlegaASuSalaYDesdeLaSalaASusFunciones(): void
+    {
+        $this->cargarLosDatos();
+        $sala = DatosDePrueba::SALAS[1];
+        $funcion = self::funcionesDe($sala['id'])[0];
+
+        self::assertStringContainsString("href=\"/salas/{$sala['id']}\"", $this->pedir("/cartelera/{$funcion}")->cuerpo());
+        self::assertStringContainsString("href=\"/cartelera/{$funcion}\"", $this->pedir("/salas/{$sala['id']}")->cuerpo());
+    }
+
+    public function testElListadoEnlazaALaFichaDeCadaSala(): void
+    {
+        $this->cargarLosDatos();
+
+        $cuerpo = $this->pedir('/salas')->cuerpo();
+
+        foreach (DatosDePrueba::SALAS as $sala) {
+            self::assertStringContainsString("href=\"/salas/{$sala['id']}\"", $cuerpo);
+        }
+        self::assertSame(count(DatosDePrueba::SALAS), substr_count($cuerpo, 'Ver sala'));
+    }
+
+    public function testUnaSalaSinFuncionesProgramadasLoDice(): void
+    {
+        $this->cargarLosDatos();
+        $sala = DatosDePrueba::SALAS[3];
+        $this->base->ejecutar("UPDATE funcion SET estado = 'cancelada' WHERE sala_id = ?", [$sala['id']]);
+
+        $respuesta = $this->pedir("/salas/{$sala['id']}");
+
+        self::assertSame(200, $respuesta->estado());
+        self::assertStringContainsString('Esta sala no tiene funciones programadas por ahora.', $respuesta->cuerpo());
+        self::assertStringNotContainsString('<article class="tarjeta-funcion', $respuesta->cuerpo());
+    }
+
+    public function testSuOrganizadorVeLaFichaSinPublicarConElAviso(): void
+    {
+        $this->cargarLosDatos();
+        $sala = DatosDePrueba::SALAS[0];
+        $this->base->ejecutar('UPDATE sala SET habilitada = FALSE WHERE id = ?', [$sala['id']]);
+
+        $propia = $this->pedir("/salas/{$sala['id']}", DatosDePrueba::ORGANIZADOR_DEFECTO_ID);
+
+        self::assertSame(200, $propia->estado());
+        self::assertStringContainsString('Todavía no está publicada', $propia->cuerpo());
+        // Sus funciones no están en la cartelera hasta que se habilite.
+        self::assertStringContainsString('Esta sala no tiene funciones programadas por ahora.', $propia->cuerpo());
+        self::assertSame(404, $this->pedir("/salas/{$sala['id']}")->estado());
+        self::assertSame(404, $this->pedir("/salas/{$sala['id']}", self::OTRO_ORGANIZADOR)->estado());
     }
 
     public function testOtroOrganizadorNoLasVeComoPropias(): void

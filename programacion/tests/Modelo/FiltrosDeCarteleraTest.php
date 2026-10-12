@@ -15,7 +15,7 @@ final class FiltrosDeCarteleraTest extends TestCase
 {
     public function testLosFiltrosEnBlancoNoFiltran(): void
     {
-        self::assertEquals(new FiltrosDeCartelera(), new FiltrosDeCartelera('  ', '', null, "\t"));
+        self::assertEquals(new FiltrosDeCartelera(), new FiltrosDeCartelera('  ', '', null, "\t", ' '));
         self::assertNull(new FiltrosDeCartelera(texto: ' ')->texto);
     }
 

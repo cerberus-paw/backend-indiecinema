@@ -58,6 +58,9 @@ final class RepositorioDeCarteleraTest extends TestCase
     /** @var array<string, string> el id de cada función que entra en la cartelera, por su nombre en las pruebas */
     private array $enCartelera = [];
 
+    /** @var array<string, string> el id de cada sala, por nombre */
+    private array $salaIds = [];
+
     protected function setUp(): void
     {
         $this->base = self::baseConTablasNuevas(new Configuracion(['base' => self::baseDePruebas()]));
@@ -120,6 +123,8 @@ final class RepositorioDeCarteleraTest extends TestCase
         $sala = Sala::nueva(self::ORGANIZADORA, new DatosDeSala($nombre, 'Una sala.', 'Av. San Martín 450', $localidad, 60, 2, 120, 15), 'sala.jpg');
         $this->salas->agregar($sala);
         $this->base->ejecutar('UPDATE sala SET habilitada = TRUE WHERE id = ?', [$sala->id]);
+
+        $this->salaIds[$nombre] = $sala->id;
 
         return $this->salas->buscar($sala->id) ?? self::fail('No se guardó la sala.');
     }
@@ -280,6 +285,17 @@ final class RepositorioDeCarteleraTest extends TestCase
         self::assertSame([], $this->nombres($this->pagina(new FiltrosDeCartelera(generoId: $terror))));
     }
 
+    public function testFiltraPorSala(): void
+    {
+        self::assertSame(['cienaga', 'zama'], $this->nombres($this->todas(new FiltrosDeCartelera(salaId: $this->salaIds['Cine Club El Galpón']))));
+        self::assertSame(['carroza', 'cien'], $this->nombres($this->todas(new FiltrosDeCartelera(salaId: $this->salaIds['Cine Teatro Italiano']))));
+        // Las que no están en la cartelera tampoco están en la ficha de la sala.
+        self::assertSame([], $this->todas(new FiltrosDeCartelera(salaId: $this->salaIds['Sala Deshabilitada'])));
+        self::assertSame([], $this->todas(new FiltrosDeCartelera(salaId: $this->salaIds['Sala de Baja'])));
+        self::assertSame([], $this->todas(new FiltrosDeCartelera(salaId: Uuid::nuevo())));
+        self::assertSame(['zama'], $this->nombres($this->todas(new FiltrosDeCartelera(fecha: new DateTimeImmutable('2026-10-13'), salaId: $this->salaIds['Cine Club El Galpón']))));
+    }
+
     public function testLosFiltrosSeCumplenTodosALaVez(): void
     {
         $comedia = $this->generos['Comedia'];
@@ -387,6 +403,7 @@ final class RepositorioDeCarteleraTest extends TestCase
         yield 'localidad con otra sentencia' => [new FiltrosDeCartelera(localidad: "Mercedes'; DELETE FROM sala; #")];
         yield 'género que cierra la comilla' => [new FiltrosDeCartelera(generoId: "x' OR 1=1 -- ")];
         yield 'género con una subconsulta' => [new FiltrosDeCartelera(generoId: "' OR genero_id IN (SELECT id FROM genero) -- ")];
+        yield 'sala que cierra la comilla' => [new FiltrosDeCartelera(salaId: "x' OR '1'='1")];
     }
 
     #[DataProvider('inyecciones')]

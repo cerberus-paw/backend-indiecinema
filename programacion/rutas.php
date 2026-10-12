@@ -31,6 +31,8 @@ return static function (Router $router): void {
     $router->post('/organizador/salas/{id}/editar', [SalasDelOrganizador::class, 'actualizar'], Rol::Organizador);
     // El listado público: sólo las habilitadas, sin sesión.
     $router->get('/salas', [Salas::class, 'listar']);
+    // La ficha de una, con sus próximas funciones. Una sin habilitar sólo la ve su organizador.
+    $router->get('/salas/{id}', [Salas::class, 'mostrar']);
     // Pública si la sala está habilitada; si no, sólo para su organizador (lo decide el servicio).
     $router->get('/salas/{id}/imagen', [ImagenDeSala::class, 'mostrar']);
 

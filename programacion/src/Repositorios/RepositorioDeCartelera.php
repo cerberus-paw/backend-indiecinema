@@ -131,6 +131,10 @@ final class RepositorioDeCartelera
             )";
             $parametros[] = $filtros->generoId;
         }
+        if ($filtros->salaId !== null) {
+            $condiciones[] = 'f.sala_id = ?';
+            $parametros[] = $filtros->salaId;
+        }
 
         return [implode(' AND ', $condiciones), $parametros];
     }

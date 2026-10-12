@@ -272,13 +272,23 @@ a ninguna casilla.
 Después, los de programación: los géneros, cuatro salas habilitadas de distintas localidades, doce
 obras de dominio público con afiche y quince funciones programadas, todas a nombre del organizador
 de prueba, con las fotos de las salas y los afiches copiados al volumen de archivos. Pasan por los
-mismos repositorios que la web, también sólo en desarrollo, y correrlo de nuevo agrega sólo lo que
-falte. Las fechas de las funciones se cuentan desde el día en que se cargan; una función que ya
-estaba conserva la suya:
+mismos repositorios que la web, y correrlo de nuevo agrega sólo lo que falte. Las fechas de las
+funciones se cuentan desde el día en que se cargan; una función que ya estaba conserva la suya:
 
 ```
 docker compose exec programacion php herramientas/datos-de-prueba.php
 ```
+
+En producción (cualquier `entorno` que no sea `"desarrollo"`) no hace nada sin la confirmación
+explícita, para que los datos inventados no lleguen al sitio real por un comando copiado de acá.
+Para cargarlos en el servidor, a propósito:
+
+```
+docker compose exec programacion php herramientas/datos-de-prueba.php --confirmar-produccion
+```
+
+Ahí no están los usuarios de prueba de cuentas (sus contraseñas son públicas y no se cargan en
+producción), así que las salas se ven en el listado público pero nadie las tiene en «Mis salas».
 
 Para comprobar que ningún subsistema sale de su esquema: entra con el usuario de cada uno e
 intenta leer los esquemas de los otros, crear y borrar tablas y leer el control de migraciones.

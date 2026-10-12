@@ -20,7 +20,7 @@ use RuntimeException;
 /**
  * La carga de los datos de demostración contra un MySQL de verdad y una carpeta temporal en lugar
  * del volumen: que deje el sitio con salas habilitadas, obras con afiche y funciones futuras, que
- * correrla de nuevo no duplique nada y que nunca corra fuera de desarrollo.
+ * correrla de nuevo no duplique nada y que en producción no corra sin la confirmación explícita.
  */
 final class CargaDeDatosDePruebaTest extends TestCase
 {
@@ -53,7 +53,7 @@ final class CargaDeDatosDePruebaTest extends TestCase
         @rmdir($this->carpeta);
     }
 
-    private function datos(?Configuracion $configuracion = null): DatosDePrueba
+    private function datos(?Configuracion $configuracion = null, bool $confirmadoEnProduccion = false): DatosDePrueba
     {
         return DatosDePrueba::para(
             $configuracion ?? $this->configuracion,
@@ -61,7 +61,17 @@ final class CargaDeDatosDePruebaTest extends TestCase
             new RepositorioDeSalas($this->base),
             new RepositorioDeObras($this->base),
             new RepositorioDeFunciones($this->base),
+            $confirmadoEnProduccion,
         );
+    }
+
+    private function produccion(): Configuracion
+    {
+        return new Configuracion([
+            'app' => ['entorno' => 'produccion'],
+            'archivos' => ['carpeta' => $this->carpeta],
+            'base' => self::baseDePruebas(),
+        ]);
     }
 
     /**
@@ -200,17 +210,29 @@ final class CargaDeDatosDePruebaTest extends TestCase
         self::assertStringEqualsFile("{$this->carpeta}/afiches/{$afiche}", 'cambiada a mano');
     }
 
-    public function testNoSeCarganFueraDeDesarrollo(): void
+    public function testEnProduccionNoCorreSinLaConfirmacion(): void
     {
-        $produccion = new Configuracion(['app' => ['entorno' => 'produccion'], 'base' => self::baseDePruebas()]);
-
         try {
-            $this->datos($produccion);
-            self::fail('Se cargaron datos de prueba en producción.');
+            $this->datos($this->produccion())->cargar();
+            self::fail('Se cargaron datos de prueba en producción sin la confirmación.');
         } catch (RuntimeException $error) {
-            self::assertStringContainsString('desarrollo', $error->getMessage());
+            // Dice cómo confirmar, para que no haya que ir a buscarlo.
+            self::assertStringContainsString('--confirmar-produccion', $error->getMessage());
         }
         self::assertSame(array_fill_keys(self::TABLAS, 0), $this->filas());
         self::assertDirectoryDoesNotExist($this->carpeta);
+    }
+
+    public function testEnProduccionCorreConLaConfirmacion(): void
+    {
+        $resultado = $this->datos($this->produccion(), confirmadoEnProduccion: true)->cargar();
+
+        self::assertSame([8, 4, 12, 15, 4, 12], array_column($resultado, 'agregadas'));
+        self::assertSame(4, $this->base->valor('SELECT COUNT(*) FROM sala WHERE habilitada = TRUE'));
+    }
+
+    public function testEnDesarrolloNoHaceFaltaLaConfirmacion(): void
+    {
+        self::assertSame(15, $this->datos(confirmadoEnProduccion: false)->cargar()['funciones']['agregadas']);
     }
 }

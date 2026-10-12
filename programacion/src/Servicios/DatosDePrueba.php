@@ -565,13 +565,17 @@ final class DatosDePrueba
     }
 
     /**
-     * Sólo en desarrollo, como los usuarios de prueba de cuentas.
+     * En desarrollo, siempre. En producción, sólo con la confirmación explícita de quien lo corre
+     * ($confirmadoEnProduccion, que el script toma de --confirmar-produccion): sirven para mostrar
+     * el sistema en el servidor, pero no tienen que llegar al sitio real por un comando copiado
+     * del README. A diferencia de los usuarios de prueba de cuentas, no tienen contraseñas, así
+     * que cargarlos ahí no abre ninguna cuenta.
      *
      * Las fotos de las salas van adonde las guarda el formulario (ArchivosDeSalas). Los afiches,
      * a la carpeta afiches del mismo volumen: todavía nada los muestra, pero así quedan donde los
      * va a buscar la página de la obra.
      *
-     * @throws RuntimeException fuera de desarrollo
+     * @throws RuntimeException en producción, sin la confirmación
      */
     public static function para(
         Configuracion $configuracion,
@@ -579,9 +583,13 @@ final class DatosDePrueba
         RepositorioDeSalas $salas,
         RepositorioDeObras $obras,
         RepositorioDeFunciones $funciones,
+        bool $confirmadoEnProduccion = false,
     ): self {
-        if (!$configuracion->enDesarrollo()) {
-            throw new RuntimeException('Los datos de prueba se cargan sólo con entorno = "desarrollo".');
+        if (!$configuracion->enDesarrollo() && !$confirmadoEnProduccion) {
+            throw new RuntimeException(
+                'Esto es producción: los datos de prueba se cargan acá sólo con la confirmación explícita, '
+                . 'agregando --confirmar-produccion al comando.',
+            );
         }
         $carpeta = rtrim((string) $configuracion->obtener('archivos.carpeta', '/var/indiecinema/archivos'), '/');
 

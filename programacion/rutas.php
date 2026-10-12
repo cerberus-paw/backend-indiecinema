@@ -5,6 +5,7 @@ declare(strict_types=1);
 use IndieCinema\Nucleo\Http\EstadoInterno;
 use IndieCinema\Nucleo\Ruteo\Router;
 use IndieCinema\Nucleo\Seguridad\Rol;
+use IndieCinema\Programacion\Controladores\AcercaDe;
 use IndieCinema\Programacion\Controladores\Cartelera;
 use IndieCinema\Programacion\Controladores\ImagenDeSala;
 use IndieCinema\Programacion\Controladores\Inicio;
@@ -17,6 +18,8 @@ use IndieCinema\Programacion\Controladores\SalasDelOrganizador;
  */
 return static function (Router $router): void {
     $router->get('/', [Inicio::class, 'mostrar']);
+    // Quiénes somos y cómo funciona: el encabezado y el pie enlazan a sus secciones.
+    $router->get('/acerca-de', [AcercaDe::class, 'mostrar']);
     // La cartelera pública, sin sesión. Los filtros y la página van en la URL.
     $router->get('/cartelera', [Cartelera::class, 'listar']);
     // La misma, con los mismos filtros, para abrir en una planilla.

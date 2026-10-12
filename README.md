@@ -365,7 +365,8 @@ Las que tocan la base corren contra un MySQL de verdad: sin la variable `PRUEBAS
 saltean. En programación son las de punta a punta (rutas, roles, token CSRF, plantillas del front y
 las tablas de las migraciones, con las restricciones de sala, obra y sus géneros, y función y sus
 obras, los repositorios de obras, de funciones y de géneros, y la cartelera con cada filtro, el
-paginado e intentos de inyección SQL); en cuentas, el registro de punta a punta y las
+paginado e intentos de inyección SQL, y `/cartelera` con los filtros por la URL, los parámetros
+inválidos y el 404); en cuentas, el registro de punta a punta y las
 restricciones de las tablas usuario y rol (correo único, roles sin repetir y sólo de un usuario que
 existe). Para correrlas, uno descartable:
 

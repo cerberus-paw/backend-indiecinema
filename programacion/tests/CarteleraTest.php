@@ -331,6 +331,113 @@ final class CarteleraTest extends TestCase
         }
     }
 
+    /**
+     * Las filas del CSV, sin los encabezados, como las leería una planilla.
+     *
+     * @return list<list<string|null>>
+     */
+    private static function filasDelCsv(Respuesta $respuesta): array
+    {
+        self::assertSame(200, $respuesta->estado(), $respuesta->cuerpo());
+        self::assertStringStartsWith("\u{FEFF}Fecha;Hora;Obras;Sala;Localidad;Precio\r\n", $respuesta->cuerpo());
+        $archivo = fopen('php://memory', 'w+');
+        fwrite($archivo, $respuesta->cuerpo());
+        rewind($archivo);
+        fgetcsv($archivo, null, ';', '"', '');
+        $filas = [];
+        while (($fila = fgetcsv($archivo, null, ';', '"', '')) !== false) {
+            $filas[] = $fila;
+        }
+        fclose($archivo);
+
+        return $filas;
+    }
+
+    public function testElCsvTraeTodasLasFuncionesSinPaginar(): void
+    {
+        $this->cargarDatosDePrueba();
+
+        $respuesta = $this->pedir('/cartelera.csv', ['por_pagina' => 4]);
+
+        self::assertSame('text/csv; charset=utf-8', $respuesta->cabecera('Content-Type'));
+        self::assertSame('attachment; filename="cartelera.csv"', $respuesta->cabecera('Content-Disposition'));
+        $filas = self::filasDelCsv($respuesta);
+        self::assertCount(15, $filas);
+        // Como en la página, la primera es la más próxima: Metrópolis, en una semana, a las 20.
+        self::assertSame([(new DateTimeImmutable('today +7 days'))->format('Y-m-d'), '20:00', 'Metrópolis', 'Cine Club El Alambique', 'Luján'], array_slice($filas[0], 0, 5));
+        self::assertContains('A la gorra', array_column($filas, 5));
+        self::assertContains('2500', array_column($filas, 5));
+    }
+
+    #[DataProvider('filtros')]
+    public function testElCsvRespetaLosFiltrosDeLaUrl(string $consulta, int $funciones, string $resultados): void
+    {
+        $this->cargarDatosDePrueba();
+        $consulta = strtr($consulta, [
+            '{dentro de 7 días}' => (new DateTimeImmutable('today +7 days'))->format('Y-m-d'),
+            '{dentro de 28 días}' => (new DateTimeImmutable('today +28 days'))->format('Y-m-d'),
+            '{Comedia}' => $this->generoId('Comedia'),
+        ]);
+
+        // Con páginas de una, para ver que el archivo no se corta en la primera.
+        self::assertCount($funciones, self::filasDelCsv($this->pedir("/cartelera.csv?{$consulta}", ['por_pagina' => 1])));
+    }
+
+    public function testElCsvTraeLasMismasFuncionesQueLaPaginaFiltrada(): void
+    {
+        $this->cargarDatosDePrueba();
+
+        $filas = self::filasDelCsv($this->pedir('/cartelera.csv?localidad=San+Antonio+de+Areco'));
+        $pagina = $this->pedir('/cartelera?localidad=San+Antonio+de+Areco')->cuerpo();
+
+        self::assertCount(3, $filas);
+        foreach ($filas as $fila) {
+            self::assertSame('San Antonio de Areco', $fila[4]);
+            self::assertStringContainsString(htmlspecialchars((string) $fila[2]), $pagina);
+        }
+    }
+
+    public function testElCsvIgnoraLaPagina(): void
+    {
+        $this->cargarDatosDePrueba();
+
+        self::assertCount(15, self::filasDelCsv($this->pedir('/cartelera.csv?pagina=999')));
+    }
+
+    #[DataProvider('parametrosInvalidos')]
+    public function testElCsvDejaAfueraUnFiltroInvalido(string $consulta): void
+    {
+        $this->cargarDatosDePrueba();
+
+        self::assertCount(15, self::filasDelCsv($this->pedir("/cartelera.csv?{$consulta}")));
+    }
+
+    public function testElCsvSinResultadosTraeSoloLosEncabezados(): void
+    {
+        $this->cargarDatosDePrueba();
+
+        self::assertSame([], self::filasDelCsv($this->pedir('/cartelera.csv?q=Nueve+reinas')));
+        self::assertSame([], self::filasDelCsv($this->pedir('/cartelera.csv?q=%27+OR+%271%27%3D%271')));
+    }
+
+    public function testLaPaginaTieneElLinkAlCsvConLosFiltros(): void
+    {
+        $this->cargarDatosDePrueba();
+
+        $cuerpo = $this->pedir('/cartelera?localidad=Mercedes&pagina=2&fecha=ayer', ['por_pagina' => 1])->cuerpo();
+
+        // Sin la página ni el filtro inválido.
+        self::assertStringContainsString('<a href="/cartelera.csv?localidad=Mercedes" class="boton boton-secundario boton-chico" download>Descargar CSV</a>', $cuerpo);
+        self::assertStringContainsString('href="/cartelera.csv"', $this->pedir('/cartelera')->cuerpo());
+    }
+
+    public function testSinResultadosNoHayLinkAlCsv(): void
+    {
+        $this->cargarDatosDePrueba();
+
+        self::assertStringNotContainsString('/cartelera.csv', $this->pedir('/cartelera?q=Nueve+reinas')->cuerpo());
+    }
+
     public function testSeVeSinSesion(): void
     {
         $this->cargarDatosDePrueba();

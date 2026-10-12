@@ -71,9 +71,25 @@ final class ParametrosDeCartelera
      */
     public function urlDePagina(int $numero): string
     {
-        $consulta = http_build_query($this->valores + ($numero > 1 ? ['pagina' => $numero] : []), '', '&', PHP_QUERY_RFC3986);
+        return self::url('/cartelera', $this->valores + ($numero > 1 ? ['pagina' => $numero] : []));
+    }
 
-        return '/cartelera' . ($consulta === '' ? '' : "?{$consulta}");
+    /**
+     * La URL del CSV con los mismos filtros. No lleva la página: el archivo las trae todas.
+     */
+    public function urlDeCsv(): string
+    {
+        return self::url('/cartelera.csv', $this->valores);
+    }
+
+    /**
+     * @param array<string, int|string> $consulta
+     */
+    private static function url(string $ruta, array $consulta): string
+    {
+        $consulta = http_build_query($consulta, '', '&', PHP_QUERY_RFC3986);
+
+        return $ruta . ($consulta === '' ? '' : "?{$consulta}");
     }
 
     private function texto(mixed $valor, string $etiqueta, int $maximo): ?string

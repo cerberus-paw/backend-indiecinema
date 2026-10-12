@@ -25,6 +25,8 @@ use InvalidArgumentException;
 final class RepositorioDeCartelera
 {
     private const DESDE = 'FROM funcion f JOIN sala s ON s.id = f.sala_id';
+    /** La sala y el id desempatan, así una función no cambia de página entre una consulta y otra. */
+    private const ORDEN = 'ORDER BY f.fecha_hora, s.nombre, f.id';
 
     public function __construct(private readonly BaseDeDatos $base)
     {
@@ -54,15 +56,22 @@ final class RepositorioDeCartelera
             return $pagina;
         }
 
-        $filas = $this->base->filas(
-            'SELECT f.id, f.fecha_hora, f.precio_base, s.id AS sala_id, s.nombre AS sala, s.localidad '
-            . self::DESDE . " WHERE {$condiciones}
-             ORDER BY f.fecha_hora, s.nombre, f.id
-             LIMIT ? OFFSET ?",
-            [...$parametros, $tamano, ($numero - 1) * $tamano],
-        );
+        $funciones = $this->funciones("{$condiciones} " . self::ORDEN . ' LIMIT ? OFFSET ?', [...$parametros, $tamano, ($numero - 1) * $tamano]);
 
-        return new PaginaDeCartelera($this->conSusObras($filas), $numero, $tamano, $total);
+        return new PaginaDeCartelera($funciones, $numero, $tamano, $total);
+    }
+
+    /**
+     * Todas las funciones filtradas, sin paginar y en el mismo orden que las páginas: lo que se
+     * descarga en CSV.
+     *
+     * @return list<FuncionEnCartelera>
+     */
+    public function todas(FiltrosDeCartelera $filtros, DateTimeImmutable $ahora = new DateTimeImmutable()): array
+    {
+        [$condiciones, $parametros] = self::condiciones($filtros, $ahora);
+
+        return $this->funciones("{$condiciones} " . self::ORDEN, $parametros);
     }
 
     /**
@@ -137,8 +146,24 @@ final class RepositorioDeCartelera
     }
 
     /**
-     * Las obras de todas las funciones de la página en una sola consulta, en vez de una por
-     * función.
+     * Las funciones con sus obras.
+     *
+     * @param string      $resto      el WHERE, sin la palabra, y lo que sigue
+     * @param list<mixed> $parametros
+     *
+     * @return list<FuncionEnCartelera>
+     */
+    private function funciones(string $resto, array $parametros): array
+    {
+        return $this->conSusObras($this->base->filas(
+            'SELECT f.id, f.fecha_hora, f.precio_base, s.id AS sala_id, s.nombre AS sala, s.localidad '
+            . self::DESDE . " WHERE {$resto}",
+            $parametros,
+        ));
+    }
+
+    /**
+     * Las obras de todas las funciones en una sola consulta, en vez de una por función.
      *
      * @param list<array<string, mixed>> $filas
      *
@@ -146,6 +171,9 @@ final class RepositorioDeCartelera
      */
     private function conSusObras(array $filas): array
     {
+        if ($filas === []) {
+            return [];
+        }
         $ids = array_column($filas, 'id');
         $marcas = implode(', ', array_fill(0, count($ids), '?'));
         $obras = [];

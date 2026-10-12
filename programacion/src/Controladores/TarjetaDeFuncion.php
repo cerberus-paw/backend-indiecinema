@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace IndieCinema\Programacion\Controladores;
 
+use DateTimeImmutable;
 use IndieCinema\Programacion\Modelo\FuncionEnCartelera;
 use IndieCinema\Programacion\Modelo\ObraEnCartelera;
 
@@ -22,8 +23,6 @@ final class TarjetaDeFuncion
      */
     public static function datos(FuncionEnCartelera $funcion): array
     {
-        $fecha = $funcion->fechaHora;
-
         return [
             'id' => $funcion->id,
             // Una función con varias obras las proyecta todas: el título las nombra a todas.
@@ -32,14 +31,22 @@ final class TarjetaDeFuncion
             'precio' => self::precio($funcion->precioBase),
             'sala' => $funcion->sala,
             'localidad' => $funcion->localidad,
-            'fecha' => sprintf(
-                '%s %d %s · %s',
-                self::DIAS[(int) $fecha->format('w')],
-                (int) $fecha->format('j'),
-                self::MESES[(int) $fecha->format('n') - 1],
-                $fecha->format('H:i'),
-            ),
+            'fecha' => self::fecha($funcion->fechaHora),
         ];
+    }
+
+    /**
+     * «Sáb 19 sep · 20:30»
+     */
+    public static function fecha(DateTimeImmutable $fecha): string
+    {
+        return sprintf(
+            '%s %d %s · %s',
+            self::DIAS[(int) $fecha->format('w')],
+            (int) $fecha->format('j'),
+            self::MESES[(int) $fecha->format('n') - 1],
+            $fecha->format('H:i'),
+        );
     }
 
     /**

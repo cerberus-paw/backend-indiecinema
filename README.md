@@ -89,6 +89,12 @@ todo el sitio se vea igual aunque lo sirvan subsistemas distintos.
   un controlador. La E2 sólo nombraba la documentación de las salas, que es de moderación; la E3
   suma la imagen de la sala y el afiche de la obra, así que programación ya tiene el suyo. Cuentas
   y moderación suman el propio cuando guarden archivos (la foto de perfil, la documentación).
+- **La ficha de una función es `/cartelera/{id}`, y la sirve programación.** nginx reparte por
+  prefijo y manda todo `/funcion/` al subsistema funciones, pero la ficha (las obras, la sala, la
+  fecha, el precio y el estado) es de programación, que tiene esos datos: bajo `/funcion/` le
+  llegaría a funciones. Va debajo de la cartelera, que es de donde se llega, y no pide un prefijo
+  nuevo en nginx. Lo que sí es de funciones (reservar, pagar, calificar) sigue bajo `/funcion/` y
+  enlaza a la ficha con el mismo id. La tarjeta del paquete front enlaza ahí por defecto.
 - **Sólo nginx publica un puerto.** MySQL y los subsistemas están en la red interna: desde
   afuera no se llega a la base ni a las rutas `/interno/`.
 - **El HTTPS lo termina el mismo nginx, sólo en el VPS** (`docker-compose.https.yml`): sigue

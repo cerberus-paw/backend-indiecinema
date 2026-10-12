@@ -130,6 +130,12 @@ final class CarteleraTest extends TestCase
         self::assertStringContainsString('Metrópolis', $primera[0] ?? '');
         self::assertStringContainsString('Cine Club El Alambique · Luján', $primera[0] ?? '');
         self::assertStringContainsString('· 20:00', $primera[0] ?? '');
+        // Enlaza a su ficha, en programación, y no a /funcion/, que es del subsistema funciones.
+        self::assertMatchesRegularExpression('#<a href="/cartelera/([0-9a-f-]{36})" class="tarjeta-funcion-titulo-enlace">#', $primera[0] ?? '');
+        preg_match('#href="/cartelera/([0-9a-f-]{36})"#', $primera[0] ?? '', $ficha);
+        self::assertSame(1, $this->base->valor('SELECT COUNT(*) FROM funcion WHERE id = ?', [$ficha[1] ?? '']));
+        preg_match_all('#<article class="tarjeta-funcion.*?</article>#s', $cuerpo, $tarjetas);
+        self::assertStringNotContainsString('href="/funcion/', implode('', $tarjetas[0]));
         self::assertStringContainsString('$ 2.500', $cuerpo);
         self::assertStringContainsString('A la gorra', $cuerpo);
         self::assertStringContainsString('Página 1 de 2', $cuerpo);

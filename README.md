@@ -170,6 +170,14 @@ cp funciones/config/config.ejemplo.ini funciones/config/config.ini
 
 composer install -d cuentas && composer install -d programacion && composer install -d funciones
 docker compose up -d --build
+
+# La primera vez, MySQL crea los esquemas y aplica las migraciones antes de aceptar conexiones:
+# esperar a que el log diga «ready for connections» con «port: 3306» (Ctrl+C para salir).
+docker compose logs -f mysql
+
+# Los datos de prueba (ver abajo): usuarios, salas, obras y funciones.
+docker compose exec cuentas php herramientas/datos-de-prueba.php
+docker compose exec programacion php herramientas/datos-de-prueba.php
 ```
 
 En desarrollo los ejemplos sirven tal cual. En el VPS hay que cambiar cada `cambiar` (con
@@ -191,8 +199,10 @@ docker run --rm -u "$(id -u):$(id -g)" -v "$PWD/..:/app" -w /app/backend-indieci
 
 | URL | Qué es |
 |---|---|
-| http://localhost:8080/ | programación (catálogo, salas, cartelera) |
-| http://localhost:8080/cuenta/ | cuentas |
+| http://localhost:8080/ | programación (por ahora, la página de prueba del esqueleto) |
+| http://localhost:8080/salas | el listado público de salas habilitadas |
+| http://localhost:8080/organizador/salas | «Mis salas», con sesión de organizador |
+| http://localhost:8080/cuenta/ | cuentas (`/cuenta/ingresar` y `/cuenta/registro`) |
 | http://localhost:8080/funcion/ | funciones (403 hasta que tenga su `public/index.php`) |
 | http://localhost:8080/estaticos/… | CSS, JavaScript e imágenes del paquete front |
 
@@ -246,13 +256,16 @@ docker compose exec mysql bash /herramientas/migrar.sh programacion   # uno solo
 
 #### Datos de prueba
 
-Un administrador, un organizador y dos espectadores, para la demo y para probar cada rol sin
-registrarse. Se cargan con la conexión de cuentas, como cualquier registro (Argon2id, el usuario y
-sus roles juntos), y sólo con `entorno = "desarrollo"` en su `config.ini`: estas contraseñas son
-públicas. Correrlo de nuevo agrega sólo los que falten. A diferencia del registro, cada uno tiene un
-id fijo, porque los datos de programación ponen salas y obras a nombre del organizador; si la base
-ya tenía estos usuarios con otro id, de antes de que fuera fijo, hay que borrarlos y volver a
-cargarlos:
+Para la demo y para probar cada rol sin cargar nada a mano, cuentas y programación tienen un
+script que carga sus datos de prueba. Primero cuentas, porque las salas y las obras de
+programación son de su organizador.
+
+Cuentas carga un administrador, un organizador y dos espectadores. Se cargan con la conexión de
+cuentas, como cualquier registro (Argon2id, el usuario y sus roles juntos), y sólo con
+`entorno = "desarrollo"` en su `config.ini`: estas contraseñas son públicas. Correrlo de nuevo
+agrega sólo los que falten. A diferencia del registro, cada uno tiene un id fijo, porque los datos
+de programación ponen salas y obras a nombre del organizador; si la base ya tenía estos usuarios
+con otro id, de antes de que fuera fijo, hay que borrarlos y volver a cargarlos:
 
 ```
 docker compose exec cuentas php herramientas/datos-de-prueba.php
@@ -269,15 +282,41 @@ Todos tienen además el rol de espectador, como cualquier cuenta. El primer admi
 acá: la web no asigna ese rol. Los correos son del dominio `.test`, que está reservado y no llega
 a ninguna casilla.
 
-Después, los de programación: los géneros, cuatro salas habilitadas de distintas localidades, doce
-obras de dominio público con afiche y quince funciones programadas, todas a nombre del organizador
-de prueba, con las fotos de las salas y los afiches copiados al volumen de archivos. Pasan por los
-mismos repositorios que la web, y correrlo de nuevo agrega sólo lo que falte. Las fechas de las
-funciones se cuentan desde el día en que se cargan; una función que ya estaba conserva la suya:
+Después, programación, todo a nombre de Omar Organizador (el detalle está en
+[`programacion/datos-prueba/`](programacion/datos-prueba/README.md)):
+
+- ocho géneros;
+- cuatro salas habilitadas, cada una en una localidad: Cine Club El Alambique (Luján), Espacio
+  Cultural La Trocha (Mercedes), Cine Teatro Eureka (General Rodríguez) y Cine Club Areco (San
+  Antonio de Areco);
+- doce obras de dominio público, cada una con su afiche;
+- quince funciones programadas, entre una semana y un mes después del día en que se cargan.
+
+Las fotos de las salas y los afiches (imágenes hechas para el proyecto, con licencia CC0) se copian
+al volumen de archivos de programación. Pasan por los mismos repositorios que la web, y correrlo de
+nuevo agrega sólo lo que falte, buscando cada cosa por su id: lo que ya estaba no se toca, aunque
+se haya cambiado a mano. Por eso una función que ya estaba conserva su fecha, y pasado un mes queda
+en el pasado.
 
 ```
 docker compose exec programacion php herramientas/datos-de-prueba.php
+#   generos     8 agregados,  0 ya estaban
+#   salas       4 agregados,  0 ya estaban
+#   obras      12 agregados,  0 ya estaban
+#   funciones  15 agregados,  0 ya estaban
+#   fotos       4 agregados,  0 ya estaban
+#   afiches    12 agregados,  0 ya estaban
 ```
+
+La segunda vez, todo sale en «ya estaban». Para comprobar la carga en el navegador:
+
+- http://localhost:8080/salas muestra las cuatro salas, con su localidad y su foto.
+- Con la sesión de `organizador@indiecinema.test` (contraseña `organizador2026`, en
+  http://localhost:8080/cuenta/ingresar), http://localhost:8080/organizador/salas muestra las
+  cuatro como `PUBLICADA`, y cada una se puede editar.
+
+Las obras y las funciones todavía no tienen pantalla: se ven cuando estén el catálogo y la
+cartelera.
 
 En producción (cualquier `entorno` que no sea `"desarrollo"`) no hace nada sin la confirmación
 explícita, para que los datos inventados no lleguen al sitio real por un comando copiado de acá.
@@ -347,7 +386,9 @@ php -S localhost:8080 herramientas/servidor-local.php
 env ROL=organizador NOMBRE="Salvador Baez" php -S localhost:8080 herramientas/servidor-local.php
 ```
 
-Necesita los `config.ini` y el `composer install` de cada subsistema, como arriba.
+Necesita los `config.ini` y el `composer install` de cada subsistema, como arriba. Los datos de
+prueba se cargan con Docker: el `config.ini` apunta a `mysql`, que sólo existe en la red del
+compose, y los archivos van al volumen de programación.
 
 ## Pruebas
 

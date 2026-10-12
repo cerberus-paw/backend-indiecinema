@@ -97,14 +97,9 @@ final class ParametrosDeCartelera
         if ($valor === null || $valor === '') {
             return null;
         }
-        // Un «q[]=…» llega como arreglo, y un texto que no es UTF-8 no se puede comparar.
-        if (!is_string($valor) || !mb_check_encoding($valor, 'UTF-8')) {
-            $this->avisos[] = "{$etiqueta} no es un texto válido: se muestra la cartelera sin ese filtro.";
-
-            return null;
-        }
-        if (mb_strlen(trim($valor)) > $maximo) {
-            $this->avisos[] = "{$etiqueta} puede tener hasta {$maximo} caracteres: se muestra la cartelera sin ese filtro.";
+        $problema = TextoDeLaUrl::problema($valor, $maximo);
+        if ($problema !== null) {
+            $this->avisos[] = "{$etiqueta} {$problema}: se muestra la cartelera sin ese filtro.";
 
             return null;
         }

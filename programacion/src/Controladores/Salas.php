@@ -11,8 +11,9 @@ use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Programacion\Servicios\ServicioDeSalas;
 
 /**
- * GET /salas: el listado público de salas habilitadas, para cualquiera, con o sin sesión, y
- * GET /salas/{id}: la ficha de una, con sus próximas funciones.
+ * GET /salas: el listado público de salas habilitadas, para cualquiera, con o sin sesión, con un
+ * buscador por nombre y localidad que viaja en la URL (un formulario GET), así funciona sin
+ * JavaScript. GET /salas/{id}: la ficha de una, con sus próximas funciones.
  */
 final class Salas extends Controlador
 {
@@ -22,8 +23,12 @@ final class Salas extends Controlador
 
     public function listar(Peticion $peticion): Respuesta
     {
+        $parametros = ParametrosDeSalas::desdeConsulta(['q' => $peticion->consulta('q')]);
+
         return $this->vista('salas.html.twig', [
-            'salas' => array_map(TarjetaDeSala::datos(...), $this->servicio->publicadas()),
+            'salas' => array_map(TarjetaDeSala::datos(...), $this->servicio->publicadas($parametros->texto)),
+            'busqueda' => $parametros->texto,
+            'avisos' => $parametros->avisos,
         ]);
     }
 

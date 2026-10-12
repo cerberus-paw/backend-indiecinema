@@ -6,6 +6,8 @@ namespace IndieCinema\Programacion\Servicios;
 
 use IndieCinema\Nucleo\Configuracion;
 use IndieCinema\Nucleo\Http\ExcepcionHttp;
+use IndieCinema\Nucleo\Uuid;
+use IndieCinema\Programacion\Modelo\DetalleDeFuncion;
 use IndieCinema\Programacion\Modelo\FiltrosDeCartelera;
 use IndieCinema\Programacion\Modelo\FuncionEnCartelera;
 use IndieCinema\Programacion\Modelo\Genero;
@@ -82,5 +84,25 @@ final class ServicioDeCartelera
     public function generos(): array
     {
         return $this->generos->todos();
+    }
+
+    /**
+     * La ficha pública de una función con sus obras y su sala, en cualquier estado: también las
+     * que están en votación, las que ya pasaron y las canceladas, que la ficha muestra como tales.
+     *
+     * @throws ExcepcionHttp 404 si el id no es un UUID, la función no existe o su sala no está
+     *                         publicada (sin habilitar o dada de baja)
+     */
+    public function detalle(string $id): DetalleDeFuncion
+    {
+        if (!Uuid::esValido($id)) {
+            throw ExcepcionHttp::noEncontrada();
+        }
+        $detalle = $this->cartelera->detalle($id);
+        if ($detalle === null) {
+            throw ExcepcionHttp::noEncontrada();
+        }
+
+        return $detalle;
     }
 }

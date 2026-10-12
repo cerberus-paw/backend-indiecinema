@@ -21,6 +21,8 @@ return static function (Router $router): void {
     $router->get('/cartelera', [Cartelera::class, 'listar']);
     // La misma, con los mismos filtros, para abrir en una planilla.
     $router->get('/cartelera.csv', [Cartelera::class, 'descargar']);
+    // La ficha de una función programada con sus obras y su sala.
+    $router->get('/cartelera/{id}', [Cartelera::class, 'detalle']);
 
     // «Mis salas», alta y edición de la sala propia. Que la sala sea del que la edita lo
     // controla el servicio.

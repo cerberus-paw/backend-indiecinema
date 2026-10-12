@@ -11,6 +11,7 @@ use IndieCinema\Nucleo\Configuracion;
 use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Log;
+use IndieCinema\Nucleo\Uuid;
 use IndieCinema\Programacion\Repositorios\RepositorioDeFunciones;
 use IndieCinema\Programacion\Repositorios\RepositorioDeGeneros;
 use IndieCinema\Programacion\Repositorios\RepositorioDeObras;
@@ -452,5 +453,107 @@ final class CarteleraTest extends TestCase
 
         self::assertSame(200, $respuesta->estado());
         self::assertStringContainsString('href="/cartelera" class="nav-enlace activo"', $respuesta->cuerpo());
+    }
+
+    public function testDetalleDeFuncionProgramada(): void
+    {
+        $this->cargarDatosDePrueba();
+
+        $id = (string) $this->base->valor("SELECT id FROM funcion WHERE estado = 'programada' ORDER BY fecha_hora LIMIT 1");
+        $salaId = (string) $this->base->valor('SELECT sala_id FROM funcion WHERE id = ?', [$id]);
+        $respuesta = $this->pedir("/cartelera/{$id}");
+
+        self::assertSame(200, $respuesta->estado());
+        $cuerpo = $respuesta->cuerpo();
+        self::assertStringContainsString('Metrópolis', $cuerpo);
+        self::assertStringContainsString('Fritz Lang', $cuerpo);
+        self::assertStringContainsString('153 min', $cuerpo);
+        self::assertStringContainsString('Cine Club El Alambique', $cuerpo);
+        self::assertStringContainsString('href="/salas/' . $salaId . '"', $cuerpo);
+        self::assertStringContainsString('San Martín 420 · Luján', $cuerpo);
+        self::assertStringContainsString('$ 2.500', $cuerpo);
+        self::assertStringContainsString('<span class="insignia-estado insignia-programada">PROGRAMADA</span>', $cuerpo);
+        self::assertStringNotContainsString('Esta función fue cancelada.', $cuerpo);
+    }
+
+    public function testDetalleDeFuncionEnVotacionDeTitulos(): void
+    {
+        $this->cargarDatosDePrueba();
+
+        $id = (string) $this->base->valor("SELECT id FROM funcion WHERE estado = 'programada' ORDER BY fecha_hora LIMIT 1");
+        $this->base->ejecutar("UPDATE funcion SET estado = 'en_votacion_titulos', fecha_hora = NULL WHERE id = ?", [$id]);
+        $this->base->ejecutar("UPDATE funcion_obra SET estado = 'candidata' WHERE funcion_id = ?", [$id]);
+
+        $respuesta = $this->pedir("/cartelera/{$id}");
+
+        self::assertSame(200, $respuesta->estado());
+        $cuerpo = $respuesta->cuerpo();
+        self::assertStringContainsString('EN VOTACIÓN DE TÍTULOS', $cuerpo);
+        self::assertStringContainsString('Obras candidatas en votación', $cuerpo);
+        self::assertStringContainsString('Fecha a confirmar', $cuerpo);
+    }
+
+    public function testDetalleDeFuncionCanceladaMuestraAvisoDeCancelacion(): void
+    {
+        $this->cargarDatosDePrueba();
+
+        $id = (string) $this->base->valor("SELECT id FROM funcion WHERE estado = 'programada' ORDER BY fecha_hora LIMIT 1");
+        $this->base->ejecutar("UPDATE funcion SET estado = 'cancelada' WHERE id = ?", [$id]);
+
+        $respuesta = $this->pedir("/cartelera/{$id}");
+
+        self::assertSame(200, $respuesta->estado());
+        $cuerpo = $respuesta->cuerpo();
+        self::assertStringContainsString('Función cancelada', $cuerpo);
+        self::assertStringContainsString('Esta función fue cancelada.', $cuerpo);
+        // Sigue mostrando qué era: las obras, la sala y la fecha.
+        self::assertStringContainsString('Metrópolis', $cuerpo);
+        self::assertStringContainsString('Cine Club El Alambique', $cuerpo);
+        self::assertStringNotContainsString('Fecha a confirmar', $cuerpo);
+        self::assertStringNotContainsString('>PROGRAMADA<', $cuerpo);
+    }
+
+    public function testDetalleDeFuncionInexistenteResponde404(): void
+    {
+        $this->cargarDatosDePrueba();
+
+        $respuesta = $this->pedir('/cartelera/' . Uuid::nuevo());
+
+        self::assertSame(404, $respuesta->estado());
+    }
+
+    public function testDetalleConIdInvalidoResponde404(): void
+    {
+        $this->cargarDatosDePrueba();
+
+        $respuesta = $this->pedir('/cartelera/no-es-un-uuid');
+
+        self::assertSame(404, $respuesta->estado());
+    }
+
+    public function testDetalleDeFuncionConSalaDeshabilitadaResponde404(): void
+    {
+        $this->cargarDatosDePrueba();
+
+        $id = (string) $this->base->valor("SELECT id FROM funcion WHERE estado = 'programada' ORDER BY fecha_hora LIMIT 1");
+        $salaId = (string) $this->base->valor('SELECT sala_id FROM funcion WHERE id = ?', [$id]);
+        $this->base->ejecutar('UPDATE sala SET habilitada = FALSE WHERE id = ?', [$salaId]);
+
+        $respuesta = $this->pedir("/cartelera/{$id}");
+
+        self::assertSame(404, $respuesta->estado());
+    }
+
+    public function testDetalleDeFuncionConSalaDadaDeBajaResponde404(): void
+    {
+        $this->cargarDatosDePrueba();
+
+        $id = (string) $this->base->valor("SELECT id FROM funcion WHERE estado = 'programada' ORDER BY fecha_hora LIMIT 1");
+        $salaId = (string) $this->base->valor('SELECT sala_id FROM funcion WHERE id = ?', [$id]);
+        $this->base->ejecutar('UPDATE sala SET dada_de_baja_en = NOW() WHERE id = ?', [$salaId]);
+
+        $respuesta = $this->pedir("/cartelera/{$id}");
+
+        self::assertSame(404, $respuesta->estado());
     }
 }

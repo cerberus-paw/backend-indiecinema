@@ -150,13 +150,24 @@ final class RepositorioDeCarteleraTest extends TestCase
     }
 
     /**
-     * @return list<string> los nombres de las funciones de la página, en su orden
+     * @return list<FuncionEnCartelera>
      */
-    private function nombres(PaginaDeCartelera $pagina): array
+    private function todas(FiltrosDeCartelera $filtros = new FiltrosDeCartelera()): array
+    {
+        return $this->cartelera->todas($filtros, new DateTimeImmutable(self::AHORA));
+    }
+
+    /**
+     * @param PaginaDeCartelera|list<FuncionEnCartelera> $funciones
+     *
+     * @return list<string> los nombres de las funciones, en su orden
+     */
+    private function nombres(PaginaDeCartelera|array $funciones): array
     {
         $nombres = array_flip($this->enCartelera);
+        $funciones = $funciones instanceof PaginaDeCartelera ? $funciones->funciones : $funciones;
 
-        return array_map(static fn (FuncionEnCartelera $funcion): string => $nombres[$funcion->id] ?? $funcion->id, $pagina->funciones);
+        return array_map(static fn (FuncionEnCartelera $funcion): string => $nombres[$funcion->id] ?? $funcion->id, $funciones);
     }
 
     public function testListaLasProgramadasQueNoPasaronDeSalasPublicadasPorFecha(): void
@@ -389,6 +400,31 @@ final class RepositorioDeCarteleraTest extends TestCase
         self::assertSame(10, $this->base->valor('SELECT COUNT(*) FROM funcion'));
         self::assertSame(4, $this->base->valor('SELECT COUNT(*) FROM sala'));
         self::assertSame(['cienaga', 'carroza', 'zama', 'cien'], $this->nombres($this->pagina()));
+    }
+
+    public function testTodasTraeLasMismasQueLasPaginasJuntas(): void
+    {
+        $todas = $this->todas();
+
+        self::assertSame(['cienaga', 'carroza', 'zama', 'cien'], $this->nombres($todas));
+        self::assertEquals([...$this->pagina(tamano: 2)->funciones, ...$this->pagina(numero: 2, tamano: 2)->funciones], $todas);
+    }
+
+    public function testTodasRespetaLosFiltros(): void
+    {
+        $comedia = $this->generos['Comedia'];
+
+        self::assertSame(['carroza', 'cien'], $this->nombres($this->todas(new FiltrosDeCartelera(localidad: 'Mercedes'))));
+        self::assertSame(['cienaga', 'zama'], $this->nombres($this->todas(new FiltrosDeCartelera(texto: 'martel'))));
+        self::assertSame(['cienaga', 'carroza'], $this->nombres($this->todas(new FiltrosDeCartelera(fecha: new DateTimeImmutable('2026-10-12')))));
+        self::assertSame(['carroza', 'cien'], $this->nombres($this->todas(new FiltrosDeCartelera(generoId: $comedia))));
+        self::assertSame(['cien'], $this->nombres($this->todas(new FiltrosDeCartelera('100', 'Mercedes', new DateTimeImmutable('2026-10-20'), $comedia))));
+    }
+
+    public function testTodasSinResultadosEsUnaListaVacia(): void
+    {
+        self::assertSame([], $this->todas(new FiltrosDeCartelera(texto: 'Nueve reinas')));
+        self::assertSame([], $this->todas(new FiltrosDeCartelera(texto: "' OR '1'='1")));
     }
 
     public function testLasLocalidadesDelFiltroSonLasQueTienenFuncionesEnCartelera(): void

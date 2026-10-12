@@ -61,6 +61,17 @@ final class ServicioDeCartelera
     }
 
     /**
+     * Las primeras funciones de la cartelera, sin filtros, para la portada; el total dice cuántas
+     * hay en toda la cartelera.
+     *
+     * @param positive-int $cantidad
+     */
+    public function proximas(int $cantidad): PaginaDeCartelera
+    {
+        return $this->cartelera->pagina(new FiltrosDeCartelera(), 1, $cantidad);
+    }
+
+    /**
      * Todas las funciones filtradas, sin paginar, para descargarlas.
      *
      * @return list<FuncionEnCartelera>

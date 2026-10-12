@@ -205,7 +205,8 @@ docker run --rm -u "$(id -u):$(id -g)" -v "$PWD/..:/app" -w /app/backend-indieci
 
 | URL | Qué es |
 |---|---|
-| http://localhost:8080/ | programación (por ahora, la página de prueba del esqueleto) |
+| http://localhost:8080/ | la portada, con las próximas funciones y algunas salas |
+| http://localhost:8080/cartelera | la cartelera pública, con filtros, paginado y descarga en CSV |
 | http://localhost:8080/salas | el listado público de salas habilitadas |
 | http://localhost:8080/organizador/salas | «Mis salas», con sesión de organizador |
 | http://localhost:8080/cuenta/ | cuentas (`/cuenta/ingresar` y `/cuenta/registro`) |
@@ -415,9 +416,10 @@ obras, los repositorios de obras, de funciones y de géneros, y la cartelera con
 paginado e intentos de inyección SQL, y `/cartelera` con los filtros por la URL, los parámetros
 inválidos y el 404, `/cartelera.csv` con los mismos filtros, la ficha de la función en cada
 estado, con sus 404, la ficha de la sala, con quién la ve, sus próximas funciones y el camino de
-la función a su sala y de vuelta, y el buscador del listado de salas); en cuentas, el registro de
-punta a punta y las restricciones de las tablas usuario y rol (correo único, roles sin repetir y
-sólo de un usuario que existe). Para correrlas, uno descartable:
+la función a su sala y de vuelta, el buscador del listado de salas y la portada con las próximas
+funciones); en cuentas, el registro de punta a punta y las restricciones de las tablas usuario y
+rol (correo único, roles sin repetir y sólo de un usuario que existe). Para correrlas, uno
+descartable:
 
 ```
 docker run -d --rm --name mysql-pruebas -e MYSQL_ROOT_PASSWORD=pruebas -e MYSQL_DATABASE=pruebas -p 127.0.0.1:3307:3306 mysql:8.4

@@ -5,6 +5,7 @@ declare(strict_types=1);
 use IndieCinema\Nucleo\Http\EstadoInterno;
 use IndieCinema\Nucleo\Ruteo\Router;
 use IndieCinema\Nucleo\Seguridad\Rol;
+use IndieCinema\Programacion\Controladores\Cartelera;
 use IndieCinema\Programacion\Controladores\ImagenDeSala;
 use IndieCinema\Programacion\Controladores\Inicio;
 use IndieCinema\Programacion\Controladores\Salas;
@@ -16,6 +17,8 @@ use IndieCinema\Programacion\Controladores\SalasDelOrganizador;
  */
 return static function (Router $router): void {
     $router->get('/', [Inicio::class, 'mostrar']);
+    // La cartelera pública, sin sesión. Los filtros y la página van en la URL.
+    $router->get('/cartelera', [Cartelera::class, 'listar']);
 
     // «Mis salas», alta y edición de la sala propia. Que la sala sea del que la edita lo
     // controla el servicio.

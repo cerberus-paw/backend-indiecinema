@@ -7,6 +7,7 @@ namespace IndieCinema\Programacion\Servicios;
 use IndieCinema\Nucleo\Configuracion;
 use IndieCinema\Nucleo\Http\ExcepcionHttp;
 use IndieCinema\Programacion\Modelo\FiltrosDeCartelera;
+use IndieCinema\Programacion\Modelo\FuncionEnCartelera;
 use IndieCinema\Programacion\Modelo\Genero;
 use IndieCinema\Programacion\Modelo\PaginaDeCartelera;
 use IndieCinema\Programacion\Repositorios\RepositorioDeCartelera;
@@ -15,7 +16,7 @@ use RuntimeException;
 
 /**
  * La cartelera pública, para cualquiera, con o sin sesión: una página de las funciones filtradas,
- * del tamaño que dice config.ini, y las opciones de los filtros.
+ * del tamaño que dice config.ini, o todas para descargarlas, y las opciones de los filtros.
  */
 final class ServicioDeCartelera
 {
@@ -55,6 +56,16 @@ final class ServicioDeCartelera
         }
 
         return $pagina;
+    }
+
+    /**
+     * Todas las funciones filtradas, sin paginar, para descargarlas.
+     *
+     * @return list<FuncionEnCartelera>
+     */
+    public function todas(FiltrosDeCartelera $filtros): array
+    {
+        return $this->cartelera->todas($filtros);
     }
 
     /**

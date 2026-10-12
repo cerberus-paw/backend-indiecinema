@@ -136,4 +136,12 @@ final class ParametrosDeCarteleraTest extends TestCase
         self::assertSame('/cartelera?pagina=2', ParametrosDeCartelera::desdeConsulta([])->urlDePagina(2));
         self::assertSame('/cartelera', ParametrosDeCartelera::desdeConsulta([])->urlDePagina(1));
     }
+
+    public function testLaUrlDelCsvConservaLosFiltrosYNoLlevaLaPagina(): void
+    {
+        $parametros = ParametrosDeCartelera::desdeConsulta(['q' => 'el pibe & cía', 'localidad' => 'San Antonio de Areco', 'fecha' => 'x', 'pagina' => '2']);
+
+        self::assertSame('/cartelera.csv?q=el%20pibe%20%26%20c%C3%ADa&localidad=San%20Antonio%20de%20Areco', $parametros->urlDeCsv());
+        self::assertSame('/cartelera.csv', ParametrosDeCartelera::desdeConsulta(['pagina' => '3'])->urlDeCsv());
+    }
 }

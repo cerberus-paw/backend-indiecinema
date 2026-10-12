@@ -14,7 +14,8 @@ use IndieCinema\Programacion\Servicios\ServicioDeCartelera;
 /**
  * GET /cartelera: las funciones programadas que todavía no pasaron, para cualquiera, con o sin
  * sesión. Los filtros y la página viajan en la URL (un formulario GET), así funcionan sin
- * JavaScript y se pueden compartir.
+ * JavaScript y se pueden compartir. GET /cartelera.csv descarga la cartelera con los mismos
+ * filtros.
  */
 final class Cartelera extends Controlador
 {
@@ -27,13 +28,7 @@ final class Cartelera extends Controlador
      */
     public function listar(Peticion $peticion): Respuesta
     {
-        $parametros = ParametrosDeCartelera::desdeConsulta([
-            'q' => $peticion->consulta('q'),
-            'localidad' => $peticion->consulta('localidad'),
-            'fecha' => $peticion->consulta('fecha'),
-            'genero' => $peticion->consulta('genero'),
-            'pagina' => $peticion->consulta('pagina'),
-        ]);
+        $parametros = self::parametros($peticion);
         // «pagina=abc» o «pagina=0» no es una página que exista, igual que una después de la última.
         if ($parametros->pagina === null) {
             throw ExcepcionHttp::noEncontrada();
@@ -55,6 +50,31 @@ final class Cartelera extends Controlador
                 'anterior' => $pagina->numero > 1 ? $parametros->urlDePagina($pagina->numero - 1) : null,
                 'siguiente' => $pagina->numero < $total ? $parametros->urlDePagina($pagina->numero + 1) : null,
             ],
+            'csv' => $parametros->urlDeCsv(),
+        ]);
+    }
+
+    /**
+     * Todas las funciones filtradas, no sólo las de una página. Un filtro inválido se deja afuera
+     * como en la página, aunque acá no hay dónde avisarlo, y la página se ignora.
+     */
+    public function descargar(Peticion $peticion): Respuesta
+    {
+        $funciones = $this->servicio->todas(self::parametros($peticion)->filtros);
+
+        return (new Respuesta(CsvDeCartelera::armar($funciones)))
+            ->conCabecera('Content-Type', 'text/csv; charset=utf-8')
+            ->conCabecera('Content-Disposition', 'attachment; filename="cartelera.csv"');
+    }
+
+    private static function parametros(Peticion $peticion): ParametrosDeCartelera
+    {
+        return ParametrosDeCartelera::desdeConsulta([
+            'q' => $peticion->consulta('q'),
+            'localidad' => $peticion->consulta('localidad'),
+            'fecha' => $peticion->consulta('fecha'),
+            'genero' => $peticion->consulta('genero'),
+            'pagina' => $peticion->consulta('pagina'),
         ]);
     }
 }

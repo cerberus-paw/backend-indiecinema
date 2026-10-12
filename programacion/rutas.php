@@ -19,6 +19,8 @@ return static function (Router $router): void {
     $router->get('/', [Inicio::class, 'mostrar']);
     // La cartelera pública, sin sesión. Los filtros y la página van en la URL.
     $router->get('/cartelera', [Cartelera::class, 'listar']);
+    // La misma, con los mismos filtros, para abrir en una planilla.
+    $router->get('/cartelera.csv', [Cartelera::class, 'descargar']);
 
     // «Mis salas», alta y edición de la sala propia. Que la sala sea del que la edita lo
     // controla el servicio.

@@ -413,9 +413,10 @@ saltean. En programación son las de punta a punta (rutas, roles, token CSRF, pl
 las tablas de las migraciones, con las restricciones de sala, obra y sus géneros, y función y sus
 obras, los repositorios de obras, de funciones y de géneros, y la cartelera con cada filtro, el
 paginado e intentos de inyección SQL, y `/cartelera` con los filtros por la URL, los parámetros
-inválidos y el 404, `/cartelera.csv` con los mismos filtros, y la ficha de la función en cada
-estado, con sus 404); en cuentas, el registro de punta a punta y las restricciones de las tablas
-usuario y rol (correo único, roles sin repetir y sólo de un usuario que existe). Para correrlas, uno descartable:
+inválidos y el 404, `/cartelera.csv` con los mismos filtros, la ficha de la función en cada
+estado, con sus 404, y la ficha de la sala, con quién la ve y sus próximas funciones); en cuentas,
+el registro de punta a punta y las restricciones de las tablas usuario y rol (correo único, roles
+sin repetir y sólo de un usuario que existe). Para correrlas, uno descartable:
 
 ```
 docker run -d --rm --name mysql-pruebas -e MYSQL_ROOT_PASSWORD=pruebas -e MYSQL_DATABASE=pruebas -p 127.0.0.1:3307:3306 mysql:8.4

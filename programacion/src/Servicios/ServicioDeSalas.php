@@ -8,15 +8,18 @@ use IndieCinema\Nucleo\Http\ExcepcionHttp;
 use IndieCinema\Nucleo\Seguridad\Usuario;
 use IndieCinema\Nucleo\Uuid;
 use IndieCinema\Programacion\Modelo\DatosDeSala;
+use IndieCinema\Programacion\Modelo\FichaDeSala;
+use IndieCinema\Programacion\Modelo\FiltrosDeCartelera;
 use IndieCinema\Programacion\Modelo\ImagenSubida;
 use IndieCinema\Programacion\Modelo\Sala;
+use IndieCinema\Programacion\Repositorios\RepositorioDeCartelera;
 use IndieCinema\Programacion\Repositorios\RepositorioDeSalas;
 use Psr\Log\LoggerInterface;
 use Throwable;
 
 /**
- * El alta y la edición de salas. El rol de organizador lo controla la ruta; que la sala sea del
- * que la edita, que la ruta no puede saber, se controla acá.
+ * El alta y la edición de salas, y lo que se muestra de ellas. El rol de organizador lo controla
+ * la ruta; que la sala sea del que la edita, que la ruta no puede saber, se controla acá.
  */
 final class ServicioDeSalas
 {
@@ -24,6 +27,7 @@ final class ServicioDeSalas
         private readonly RepositorioDeSalas $salas,
         private readonly ArchivosDeSalas $archivos,
         private readonly LoggerInterface $log,
+        private readonly RepositorioDeCartelera $cartelera,
     ) {
     }
 
@@ -94,6 +98,23 @@ final class ServicioDeSalas
         if ($anterior !== null) {
             $this->archivos->borrar($anterior);
         }
+    }
+
+    /**
+     * La ficha de la sala con sus próximas funciones, las mismas que muestra la cartelera. Como la
+     * imagen, una sala sin habilitar sólo la ve su organizador, y sin funciones, porque no están
+     * en la cartelera. Si no, 404, como si no existiera.
+     *
+     * @throws ExcepcionHttp 404
+     */
+    public function ficha(string $id, ?Usuario $usuario): FichaDeSala
+    {
+        $sala = $this->buscar($id);
+        if (!$sala->laPuedeVer($usuario?->id)) {
+            throw ExcepcionHttp::noEncontrada();
+        }
+
+        return new FichaDeSala($sala, $this->cartelera->todas(new FiltrosDeCartelera(salaId: $sala->id)));
     }
 
     /**

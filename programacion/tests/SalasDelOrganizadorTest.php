@@ -357,4 +357,40 @@ final class SalasDelOrganizadorTest extends TestCase
         self::assertSame(404, $this->pedir('GET', '/organizador/salas/' . Uuid::nuevo() . '/editar', self::ORGANIZADORA)->estado());
         self::assertSame(404, $this->pedir('GET', '/organizador/salas/1/editar', self::ORGANIZADORA)->estado());
     }
+
+    /**
+     * La ficha de una sala que no se ve es la página de error, igual que la de una que no existe.
+     */
+    private function assertFichaNoEncontrada(string $id, ?string $usuario, string $rol = 'organizador'): void
+    {
+        $respuesta = $this->pedir('GET', "/salas/{$id}", $usuario, $rol);
+
+        self::assertSame(404, $respuesta->estado());
+        self::assertStringContainsString('No encontramos lo que buscabas.', $respuesta->cuerpo());
+    }
+
+    public function testLaFichaDeUnaSalaQueNoExisteDa404(): void
+    {
+        $this->assertFichaNoEncontrada(Uuid::nuevo(), null);
+        $this->assertFichaNoEncontrada('1', null);
+        $this->assertFichaNoEncontrada('%27%20OR%20%271%27%3D%271', null);
+    }
+
+    public function testLaFichaDeUnaSalaSinHabilitarNoSeVePublicamente(): void
+    {
+        $id = $this->crearSala(self::ORGANIZADORA);
+
+        $this->assertFichaNoEncontrada($id, null);
+        $this->assertFichaNoEncontrada($id, self::OTRO_ORGANIZADOR, 'espectador');
+        $this->assertFichaNoEncontrada($id, self::OTRO_ORGANIZADOR);
+    }
+
+    public function testLaFichaDeUnaSalaDadaDeBajaNoSeVe(): void
+    {
+        $id = $this->crearSala(self::ORGANIZADORA);
+        $this->base->ejecutar('UPDATE sala SET habilitada = TRUE, dada_de_baja_en = NOW() WHERE id = ?', [$id]);
+
+        $this->assertFichaNoEncontrada($id, null);
+        $this->assertFichaNoEncontrada($id, self::ORGANIZADORA);
+    }
 }

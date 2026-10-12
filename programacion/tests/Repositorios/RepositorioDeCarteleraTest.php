@@ -9,11 +9,13 @@ use IndieCinema\Nucleo\BaseDeDatos;
 use IndieCinema\Nucleo\Configuracion;
 use IndieCinema\Nucleo\Uuid;
 use IndieCinema\Programacion\Modelo\DatosDeSala;
+use IndieCinema\Programacion\Modelo\EstadoFuncion;
 use IndieCinema\Programacion\Modelo\FiltrosDeCartelera;
 use IndieCinema\Programacion\Modelo\Funcion;
 use IndieCinema\Programacion\Modelo\FuncionEnCartelera;
 use IndieCinema\Programacion\Modelo\Obra;
 use IndieCinema\Programacion\Modelo\ObraEnCartelera;
+use IndieCinema\Programacion\Modelo\ObraEnDetalle;
 use IndieCinema\Programacion\Modelo\OrigenCopia;
 use IndieCinema\Programacion\Modelo\PaginaDeCartelera;
 use IndieCinema\Programacion\Modelo\Sala;
@@ -61,6 +63,13 @@ final class RepositorioDeCarteleraTest extends TestCase
     /** @var array<string, string> el id de cada sala, por nombre */
     private array $salaIds = [];
 
+    private string $pasadaId;
+    private string $canceladaId;
+    private string $deshabilitadaId;
+    private string $enVotacionId;
+    private string $enAcuerdoId;
+    private string $deBajaId;
+
     protected function setUp(): void
     {
         $this->base = self::baseConTablasNuevas(new Configuracion(['base' => self::baseDePruebas()]));
@@ -91,23 +100,28 @@ final class RepositorioDeCarteleraTest extends TestCase
         $this->enCartelera['cien'] = $this->programada($italiano, ['Cine al 100%'], '2026-10-20 21:00:00')->id;
 
         // Ya pasó.
-        $this->programada($galpon, ['Zama'], '2026-10-11 17:00:00');
+        $this->pasadaId = $this->programada($galpon, ['Zama'], '2026-10-11 17:00:00')->id;
         // Todavía sin fecha.
-        $this->funciones->agregar($galpon->crearFuncion([$this->obras['La ciénaga']], 40, 3500.0));
+        $enVotacion = $galpon->crearFuncion([$this->obras['La ciénaga']], 40, 3500.0);
+        $this->funciones->agregar($enVotacion);
+        $this->enVotacionId = $enVotacion->id;
         $enAcuerdo = $galpon->crearFuncion([$this->obras['Zama']], 40, 3500.0);
         $this->funciones->agregar($enAcuerdo);
         $enAcuerdo->cerrarVotacionTitulos([$this->obras['Zama']]);
         $this->funciones->guardar($enAcuerdo);
+        $this->enAcuerdoId = $enAcuerdo->id;
         // Cancelada después de programarla.
         $cancelada = $this->programada($galpon, ['La ciénaga'], '2026-10-14 20:00:00');
         $cancelada->cancelar();
         $this->funciones->guardar($cancelada);
+        $this->canceladaId = $cancelada->id;
         // De una sala que el administrador deshabilitó y de una dada de baja.
         $deshabilitada = $this->salaHabilitada('Sala Deshabilitada', 'San Andrés de Giles');
-        $this->programada($deshabilitada, ['La ciénaga'], '2026-10-15 20:00:00');
+        $this->deshabilitadaId = $this->programada($deshabilitada, ['La ciénaga'], '2026-10-15 20:00:00')->id;
         $this->base->ejecutar('UPDATE sala SET habilitada = FALSE WHERE id = ?', [$deshabilitada->id]);
         $deBaja = $this->salaHabilitada('Sala de Baja', 'Chivilcoy');
-        $this->programada($deBaja, ['La ciénaga'], '2026-10-15 20:00:00');
+        $deBajaFuncion = $this->programada($deBaja, ['La ciénaga'], '2026-10-15 20:00:00');
+        $this->deBajaId = $deBajaFuncion->id;
         $this->base->ejecutar('UPDATE sala SET dada_de_baja_en = NOW() WHERE id = ?', [$deBaja->id]);
     }
 
@@ -449,5 +463,105 @@ final class RepositorioDeCarteleraTest extends TestCase
         self::assertSame(['Luján', 'Mercedes'], $this->cartelera->localidades(new DateTimeImmutable(self::AHORA)));
         // Después de la última función no queda ninguna.
         self::assertSame([], $this->cartelera->localidades(new DateTimeImmutable('2026-10-20 21:00:00')));
+    }
+
+    public function testDetalleDeFuncionProgramada(): void
+    {
+        $detalle = $this->cartelera->detalle($this->enCartelera['carroza']);
+
+        self::assertNotNull($detalle);
+        self::assertSame($this->enCartelera['carroza'], $detalle->id);
+        self::assertSame(EstadoFuncion::Programada, $detalle->estado);
+        self::assertTrue($detalle->obrasElegidas);
+        self::assertSame(2000.0, $detalle->precioBase);
+        self::assertSame(40, $detalle->cupo);
+        self::assertSame('Cine Teatro Italiano', $detalle->sala->nombre);
+        self::assertSame('Mercedes', $detalle->sala->localidad);
+        self::assertSame('Av. San Martín 450', $detalle->sala->direccion);
+        self::assertSame(60, $detalle->sala->capacidad);
+        self::assertCount(2, $detalle->obras);
+        self::assertSame('Esperando la carroza', $detalle->obras[0]->titulo);
+        self::assertSame('Alejandro Doria', $detalle->obras[0]->director);
+        self::assertSame(['Comedia'], $detalle->obras[0]->generos);
+        self::assertSame('Relatos salvajes', $detalle->obras[1]->titulo);
+        self::assertSame('Damián Szifron', $detalle->obras[1]->director);
+    }
+
+    public function testDetalleDeFuncionEnVotacionDeTitulosMuestraCandidatas(): void
+    {
+        $detalle = $this->cartelera->detalle($this->enVotacionId);
+
+        self::assertNotNull($detalle);
+        self::assertSame(EstadoFuncion::EnVotacionTitulos, $detalle->estado);
+        self::assertFalse($detalle->obrasElegidas);
+        self::assertNull($detalle->fechaHora);
+        self::assertCount(1, $detalle->obras);
+        self::assertSame('La ciénaga', $detalle->obras[0]->titulo);
+    }
+
+    public function testDetalleDeFuncionEnAcuerdoDeFechaMuestraElegidas(): void
+    {
+        $detalle = $this->cartelera->detalle($this->enAcuerdoId);
+
+        self::assertNotNull($detalle);
+        self::assertSame(EstadoFuncion::EnAcuerdoFecha, $detalle->estado);
+        self::assertTrue($detalle->obrasElegidas);
+        self::assertNull($detalle->fechaHora);
+        self::assertCount(1, $detalle->obras);
+        self::assertSame('Zama', $detalle->obras[0]->titulo);
+    }
+
+    public function testDetalleDeFuncionCanceladaSeVeConSuEstado(): void
+    {
+        $detalle = $this->cartelera->detalle($this->canceladaId);
+
+        self::assertNotNull($detalle);
+        self::assertSame(EstadoFuncion::Cancelada, $detalle->estado);
+    }
+
+    public function testDetalleDeFuncionPasadaSeVe(): void
+    {
+        $detalle = $this->cartelera->detalle($this->pasadaId);
+
+        self::assertNotNull($detalle);
+        self::assertSame('Zama', $detalle->obras[0]->titulo);
+    }
+
+    public function testDetalleConLaElegidaDadaDeBajaLaSigueMostrandoYNoLasPerdedoras(): void
+    {
+        $this->base->ejecutar('UPDATE obra SET dada_de_baja_en = NOW() WHERE id = ?', [$this->obras['Zama']]);
+
+        $detalle = $this->cartelera->detalle($this->enCartelera['zama']);
+
+        self::assertNotNull($detalle);
+        self::assertTrue($detalle->obrasElegidas);
+        self::assertSame(['Zama'], array_map(static fn (ObraEnDetalle $obra): string => $obra->titulo, $detalle->obras));
+    }
+
+    public function testDetalleDeFuncionCanceladaEnVotacionMuestraLasCandidatas(): void
+    {
+        $this->base->ejecutar("UPDATE funcion SET estado = 'cancelada' WHERE id = ?", [$this->enVotacionId]);
+
+        $detalle = $this->cartelera->detalle($this->enVotacionId);
+
+        self::assertNotNull($detalle);
+        self::assertSame(EstadoFuncion::Cancelada, $detalle->estado);
+        self::assertFalse($detalle->obrasElegidas);
+        self::assertSame('La ciénaga', $detalle->obras[0]->titulo);
+    }
+
+    public function testDetalleDeFuncionInexistenteDevuelveNull(): void
+    {
+        self::assertNull($this->cartelera->detalle(Uuid::nuevo()));
+    }
+
+    public function testDetalleDeFuncionConSalaDeshabilitadaDevuelveNull(): void
+    {
+        self::assertNull($this->cartelera->detalle($this->deshabilitadaId));
+    }
+
+    public function testDetalleDeFuncionConSalaDadaDeBajaDevuelveNull(): void
+    {
+        self::assertNull($this->cartelera->detalle($this->deBajaId));
     }
 }

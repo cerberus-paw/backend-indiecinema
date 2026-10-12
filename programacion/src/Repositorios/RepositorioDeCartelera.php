@@ -6,11 +6,15 @@ namespace IndieCinema\Programacion\Repositorios;
 
 use DateTimeImmutable;
 use IndieCinema\Nucleo\BaseDeDatos;
+use IndieCinema\Programacion\Modelo\DetalleDeFuncion;
 use IndieCinema\Programacion\Modelo\EstadoFuncion;
 use IndieCinema\Programacion\Modelo\FiltrosDeCartelera;
 use IndieCinema\Programacion\Modelo\FuncionEnCartelera;
 use IndieCinema\Programacion\Modelo\ObraEnCartelera;
+use IndieCinema\Programacion\Modelo\ObraEnDetalle;
 use IndieCinema\Programacion\Modelo\PaginaDeCartelera;
+use IndieCinema\Programacion\Modelo\SalaEnDetalle;
+use IndieCinema\Programacion\Modelo\TipoObra;
 use InvalidArgumentException;
 
 /**
@@ -72,6 +76,98 @@ final class RepositorioDeCartelera
         [$condiciones, $parametros] = self::condiciones($filtros, $ahora);
 
         return $this->funciones("{$condiciones} " . self::ORDEN, $parametros);
+    }
+
+    /**
+     * El detalle de una función, en cualquier estado, con su sala y sus obras: las elegidas si ya
+     * se definieron, o las candidatas si está en votación (o se canceló durante la votación).
+     *
+     * Las obras dadas de baja también: la baja es lógica justamente para que las funciones sigan
+     * apuntando a ellas. Si se filtraran, una función cuya elegida se dio de baja mostraría las
+     * candidatas que perdieron.
+     *
+     * Devuelve null si la función no existe o si su sala no está habilitada o está dada de baja.
+     */
+    public function detalle(string $id): ?DetalleDeFuncion
+    {
+        $fila = $this->base->fila(
+            'SELECT f.id, f.estado, f.fecha_hora, f.precio_base, f.cupo,
+                    s.id AS sala_id, s.nombre AS sala_nombre, s.descripcion AS sala_descripcion,
+                    s.direccion AS sala_direccion, s.localidad AS sala_localidad,
+                    s.capacidad AS sala_capacidad, s.imagen AS sala_imagen '
+            . self::DESDE . '
+             WHERE f.id = ? AND s.habilitada = TRUE AND s.dada_de_baja_en IS NULL',
+            [$id],
+        );
+        if ($fila === null) {
+            return null;
+        }
+
+        $filasObras = $this->base->filas(
+            "SELECT fo.estado AS estado_obra, o.id, o.titulo, o.sinopsis, o.anio, o.director, o.duracion, o.tipo, o.afiche
+             FROM funcion_obra fo
+             JOIN obra o ON o.id = fo.obra_id
+             WHERE fo.funcion_id = ?
+             ORDER BY o.titulo, o.id",
+            [$id],
+        );
+
+        // Si ya hay elegidas, se muestran sólo ésas (las perdedoras quedan afuera).
+        // Si todavía no hay (en votación), se muestran las candidatas.
+        $elegidas = array_values(array_filter($filasObras, static fn (array $o): bool => $o['estado_obra'] === 'elegida'));
+        $obrasElegidas = $elegidas !== [];
+        $obrasAProyectar = $obrasElegidas ? $elegidas : $filasObras;
+
+        $generosPorObra = [];
+        if ($obrasAProyectar !== []) {
+            $idsObras = array_column($obrasAProyectar, 'id');
+            $marcas = implode(', ', array_fill(0, count($idsObras), '?'));
+            foreach ($this->base->filas(
+                "SELECT og.obra_id, g.nombre AS genero
+                 FROM obra_genero og
+                 JOIN genero g ON g.id = og.genero_id
+                 WHERE og.obra_id IN ({$marcas})
+                 ORDER BY g.nombre",
+                $idsObras,
+            ) as $filaGenero) {
+                $generosPorObra[$filaGenero['obra_id']][] = (string) $filaGenero['genero'];
+            }
+        }
+
+        $obras = array_map(static fn (array $o): ObraEnDetalle => new ObraEnDetalle(
+            (string) $o['id'],
+            (string) $o['titulo'],
+            (string) $o['sinopsis'],
+            (int) $o['anio'],
+            (string) $o['director'],
+            (int) $o['duracion'],
+            TipoObra::from((string) $o['tipo']),
+            $o['afiche'] === null ? null : (string) $o['afiche'],
+            $generosPorObra[$o['id']] ?? [],
+        ), $obrasAProyectar);
+
+        $sala = new SalaEnDetalle(
+            (string) $fila['sala_id'],
+            (string) $fila['sala_nombre'],
+            (string) $fila['sala_descripcion'],
+            (string) $fila['sala_direccion'],
+            (string) $fila['sala_localidad'],
+            (int) $fila['sala_capacidad'],
+            $fila['sala_imagen'] === null ? null : (string) $fila['sala_imagen'],
+        );
+
+        $fechaHora = $fila['fecha_hora'] === null ? null : new DateTimeImmutable((string) $fila['fecha_hora']);
+
+        return new DetalleDeFuncion(
+            (string) $fila['id'],
+            EstadoFuncion::from((string) $fila['estado']),
+            $fechaHora,
+            (float) $fila['precio_base'],
+            (int) $fila['cupo'],
+            $sala,
+            $obras,
+            $obrasElegidas,
+        );
     }
 
     /**

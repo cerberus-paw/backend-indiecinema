@@ -8,3 +8,6 @@
 # Caché de PHPUnit.
 .phpunit.result.cache
 .phpunit.cache/
+
+# Hand-offs entre sesiones de Claude Code: son locales de cada uno.
+.claude/handoff/

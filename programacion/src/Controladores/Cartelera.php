@@ -10,6 +10,7 @@ use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Programacion\Modelo\DetalleDeFuncion;
 use IndieCinema\Programacion\Modelo\EstadoFuncion;
+use IndieCinema\Programacion\Modelo\FuncionEnCartelera;
 use IndieCinema\Programacion\Modelo\Genero;
 use IndieCinema\Programacion\Modelo\ObraEnDetalle;
 use IndieCinema\Programacion\Servicios\ServicioDeCartelera;
@@ -17,8 +18,10 @@ use IndieCinema\Programacion\Servicios\ServicioDeCartelera;
 /**
  * GET /cartelera: las funciones programadas que todavía no pasaron, para cualquiera, con o sin
  * sesión. Los filtros y la página viajan en la URL (un formulario GET), así funcionan sin
- * JavaScript y se pueden compartir. GET /cartelera.csv descarga la cartelera con los mismos
- * filtros. GET /cartelera/{id} muestra la ficha de una función con sus obras y su sala.
+ * JavaScript y se pueden compartir. El mismo pedido con «Accept: application/json» devuelve la
+ * misma consulta en JSON, para actualizar la lista sin recargar. GET /cartelera.csv descarga la
+ * cartelera con los mismos filtros. GET /cartelera/{id} muestra la ficha de una función con sus
+ * obras y su sala.
  */
 final class Cartelera extends Controlador
 {
@@ -27,7 +30,12 @@ final class Cartelera extends Controlador
     }
 
     /**
-     * @throws ExcepcionHttp 404 si la página no es un número o no existe
+     * La página en HTML o, si el pedido acepta JSON, la misma consulta en JSON: las funciones de
+     * la página, los filtros aplicados, los avisos, el paginado y el link al CSV. Las dos llevan
+     * «Vary: Accept», porque la misma URL tiene dos representaciones y una caché (la del navegador
+     * al volver atrás) no las tiene que mezclar.
+     *
+     * @throws ExcepcionHttp 404 si la página no es un número o no existe (en JSON, si se pidió JSON)
      */
     public function listar(Peticion $peticion): Respuesta
     {
@@ -38,6 +46,28 @@ final class Cartelera extends Controlador
         }
         $pagina = $this->servicio->pagina($parametros->filtros, $parametros->pagina);
         $total = $pagina->totalDePaginas();
+        $paginado = [
+            'numero' => $pagina->numero,
+            'total_paginas' => $total,
+            'total_funciones' => $pagina->total,
+            'anterior' => $pagina->numero > 1 ? $parametros->urlDePagina($pagina->numero - 1) : null,
+            'siguiente' => $pagina->numero < $total ? $parametros->urlDePagina($pagina->numero + 1) : null,
+        ];
+
+        if ($peticion->aceptaJson()) {
+            return $this->json([
+                // Con el link a la ficha, que en HTML arma la plantilla de la tarjeta.
+                'funciones' => array_map(
+                    static fn (FuncionEnCartelera $funcion): array => TarjetaDeFuncion::datos($funcion) + ['url' => "/cartelera/{$funcion->id}"],
+                    $pagina->funciones,
+                ),
+                // Un objeto aunque no haya filtros: vacío, json_encode() lo escribiría como lista.
+                'filtros' => (object) $parametros->valores,
+                'avisos' => $parametros->avisos,
+                'paginado' => $paginado,
+                'csv' => $parametros->urlDeCsv(),
+            ])->conCabecera('Vary', 'Accept');
+        }
 
         return $this->vista('cartelera.html.twig', [
             'funciones' => array_map(TarjetaDeFuncion::datos(...), $pagina->funciones),
@@ -46,15 +76,9 @@ final class Cartelera extends Controlador
             'avisos' => $parametros->avisos,
             'localidades' => $this->servicio->localidades(),
             'generos' => array_map(static fn (Genero $genero): array => ['id' => $genero->id, 'nombre' => $genero->nombre], $this->servicio->generos()),
-            'paginado' => [
-                'numero' => $pagina->numero,
-                'total_paginas' => $total,
-                'total_funciones' => $pagina->total,
-                'anterior' => $pagina->numero > 1 ? $parametros->urlDePagina($pagina->numero - 1) : null,
-                'siguiente' => $pagina->numero < $total ? $parametros->urlDePagina($pagina->numero + 1) : null,
-            ],
+            'paginado' => $paginado,
             'csv' => $parametros->urlDeCsv(),
-        ]);
+        ])->conCabecera('Vary', 'Accept');
     }
 
     /**

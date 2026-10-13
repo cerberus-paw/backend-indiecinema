@@ -81,14 +81,35 @@ final class CarteleraTest extends TestCase
     }
 
     /**
-     * @param array<string, mixed> $cartelera
+     * @param array<string, mixed>  $cartelera
+     * @param array<string, string> $cabeceras
      */
-    private function pedir(string $url, array $cartelera = []): Respuesta
+    private function pedir(string $url, array $cartelera = [], array $cabeceras = []): Respuesta
     {
         parse_str((string) parse_url($url, PHP_URL_QUERY), $consulta);
         $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion($cartelera), new Log('programacion', $this->salidaDelLog));
 
-        return $aplicacion->atender(new Peticion('GET', (string) parse_url($url, PHP_URL_PATH), $consulta));
+        return $aplicacion->atender(new Peticion('GET', (string) parse_url($url, PHP_URL_PATH), $consulta, [], $cabeceras));
+    }
+
+    /**
+     * El mismo pedido, como lo hace el JavaScript de la cartelera.
+     *
+     * @param array<string, mixed> $cartelera
+     */
+    private function pedirJson(string $url, array $cartelera = []): Respuesta
+    {
+        return $this->pedir($url, $cartelera, ['Accept' => 'application/json']);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function json(Respuesta $respuesta): array
+    {
+        self::assertSame('application/json; charset=utf-8', $respuesta->cabecera('Content-Type'), $respuesta->cuerpo());
+
+        return json_decode($respuesta->cuerpo(), true, 512, JSON_THROW_ON_ERROR);
     }
 
     private function generoId(string $nombre): string
@@ -453,6 +474,111 @@ final class CarteleraTest extends TestCase
 
         self::assertSame(200, $respuesta->estado());
         self::assertStringContainsString('href="/cartelera" class="nav-enlace activo"', $respuesta->cuerpo());
+    }
+
+    public function testConAcceptJsonDevuelveLaMismaConsultaEnJson(): void
+    {
+        $this->cargarDatosDePrueba();
+
+        $respuesta = $this->pedirJson('/cartelera');
+
+        self::assertSame(200, $respuesta->estado());
+        self::assertSame('Accept', $respuesta->cabecera('Vary'));
+        $json = self::json($respuesta);
+        self::assertSame(['funciones', 'filtros', 'avisos', 'paginado', 'csv'], array_keys($json));
+        self::assertCount(12, $json['funciones']);
+        // Cada función con lo mismo que muestra la tarjeta, y el link a su ficha.
+        $primera = $json['funciones'][0];
+        self::assertSame(['id', 'titulo', 'estado', 'precio', 'sala', 'localidad', 'fecha', 'url'], array_keys($primera));
+        self::assertSame("/cartelera/{$primera['id']}", $primera['url']);
+        self::assertSame(
+            ['numero' => 1, 'total_paginas' => 2, 'total_funciones' => 15, 'anterior' => null, 'siguiente' => '/cartelera?pagina=2'],
+            $json['paginado'],
+        );
+        self::assertSame([], $json['avisos']);
+        self::assertSame('/cartelera.csv', $json['csv']);
+        // Sin filtros, un objeto vacío y no una lista.
+        self::assertStringContainsString('"filtros":{}', $respuesta->cuerpo());
+    }
+
+    public function testSinAcceptJsonSigueSiendoLaPagina(): void
+    {
+        $this->cargarDatosDePrueba();
+
+        // Lo que manda un navegador al abrir la URL o al enviar el formulario.
+        $respuesta = $this->pedir('/cartelera', [], ['Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8']);
+
+        self::assertPagina($respuesta, 12, '15 funciones');
+        self::assertSame('text/html; charset=utf-8', $respuesta->cabecera('Content-Type'));
+        self::assertSame('Accept', $respuesta->cabecera('Vary'));
+    }
+
+    #[DataProvider('filtros')]
+    public function testElJsonTraeLasMismasFuncionesQueLaPagina(string $consulta, int $tarjetas, string $resultados): void
+    {
+        $this->cargarDatosDePrueba();
+        $consulta = strtr($consulta, [
+            '{dentro de 7 días}' => (new DateTimeImmutable('today +7 days'))->format('Y-m-d'),
+            '{dentro de 28 días}' => (new DateTimeImmutable('today +28 days'))->format('Y-m-d'),
+            '{Comedia}' => $this->generoId('Comedia'),
+        ]);
+
+        $json = self::json($this->pedirJson("/cartelera?{$consulta}"));
+        $pagina = $this->pedir("/cartelera?{$consulta}");
+        preg_match_all('#<article class="tarjeta-funcion.*?href="(/cartelera/[^"]+)"#s', $pagina->cuerpo(), $enLaPagina);
+
+        self::assertPagina($pagina, $tarjetas, $resultados);
+        self::assertSame($tarjetas, $json['paginado']['total_funciones']);
+        self::assertSame($enLaPagina[1], array_column($json['funciones'], 'url'));
+        self::assertSame([], $json['avisos']);
+    }
+
+    public function testElJsonConservaLosFiltrosEnLosLinks(): void
+    {
+        $this->cargarDatosDePrueba();
+
+        $json = self::json($this->pedirJson('/cartelera?localidad=Mercedes&pagina=2', ['por_pagina' => 1]));
+
+        self::assertSame(['localidad' => 'Mercedes'], $json['filtros']);
+        self::assertSame(2, $json['paginado']['numero']);
+        self::assertSame('/cartelera?localidad=Mercedes', $json['paginado']['anterior']);
+        self::assertSame('/cartelera?localidad=Mercedes&pagina=3', $json['paginado']['siguiente']);
+        self::assertSame('/cartelera.csv?localidad=Mercedes', $json['csv']);
+    }
+
+    #[DataProvider('parametrosInvalidos')]
+    public function testElJsonAvisaUnFiltroInvalido(string $consulta): void
+    {
+        $this->cargarDatosDePrueba();
+
+        $respuesta = $this->pedirJson("/cartelera?{$consulta}");
+
+        self::assertSame(200, $respuesta->estado());
+        $json = self::json($respuesta);
+        self::assertSame(15, $json['paginado']['total_funciones']);
+        self::assertNotEmpty($json['avisos']);
+    }
+
+    public function testSinResultadosElJsonTraeLaListaVacia(): void
+    {
+        $this->cargarDatosDePrueba();
+
+        $json = self::json($this->pedirJson('/cartelera?q=Nueve+reinas'));
+
+        self::assertSame([], $json['funciones']);
+        self::assertSame(0, $json['paginado']['total_funciones']);
+        self::assertNull($json['paginado']['siguiente']);
+    }
+
+    #[DataProvider('paginasQueNoExisten')]
+    public function testEnJsonUnaPaginaQueNoExisteDa404EnJson(string $consulta): void
+    {
+        $this->cargarDatosDePrueba();
+
+        $respuesta = $this->pedirJson("/cartelera?{$consulta}");
+
+        self::assertSame(404, $respuesta->estado());
+        self::assertSame(['error' => 'No encontramos lo que buscabas.'], self::json($respuesta));
     }
 
     public function testDetalleDeFuncionProgramada(): void

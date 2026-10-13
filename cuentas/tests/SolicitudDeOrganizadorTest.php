@@ -12,14 +12,15 @@ use IndieCinema\Nucleo\Configuracion;
 use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Log;
+use IndieCinema\Nucleo\Pruebas\Dobles\ServidorSmtpDePrueba;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 /**
  * La solicitud para ser organizador de punta a punta: la aplicación entera con las rutas de
- * cuentas y la plantilla del paquete front. En desarrollo, para que Twig falle si la plantilla usa
- * una variable que el controlador no le pasa. No necesita MySQL: la solicitud todavía no se
- * guarda.
+ * cuentas, la plantilla del paquete front y un servidor SMTP de mentira, que recibe el correo al
+ * equipo. En desarrollo, para que Twig falle si la plantilla usa una variable que el controlador
+ * no le pasa. No necesita MySQL: la solicitud todavía no se guarda.
  */
 final class SolicitudDeOrganizadorTest extends TestCase
 {
@@ -27,6 +28,24 @@ final class SolicitudDeOrganizadorTest extends TestCase
     private const URL = '/solicitud';
     private const ESPECTADOR = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
     private const CSRF = 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc';
+    private const EQUIPO = 'equipo@indiecinema.test';
+
+    private static ServidorSmtpDePrueba $correo;
+
+    public static function setUpBeforeClass(): void
+    {
+        self::$correo = ServidorSmtpDePrueba::iniciar();
+    }
+
+    public static function tearDownAfterClass(): void
+    {
+        self::$correo->detener();
+    }
+
+    protected function setUp(): void
+    {
+        self::$correo->vaciar();
+    }
 
     /**
      * Como llega de nginx: sin el prefijo y, con un rol, con las cabeceras de la sesión.
@@ -39,6 +58,8 @@ final class SolicitudDeOrganizadorTest extends TestCase
         $configuracion = new Configuracion([
             'app' => ['subsistema' => 'cuentas', 'prefijo' => '/cuenta', 'entorno' => 'desarrollo'],
             'nginx' => ['secreto' => self::SECRETO],
+            'correo' => ['servidor' => self::$correo->url(), 'remitente' => 'no-responder@indiecinema.test'],
+            'solicitudes' => ['destino' => self::EQUIPO],
         ]);
         $cabeceras = $rol === null ? [] : ['X-Nginx-Secreto' => self::SECRETO, 'X-Usuario-Id' => self::ESPECTADOR, 'X-Rol' => $rol];
         $aplicacion = new Aplicacion(dirname(__DIR__), $configuracion, new Log('cuentas', fopen('php://memory', 'w+')));
@@ -146,6 +167,10 @@ final class SolicitudDeOrganizadorTest extends TestCase
         // 303: recargar no vuelve a mandar la solicitud.
         self::assertSame(303, $respuesta->estado());
         self::assertSame('/cuenta/solicitud?enviada=1', $respuesta->cabecera('Location'));
+        // Le llegó al equipo, a la dirección de la configuración.
+        $correos = self::$correo->correos();
+        self::assertCount(1, $correos);
+        self::assertSame(['<' . self::EQUIPO . '>'], $correos[0]['para']);
 
         $aviso = $this->pedir(url: '/solicitud?enviada=1');
         self::assertSame(200, $aviso->estado());

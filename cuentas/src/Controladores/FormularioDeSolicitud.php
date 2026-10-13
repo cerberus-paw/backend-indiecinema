@@ -128,7 +128,7 @@ final class FormularioDeSolicitud
         if ($valor === '') {
             return $reglas['requerido'] ? ucfirst("falta {$nombre}.") : null;
         }
-        $largo = mb_strlen($valor);
+        $largo = self::largo($valor);
         if (isset($reglas['minimo']) && $largo < $reglas['minimo']) {
             return ucfirst("{$nombre} tiene que tener al menos {$reglas['minimo']} caracteres.");
         }
@@ -146,6 +146,16 @@ final class FormularioDeSolicitud
         }
 
         return null;
+    }
+
+    /**
+     * El largo como lo mide el navegador para minlength y maxlength: en unidades de UTF-16, así
+     * un emoji cuenta dos. Con mb_strlen() el servidor aceptaría textos que el navegador rechaza.
+     * Nunca da menos que los caracteres, así que lo que pasa entra en las columnas de la base.
+     */
+    private static function largo(string $valor): int
+    {
+        return intdiv(strlen(mb_convert_encoding($valor, 'UTF-16LE', 'UTF-8')), 2);
     }
 
     /**

@@ -226,7 +226,9 @@ docker run --rm -u "$(id -u):$(id -g)" -v "$PWD/..:/app" -w /app/backend-indieci
 | http://localhost:8080/estaticos/… | CSS, JavaScript e imágenes del paquete front |
 
 Las rutas `/interno/` dan 404 desde afuera: sólo se llaman entre subsistemas, por la red del
-compose (`http://cuentas:8080/interno/…`). MySQL no publica ningún puerto.
+compose (`http://cuentas:8080/interno/…`). Lo comprueba `nginx/comprobar-desde-afuera.sh
+http://localhost:8080`, también con rutas disfrazadas, y lo corre la CI. MySQL no publica ningún
+puerto.
 
 Si el 8080 está ocupado, se cambia `PUERTO_HTTP` en `.env`. Si nginx ya se había creado con el
 puerto ocupado, queda andando pero sin el puerto abierto («no se pudo conectar» en el navegador),

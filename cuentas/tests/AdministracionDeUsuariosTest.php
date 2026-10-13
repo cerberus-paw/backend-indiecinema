@@ -8,6 +8,7 @@ use IndieCinema\Cuentas\Modelo\EstadoCuenta;
 use IndieCinema\Cuentas\Modelo\Usuario;
 use IndieCinema\Cuentas\Repositorios\RepositorioDeUsuarios;
 use IndieCinema\Nucleo\Aplicacion;
+use IndieCinema\Nucleo\BaseDeDatos;
 use IndieCinema\Nucleo\Configuracion;
 use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
@@ -29,14 +30,21 @@ final class AdministracionDeUsuariosTest extends TestCase
     private const SECRETO = 'secreto-de-nginx';
     private const URL = '/administracion/usuarios';
     private const ADMINISTRADOR = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    private const CSRF = 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc';
 
     private Configuracion $configuracion;
+    private BaseDeDatos $base;
     private RepositorioDeUsuarios $usuarios;
+
+    /** @var resource */
+    private $salidaDelLog;
 
     protected function setUp(): void
     {
         $this->configuracion = $this->configuracion();
-        $this->usuarios = new RepositorioDeUsuarios(self::baseConTablasNuevas($this->configuracion));
+        $this->base = self::baseConTablasNuevas($this->configuracion);
+        $this->usuarios = new RepositorioDeUsuarios($this->base);
+        $this->salidaDelLog = fopen('php://memory', 'w+');
     }
 
     /**
@@ -57,13 +65,51 @@ final class AdministracionDeUsuariosTest extends TestCase
      *
      * @param array<string, mixed> $usuarios la sección [usuarios] de config.ini
      */
-    private function pedir(string $url = self::URL, ?string $rol = 'administrador', array $usuarios = []): Respuesta
+    private function pedir(string $url = self::URL, ?string $rol = 'administrador', array $usuarios = [], string $metodo = 'GET', array $cuerpo = []): Respuesta
     {
         parse_str((string) parse_url($url, PHP_URL_QUERY), $consulta);
         $cabeceras = $rol === null ? [] : ['X-Nginx-Secreto' => self::SECRETO, 'X-Usuario-Id' => self::ADMINISTRADOR, 'X-Rol' => $rol];
-        $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion($usuarios), new Log('cuentas', fopen('php://memory', 'w+')));
+        $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion($usuarios), new Log('cuentas', $this->salidaDelLog));
 
-        return $aplicacion->atender(new Peticion('GET', (string) parse_url($url, PHP_URL_PATH), $consulta, [], $cabeceras));
+        return $aplicacion->atender(new Peticion($metodo, (string) parse_url($url, PHP_URL_PATH), $consulta, $cuerpo, $cabeceras, ['csrf' => self::CSRF]));
+    }
+
+    /**
+     * El POST de un botón de la tabla, con el token y, si vienen, los filtros de los campos ocultos.
+     *
+     * @param array<string, string> $campos
+     */
+    private function enviar(string $url, array $campos = [], ?string $rol = 'administrador'): Respuesta
+    {
+        return $this->pedir($url, $rol, metodo: 'POST', cuerpo: $campos + ['_csrf' => self::CSRF]);
+    }
+
+    private function log(): string
+    {
+        rewind($this->salidaDelLog);
+
+        return (string) stream_get_contents($this->salidaDelLog);
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function roles(string $id): array
+    {
+        return array_column($this->base->filas('SELECT tipo FROM rol WHERE usuario_id = ? ORDER BY tipo', [$id]), 'tipo');
+    }
+
+    private function abrirSesion(string $id): void
+    {
+        $this->base->ejecutar(
+            'INSERT INTO sesion (huella, usuario_id, creada_en, usada_en, vence_en) VALUES (?, ?, NOW(), NOW(), NOW() + INTERVAL 1 DAY)',
+            [hash('sha256', random_bytes(16)), $id],
+        );
+    }
+
+    private function sesiones(string $id): int
+    {
+        return (int) $this->base->valor('SELECT COUNT(*) FROM sesion WHERE usuario_id = ?', [$id]);
     }
 
     /**
@@ -379,5 +425,140 @@ final class AdministracionDeUsuariosTest extends TestCase
 
         self::assertSame($estado, $respuesta->estado());
         self::assertStringNotContainsString('ana@ejemplo.com', $respuesta->cuerpo());
+    }
+
+    public function testElEspectadorTieneDarYElOrganizadorQuitar(): void
+    {
+        $espectadora = $this->agregar('Eva Espectadora', 'eva@ejemplo.com');
+        $organizador = $this->agregar('Omar Organizador', 'omar@ejemplo.com', [Rol::Organizador]);
+        $moderadora = $this->agregar('Mora Moderadora', 'mora@ejemplo.com', [Rol::Moderador]);
+
+        $cuerpo = $this->pedir(self::URL . '?q=ejemplo')->cuerpo();
+
+        self::assertStringContainsString("action=\"/cuenta/administracion/usuarios/{$espectadora}/dar-organizador\"", $cuerpo);
+        self::assertStringContainsString("action=\"/cuenta/administracion/usuarios/{$organizador}/quitar-organizador\"", $cuerpo);
+        // El moderador y el administrador no tienen acciones: esos roles no se cambian desde la web.
+        preg_match("#<tr data-usuario=\"{$moderadora}\">.*?</tr>#s", $cuerpo, $fila);
+        self::assertStringNotContainsString('<form', $fila[0] ?? '');
+        // Cada formulario lleva el token y la búsqueda, para volver a ella.
+        preg_match("#<tr data-usuario=\"{$espectadora}\">.*?</tr>#s", $cuerpo, $fila);
+        self::assertStringContainsString('name="_csrf" value="' . self::CSRF . '"', $fila[0] ?? '');
+        self::assertStringContainsString('<input type="hidden" name="q" value="ejemplo">', $fila[0] ?? '');
+    }
+
+    public function testDarElRolDeOrganizadorCierraSusSesionesYQuedaEnElLog(): void
+    {
+        $id = $this->agregar('Eva Espectadora', 'eva@ejemplo.com');
+        $this->abrirSesion($id);
+
+        $respuesta = $this->enviar(self::URL . "/{$id}/dar-organizador");
+
+        self::assertSame(303, $respuesta->estado(), $respuesta->cuerpo());
+        self::assertSame("/cuenta/administracion/usuarios?organizador_dado={$id}", $respuesta->cabecera('Location'));
+        self::assertSame(['espectador', 'organizador'], $this->roles($id));
+        // Con el rol nuevo tiene que volver a ingresar: así nginx manda el rol al día.
+        self::assertSame(0, $this->sesiones($id));
+        self::assertStringContainsString(self::ADMINISTRADOR . " le dio el rol de organizador a {$id}.", $this->log());
+        self::assertStringContainsString(
+            'Le diste el rol de organizador a «Eva Espectadora»',
+            $this->pedir(self::URL . "?organizador_dado={$id}")->cuerpo(),
+        );
+    }
+
+    public function testQuitarElRolDeOrganizadorCierraSusSesionesYQuedaEnElLog(): void
+    {
+        $id = $this->agregar('Omar Organizador', 'omar@ejemplo.com', [Rol::Organizador]);
+        $this->abrirSesion($id);
+
+        $respuesta = $this->enviar(self::URL . "/{$id}/quitar-organizador");
+
+        self::assertSame(303, $respuesta->estado());
+        self::assertSame("/cuenta/administracion/usuarios?organizador_quitado={$id}", $respuesta->cabecera('Location'));
+        self::assertSame(['espectador'], $this->roles($id));
+        self::assertSame(0, $this->sesiones($id));
+        self::assertStringContainsString(self::ADMINISTRADOR . " le quitó el rol de organizador a {$id}.", $this->log());
+        self::assertStringContainsString(
+            'Le quitaste el rol de organizador a «Omar Organizador»',
+            $this->pedir(self::URL . "?organizador_quitado={$id}")->cuerpo(),
+        );
+    }
+
+    public function testVuelveALaMismaBusqueda(): void
+    {
+        $id = $this->agregar('Eva Espectadora', 'eva@ejemplo.com');
+
+        $respuesta = $this->enviar(self::URL . "/{$id}/dar-organizador", ['q' => 'eva', 'rol' => 'espectador', 'estado' => 'activa']);
+
+        self::assertSame(
+            "/cuenta/administracion/usuarios?q=eva&rol=espectador&estado=activa&organizador_dado={$id}",
+            $respuesta->cabecera('Location'),
+        );
+    }
+
+    /**
+     * @return iterable<string, array{list<Rol>, string, list<string>}>
+     */
+    public static function cambiosQueNoCambianNada(): iterable
+    {
+        yield 'dar a quien ya es organizador' => [[Rol::Organizador], 'dar-organizador', ['espectador', 'organizador']];
+        // El administrador ya alcanza al organizador: no se le suma.
+        yield 'dar a un administrador' => [[Rol::Administrador], 'dar-organizador', ['espectador', 'administrador']];
+        yield 'quitar a un espectador' => [[], 'quitar-organizador', ['espectador']];
+    }
+
+    /**
+     * @param list<Rol>    $roles
+     * @param list<string> $quedan
+     */
+    #[DataProvider('cambiosQueNoCambianNada')]
+    public function testUnCambioQueNoCambiaNadaNoSeRegistraNiCierraSesiones(array $roles, string $accion, array $quedan): void
+    {
+        $id = $this->agregar('Ana Pérez', 'ana@ejemplo.com', $roles);
+        $this->abrirSesion($id);
+
+        self::assertSame(303, $this->enviar(self::URL . "/{$id}/{$accion}")->estado());
+
+        self::assertSame($quedan, $this->roles($id));
+        self::assertSame(1, $this->sesiones($id));
+        self::assertStringNotContainsString('rol de organizador', $this->log());
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function usuariosQueNoExisten(): iterable
+    {
+        yield 'un id que no está' => [Uuid::nuevo()];
+        yield 'no es un id' => ['abc'];
+    }
+
+    #[DataProvider('usuariosQueNoExisten')]
+    public function testUnUsuarioQueNoExisteDa404(string $id): void
+    {
+        self::assertSame(404, $this->enviar(self::URL . "/{$id}/dar-organizador")->estado());
+        self::assertSame(404, $this->enviar(self::URL . "/{$id}/quitar-organizador")->estado());
+    }
+
+    public function testSinElTokenCsrfNoCambiaElRol(): void
+    {
+        $id = $this->agregar('Eva Espectadora', 'eva@ejemplo.com');
+
+        $respuesta = $this->pedir(self::URL . "/{$id}/dar-organizador", metodo: 'POST', cuerpo: ['_csrf' => str_repeat('d', 64)]);
+
+        self::assertSame(403, $respuesta->estado());
+        self::assertSame(['espectador'], $this->roles($id));
+    }
+
+    #[DataProvider('otrosRoles')]
+    public function testSoloElAdministradorCambiaRoles(?string $rol, int $estado): void
+    {
+        $espectadora = $this->agregar('Eva Espectadora', 'eva@ejemplo.com');
+        $organizador = $this->agregar('Omar Organizador', 'omar@ejemplo.com', [Rol::Organizador]);
+
+        self::assertSame($estado, $this->enviar(self::URL . "/{$espectadora}/dar-organizador", rol: $rol)->estado());
+        self::assertSame($estado, $this->enviar(self::URL . "/{$organizador}/quitar-organizador", rol: $rol)->estado());
+
+        self::assertSame(['espectador'], $this->roles($espectadora));
+        self::assertSame(['espectador', 'organizador'], $this->roles($organizador));
     }
 }

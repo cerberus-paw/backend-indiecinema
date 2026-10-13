@@ -216,6 +216,7 @@ docker run --rm -u "$(id -u):$(id -g)" -v "$PWD/..:/app" -w /app/backend-indieci
 | http://localhost:8080/acerca-de | «Acerca de IndieCinema»: quiénes somos y cómo funciona |
 | http://localhost:8080/salas | el listado público de salas habilitadas |
 | http://localhost:8080/organizador/salas | «Mis salas», con sesión de organizador |
+| http://localhost:8080/organizador/funciones | «Mis funciones»: las de sus salas, en cualquier estado y con su fecha |
 | http://localhost:8080/cuenta/ | cuentas (`/cuenta/ingresar` y `/cuenta/registro`) |
 | http://localhost:8080/cuenta/solicitud | la solicitud para ser organizador, con sesión de espectador: se guarda y le llega al equipo por correo |
 | http://localhost:8080/cuenta/administracion/solicitudes | la bandeja de solicitudes, para aprobarlas (le da el rol de organizador) o rechazarlas con un motivo; sólo el administrador |

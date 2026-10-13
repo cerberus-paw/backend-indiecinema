@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace IndieCinema\Cuentas\Modelo;
 
+use DateTimeImmutable;
 use IndieCinema\Nucleo\Seguridad\Rol;
 
 /**
@@ -21,6 +22,7 @@ final readonly class UsuarioEnListado
         public string $correo,
         public EstadoCuenta $estado,
         public array $roles,
+        public DateTimeImmutable $creadoEn,
     ) {
     }
 

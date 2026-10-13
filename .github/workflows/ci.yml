@@ -39,7 +39,7 @@ jobs:
       # Que falle uno no corta los otros: se ve de una vez todo lo que está roto.
       fail-fast: false
       matrix:
-        paquete: [nucleo, cuentas, programacion]
+        paquete: [nucleo, cuentas, programacion, funciones]
     # Las pruebas que tocan la base corren contra un MySQL de verdad, como en el README.
     services:
       mysql:

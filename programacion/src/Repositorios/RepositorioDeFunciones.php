@@ -115,25 +115,33 @@ final class RepositorioDeFunciones
     }
 
     /**
-     * Las funciones de todas las salas de un organizador, como las muestra su panel: en el mismo
-     * orden que las de una sala y en cualquier estado, también las canceladas y las que todavía no
-     * tienen fecha.
+     * Las funciones de todas las salas de un organizador, como las muestra su panel, en cualquier
+     * estado: también las canceladas y las que todavía no tienen fecha.
+     *
+     * Arriba, las que siguen en curso, como las de una sala: la más próxima primero y al final las
+     * que todavía no tienen fecha. Abajo, las terminadas (canceladas, finalizadas o con la fecha ya
+     * pasada), la más reciente primero: así las viejas no tapan a las que vienen.
      *
      * Las de una sala dada de baja no están: la sala ya no se ve en ningún lado, así que sus
      * funciones tampoco tienen desde dónde seguirse.
      *
      * @return list<FuncionDelOrganizador>
      */
-    public function delOrganizador(string $organizadorId): array
+    public function delOrganizador(string $organizadorId, DateTimeImmutable $ahora = new DateTimeImmutable()): array
     {
         $filas = $this->base->filas(
-            'SELECT f.id, f.estado, f.fecha_hora, f.precio_base, f.cupo,
-                    s.id AS sala_id, s.nombre AS sala_nombre, s.habilitada AS sala_habilitada
-             FROM funcion f
-             JOIN sala s ON s.id = f.sala_id
-             WHERE s.organizador_id = ? AND s.dada_de_baja_en IS NULL
-             ORDER BY f.fecha_hora IS NULL, f.fecha_hora, f.creada_en DESC, f.id',
-            [$organizadorId],
+            'SELECT * FROM (
+                SELECT f.id, f.estado, f.fecha_hora, f.precio_base, f.cupo, f.creada_en,
+                       s.id AS sala_id, s.nombre AS sala_nombre, s.habilitada AS sala_habilitada,
+                       (f.estado IN (?, ?) OR (f.fecha_hora IS NOT NULL AND f.fecha_hora <= ?)) AS terminada
+                FROM funcion f
+                JOIN sala s ON s.id = f.sala_id
+                WHERE s.organizador_id = ? AND s.dada_de_baja_en IS NULL
+             ) AS f
+             ORDER BY f.terminada, f.fecha_hora IS NULL,
+                      IF(f.terminada, NULL, f.fecha_hora), IF(f.terminada, f.fecha_hora, NULL) DESC,
+                      f.creada_en DESC, f.id',
+            [EstadoFuncion::Cancelada, EstadoFuncion::Finalizada, $ahora, $organizadorId],
         );
         // Los títulos de todas en una sola consulta, en vez de una por función.
         $titulos = [];

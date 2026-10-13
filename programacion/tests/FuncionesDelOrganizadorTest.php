@@ -109,17 +109,30 @@ final class FuncionesDelOrganizadorTest extends TestCase
 
     /**
      * Una ya programada para esa fecha. Cada cambio de estado se guarda antes del siguiente, como
-     * pide el repositorio.
+     * pide el repositorio. $programadaEl es cuándo se fijó la fecha, que tiene que ser anterior a
+     * ella: con una fecha vieja, sirve para tener una función que ya pasó.
      */
-    private function programada(Sala $sala, string $fecha, string $titulo = 'Zama'): Funcion
+    private function programada(Sala $sala, string $fecha, string $titulo = 'Zama', string $programadaEl = 'now'): Funcion
     {
         $funcion = $this->funcion($sala);
         $funcion->cerrarVotacionTitulos([$this->obras[$titulo]]);
         $this->funciones->guardar($funcion);
-        $funcion->fijarFechaHora(new DateTimeImmutable($fecha));
+        $funcion->fijarFechaHora(new DateTimeImmutable($fecha), new DateTimeImmutable($programadaEl));
         $this->funciones->guardar($funcion);
 
         return $funcion;
+    }
+
+    /**
+     * Los ids de las funciones en el orden de la tabla.
+     *
+     * @return list<string>
+     */
+    private static function enLaTabla(string $cuerpo): array
+    {
+        preg_match_all('#<tr data-funcion="([0-9a-f-]{36})">#', $cuerpo, $ids);
+
+        return $ids[1];
     }
 
     public function testMuestraSoloLasFuncionesDeSusSalas(): void
@@ -152,6 +165,31 @@ final class FuncionesDelOrganizadorTest extends TestCase
         self::assertStringContainsString('en votación de títulos', $cuerpo);
         self::assertStringContainsString('La ciénaga + Zama', $cuerpo);
         self::assertStringContainsString('títulos candidatos', $cuerpo);
+    }
+
+    /**
+     * Arriba las que siguen en curso: la más próxima primero y después las que no tienen fecha.
+     * Abajo las terminadas (canceladas, finalizadas o con la fecha ya pasada), la más reciente
+     * primero, así las viejas no tapan a las que vienen.
+     */
+    public function testPrimeroLasQueSiguenEnCursoYDespuesLasTerminadas(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $dentroDeDosSemanas = $this->programada($sala, '2030-09-26 20:30:00');
+        $dentroDeUnaSemana = $this->programada($sala, '2030-09-19 20:30:00');
+        $enVotacion = $this->funcion($sala);
+        $yaPaso = $this->programada($sala, '2020-03-05 20:30:00', programadaEl: '2020-01-01');
+        $finalizada = $this->programada($sala, '2021-06-10 20:30:00', programadaEl: '2021-01-01');
+        $finalizada->finalizar();
+        $this->funciones->guardar($finalizada);
+        $cancelada = $this->programada($sala, '2030-10-03 20:30:00');
+        $cancelada->cancelar();
+        $this->funciones->guardar($cancelada);
+
+        self::assertSame(
+            [$dentroDeUnaSemana->id, $dentroDeDosSemanas->id, $enVotacion->id, $cancelada->id, $finalizada->id, $yaPaso->id],
+            self::enLaTabla($this->pedir(self::ORGANIZADORA)->cuerpo()),
+        );
     }
 
     public function testLaCanceladaSigueEnElPanel(): void

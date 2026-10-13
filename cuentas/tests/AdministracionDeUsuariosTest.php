@@ -451,6 +451,22 @@ final class AdministracionDeUsuariosTest extends TestCase
         self::assertMatchesRegularExpression('#<select[^>]* disabled[^>]*>\s*<option>Moderador</option>#', $fila[0] ?? '');
     }
 
+    public function testLasTarjetasCuentanTodasLasCuentas(): void
+    {
+        $this->cargarUsuarios();
+        $viejo = $this->agregar('Omar Viejo', 'omar@ejemplo.com', [Rol::Organizador]);
+        $this->base->ejecutar("UPDATE usuario SET creado_en = '2020-01-15 12:00:00' WHERE id = ?", [$viejo]);
+        // Un organizador suspendido no está activo.
+        $this->agregar('Sara Suspendida', 'sara@ejemplo.com', [Rol::Organizador], EstadoCuenta::Suspendida);
+
+        // Con una búsqueda, los números siguen siendo de todas las cuentas.
+        $cuerpo = $this->pedir(self::URL . '?q=ana')->cuerpo();
+
+        preg_match_all('#<dd class="panel-admin-dato-valor">([^<]*)</dd>\s*<dd class="panel-admin-dato-nota">([^<]*)</dd>#', $cuerpo, $datos);
+        self::assertSame(['7', '2'], $datos[1], $cuerpo);
+        self::assertSame(['+6 este mes', 'con la cuenta activa'], $datos[2]);
+    }
+
     public function testDarElRolDeOrganizadorCierraSusSesionesYQuedaEnElLog(): void
     {
         $id = $this->agregar('Eva Espectadora', 'eva@ejemplo.com');

@@ -6,6 +6,7 @@ namespace IndieCinema\Cuentas\Servicios;
 
 use IndieCinema\Cuentas\Modelo\FiltrosDeUsuarios;
 use IndieCinema\Cuentas\Modelo\PaginaDeUsuarios;
+use IndieCinema\Cuentas\Modelo\ResumenDeUsuarios;
 use IndieCinema\Cuentas\Modelo\UsuarioEnListado;
 use IndieCinema\Cuentas\Repositorios\RepositorioDeUsuarios;
 use IndieCinema\Nucleo\Configuracion;
@@ -18,8 +19,8 @@ use RuntimeException;
 
 /**
  * Los usuarios para el administrador: el listado con la búsqueda y los filtros, por páginas del
- * tamaño que dice config.ini, y dar o quitar el rol de organizador. Que quien pide sea
- * administrador lo controla la ruta.
+ * tamaño que dice config.ini, los números de las tarjetas, y dar o quitar el rol de organizador.
+ * Que quien pide sea administrador lo controla la ruta.
  *
  * Desde la web sólo se da y se quita el de organizador: el de moderador y el de administrador no
  * tienen pantalla, y el primer administrador sale de los datos de prueba.
@@ -60,6 +61,14 @@ final class ServicioDeUsuarios
         }
 
         return $pagina;
+    }
+
+    /**
+     * Los números de las tarjetas, sobre todas las cuentas: no cambian con la búsqueda.
+     */
+    public function resumen(): ResumenDeUsuarios
+    {
+        return $this->usuarios->resumen();
     }
 
     /**

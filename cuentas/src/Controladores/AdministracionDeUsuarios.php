@@ -16,8 +16,9 @@ use LogicException;
 
 /**
  * GET /cuenta/administracion/usuarios: «Usuarios y roles» del administrador, como el wireframe de
- * la E2, con un buscador por nombre o correo y los filtros de rol y estado, que viajan en la URL
- * (un formulario GET), así funciona sin JavaScript y se puede compartir. En cada fila, el rol es un desplegable: elegir otro y guardar es un POST. Sólo el
+ * la E2, con las tarjetas de números, un buscador por nombre o correo y los filtros de rol y
+ * estado, que viajan en la URL (un formulario GET), así funciona sin JavaScript y se puede
+ * compartir. En cada fila, el rol es un desplegable: elegir otro y guardar es un POST. Sólo el
  * administrador llega: lo controla el rol de la ruta, y el núcleo ya controló el token CSRF de los
  * POST.
  */
@@ -47,7 +48,10 @@ final class AdministracionDeUsuarios extends Controlador
         $pagina = $this->servicio->pagina($parametros->filtros, $parametros->pagina);
         $total = $pagina->totalDePaginas();
 
+        $resumen = $this->servicio->resumen();
+
         return $this->vista('administracion_usuarios.html.twig', [
+            'resumen' => ['usuarios' => $resumen->usuarios, 'nuevos' => $resumen->nuevos, 'organizadores' => $resumen->organizadores],
             'usuarios' => array_map(self::datos(...), $pagina->usuarios),
             'filtros' => $parametros->valores,
             'avisos' => $parametros->avisos,

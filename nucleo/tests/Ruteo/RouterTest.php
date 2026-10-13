@@ -8,6 +8,7 @@ use IndieCinema\Nucleo\Http\ExcepcionHttp;
 use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Pruebas\Dobles\ControladorDePrueba;
 use IndieCinema\Nucleo\Ruteo\Router;
+use IndieCinema\Nucleo\Ruteo\Ruta;
 use IndieCinema\Nucleo\Seguridad\Rol;
 use LogicException;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -39,6 +40,16 @@ final class RouterTest extends TestCase
 
         self::assertSame(['id' => '7'], $parametros);
         self::assertSame(Rol::Organizador, $ruta->rolMinimo);
+    }
+
+    public function testDaTodasLasRutasEnElOrdenEnQueSeDeclararon(): void
+    {
+        $rutas = $this->router->rutas();
+
+        self::assertSame(['GET /', 'GET /salas/{id}', 'POST /salas'], array_map(
+            static fn (Ruta $ruta): string => "{$ruta->metodo} {$ruta->patron}",
+            $rutas,
+        ));
     }
 
     public function testHeadLoAtiendeLaRutaDelGet(): void

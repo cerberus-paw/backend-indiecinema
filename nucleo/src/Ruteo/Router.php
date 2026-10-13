@@ -61,6 +61,17 @@ final class Router
     }
 
     /**
+     * Todas, en el orden en que se declararon: para las pruebas que recorren las rutas de un
+     * subsistema (por ejemplo, que todas las del panel del administrador pidan ese rol).
+     *
+     * @return list<Ruta>
+     */
+    public function rutas(): array
+    {
+        return $this->rutas;
+    }
+
+    /**
      * @return array{0: Ruta, 1: array<string, string>} la ruta y sus parámetros
      *
      * @throws ExcepcionHttp 404 si no existe la ruta, 405 si existe con otro método

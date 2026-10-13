@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace IndieCinema\Cuentas\Servicios;
 
+use IndieCinema\Cuentas\Modelo\FiltrosDeUsuarios;
 use IndieCinema\Cuentas\Modelo\PaginaDeUsuarios;
 use IndieCinema\Cuentas\Repositorios\RepositorioDeUsuarios;
 use IndieCinema\Nucleo\Configuracion;
@@ -11,8 +12,8 @@ use IndieCinema\Nucleo\Http\ExcepcionHttp;
 use RuntimeException;
 
 /**
- * Los usuarios para el administrador: el listado con la búsqueda, por páginas del tamaño que dice
- * config.ini. Que quien pide sea administrador lo controla la ruta.
+ * Los usuarios para el administrador: el listado con la búsqueda y los filtros, por páginas del
+ * tamaño que dice config.ini. Que quien pide sea administrador lo controla la ruta.
  */
 final class ServicioDeUsuarios
 {
@@ -41,9 +42,9 @@ final class ServicioDeUsuarios
      *
      * @throws ExcepcionHttp 404 si la página no existe
      */
-    public function pagina(?string $texto, int $numero): PaginaDeUsuarios
+    public function pagina(FiltrosDeUsuarios $filtros, int $numero): PaginaDeUsuarios
     {
-        $pagina = $this->usuarios->pagina($texto, $numero, $this->porPagina);
+        $pagina = $this->usuarios->pagina($filtros, $numero, $this->porPagina);
         if (!$pagina->existe()) {
             throw ExcepcionHttp::noEncontrada();
         }

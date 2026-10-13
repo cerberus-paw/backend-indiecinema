@@ -6,6 +6,7 @@ namespace IndieCinema\Cuentas\Repositorios;
 
 use DateTimeImmutable;
 use IndieCinema\Cuentas\Modelo\EstadoCuenta;
+use IndieCinema\Cuentas\Modelo\FiltrosDeUsuarios;
 use IndieCinema\Cuentas\Modelo\PaginaDeUsuarios;
 use IndieCinema\Cuentas\Modelo\Usuario;
 use IndieCinema\Cuentas\Modelo\UsuarioEnListado;
@@ -59,27 +60,41 @@ final class RepositorioDeUsuarios
      * Una página del listado del administrador, por nombre y después por correo, que es único y
      * deja el orden fijo entre dos usuarios con el mismo nombre.
      *
-     * @param ?string      $texto  si viene, sólo los que lo tienen en el nombre o en el correo. El
-     *                             nombre se compara sin distinguir mayúsculas ni tildes (la
-     *                             intercalación de la columna); el correo, sólo si el texto es
-     *                             ASCII, como la columna: un texto con tildes no puede estar en un
-     *                             correo. Va como parámetro, con los comodines de LIKE escapados.
+     * - El texto, en el nombre o en el correo. El nombre se compara sin distinguir mayúsculas ni
+     *   tildes (la intercalación de la columna); el correo, sólo si el texto es ASCII, como la
+     *   columna: un texto con tildes no puede estar en un correo. Va como parámetro, con los
+     *   comodines de LIKE escapados.
+     * - El rol es el mayor de cada usuario, el que muestra la tabla: los roles se acumulan, y un
+     *   organizador también es espectador, pero filtrar por espectador trae a los que son sólo eso.
+     *
      * @param positive-int $numero
      * @param positive-int $tamano
      */
-    public function pagina(?string $texto, int $numero, int $tamano): PaginaDeUsuarios
+    public function pagina(FiltrosDeUsuarios $filtros, int $numero, int $tamano): PaginaDeUsuarios
     {
-        $texto = trim((string) $texto);
-        $condicion = 'TRUE';
+        $condiciones = ['TRUE'];
         $parametros = [];
+        $texto = trim((string) $filtros->texto);
         if ($texto !== '') {
-            $condicion = "u.nombre LIKE ? ESCAPE '!'";
-            $parametros = [self::contiene($texto)];
-            if (mb_check_encoding($texto, 'ASCII')) {
-                $condicion = "({$condicion} OR u.correo LIKE ? ESCAPE '!')";
-                $parametros[] = self::contiene($texto);
+            $ascii = mb_check_encoding($texto, 'ASCII');
+            $condiciones[] = $ascii ? "(u.nombre LIKE ? ESCAPE '!' OR u.correo LIKE ? ESCAPE '!')" : "u.nombre LIKE ? ESCAPE '!'";
+            array_push($parametros, ...array_fill(0, $ascii ? 2 : 1, self::contiene($texto)));
+        }
+        if ($filtros->rol !== null) {
+            $condiciones[] = 'EXISTS (SELECT 1 FROM rol WHERE rol.usuario_id = u.id AND rol.tipo = ?)';
+            $parametros[] = $filtros->rol->value;
+            $mayores = array_filter(Rol::cases(), static fn (Rol $rol): bool => $rol->alcanza($filtros->rol) && $rol !== $filtros->rol);
+            if ($mayores !== []) {
+                $condiciones[] = 'NOT EXISTS (SELECT 1 FROM rol WHERE rol.usuario_id = u.id AND rol.tipo IN ('
+                    . implode(', ', array_fill(0, count($mayores), '?')) . '))';
+                array_push($parametros, ...array_map(static fn (Rol $rol): string => $rol->value, array_values($mayores)));
             }
         }
+        if ($filtros->estado !== null) {
+            $condiciones[] = 'u.estado = ?';
+            $parametros[] = $filtros->estado->value;
+        }
+        $condicion = implode(' AND ', $condiciones);
 
         $total = (int) $this->base->valor("SELECT COUNT(*) FROM usuario u WHERE {$condicion}", $parametros);
         $pagina = new PaginaDeUsuarios([], $numero, $tamano, $total);

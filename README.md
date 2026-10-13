@@ -222,7 +222,7 @@ docker run --rm -u "$(id -u):$(id -g)" -v "$PWD/..:/app" -w /app/backend-indieci
 | http://localhost:8080/cuenta/administracion/solicitudes | la bandeja de solicitudes, para aprobarlas (le da el rol de organizador) o rechazarlas con un motivo; sólo el administrador |
 | http://localhost:8025 | el buzón de prueba (Mailpit): los correos que mandan los subsistemas, sin que salgan a nadie |
 | http://localhost:8080/administracion/salas | todas las salas, para habilitarlas o deshabilitarlas; sólo el administrador |
-| http://localhost:8080/cuenta/administracion/usuarios | usuarios y roles, con buscador por nombre o correo, filtros de rol y estado, y dar o quitar el rol de organizador; sólo el administrador |
+| http://localhost:8080/cuenta/administracion/usuarios | usuarios y roles, con buscador por nombre o correo, filtros de rol y estado, y el rol en un desplegable (espectador u organizador); sólo el administrador |
 | http://localhost:8080/funcion/ | funciones: todavía sin pantallas, responde la página de error (404) |
 | http://localhost:8080/estaticos/… | CSS, JavaScript e imágenes del paquete front |
 

@@ -75,9 +75,9 @@ final class AdministracionDeUsuariosTest extends TestCase
     }
 
     /**
-     * El POST de un botón de la tabla, con el token y, si vienen, los filtros de los campos ocultos.
+     * El POST del desplegable del rol, con el token y, si vienen, los filtros de los campos ocultos.
      *
-     * @param array<string, string> $campos
+     * @param array<string, mixed> $campos
      */
     private function enviar(string $url, array $campos = [], ?string $rol = 'administrador'): Respuesta
     {
@@ -170,8 +170,9 @@ final class AdministracionDeUsuariosTest extends TestCase
         preg_match("#<tr data-usuario=\"{$id}\">.*?</tr>#s", $cuerpo, $fila);
         self::assertNotEmpty($fila, $cuerpo);
         self::assertStringContainsString('jgomez@correo.org', $fila[0]);
-        // Un solo rol, el mayor, como el wireframe: el organizador también es espectador.
-        preg_match_all('#class="usuario-rol rol-([a-z]+)"#', $fila[0], $roles);
+        // Un solo rol, el mayor, elegido en el desplegable como el wireframe: el organizador también
+        // es espectador.
+        preg_match_all('#<option value="([a-z]+)" selected>#', $fila[0], $roles);
         self::assertSame(['organizador'], $roles[1]);
         self::assertStringContainsString('estado-cuenta-activa', $fila[0]);
         // La inicial en el avatar.
@@ -427,7 +428,7 @@ final class AdministracionDeUsuariosTest extends TestCase
         self::assertStringNotContainsString('ana@ejemplo.com', $respuesta->cuerpo());
     }
 
-    public function testElEspectadorTieneDarYElOrganizadorQuitar(): void
+    public function testElEspectadorYElOrganizadorTienenElDesplegableDelRol(): void
     {
         $espectadora = $this->agregar('Eva Espectadora', 'eva@ejemplo.com');
         $organizador = $this->agregar('Omar Organizador', 'omar@ejemplo.com', [Rol::Organizador]);
@@ -435,15 +436,19 @@ final class AdministracionDeUsuariosTest extends TestCase
 
         $cuerpo = $this->pedir(self::URL . '?q=ejemplo')->cuerpo();
 
-        self::assertStringContainsString("action=\"/cuenta/administracion/usuarios/{$espectadora}/dar-organizador\"", $cuerpo);
-        self::assertStringContainsString("action=\"/cuenta/administracion/usuarios/{$organizador}/quitar-organizador\"", $cuerpo);
-        // El moderador y el administrador no tienen acciones: esos roles no se cambian desde la web.
+        foreach ([$espectadora => 'espectador', $organizador => 'organizador'] as $id => $rol) {
+            preg_match("#<tr data-usuario=\"{$id}\">.*?</tr>#s", $cuerpo, $fila);
+            self::assertStringContainsString("action=\"/cuenta/administracion/usuarios/{$id}/rol\"", $fila[0] ?? '');
+            self::assertStringContainsString('<select name="nuevo_rol"', $fila[0] ?? '');
+            self::assertStringContainsString("<option value=\"{$rol}\" selected>", $fila[0] ?? '');
+            // Cada formulario lleva el token y la búsqueda, para volver a ella.
+            self::assertStringContainsString('name="_csrf" value="' . self::CSRF . '"', $fila[0] ?? '');
+            self::assertStringContainsString('<input type="hidden" name="q" value="ejemplo">', $fila[0] ?? '');
+        }
+        // El moderador y el administrador no se cambian desde la web: el desplegable, deshabilitado.
         preg_match("#<tr data-usuario=\"{$moderadora}\">.*?</tr>#s", $cuerpo, $fila);
         self::assertStringNotContainsString('<form', $fila[0] ?? '');
-        // Cada formulario lleva el token y la búsqueda, para volver a ella.
-        preg_match("#<tr data-usuario=\"{$espectadora}\">.*?</tr>#s", $cuerpo, $fila);
-        self::assertStringContainsString('name="_csrf" value="' . self::CSRF . '"', $fila[0] ?? '');
-        self::assertStringContainsString('<input type="hidden" name="q" value="ejemplo">', $fila[0] ?? '');
+        self::assertMatchesRegularExpression('#<select[^>]* disabled[^>]*>\s*<option>Moderador</option>#', $fila[0] ?? '');
     }
 
     public function testDarElRolDeOrganizadorCierraSusSesionesYQuedaEnElLog(): void
@@ -451,7 +456,7 @@ final class AdministracionDeUsuariosTest extends TestCase
         $id = $this->agregar('Eva Espectadora', 'eva@ejemplo.com');
         $this->abrirSesion($id);
 
-        $respuesta = $this->enviar(self::URL . "/{$id}/dar-organizador");
+        $respuesta = $this->enviar(self::URL . "/{$id}/rol", ['nuevo_rol' => 'organizador']);
 
         self::assertSame(303, $respuesta->estado(), $respuesta->cuerpo());
         self::assertSame("/cuenta/administracion/usuarios?organizador_dado={$id}", $respuesta->cabecera('Location'));
@@ -470,7 +475,7 @@ final class AdministracionDeUsuariosTest extends TestCase
         $id = $this->agregar('Omar Organizador', 'omar@ejemplo.com', [Rol::Organizador]);
         $this->abrirSesion($id);
 
-        $respuesta = $this->enviar(self::URL . "/{$id}/quitar-organizador");
+        $respuesta = $this->enviar(self::URL . "/{$id}/rol", ['nuevo_rol' => 'espectador']);
 
         self::assertSame(303, $respuesta->estado());
         self::assertSame("/cuenta/administracion/usuarios?organizador_quitado={$id}", $respuesta->cabecera('Location'));
@@ -487,7 +492,8 @@ final class AdministracionDeUsuariosTest extends TestCase
     {
         $id = $this->agregar('Eva Espectadora', 'eva@ejemplo.com');
 
-        $respuesta = $this->enviar(self::URL . "/{$id}/dar-organizador", ['q' => 'eva', 'rol' => 'espectador', 'estado' => 'activa']);
+        // El filtro de rol viaja como rol y el rol elegido, como nuevo_rol: no se pisan.
+        $respuesta = $this->enviar(self::URL . "/{$id}/rol", ['nuevo_rol' => 'organizador', 'q' => 'eva', 'rol' => 'espectador', 'estado' => 'activa']);
 
         self::assertSame(
             "/cuenta/administracion/usuarios?q=eva&rol=espectador&estado=activa&organizador_dado={$id}",
@@ -500,27 +506,64 @@ final class AdministracionDeUsuariosTest extends TestCase
      */
     public static function cambiosQueNoCambianNada(): iterable
     {
-        yield 'dar a quien ya es organizador' => [[Rol::Organizador], 'dar-organizador', ['espectador', 'organizador']];
-        // El administrador ya alcanza al organizador: no se le suma.
-        yield 'dar a un administrador' => [[Rol::Administrador], 'dar-organizador', ['espectador', 'administrador']];
-        yield 'quitar a un espectador' => [[], 'quitar-organizador', ['espectador']];
+        yield 'organizador a quien ya lo es' => [[Rol::Organizador], 'organizador', ['espectador', 'organizador']];
+        yield 'espectador a quien ya lo es' => [[], 'espectador', ['espectador']];
     }
 
     /**
+     * Sin JavaScript, «Guardar» está siempre: guardar sin cambiar el rol vuelve sin aviso.
+     *
      * @param list<Rol>    $roles
      * @param list<string> $quedan
      */
     #[DataProvider('cambiosQueNoCambianNada')]
-    public function testUnCambioQueNoCambiaNadaNoSeRegistraNiCierraSesiones(array $roles, string $accion, array $quedan): void
+    public function testElegirElMismoRolNoCambiaNadaNiSeRegistra(array $roles, string $nuevoRol, array $quedan): void
     {
         $id = $this->agregar('Ana Pérez', 'ana@ejemplo.com', $roles);
         $this->abrirSesion($id);
 
-        self::assertSame(303, $this->enviar(self::URL . "/{$id}/{$accion}")->estado());
+        $respuesta = $this->enviar(self::URL . "/{$id}/rol", ['nuevo_rol' => $nuevoRol]);
 
+        self::assertSame(303, $respuesta->estado());
+        self::assertSame('/cuenta/administracion/usuarios', $respuesta->cabecera('Location'));
         self::assertSame($quedan, $this->roles($id));
         self::assertSame(1, $this->sesiones($id));
         self::assertStringNotContainsString('rol de organizador', $this->log());
+    }
+
+    /**
+     * @return iterable<string, array{list<Rol>, array<string, mixed>}>
+     */
+    public static function cambiosQueNoSePuedenHacer(): iterable
+    {
+        // Esos roles no se cambian desde la web, ni para sumarles el de organizador.
+        yield 'un administrador a organizador' => [[Rol::Administrador], ['nuevo_rol' => 'organizador']];
+        yield 'un administrador a espectador' => [[Rol::Administrador], ['nuevo_rol' => 'espectador']];
+        yield 'un moderador a espectador' => [[Rol::Moderador], ['nuevo_rol' => 'espectador']];
+        // Desde la web no se da otro rol que el de organizador.
+        yield 'un espectador a administrador' => [[], ['nuevo_rol' => 'administrador']];
+        yield 'un espectador a moderador' => [[], ['nuevo_rol' => 'moderador']];
+        yield 'un espectador a visitante' => [[], ['nuevo_rol' => 'visitante']];
+        yield 'un rol que no existe' => [[], ['nuevo_rol' => 'productor']];
+        yield 'sin rol' => [[], []];
+        yield 'el rol como arreglo' => [[], ['nuevo_rol' => ['organizador']]];
+    }
+
+    /**
+     * @param list<Rol>            $roles
+     * @param array<string, mixed> $campos
+     */
+    #[DataProvider('cambiosQueNoSePuedenHacer')]
+    public function testUnCambioQueNoSePuedeHacerDa400(array $roles, array $campos): void
+    {
+        $id = $this->agregar('Ana Pérez', 'ana@ejemplo.com', $roles);
+        $antes = $this->roles($id);
+        $this->abrirSesion($id);
+
+        self::assertSame(400, $this->enviar(self::URL . "/{$id}/rol", $campos)->estado());
+
+        self::assertSame($antes, $this->roles($id));
+        self::assertSame(1, $this->sesiones($id));
     }
 
     /**
@@ -535,15 +578,15 @@ final class AdministracionDeUsuariosTest extends TestCase
     #[DataProvider('usuariosQueNoExisten')]
     public function testUnUsuarioQueNoExisteDa404(string $id): void
     {
-        self::assertSame(404, $this->enviar(self::URL . "/{$id}/dar-organizador")->estado());
-        self::assertSame(404, $this->enviar(self::URL . "/{$id}/quitar-organizador")->estado());
+        self::assertSame(404, $this->enviar(self::URL . "/{$id}/rol", ['nuevo_rol' => 'organizador'])->estado());
+        self::assertSame(404, $this->enviar(self::URL . "/{$id}/rol", ['nuevo_rol' => 'espectador'])->estado());
     }
 
     public function testSinElTokenCsrfNoCambiaElRol(): void
     {
         $id = $this->agregar('Eva Espectadora', 'eva@ejemplo.com');
 
-        $respuesta = $this->pedir(self::URL . "/{$id}/dar-organizador", metodo: 'POST', cuerpo: ['_csrf' => str_repeat('d', 64)]);
+        $respuesta = $this->pedir(self::URL . "/{$id}/rol", metodo: 'POST', cuerpo: ['nuevo_rol' => 'organizador', '_csrf' => str_repeat('d', 64)]);
 
         self::assertSame(403, $respuesta->estado());
         self::assertSame(['espectador'], $this->roles($id));
@@ -555,8 +598,8 @@ final class AdministracionDeUsuariosTest extends TestCase
         $espectadora = $this->agregar('Eva Espectadora', 'eva@ejemplo.com');
         $organizador = $this->agregar('Omar Organizador', 'omar@ejemplo.com', [Rol::Organizador]);
 
-        self::assertSame($estado, $this->enviar(self::URL . "/{$espectadora}/dar-organizador", rol: $rol)->estado());
-        self::assertSame($estado, $this->enviar(self::URL . "/{$organizador}/quitar-organizador", rol: $rol)->estado());
+        self::assertSame($estado, $this->enviar(self::URL . "/{$espectadora}/rol", ['nuevo_rol' => 'organizador'], $rol)->estado());
+        self::assertSame($estado, $this->enviar(self::URL . "/{$organizador}/rol", ['nuevo_rol' => 'espectador'], $rol)->estado());
 
         self::assertSame(['espectador'], $this->roles($espectadora));
         self::assertSame(['espectador', 'organizador'], $this->roles($organizador));

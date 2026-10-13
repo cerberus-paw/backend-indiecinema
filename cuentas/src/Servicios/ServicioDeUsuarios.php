@@ -71,6 +71,34 @@ final class ServicioDeUsuarios
     }
 
     /**
+     * El desplegable del rol de cada fila: deja al usuario de espectador o de organizador. Al
+     * moderador y al administrador no se los cambia desde la web, y el desplegable ni los ofrece.
+     *
+     * @return bool si cambió algo: elegir el rol que ya tenía no cambia nada ni se registra
+     *
+     * @throws ExcepcionHttp 404 si el usuario no existe; 400 si el rol no es espectador ni
+     *                       organizador, o si el usuario es moderador o administrador
+     */
+    public function cambiarRol(string $id, Rol $rol, Usuario $administrador): bool
+    {
+        $actual = $this->buscar($id)->mayorRol();
+        $cambiables = [Rol::Espectador, Rol::Organizador];
+        if (!in_array($rol, $cambiables, true) || !in_array($actual, $cambiables, true)) {
+            throw ExcepcionHttp::solicitudInvalida('Desde la web sólo se pasa de espectador a organizador, o al revés.');
+        }
+        if ($rol === $actual) {
+            return false;
+        }
+        if ($rol === Rol::Organizador) {
+            $this->darOrganizador($id, $administrador);
+        } else {
+            $this->quitarOrganizador($id, $administrador);
+        }
+
+        return true;
+    }
+
+    /**
      * Le da el rol de organizador, además del que tiene. Si ya lo tiene, o uno mayor que lo
      * incluye, no cambia nada ni se registra (dos pestañas, o reenviar el POST).
      *

@@ -10,15 +10,16 @@ use IndieCinema\Nucleo\Controlador;
 use IndieCinema\Nucleo\Http\ExcepcionHttp;
 use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
+use IndieCinema\Nucleo\Seguridad\Rol;
 use IndieCinema\Nucleo\Seguridad\Usuario;
 use LogicException;
 
 /**
  * GET /cuenta/administracion/usuarios: «Usuarios y roles» del administrador, como el wireframe de
  * la E2, con un buscador por nombre o correo y los filtros de rol y estado, que viajan en la URL
- * (un formulario GET), así funciona sin JavaScript y se puede compartir. Desde cada fila se da o
- * se quita el rol de organizador, con un POST. Sólo el administrador llega: lo controla el rol de
- * la ruta, y el núcleo ya controló el token CSRF de los POST.
+ * (un formulario GET), así funciona sin JavaScript y se puede compartir. En cada fila, el rol es un desplegable: elegir otro y guardar es un POST. Sólo el
+ * administrador llega: lo controla el rol de la ruta, y el núcleo ya controló el token CSRF de los
+ * POST.
  */
 final class AdministracionDeUsuarios extends Controlador
 {
@@ -63,23 +64,27 @@ final class AdministracionDeUsuarios extends Controlador
     }
 
     /**
-     * @throws ExcepcionHttp 404 si el usuario no existe
+     * El desplegable del rol de una fila. El campo es nuevo_rol y no rol, que es el filtro que
+     * viaja en los campos ocultos para volver a la misma búsqueda. Si no cambió nada, vuelve sin
+     * aviso.
+     *
+     * @throws ExcepcionHttp 404 si el usuario no existe; 400 si el rol no se puede elegir
      */
-    public function darOrganizador(Peticion $peticion): Respuesta
+    public function cambiarRol(Peticion $peticion): Respuesta
     {
-        $usuario = $this->servicio->darOrganizador((string) $peticion->parametro('id'), self::administrador($peticion));
+        $id = (string) $peticion->parametro('id');
+        $valor = $peticion->campo('nuevo_rol');
+        $rol = is_string($valor) ? Rol::tryFrom($valor) : null;
+        if ($rol === null) {
+            throw ExcepcionHttp::solicitudInvalida('Elegí espectador u organizador.');
+        }
+        $cambio = $this->servicio->cambiarRol($id, $rol, self::administrador($peticion));
 
-        return self::volverAlListado($peticion, ['organizador_dado' => $usuario->id]);
-    }
-
-    /**
-     * @throws ExcepcionHttp 404 si el usuario no existe
-     */
-    public function quitarOrganizador(Peticion $peticion): Respuesta
-    {
-        $usuario = $this->servicio->quitarOrganizador((string) $peticion->parametro('id'), self::administrador($peticion));
-
-        return self::volverAlListado($peticion, ['organizador_quitado' => $usuario->id]);
+        return self::volverAlListado($peticion, match (true) {
+            !$cambio => [],
+            $rol === Rol::Organizador => ['organizador_dado' => $id],
+            default => ['organizador_quitado' => $id],
+        });
     }
 
     private static function administrador(Peticion $peticion): Usuario

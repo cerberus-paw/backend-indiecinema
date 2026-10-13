@@ -32,11 +32,10 @@ return static function (Router $router): void {
     $router->get('/solicitud', [SolicitudDeOrganizador::class, 'mostrar'], Rol::Espectador);
     $router->post('/solicitud', [SolicitudDeOrganizador::class, 'enviar'], Rol::Espectador);
 
-    // El listado de usuarios con su buscador, y dar o quitar el rol de organizador; sólo para el
-    // administrador.
+    // El listado de usuarios con su buscador, y el desplegable que da o quita el rol de organizador;
+    // sólo para el administrador.
     $router->get('/administracion/usuarios', [AdministracionDeUsuarios::class, 'listar'], Rol::Administrador);
-    $router->post('/administracion/usuarios/{id}/dar-organizador', [AdministracionDeUsuarios::class, 'darOrganizador'], Rol::Administrador);
-    $router->post('/administracion/usuarios/{id}/quitar-organizador', [AdministracionDeUsuarios::class, 'quitarOrganizador'], Rol::Administrador);
+    $router->post('/administracion/usuarios/{id}/rol', [AdministracionDeUsuarios::class, 'cambiarRol'], Rol::Administrador);
 
     // La bandeja de solicitudes para ser organizador: aprobar una le da el rol.
     $router->get('/administracion/solicitudes', [AdministracionDeSolicitudes::class, 'listar'], Rol::Administrador);

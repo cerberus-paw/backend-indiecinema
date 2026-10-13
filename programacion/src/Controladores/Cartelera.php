@@ -39,7 +39,7 @@ final class Cartelera extends Controlador
      */
     public function listar(Peticion $peticion): Respuesta
     {
-        $parametros = self::parametros($peticion);
+        $parametros = $this->parametros($peticion);
         // «pagina=abc» o «pagina=0» no es una página que exista, igual que una después de la última.
         if ($parametros->pagina === null) {
             throw ExcepcionHttp::noEncontrada();
@@ -87,7 +87,7 @@ final class Cartelera extends Controlador
      */
     public function descargar(Peticion $peticion): Respuesta
     {
-        $funciones = $this->servicio->todas(self::parametros($peticion)->filtros);
+        $funciones = $this->servicio->todas($this->parametros($peticion)->filtros);
 
         return (new Respuesta(CsvDeCartelera::armar($funciones)))
             ->conCabecera('Content-Type', 'text/csv; charset=utf-8')
@@ -109,7 +109,7 @@ final class Cartelera extends Controlador
         ]);
     }
 
-    private static function parametros(Peticion $peticion): ParametrosDeCartelera
+    private function parametros(Peticion $peticion): ParametrosDeCartelera
     {
         return ParametrosDeCartelera::desdeConsulta([
             'q' => $peticion->consulta('q'),
@@ -117,7 +117,7 @@ final class Cartelera extends Controlador
             'fecha' => $peticion->consulta('fecha'),
             'genero' => $peticion->consulta('genero'),
             'pagina' => $peticion->consulta('pagina'),
-        ]);
+        ], $this->servicio->generoPorNombre(...));
     }
 
     /**

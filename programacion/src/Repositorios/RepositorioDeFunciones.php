@@ -8,6 +8,7 @@ use DateTimeImmutable;
 use IndieCinema\Nucleo\BaseDeDatos;
 use IndieCinema\Programacion\Modelo\EstadoFuncion;
 use IndieCinema\Programacion\Modelo\Funcion;
+use IndieCinema\Programacion\Modelo\FuncionDelOrganizador;
 use IndieCinema\Programacion\Modelo\ResumenDeFuncion;
 
 /**
@@ -111,6 +112,61 @@ final class RepositorioDeFunciones
         }
 
         return array_map(static fn (array $fila): Funcion => self::funcion($fila, $obras[$fila['id']] ?? []), $filas);
+    }
+
+    /**
+     * Las funciones de todas las salas de un organizador, como las muestra su panel: en el mismo
+     * orden que las de una sala y en cualquier estado, también las canceladas y las que todavía no
+     * tienen fecha.
+     *
+     * Las de una sala dada de baja no están: la sala ya no se ve en ningún lado, así que sus
+     * funciones tampoco tienen desde dónde seguirse.
+     *
+     * @return list<FuncionDelOrganizador>
+     */
+    public function delOrganizador(string $organizadorId): array
+    {
+        $filas = $this->base->filas(
+            'SELECT f.id, f.estado, f.fecha_hora, f.precio_base, f.cupo,
+                    s.id AS sala_id, s.nombre AS sala_nombre, s.habilitada AS sala_habilitada
+             FROM funcion f
+             JOIN sala s ON s.id = f.sala_id
+             WHERE s.organizador_id = ? AND s.dada_de_baja_en IS NULL
+             ORDER BY f.fecha_hora IS NULL, f.fecha_hora, f.creada_en DESC, f.id',
+            [$organizadorId],
+        );
+        // Los títulos de todas en una sola consulta, en vez de una por función.
+        $titulos = [];
+        foreach ($this->base->filas(
+            'SELECT fo.funcion_id, fo.estado, o.titulo FROM funcion_obra fo
+             JOIN obra o ON o.id = fo.obra_id
+             JOIN funcion f ON f.id = fo.funcion_id
+             JOIN sala s ON s.id = f.sala_id
+             WHERE s.organizador_id = ? AND s.dada_de_baja_en IS NULL
+             ORDER BY o.titulo, o.id',
+            [$organizadorId],
+        ) as $obra) {
+            $titulos[$obra['funcion_id']][] = $obra;
+        }
+
+        return array_map(static function (array $fila) use ($titulos): FuncionDelOrganizador {
+            $obras = $titulos[$fila['id']] ?? [];
+            // Como en buscar(): si ya hay elegidas son ésas; si no, las candidatas.
+            $elegidas = array_filter($obras, static fn (array $obra): bool => $obra['estado'] === 'elegida');
+
+            return new FuncionDelOrganizador(
+                (string) $fila['id'],
+                EstadoFuncion::from((string) $fila['estado']),
+                $fila['fecha_hora'] === null ? null : new DateTimeImmutable((string) $fila['fecha_hora']),
+                (float) $fila['precio_base'],
+                (int) $fila['cupo'],
+                (string) $fila['sala_id'],
+                (string) $fila['sala_nombre'],
+                (bool) $fila['sala_habilitada'],
+                array_values(array_map(static fn (array $obra): string => (string) $obra['titulo'], $elegidas ?: $obras)),
+                $elegidas !== [],
+            );
+        }, $filas);
     }
 
     /**

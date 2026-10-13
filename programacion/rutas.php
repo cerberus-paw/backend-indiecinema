@@ -8,6 +8,7 @@ use IndieCinema\Nucleo\Seguridad\Rol;
 use IndieCinema\Programacion\Controladores\AcercaDe;
 use IndieCinema\Programacion\Controladores\AdministracionDeSalas;
 use IndieCinema\Programacion\Controladores\Cartelera;
+use IndieCinema\Programacion\Controladores\FuncionesDelOrganizador;
 use IndieCinema\Programacion\Controladores\FuncionesInternas;
 use IndieCinema\Programacion\Controladores\ImagenDeSala;
 use IndieCinema\Programacion\Controladores\Inicio;
@@ -36,6 +37,9 @@ return static function (Router $router): void {
     $router->post('/organizador/salas/nueva', [SalasDelOrganizador::class, 'crear'], Rol::Organizador);
     $router->get('/organizador/salas/{id}/editar', [SalasDelOrganizador::class, 'editar'], Rol::Organizador);
     $router->post('/organizador/salas/{id}/editar', [SalasDelOrganizador::class, 'actualizar'], Rol::Organizador);
+    // «Mis funciones»: las de las salas propias, en cualquier estado. Que sean las suyas lo
+    // controla el servicio, con el id del que pide.
+    $router->get('/organizador/funciones', [FuncionesDelOrganizador::class, 'listar'], Rol::Organizador);
     // Todas las salas para el administrador, que las publica o las retira del sitio.
     $router->get('/administracion/salas', [AdministracionDeSalas::class, 'listar'], Rol::Administrador);
     $router->post('/administracion/salas/{id}/habilitar', [AdministracionDeSalas::class, 'habilitar'], Rol::Administrador);

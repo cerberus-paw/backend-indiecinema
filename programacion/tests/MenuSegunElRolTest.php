@@ -17,7 +17,8 @@ use PHPUnit\Framework\TestCase;
  * páginas.
  *
  * Los roles son acumulativos, como las rutas (Rol::alcanza()): lo del organizador lo ven también el
- * moderador y el administrador, que pueden entrar a esas pantallas. Se comparan los enlaces
+ * moderador y el administrador, que pueden entrar a esas pantallas; lo de administración, sólo el
+ * administrador. Se comparan los enlaces
  * completos, así una opción de más (o una que lleva a una pantalla que no existe) rompe la prueba.
  */
 final class MenuSegunElRolTest extends TestCase
@@ -31,6 +32,7 @@ final class MenuSegunElRolTest extends TestCase
     private const SIN_SESION = ['/cuenta/ingresar', '/cuenta/registro'];
     private const CON_SESION = ['/cuenta/'];
     private const DEL_ORGANIZADOR = ['/organizador/salas', '/organizador/salas/nueva'];
+    private const DEL_ADMINISTRADOR = ['/cuenta/administracion/usuarios'];
 
     /**
      * El encabezado y el pie de /acerca-de, por separado.
@@ -96,7 +98,7 @@ final class MenuSegunElRolTest extends TestCase
         yield 'espectador' => ['espectador', self::CON_SESION];
         yield 'organizador' => ['organizador', [...self::CON_SESION, ...self::DEL_ORGANIZADOR]];
         yield 'moderador' => ['moderador', [...self::CON_SESION, ...self::DEL_ORGANIZADOR]];
-        yield 'administrador' => ['administrador', [...self::CON_SESION, ...self::DEL_ORGANIZADOR]];
+        yield 'administrador' => ['administrador', [...self::CON_SESION, ...self::DEL_ORGANIZADOR, ...self::DEL_ADMINISTRADOR]];
     }
 
     /**

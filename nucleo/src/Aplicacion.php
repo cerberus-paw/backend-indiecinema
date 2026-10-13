@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace IndieCinema\Nucleo;
 
 use Composer\InstalledVersions;
+use IndieCinema\Nucleo\Correo\ClienteSmtp;
 use IndieCinema\Nucleo\Errores\ManejadorDeErrores;
 use IndieCinema\Nucleo\Http\ClienteInterno;
 use IndieCinema\Nucleo\Http\Peticion;
@@ -62,6 +63,7 @@ final class Aplicacion
         $this->contenedor->registrar(LoggerInterface::class, $this->log);
         $this->contenedor->fabrica(BaseDeDatos::class, static fn (): BaseDeDatos => BaseDeDatos::conectar($configuracion));
         $this->contenedor->fabrica(ClienteInterno::class, fn (): ClienteInterno => ClienteInterno::desdeConfiguracion($configuracion, $this->log));
+        $this->contenedor->fabrica(ClienteSmtp::class, fn (): ClienteSmtp => ClienteSmtp::desdeConfiguracion($configuracion, $this->log));
 
         $this->router = new Router();
         $declararRutas = require $raiz . '/rutas.php';

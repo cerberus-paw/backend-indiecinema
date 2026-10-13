@@ -147,7 +147,9 @@ todo el sitio se vea igual aunque lo sirvan subsistemas distintos.
   no el token: si uno queda comprometido, lo que lee en su `config.ini` no le sirve para hacerse
   pasar por otro. nginx también es un llamador, de `/interno/sesion` en cuentas. Si el otro
   subsistema no responde en dos segundos, la página corta con un 503 en lugar de quedar colgada.
-  `GET /interno/estado` responde quién es y a quién reconoció, para probar la conexión.
+  `GET /interno/estado` responde quién es y a quién reconoció, para probar la conexión. La
+  primera ruta de verdad es `GET /interno/funciones/{id}` de programación: le da a funciones el
+  estado, la fecha, el precio, el cupo, los títulos, la sala y el organizador de una función.
 - **Los correos salen por SMTP con el curl de PHP** (`ClienteSmtp` del núcleo), sin librerías.
   El servidor está en `[correo]` del `config.ini`: en desarrollo, el buzón de prueba del compose;
   en el VPS, el del proveedor, que con usuario exige `smtps://` o STARTTLS para no mandar la clave

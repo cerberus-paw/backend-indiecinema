@@ -79,6 +79,9 @@ final class FormularioDeSolicitudTest extends TestCase
         yield 'teléfono con + en el medio' => ['telefono', '2323+441234', 'El teléfono va con números, espacios o guiones, y puede empezar con +.'];
         yield 'presentación corta' => ['presentacion', 'Un galpón.', 'La presentación tiene que tener al menos 50 caracteres.'];
         yield 'presentación larga' => ['presentacion', str_repeat('a', 2001), 'La presentación puede tener hasta 2000 caracteres.'];
+        // Como el navegador, cada emoji cuenta dos: 1001 son 2002.
+        yield 'presentación larga con emojis' => ['presentacion', str_repeat('🎬', 1001), 'La presentación puede tener hasta 2000 caracteres.'];
+        yield 'sala larga con emojis' => ['sala', str_repeat('🎬', 51), 'El nombre de la sala puede tener hasta 100 caracteres.'];
         yield 'sin habilitación' => ['habilitacion', '', 'Tenés que declarar que el espacio está habilitado.'];
         yield 'sin derechos' => ['derechos', 'on', 'Tenés que comprometerte a tener los derechos de exhibición.'];
     }
@@ -108,6 +111,17 @@ final class FormularioDeSolicitudTest extends TestCase
             'sala' => str_repeat('ñ', 100),
             // 2000 caracteres contando cada salto como uno, como el navegador.
             'presentacion' => str_repeat("aaa\r\n", 499) . 'aaaa',
+        ] + self::camposValidos());
+
+        self::assertSame([], $formulario->errores);
+    }
+
+    public function testUnEmojiCuentaDosComoEnElNavegador(): void
+    {
+        $formulario = FormularioDeSolicitud::desdeCampos([
+            'sala' => str_repeat('🎬', 50),
+            // 25 emojis son 50: alcanzan el mínimo, como en el minlength del navegador.
+            'presentacion' => str_repeat('🎬', 25),
         ] + self::camposValidos());
 
         self::assertSame([], $formulario->errores);

@@ -98,7 +98,11 @@ final class BaseDeDatos
     /**
      * Corre $trabajo en una transacción: si termina, se confirma; si lanza una excepción, se
      * deshace y la excepción sigue. Es lo que usa, por ejemplo, el control de cupo de las
-     * reservas con SELECT … FOR UPDATE. No se anidan.
+     * reservas con SELECT … FOR UPDATE.
+     *
+     * Si ya hay una abierta, $trabajo corre dentro de esa: así un servicio junta en una sola los
+     * cambios de dos repositorios que ya usan la suya (aprobar una solicitud y dar el rol), y se
+     * confirman o se deshacen juntos.
      *
      * @template T
      *
@@ -108,6 +112,10 @@ final class BaseDeDatos
      */
     public function enTransaccion(callable $trabajo): mixed
     {
+        // La de afuera confirma o deshace todo; si el trabajo falla, la excepción le llega.
+        if ($this->pdo->inTransaction()) {
+            return $trabajo($this);
+        }
         $this->pdo->beginTransaction();
         try {
             $resultado = $trabajo($this);

@@ -123,4 +123,29 @@ final class BaseDeDatosTest extends TestCase
 
         self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM sala WHERE capacidad = 0'));
     }
+
+    /**
+     * Si la de adentro falla después de que la de afuera ya cambió algo, se deshacen las dos.
+     */
+    public function testUnaTransaccionAdentroDeOtraSeConfirmaOSeDeshaceConElla(): void
+    {
+        $this->base->enTransaccion(static function (BaseDeDatos $base): void {
+            $base->ejecutar('INSERT INTO sala (nombre, capacidad) VALUES (?, ?)', ['Sala nueva', 30]);
+            $base->enTransaccion(static fn (BaseDeDatos $base): int => $base->ejecutar('UPDATE sala SET capacidad = 40 WHERE nombre = ?', ['Sala nueva']));
+        });
+        self::assertSame(40, $this->base->valor('SELECT capacidad FROM sala WHERE nombre = ?', ['Sala nueva']));
+
+        try {
+            $this->base->enTransaccion(static function (BaseDeDatos $base): void {
+                $base->ejecutar('UPDATE sala SET capacidad = 0');
+                $base->enTransaccion(static function (): void {
+                    throw new RuntimeException('falló la de adentro');
+                });
+            });
+            self::fail('La excepción no siguió.');
+        } catch (RuntimeException) {
+        }
+
+        self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM sala WHERE capacidad = 0'));
+    }
 }

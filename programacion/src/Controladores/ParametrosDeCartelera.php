@@ -4,9 +4,10 @@ declare(strict_types=1);
 
 namespace IndieCinema\Programacion\Controladores;
 
+use Closure;
 use DateTimeImmutable;
-use IndieCinema\Nucleo\Uuid;
 use IndieCinema\Programacion\Modelo\FiltrosDeCartelera;
+use IndieCinema\Programacion\Modelo\Genero;
 
 /**
  * Valida los parámetros de la URL de la cartelera, que cualquiera puede escribir a mano.
@@ -15,7 +16,9 @@ use IndieCinema\Programacion\Modelo\FiltrosDeCartelera;
  * aviso dice por qué. La página es distinta: una que no es un número positivo no existe, como
  * la que pasa de la última, y la decide el controlador con un 404.
  *
- * Los nombres son los del formulario de programacion/cartelera en el paquete front.
+ * Los nombres son los del formulario de programacion/cartelera en el paquete front. El género
+ * viaja por su nombre, como la localidad, así la URL se lee y se puede escribir a mano; quién lo
+ * busca en la base lo decide quien llama.
  */
 final class ParametrosDeCartelera
 {
@@ -23,6 +26,8 @@ final class ParametrosDeCartelera
     private const LARGO_TEXTO = 150;
     /** Como la columna sala.localidad. */
     private const LARGO_LOCALIDAD = 100;
+    /** Como la columna genero.nombre. */
+    private const LARGO_GENERO = 50;
     /** Hasta acá, una página más no cambia nada: sólo evita pasar un número enorme a la base. */
     private const PAGINA = '/^[1-9][0-9]{0,8}$/D';
 
@@ -43,22 +48,24 @@ final class ParametrosDeCartelera
     }
 
     /**
-     * @param array<string, mixed> $consulta los parámetros de la URL
+     * @param array<string, mixed>     $consulta        los parámetros de la URL
+     * @param Closure(string): ?Genero $generoPorNombre el género con ese nombre, o null si no hay
      */
-    public static function desdeConsulta(array $consulta): self
+    public static function desdeConsulta(array $consulta, Closure $generoPorNombre): self
     {
         $parametros = new self();
         $texto = $parametros->texto($consulta['q'] ?? null, 'La búsqueda', self::LARGO_TEXTO);
         $localidad = $parametros->texto($consulta['localidad'] ?? null, 'La localidad', self::LARGO_LOCALIDAD);
         $fecha = $parametros->fecha($consulta['fecha'] ?? null);
-        $genero = $parametros->genero($consulta['genero'] ?? null);
-        $parametros->filtros = new FiltrosDeCartelera($texto, $localidad, $fecha, $genero);
-        // Lo que se aplicó, como quedó en los filtros (sin los espacios de alrededor).
+        $genero = $parametros->genero($consulta['genero'] ?? null, $generoPorNombre);
+        $parametros->filtros = new FiltrosDeCartelera($texto, $localidad, $fecha, $genero?->id);
+        // Lo que se aplicó, como quedó en los filtros (sin los espacios de alrededor), y el género
+        // con su nombre como está guardado, así «comedia» en la URL vuelve como «Comedia».
         $parametros->valores = array_filter([
             'q' => $parametros->filtros->texto,
             'localidad' => $parametros->filtros->localidad,
             'fecha' => $parametros->filtros->fecha?->format('Y-m-d'),
-            'genero' => $parametros->filtros->generoId,
+            'genero' => $genero?->nombre,
         ], static fn (?string $valor): bool => $valor !== null);
         $parametros->pagina = self::pagina($consulta['pagina'] ?? null);
 
@@ -124,18 +131,23 @@ final class ParametrosDeCartelera
         return $fecha;
     }
 
-    private function genero(mixed $valor): ?string
+    /**
+     * @param Closure(string): ?Genero $generoPorNombre
+     */
+    private function genero(mixed $valor, Closure $generoPorNombre): ?Genero
     {
-        if ($valor === null || $valor === '') {
+        // En blanco es no filtrar, como en los otros filtros.
+        if ($valor === null || (is_string($valor) && trim($valor) === '')) {
             return null;
         }
-        if (!is_string($valor) || !Uuid::esValido($valor)) {
+        // Un texto que no sirve no llega a la base. Uno que sirve pero no es el nombre de ningún
+        // género (por ejemplo, un id, como en las URL de antes) tampoco filtra.
+        $genero = TextoDeLaUrl::problema($valor, self::LARGO_GENERO) === null ? $generoPorNombre(trim($valor)) : null;
+        if ($genero === null) {
             $this->avisos[] = 'El género no es válido: se muestra la cartelera de todos los géneros.';
-
-            return null;
         }
 
-        return $valor;
+        return $genero;
     }
 
     private static function pagina(mixed $valor): ?int

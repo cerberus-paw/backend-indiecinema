@@ -112,16 +112,6 @@ final class CarteleraTest extends TestCase
         return json_decode($respuesta->cuerpo(), true, 512, JSON_THROW_ON_ERROR);
     }
 
-    private function generoId(string $nombre): string
-    {
-        foreach ((new RepositorioDeGeneros($this->base))->todos() as $genero) {
-            if ($genero->nombre === $nombre) {
-                return $genero->id;
-            }
-        }
-        self::fail("No está el género {$nombre}.");
-    }
-
     /**
      * Cuántas tarjetas de función tiene la página.
      */
@@ -165,7 +155,8 @@ final class CarteleraTest extends TestCase
         self::assertStringNotContainsString('rel="prev"', $cuerpo);
         // Las opciones de los filtros.
         self::assertStringContainsString('<option value="San Antonio de Areco"', $cuerpo);
-        self::assertStringContainsString('value="' . $this->generoId('Comedia') . '"', $cuerpo);
+        // El género, por su nombre: así viaja en la URL.
+        self::assertStringContainsString('<option value="Comedia"', $cuerpo);
     }
 
     public function testLaUltimaPaginaTraeLasQueQuedan(): void
@@ -210,7 +201,7 @@ final class CarteleraTest extends TestCase
         $consulta = strtr($consulta, [
             '{dentro de 7 días}' => (new DateTimeImmutable('today +7 days'))->format('Y-m-d'),
             '{dentro de 28 días}' => (new DateTimeImmutable('today +28 days'))->format('Y-m-d'),
-            '{Comedia}' => $this->generoId('Comedia'),
+            '{Comedia}' => 'Comedia',
         ]);
 
         $respuesta = $this->pedir("/cartelera?{$consulta}");
@@ -224,15 +215,38 @@ final class CarteleraTest extends TestCase
     public function testElFormularioMuestraLosFiltrosAplicados(): void
     {
         $this->cargarDatosDePrueba();
-        $comedia = $this->generoId('Comedia');
-
-        $cuerpo = $this->pedir("/cartelera?q=+keaton+&localidad=Luj%C3%A1n&fecha=2030-01-02&genero={$comedia}")->cuerpo();
+        $cuerpo = $this->pedir('/cartelera?q=+keaton+&localidad=Luj%C3%A1n&fecha=2030-01-02&genero=Comedia')->cuerpo();
 
         self::assertStringContainsString('<form class="filtros-cartelera" action="/cartelera" method="get"', $cuerpo);
         self::assertMatchesRegularExpression('#name="q"\s+class="campo-control control-input"\s+value="keaton"#', $cuerpo);
         self::assertMatchesRegularExpression('#<option value="Luján" selected>#', $cuerpo);
-        self::assertMatchesRegularExpression('#<option value="' . $comedia . '" selected>#', $cuerpo);
+        self::assertMatchesRegularExpression('#<option value="Comedia" selected>#', $cuerpo);
         self::assertMatchesRegularExpression('#name="fecha"\s+class="campo-control control-input"\s+value="2030-01-02"#', $cuerpo);
+    }
+
+    /**
+     * El género viaja por su nombre, que se puede escribir a mano sin mayúsculas ni tildes: filtra
+     * igual, y el formulario, los links y el JSON lo devuelven como está guardado.
+     */
+    public function testElGeneroPorNombreSinMayusculasNiTildes(): void
+    {
+        $this->cargarDatosDePrueba();
+        $esperado = $this->pedirJson('/cartelera?genero=Ciencia%20ficci%C3%B3n');
+
+        $pagina = $this->pedir('/cartelera?genero=ciencia+ficcion', ['por_pagina' => 1]);
+        $json = self::json($this->pedirJson('/cartelera?genero=CIENCIA+FICCION', ['por_pagina' => 1]));
+
+        self::assertSame(200, $pagina->estado());
+        self::assertGreaterThan(1, self::json($esperado)['paginado']['total_funciones']);
+        self::assertSame(self::json($esperado)['paginado']['total_funciones'], $json['paginado']['total_funciones']);
+        self::assertStringNotContainsString('Algunos filtros no se aplicaron', $pagina->cuerpo());
+        self::assertMatchesRegularExpression('#<option value="Ciencia ficción" selected>#', $pagina->cuerpo());
+        self::assertStringContainsString('href="/cartelera?genero=Ciencia%20ficci%C3%B3n&amp;pagina=2"', $pagina->cuerpo());
+        self::assertSame(['genero' => 'Ciencia ficción'], $json['filtros']);
+        self::assertSame('/cartelera?genero=Ciencia%20ficci%C3%B3n&pagina=2', $json['paginado']['siguiente']);
+        self::assertSame('/cartelera.csv?genero=Ciencia%20ficci%C3%B3n', $json['csv']);
+        // El CSV, con el nombre en la URL, trae las mismas funciones.
+        self::assertCount($json['paginado']['total_funciones'], self::filasDelCsv($this->pedir('/cartelera.csv?genero=ciencia+ficcion')));
     }
 
     public function testLosLinksDePaginaConservanLosFiltros(): void
@@ -257,7 +271,8 @@ final class CarteleraTest extends TestCase
         yield 'una fecha que no es fecha' => ['fecha=ma%C3%B1ana'];
         yield 'un día que no existe' => ['fecha=2026-02-31'];
         yield 'una fecha como arreglo' => ['fecha[]=2026-10-24'];
-        yield 'un género que no es un id' => ['genero=drama'];
+        yield 'un género que no existe' => ['genero=western'];
+        yield 'el id de un género, como en las URL de antes' => ['genero=00000004-0000-4000-8000-000000000005'];
         yield 'un género con una inyección' => ['genero=%27+OR+1%3D1+--+'];
         yield 'un género como arreglo' => ['genero[a]=b'];
         yield 'una búsqueda como arreglo' => ['q[]=zama'];
@@ -404,7 +419,7 @@ final class CarteleraTest extends TestCase
         $consulta = strtr($consulta, [
             '{dentro de 7 días}' => (new DateTimeImmutable('today +7 days'))->format('Y-m-d'),
             '{dentro de 28 días}' => (new DateTimeImmutable('today +28 days'))->format('Y-m-d'),
-            '{Comedia}' => $this->generoId('Comedia'),
+            '{Comedia}' => 'Comedia',
         ]);
 
         // Con páginas de una, para ver que el archivo no se corta en la primera.
@@ -520,7 +535,7 @@ final class CarteleraTest extends TestCase
         $consulta = strtr($consulta, [
             '{dentro de 7 días}' => (new DateTimeImmutable('today +7 days'))->format('Y-m-d'),
             '{dentro de 28 días}' => (new DateTimeImmutable('today +28 days'))->format('Y-m-d'),
-            '{Comedia}' => $this->generoId('Comedia'),
+            '{Comedia}' => 'Comedia',
         ]);
 
         $json = self::json($this->pedirJson("/cartelera?{$consulta}"));

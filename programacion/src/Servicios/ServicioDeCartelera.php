@@ -98,6 +98,14 @@ final class ServicioDeCartelera
     }
 
     /**
+     * El género por su nombre, como llega en la URL de la cartelera, o null si no hay ninguno.
+     */
+    public function generoPorNombre(string $nombre): ?Genero
+    {
+        return $this->generos->porNombre($nombre);
+    }
+
+    /**
      * La ficha pública de una función con sus obras y su sala, en cualquier estado: también las
      * que están en votación, las que ya pasaron y las canceladas, que la ficha muestra como tales.
      *

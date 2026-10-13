@@ -24,6 +24,18 @@ final class RepositorioDeGeneros
     }
 
     /**
+     * El género con ese nombre, sin distinguir mayúsculas ni tildes: la intercalación de la
+     * columna, la misma que hace único el nombre, compara «comedia» igual que «Comedia» y
+     * «ciencia ficcion» igual que «Ciencia ficción».
+     */
+    public function porNombre(string $nombre): ?Genero
+    {
+        $fila = $this->base->fila('SELECT id, nombre, descripcion FROM genero WHERE nombre = ?', [$nombre]);
+
+        return $fila === null ? null : self::genero($fila);
+    }
+
+    /**
      * Todos, por nombre: son pocos, y el filtro de la cartelera los ofrece a todos.
      *
      * @return list<Genero>

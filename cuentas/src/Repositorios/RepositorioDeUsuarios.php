@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace IndieCinema\Cuentas\Repositorios;
 
-use DateTimeImmutable;
 use IndieCinema\Cuentas\Modelo\EstadoCuenta;
 use IndieCinema\Cuentas\Modelo\FiltrosDeUsuarios;
 use IndieCinema\Cuentas\Modelo\PaginaDeUsuarios;
@@ -106,7 +105,7 @@ final class RepositorioDeUsuarios
         // Los roles en la misma consulta: ordenar un ENUM sigue el orden en que se declaró, que es
         // el de Rol, de menor a mayor.
         $filas = $this->base->filas(
-            "SELECT u.id, u.nombre, u.correo, u.estado, u.creado_en,
+            "SELECT u.id, u.nombre, u.correo, u.estado,
                     GROUP_CONCAT(r.tipo ORDER BY r.tipo SEPARATOR ',') AS roles
              FROM usuario u
              LEFT JOIN rol r ON r.usuario_id = u.id
@@ -195,7 +194,6 @@ final class RepositorioDeUsuarios
             (string) $fila['correo'],
             EstadoCuenta::from((string) $fila['estado']),
             array_map(static fn (string $rol): Rol => Rol::from($rol), $roles),
-            new DateTimeImmutable((string) $fila['creado_en']),
         );
     }
 

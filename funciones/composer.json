@@ -16,12 +16,24 @@
     ],
     "require": {
         "php": "^8.4",
+        "cerberus-paw/frontend-indiecinema": "@dev",
         "cerberus-paw/nucleo": "@dev"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^12.0"
     },
     "autoload": {
         "psr-4": {
             "IndieCinema\\Funciones\\": "src/"
         }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "IndieCinema\\Funciones\\Pruebas\\": "tests/"
+        }
+    },
+    "scripts": {
+        "pruebas": "phpunit"
     },
     "config": {
         "sort-packages": true

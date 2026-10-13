@@ -147,7 +147,9 @@ todo el sitio se vea igual aunque lo sirvan subsistemas distintos.
   no el token: si uno queda comprometido, lo que lee en su `config.ini` no le sirve para hacerse
   pasar por otro. nginx también es un llamador, de `/interno/sesion` en cuentas. Si el otro
   subsistema no responde en dos segundos, la página corta con un 503 en lugar de quedar colgada.
-  `GET /interno/estado` responde quién es y a quién reconoció, para probar la conexión.
+  `GET /interno/estado` responde quién es y a quién reconoció, para probar la conexión. La
+  primera ruta de verdad es `GET /interno/funciones/{id}` de programación: le da a funciones el
+  estado, la fecha, el precio, el cupo, los títulos, la sala y el organizador de una función.
 - **Los correos salen por SMTP con el curl de PHP** (`ClienteSmtp` del núcleo), sin librerías.
   El servidor está en `[correo]` del `config.ini`: en desarrollo, el buzón de prueba del compose;
   en el VPS, el del proveedor, que con usuario exige `smtps://` o STARTTLS para no mandar la clave
@@ -220,11 +222,13 @@ docker run --rm -u "$(id -u):$(id -g)" -v "$PWD/..:/app" -w /app/backend-indieci
 | http://localhost:8025 | el buzón de prueba (Mailpit): los correos que mandan los subsistemas, sin que salgan a nadie |
 | http://localhost:8080/administracion/salas | todas las salas, para habilitarlas o deshabilitarlas; sólo el administrador |
 | http://localhost:8080/cuenta/administracion/usuarios | usuarios y roles, con buscador por nombre o correo, filtros de rol y estado, y dar o quitar el rol de organizador; sólo el administrador |
-| http://localhost:8080/funcion/ | funciones (403 hasta que tenga su `public/index.php`) |
+| http://localhost:8080/funcion/ | funciones: todavía sin pantallas, responde la página de error (404) |
 | http://localhost:8080/estaticos/… | CSS, JavaScript e imágenes del paquete front |
 
 Las rutas `/interno/` dan 404 desde afuera: sólo se llaman entre subsistemas, por la red del
-compose (`http://cuentas:8080/interno/…`). MySQL no publica ningún puerto.
+compose (`http://cuentas:8080/interno/…`). Lo comprueba `nginx/comprobar-desde-afuera.sh
+http://localhost:8080`, también con rutas disfrazadas, y lo corre la CI. MySQL no publica ningún
+puerto.
 
 Si el 8080 está ocupado, se cambia `PUERTO_HTTP` en `.env`. Si nginx ya se había creado con el
 puerto ocupado, queda andando pero sin el puerto abierto («no se pudo conectar» en el navegador),
@@ -409,14 +413,16 @@ compose, y los archivos van al volumen de programación.
 
 ## Pruebas
 
-El núcleo, cuentas y programación tienen las suyas (las de cuentas y programación necesitan el
-`composer install` de arriba, que trae PHPUnit):
+El núcleo y los tres subsistemas tienen las suyas (las de los subsistemas necesitan el
+`composer install` de arriba, que trae PHPUnit). Funciones, por ahora, prueba que arranca y que
+lee una función de programación por la API interna:
 
 ```
 composer install -d nucleo
 composer pruebas -d nucleo
 composer pruebas -d cuentas
 composer pruebas -d programacion
+composer pruebas -d funciones
 ```
 
 Las que tocan la base corren contra un MySQL de verdad: sin la variable `PRUEBAS_MYSQL_HOST` se
@@ -444,6 +450,7 @@ docker run -d --rm --name mysql-pruebas -e MYSQL_ROOT_PASSWORD=pruebas -e MYSQL_
 env PRUEBAS_MYSQL_HOST=127.0.0.1 PRUEBAS_MYSQL_PUERTO=3307 PRUEBAS_MYSQL_CLAVE=pruebas composer pruebas -d nucleo
 env PRUEBAS_MYSQL_HOST=127.0.0.1 PRUEBAS_MYSQL_PUERTO=3307 PRUEBAS_MYSQL_CLAVE=pruebas composer pruebas -d cuentas
 env PRUEBAS_MYSQL_HOST=127.0.0.1 PRUEBAS_MYSQL_PUERTO=3307 PRUEBAS_MYSQL_CLAVE=pruebas composer pruebas -d programacion
+env PRUEBAS_MYSQL_HOST=127.0.0.1 PRUEBAS_MYSQL_PUERTO=3307 PRUEBAS_MYSQL_CLAVE=pruebas composer pruebas -d funciones
 docker stop mysql-pruebas
 ```
 

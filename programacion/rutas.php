@@ -8,6 +8,7 @@ use IndieCinema\Nucleo\Seguridad\Rol;
 use IndieCinema\Programacion\Controladores\AcercaDe;
 use IndieCinema\Programacion\Controladores\AdministracionDeSalas;
 use IndieCinema\Programacion\Controladores\Cartelera;
+use IndieCinema\Programacion\Controladores\FuncionesInternas;
 use IndieCinema\Programacion\Controladores\ImagenDeSala;
 use IndieCinema\Programacion\Controladores\Inicio;
 use IndieCinema\Programacion\Controladores\Salas;
@@ -45,6 +46,9 @@ return static function (Router $router): void {
     $router->get('/salas/{id}', [Salas::class, 'mostrar']);
     // Pública si la sala está habilitada; si no, sólo para su organizador (lo decide el servicio).
     $router->get('/salas/{id}/imagen', [ImagenDeSala::class, 'mostrar']);
+
+    // Una función para el subsistema funciones (acuerdo de fecha y reservas): sólo la pide él.
+    $router->interna('GET', '/interno/funciones/{id}', [FuncionesInternas::class, 'mostrar'], ['funciones']);
 
     // Para comprobar que los otros subsistemas llegan hasta acá con su token.
     $router->interna('GET', '/interno/estado', [EstadoInterno::class, 'mostrar'], ['cuentas', 'funciones']);

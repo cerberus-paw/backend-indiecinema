@@ -8,6 +8,7 @@ use DateTimeImmutable;
 use IndieCinema\Nucleo\BaseDeDatos;
 use IndieCinema\Programacion\Modelo\EstadoFuncion;
 use IndieCinema\Programacion\Modelo\Funcion;
+use IndieCinema\Programacion\Modelo\ResumenDeFuncion;
 
 /**
  * Las funciones y sus obras en el esquema de programación.
@@ -24,6 +25,49 @@ final class RepositorioDeFunciones
 
     public function __construct(private readonly BaseDeDatos $base)
     {
+    }
+
+    /**
+     * La función como la piden los otros subsistemas, con su sala y los títulos, o null si no
+     * existe o su sala se dio de baja. Una sala sin habilitar sí aparece, marcada: quien la pide
+     * decide qué hacer (no se reserva en una sala que no está publicada, por ejemplo).
+     */
+    public function resumen(string $id): ?ResumenDeFuncion
+    {
+        $fila = $this->base->fila(
+            'SELECT f.id, f.estado, f.fecha_hora, f.precio_base, f.cupo,
+                    s.id AS sala_id, s.nombre AS sala_nombre, s.localidad AS sala_localidad,
+                    s.habilitada AS sala_habilitada, s.organizador_id
+             FROM funcion f
+             JOIN sala s ON s.id = f.sala_id
+             WHERE f.id = ? AND s.dada_de_baja_en IS NULL',
+            [$id],
+        );
+        if ($fila === null) {
+            return null;
+        }
+        $obras = $this->base->filas(
+            'SELECT fo.estado, o.titulo FROM funcion_obra fo JOIN obra o ON o.id = fo.obra_id
+             WHERE fo.funcion_id = ? ORDER BY o.titulo, o.id',
+            [$id],
+        );
+        // Como en buscar(): si ya hay elegidas son ésas; si no, las candidatas.
+        $elegidas = array_filter($obras, static fn (array $obra): bool => $obra['estado'] === 'elegida');
+
+        return new ResumenDeFuncion(
+            (string) $fila['id'],
+            EstadoFuncion::from((string) $fila['estado']),
+            $fila['fecha_hora'] === null ? null : new DateTimeImmutable((string) $fila['fecha_hora']),
+            (float) $fila['precio_base'],
+            (int) $fila['cupo'],
+            array_values(array_map(static fn (array $obra): string => (string) $obra['titulo'], $elegidas ?: $obras)),
+            $elegidas !== [],
+            (string) $fila['sala_id'],
+            (string) $fila['sala_nombre'],
+            (string) $fila['sala_localidad'],
+            (bool) $fila['sala_habilitada'],
+            (string) $fila['organizador_id'],
+        );
     }
 
     public function buscar(string $id): ?Funcion

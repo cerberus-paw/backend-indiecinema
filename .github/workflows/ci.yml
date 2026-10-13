@@ -39,7 +39,7 @@ jobs:
       # Que falle uno no corta los otros: se ve de una vez todo lo que está roto.
       fail-fast: false
       matrix:
-        paquete: [nucleo, cuentas, programacion]
+        paquete: [nucleo, cuentas, programacion, funciones]
     # Las pruebas que tocan la base corren contra un MySQL de verdad, como en el README.
     services:
       mysql:
@@ -126,3 +126,11 @@ jobs:
             -out /etc/letsencrypt/live/$DOMINIO/fullchain.pem
           docker compose config --quiet
           docker compose run --rm --no-deps nginx nginx -t
+      # Con pedidos de verdad: ninguna ruta /interno/ llega a un subsistema desde afuera, con o sin
+      # prefijo y aunque venga disfrazada. nginx las corta antes de pasarlas, así que alcanza con
+      # nginx solo, sin los subsistemas.
+      - name: Comprobar que /interno/ no se alcanza desde afuera
+        run: |
+          docker compose up -d --no-deps nginx
+          for intento in $(seq 30); do curl -s -o /dev/null http://localhost:8080/_sesion && break; sleep 1; done
+          nginx/comprobar-desde-afuera.sh http://localhost:8080

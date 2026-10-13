@@ -6,6 +6,7 @@ use IndieCinema\Nucleo\Http\EstadoInterno;
 use IndieCinema\Nucleo\Ruteo\Router;
 use IndieCinema\Nucleo\Seguridad\Rol;
 use IndieCinema\Programacion\Controladores\AcercaDe;
+use IndieCinema\Programacion\Controladores\AdministracionDeSalas;
 use IndieCinema\Programacion\Controladores\Cartelera;
 use IndieCinema\Programacion\Controladores\ImagenDeSala;
 use IndieCinema\Programacion\Controladores\Inicio;
@@ -34,6 +35,10 @@ return static function (Router $router): void {
     $router->post('/organizador/salas/nueva', [SalasDelOrganizador::class, 'crear'], Rol::Organizador);
     $router->get('/organizador/salas/{id}/editar', [SalasDelOrganizador::class, 'editar'], Rol::Organizador);
     $router->post('/organizador/salas/{id}/editar', [SalasDelOrganizador::class, 'actualizar'], Rol::Organizador);
+    // Todas las salas para el administrador, que las publica o las retira del sitio.
+    $router->get('/administracion/salas', [AdministracionDeSalas::class, 'listar'], Rol::Administrador);
+    $router->post('/administracion/salas/{id}/habilitar', [AdministracionDeSalas::class, 'habilitar'], Rol::Administrador);
+    $router->post('/administracion/salas/{id}/deshabilitar', [AdministracionDeSalas::class, 'deshabilitar'], Rol::Administrador);
     // El listado público: sólo las habilitadas, sin sesión.
     $router->get('/salas', [Salas::class, 'listar']);
     // La ficha de una, con sus próximas funciones. Una sin habilitar sólo la ve su organizador.

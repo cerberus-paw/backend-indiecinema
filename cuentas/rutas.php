@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use IndieCinema\Cuentas\Controladores\AdministracionDeSolicitudes;
 use IndieCinema\Cuentas\Controladores\AdministracionDeUsuarios;
 use IndieCinema\Cuentas\Controladores\Ingreso;
 use IndieCinema\Cuentas\Controladores\Inicio;
@@ -36,6 +37,11 @@ return static function (Router $router): void {
     $router->get('/administracion/usuarios', [AdministracionDeUsuarios::class, 'listar'], Rol::Administrador);
     $router->post('/administracion/usuarios/{id}/dar-organizador', [AdministracionDeUsuarios::class, 'darOrganizador'], Rol::Administrador);
     $router->post('/administracion/usuarios/{id}/quitar-organizador', [AdministracionDeUsuarios::class, 'quitarOrganizador'], Rol::Administrador);
+
+    // La bandeja de solicitudes para ser organizador: aprobar una le da el rol.
+    $router->get('/administracion/solicitudes', [AdministracionDeSolicitudes::class, 'listar'], Rol::Administrador);
+    $router->post('/administracion/solicitudes/{id}/aprobar', [AdministracionDeSolicitudes::class, 'aprobar'], Rol::Administrador);
+    $router->post('/administracion/solicitudes/{id}/rechazar', [AdministracionDeSolicitudes::class, 'rechazar'], Rol::Administrador);
 
     // El auth_request de nginx, en cada pedido del sitio: quién es el de la cookie.
     $router->interna('GET', '/interno/sesion', [SesionInterna::class, 'validar'], ['nginx']);

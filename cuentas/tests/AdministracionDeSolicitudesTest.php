@@ -90,13 +90,13 @@ final class AdministracionDeSolicitudesTest extends TestCase
         return $id;
     }
 
-    private function agregarSolicitud(string $usuarioId, string $sala, string $enviadaEn): string
+    private function agregarSolicitud(string $usuarioId, string $sala, string $enviadaEn, string $correo = 'contacto@ejemplo.com'): string
     {
         $id = Uuid::nuevo();
         $this->solicitudes->agregar($id, $usuarioId, new DatosDeSolicitud(
             $sala,
             'Luján',
-            'contacto@ejemplo.com',
+            $correo,
             null,
             "Galpón reciclado como espacio cultural.\nEntran 60 personas.",
         ), new DateTimeImmutable($enviadaEn, new DateTimeZone('UTC')));
@@ -245,5 +245,17 @@ final class AdministracionDeSolicitudesTest extends TestCase
         self::assertStringNotContainsString('<script>alert(1)', $cuerpo);
         self::assertStringContainsString('&lt;script&gt;alert(1)&lt;/script&gt;', $cuerpo);
         self::assertStringContainsString('&lt;i&gt;Eva&lt;/i&gt;', $cuerpo);
+    }
+
+    public function testElCorreoDeContactoVaCodificadoEnElEnlace(): void
+    {
+        // Es un correo válido para el navegador; sin codificar, el ? arrancaría los parámetros del
+        // mailto: y le agregaría una copia al borrador del administrador.
+        $this->agregarSolicitud($this->agregarUsuario('Eva', 'eva@ejemplo.com'), 'El Galpón', '2026-10-10 10:00', 'ana?cc=otro@ejemplo.com');
+
+        $cuerpo = $this->pedir()->cuerpo();
+
+        self::assertStringContainsString('href="mailto:ana%3Fcc%3Dotro@ejemplo.com"', $cuerpo);
+        self::assertStringNotContainsString('mailto:ana?', $cuerpo);
     }
 }

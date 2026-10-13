@@ -63,6 +63,40 @@ final class Funcion
     }
 
     /**
+     * Se crea ya con su fecha fijada y sus obras definitivas, en estado Programada (E3-11.2).
+     *
+     * @param list<string> $obrasIds las obras a proyectar
+     *
+     * @throws ReglaIncumplida sin obras, con obras repetidas, cupo no positivo, precio negativo o fecha no futura
+     */
+    public static function programada(
+        string $salaId,
+        array $obrasIds,
+        int $cupo,
+        float $precioBase,
+        DateTimeImmutable $fechaHora,
+        DateTimeImmutable $ahora = new DateTimeImmutable(),
+    ): self {
+        if ($obrasIds === []) {
+            throw new ReglaIncumplida('La función necesita al menos una obra.');
+        }
+        if (count(array_unique($obrasIds)) !== count($obrasIds)) {
+            throw new ReglaIncumplida('Una obra no puede estar dos veces en la misma función.');
+        }
+        if ($cupo <= 0) {
+            throw new ReglaIncumplida('El cupo tiene que ser de al menos un lugar.');
+        }
+        if ($precioBase < 0) {
+            throw new ReglaIncumplida('El precio no puede ser negativo.');
+        }
+        if ($fechaHora <= $ahora) {
+            throw new ReglaIncumplida('La fecha de la función tiene que ser futura.');
+        }
+
+        return new self(Uuid::nuevo(), $salaId, $obrasIds, $precioBase, $cupo, EstadoFuncion::Programada, $fechaHora);
+    }
+
+    /**
      * Termina la votación y la función se queda con las obras elegidas, que tienen que estar entre
      * las candidatas. Sigue el acuerdo de fecha.
      *

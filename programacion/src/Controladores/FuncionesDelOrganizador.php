@@ -9,15 +9,19 @@ use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Seguridad\Usuario;
 use IndieCinema\Programacion\Modelo\FuncionDelOrganizador;
+use IndieCinema\Programacion\Modelo\Obra;
+use IndieCinema\Programacion\Modelo\Sala;
 use IndieCinema\Programacion\Servicios\ServicioDeFuncionesDelOrganizador;
 use LogicException;
 
 /**
- * «Mis funciones», en /organizador/funciones. La ruta pide el rol de organizador; que sean las de
- * sus salas y no las de cualquiera lo resuelve el servicio con el id del que pide.
+ * «Mis funciones» y alta para programar una función, en /organizador/funciones/….
+ * Las rutas piden el rol de organizador y el núcleo controla el token CSRF en los POST.
  */
 final class FuncionesDelOrganizador extends Controlador
 {
+    private const PLANTILLA_ALTA = 'alta_funcion.html.twig';
+
     public function __construct(private readonly ServicioDeFuncionesDelOrganizador $servicio)
     {
     }
@@ -26,7 +30,81 @@ final class FuncionesDelOrganizador extends Controlador
     {
         $funciones = $this->servicio->listar(self::organizador($peticion));
 
-        return $this->vista('mis_funciones.html.twig', ['funciones' => array_map(self::datos(...), $funciones)]);
+        return $this->vista('mis_funciones.html.twig', [
+            'funciones' => array_map(self::datos(...), $funciones),
+            'programada' => $peticion->consulta('programada'),
+        ]);
+    }
+
+    public function nueva(Peticion $peticion): Respuesta
+    {
+        $organizador = self::organizador($peticion);
+        $salas = $this->servicio->salasHabilitadas($organizador);
+        $obras = $this->servicio->catalogoDeObras();
+
+        return $this->formularioAlta($salas, $obras, []);
+    }
+
+    public function crear(Peticion $peticion): Respuesta
+    {
+        $organizador = self::organizador($peticion);
+        $salas = $this->servicio->salasHabilitadas($organizador);
+        $obras = $this->servicio->catalogoDeObras();
+
+        $formulario = FormularioDeFuncion::desdeCampos($peticion->cuerpo(), $salas, $obras);
+        if (!$formulario->esValido() || $formulario->salaId === null || $formulario->fechaHora === null || $formulario->cupo === null || $formulario->precio === null) {
+            return $this->formularioAlta($salas, $obras, [
+                'formulario' => $formulario,
+                'error_general' => 'Revisá los campos marcados.',
+            ], 422);
+        }
+
+        $funcion = $this->servicio->programar(
+            $organizador,
+            $formulario->salaId,
+            $formulario->obrasIds,
+            $formulario->cupo,
+            $formulario->precio,
+            $formulario->fechaHora,
+        );
+
+        // 303 al listado: al recargar no vuelve a crear la función.
+        return $this->redirigir("/organizador/funciones?programada={$funcion->id}");
+    }
+
+    /**
+     * @param list<Sala>                                                          $salas
+     * @param list<Obra>                                                          $obras
+     * @param array{formulario?: FormularioDeFuncion, error_general?: ?string} $extra
+     */
+    private function formularioAlta(array $salas, array $obras, array $extra = [], int $estado = 200): Respuesta
+    {
+        $formulario = $extra['formulario'] ?? null;
+
+        return $this->vista(self::PLANTILLA_ALTA, [
+            'accion' => '/organizador/funciones/nueva',
+            'salas' => array_map(TarjetaDeSala::datos(...), $salas),
+            'obras' => array_map(self::datosObra(...), $obras),
+            'valores' => $formulario?->valores ?? [],
+            'errores' => $formulario?->errores ?? [],
+            'error_general' => $extra['error_general'] ?? null,
+            'mensaje_exito' => null,
+        ], $estado);
+    }
+
+    /**
+     * @return array{id: string, titulo: string, anio: int, duracion: int, director: string, afiche: ?string}
+     */
+    private static function datosObra(Obra $obra): array
+    {
+        return [
+            'id' => $obra->id,
+            'titulo' => $obra->titulo,
+            'anio' => $obra->anio,
+            'duracion' => $obra->duracionMinutos,
+            'director' => $obra->director,
+            'afiche' => $obra->afiche,
+        ];
     }
 
     /**

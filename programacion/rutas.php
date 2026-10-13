@@ -40,6 +40,8 @@ return static function (Router $router): void {
     // «Mis funciones»: las de las salas propias, en cualquier estado. Que sean las suyas lo
     // controla el servicio, con el id del que pide.
     $router->get('/organizador/funciones', [FuncionesDelOrganizador::class, 'listar'], Rol::Organizador);
+    $router->get('/organizador/funciones/nueva', [FuncionesDelOrganizador::class, 'nueva'], Rol::Organizador);
+    $router->post('/organizador/funciones/nueva', [FuncionesDelOrganizador::class, 'crear'], Rol::Organizador);
     // Todas las salas para el administrador, que las publica o las retira del sitio.
     $router->get('/administracion/salas', [AdministracionDeSalas::class, 'listar'], Rol::Administrador);
     $router->post('/administracion/salas/{id}/habilitar', [AdministracionDeSalas::class, 'habilitar'], Rol::Administrador);

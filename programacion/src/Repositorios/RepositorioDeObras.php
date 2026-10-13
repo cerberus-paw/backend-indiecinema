@@ -36,6 +36,31 @@ final class RepositorioDeObras
     }
 
     /**
+     * Todas las obras activas del catálogo, ordenadas por título.
+     *
+     * @return list<Obra>
+     */
+    public function todas(): array
+    {
+        $filas = $this->base->filas(
+            'SELECT ' . self::COLUMNAS . ' FROM obra
+             WHERE dada_de_baja_en IS NULL
+             ORDER BY titulo, anio, id',
+        );
+        $generos = [];
+        foreach ($this->base->filas(
+            'SELECT og.obra_id, og.genero_id FROM obra_genero og
+             JOIN obra o ON o.id = og.obra_id
+             WHERE o.dada_de_baja_en IS NULL
+             ORDER BY og.genero_id',
+        ) as $genero) {
+            $generos[$genero['obra_id']][] = $genero['genero_id'];
+        }
+
+        return array_map(static fn (array $fila): Obra => self::obra($fila, $generos[$fila['id']] ?? []), $filas);
+    }
+
+    /**
      * Las obras de un dueño, por título.
      *
      * @return list<Obra>

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace IndieCinema\Programacion\Modelo;
 
+use DateTimeImmutable;
 use IndieCinema\Nucleo\Uuid;
 
 /**
@@ -78,5 +79,30 @@ final class Sala
         }
 
         return Funcion::nueva($this->id, $obrasIds, $cupo, $precioBase);
+    }
+
+    /**
+     * Una función ya programada en esta sala, con sus obras, fecha y hora confirmadas (E3-11.2).
+     *
+     * @param list<string> $obrasIds
+     *
+     * @throws ReglaIncumplida si la sala no está habilitada, si el cupo no entra en ella, o si
+     *                         Funcion::programada() rechaza los datos
+     */
+    public function programarFuncion(
+        array $obrasIds,
+        int $cupo,
+        float $precioBase,
+        DateTimeImmutable $fechaHora,
+        DateTimeImmutable $ahora = new DateTimeImmutable(),
+    ): Funcion {
+        if (!$this->habilitada) {
+            throw new ReglaIncumplida('La sala todavía no está habilitada para programar funciones.');
+        }
+        if ($cupo > $this->datos->capacidad) {
+            throw new ReglaIncumplida("El cupo no puede ser mayor a la capacidad de la sala ({$this->datos->capacidad}).");
+        }
+
+        return Funcion::programada($this->id, $obrasIds, $cupo, $precioBase, $fechaHora, $ahora);
     }
 }

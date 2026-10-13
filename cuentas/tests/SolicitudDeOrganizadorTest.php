@@ -37,6 +37,9 @@ final class SolicitudDeOrganizadorTest extends TestCase
 
     private BaseDeDatos $base;
 
+    /** @var resource */
+    private $salidaDelLog;
+
     public static function setUpBeforeClass(): void
     {
         self::$correo = ServidorSmtpDePrueba::iniciar();
@@ -50,6 +53,7 @@ final class SolicitudDeOrganizadorTest extends TestCase
     protected function setUp(): void
     {
         self::$correo->vaciar();
+        $this->salidaDelLog = fopen('php://memory', 'w+');
         $this->base = self::baseConTablasNuevas($this->configuracion());
         $this->base->ejecutar(
             "INSERT INTO usuario (id, nombre, correo, contrasena_hash) VALUES (?, 'Eva Prueba', 'eva@ejemplo.com', 'sin uso')",
@@ -80,8 +84,13 @@ final class SolicitudDeOrganizadorTest extends TestCase
     {
         parse_str((string) parse_url($url, PHP_URL_QUERY), $consulta);
         $configuracion ??= $this->configuracion();
-        $cabeceras = $rol === null ? [] : ['X-Nginx-Secreto' => self::SECRETO, 'X-Usuario-Id' => self::ESPECTADOR, 'X-Rol' => $rol];
-        $aplicacion = new Aplicacion(dirname(__DIR__), $configuracion, new Log('cuentas', fopen('php://memory', 'w+')));
+        $cabeceras = $rol === null ? [] : [
+            'X-Nginx-Secreto' => self::SECRETO,
+            'X-Usuario-Id' => self::ESPECTADOR,
+            'X-Rol' => $rol,
+            'X-Usuario-Nombre' => rawurlencode('Eva Prueba'),
+        ];
+        $aplicacion = new Aplicacion(dirname(__DIR__), $configuracion, new Log('cuentas', $this->salidaDelLog));
 
         return $aplicacion->atender(new Peticion($metodo, (string) parse_url($url, PHP_URL_PATH), $consulta, $cuerpo, $cabeceras, ['csrf' => self::CSRF]));
     }
@@ -92,6 +101,13 @@ final class SolicitudDeOrganizadorTest extends TestCase
     private function enviar(array $cambios = [], ?string $rol = 'espectador'): Respuesta
     {
         return $this->pedir('POST', $cambios + ['_csrf' => self::CSRF] + FormularioDeSolicitudTest::camposValidos(), $rol);
+    }
+
+    private function log(): string
+    {
+        rewind($this->salidaDelLog);
+
+        return (string) stream_get_contents($this->salidaDelLog);
     }
 
     public function testMuestraElFormularioConElToken(): void
@@ -273,5 +289,73 @@ final class SolicitudDeOrganizadorTest extends TestCase
 
         self::assertSame(303, $respuesta->estado());
         self::assertSame(1, $this->base->valor("SELECT COUNT(*) FROM solicitud WHERE estado = 'pendiente'"));
+        self::assertStringContainsString('quedó guardada, pero no se le avisó al equipo por correo', $this->log());
+    }
+
+    /**
+     * Lo que le llega al equipo: la solicitud entera, y responder le escribe al contacto que dejó.
+     */
+    public function testElCorreoAlEquipoTraeLaSolicitudYSeRespondeAlContacto(): void
+    {
+        $this->enviar(['presentacion' => "Galpón ferroviario reciclado como espacio cultural.\nEntran 60 personas."]);
+
+        $correos = self::$correo->correos();
+        self::assertCount(1, $correos);
+        [$crudas, $cuerpo] = explode("\r\n\r\n", $correos[0]['mensaje'], 2);
+        $cabeceras = [];
+        foreach (explode("\r\n", (string) preg_replace("/\r\n(?=[ \t])/", '', $crudas)) as $linea) {
+            [$nombre, $valor] = explode(': ', $linea, 2);
+            $cabeceras[$nombre] = mb_decode_mimeheader($valor);
+        }
+        $texto = (string) base64_decode(str_replace("\r\n", '', $cuerpo), true);
+
+        self::assertSame('Solicitud para ser organizador: El Galpón de la Estación', $cabeceras['Subject']);
+        self::assertSame('<galpon@ejemplo.com>', $cabeceras['Reply-To']);
+        foreach ([
+            'Eva Prueba pidió ser organizador',
+            'Sala: El Galpón de la Estación',
+            'Localidad: Luján',
+            'Correo de contacto: galpon@ejemplo.com',
+            'Teléfono: +54 2323 44-1234',
+            "Galpón ferroviario reciclado como espacio cultural.\r\nEntran 60 personas.",
+            '/cuenta/administracion/solicitudes',
+        ] as $parte) {
+            self::assertStringContainsString($parte, $texto);
+        }
+    }
+
+    public function testSinTelefonoElCorreoLoDice(): void
+    {
+        $this->enviar(['telefono' => '']);
+
+        $mensaje = self::$correo->correos()[0]['mensaje'];
+        $texto = (string) base64_decode(str_replace("\r\n", '', explode("\r\n\r\n", $mensaje, 2)[1]), true);
+        self::assertStringContainsString('Teléfono: no lo dejó', $texto);
+        self::assertNull($this->base->valor('SELECT telefono FROM solicitud'));
+    }
+
+    /**
+     * Con datos inválidos, sin el token o si ya es organizador, no se guarda ni se manda nada.
+     */
+    public function testSiNoPasaNoSeGuardaNiSeMandaNada(): void
+    {
+        $this->enviar(['correo' => 'galpon@']);
+        $this->enviar(['_csrf' => str_repeat('d', 64)]);
+        $this->enviar(rol: 'organizador');
+
+        self::assertSame([], self::$correo->correos());
+        self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM solicitud'));
+    }
+
+    /**
+     * El log registra quién la mandó por su id, sin los datos de contacto.
+     */
+    public function testElLogNoGuardaLosDatosDeContacto(): void
+    {
+        $this->enviar();
+
+        self::assertStringContainsString('El usuario ' . self::ESPECTADOR . ' pidió ser organizador', $this->log());
+        self::assertStringNotContainsString('galpon@ejemplo.com', $this->log());
+        self::assertStringNotContainsString('2323', $this->log());
     }
 }

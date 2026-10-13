@@ -152,8 +152,9 @@ final class FormularioDeSolicitud
      * El largo como lo mide el navegador para minlength y maxlength: en unidades de UTF-16, así
      * un emoji cuenta dos. Con mb_strlen() el servidor aceptaría textos que el navegador rechaza.
      * Nunca da menos que los caracteres, así que lo que pasa entra en las columnas de la base.
+     * También lo usa el motivo con el que el administrador resuelve la solicitud.
      */
-    private static function largo(string $valor): int
+    public static function largo(string $valor): int
     {
         return intdiv(strlen(mb_convert_encoding($valor, 'UTF-16LE', 'UTF-8')), 2);
     }

@@ -196,12 +196,16 @@ final class AdministracionDeSolicitudesTest extends TestCase
 
         $sinMotivo = $this->resolver($solicitud, 'aprobar', "  \n ");
         $largo = $this->resolver($solicitud, 'rechazar', str_repeat('a', 1001));
+        // Como el maxlength del navegador, cada emoji cuenta dos: 501 son 1002.
+        $conEmojis = $this->resolver($solicitud, 'rechazar', str_repeat('🎬', 501));
 
         self::assertSame(422, $sinMotivo->estado());
         self::assertMatchesRegularExpression('#id="error-motivo"[^>]*>.*Escribí el motivo#s', $sinMotivo->cuerpo());
         self::assertSame(422, $largo->estado());
         self::assertStringContainsString('El motivo puede tener hasta 1000 caracteres.', $largo->cuerpo());
         self::assertStringContainsString('maxlength="1000"', $largo->cuerpo());
+        self::assertSame(422, $conEmojis->estado());
+        self::assertStringContainsString('El motivo puede tener hasta 1000 caracteres.', $conEmojis->cuerpo());
         self::assertSame('pendiente', $this->base->valor('SELECT estado FROM solicitud WHERE id = ?', [$solicitud]));
     }
 

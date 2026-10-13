@@ -61,7 +61,7 @@ final class AdministracionDeSolicitudes extends Controlador
         $motivo = self::motivo($peticion->campo('motivo'));
         $error = match (true) {
             $motivo === '' => 'Escribí el motivo: se le muestra a quien la mandó.',
-            mb_strlen($motivo) > self::MAXIMO_MOTIVO => 'El motivo puede tener hasta ' . self::MAXIMO_MOTIVO . ' caracteres.',
+            FormularioDeSolicitud::largo($motivo) > self::MAXIMO_MOTIVO => 'El motivo puede tener hasta ' . self::MAXIMO_MOTIVO . ' caracteres.',
             default => null,
         };
         if ($error !== null) {

@@ -18,7 +18,7 @@ use Psr\Log\LoggerInterface;
 use Throwable;
 
 /**
- * El alta y la edición de salas, y lo que se muestra de ellas. El rol de organizador lo controla
+ * El alta y la edición de salas, su habilitación y lo que se muestra de ellas. El rol lo controla
  * la ruta; que la sala sea del que la edita, que la ruta no puede saber, se controla acá.
  */
 final class ServicioDeSalas
@@ -49,6 +49,40 @@ final class ServicioDeSalas
     public function delOrganizador(Usuario $organizador): array
     {
         return $this->salas->delOrganizador($organizador->id);
+    }
+
+    /**
+     * Todas, para el administrador: primero las que esperan que las habilite.
+     *
+     * @return list<Sala>
+     */
+    public function paraAdministrar(): array
+    {
+        return $this->salas->paraAdministrar();
+    }
+
+    /**
+     * Publica la sala en el sitio o la retira. Cada cambio queda en el log, con quién lo hizo: es
+     * el registro de auditoría que pide la historia. Una sala retirada deja de verse en el listado
+     * público y sus funciones, en la cartelera.
+     *
+     * @throws ExcepcionHttp 404 si no existe o está dada de baja
+     */
+    public function cambiarHabilitacion(string $id, bool $habilitada, Usuario $administrador): Sala
+    {
+        $sala = $this->buscar($id);
+        if ($sala->habilitada === $habilitada) {
+            // Dos pestañas, o recargar el POST: no hay nada que cambiar ni que registrar.
+            return $sala;
+        }
+        $sala->cambiarHabilitacion($habilitada);
+        $this->salas->guardarHabilitacion($sala);
+        $this->log->notice($habilitada ? '{administrador} habilitó la sala {sala}.' : '{administrador} deshabilitó la sala {sala}.', [
+            'administrador' => $administrador->id,
+            'sala' => $sala->id,
+        ]);
+
+        return $sala;
     }
 
     public function crear(Usuario $organizador, DatosDeSala $datos, ImagenSubida $imagen): Sala

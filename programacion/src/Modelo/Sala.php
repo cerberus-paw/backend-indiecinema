@@ -20,7 +20,7 @@ final class Sala
         public private(set) DatosDeSala $datos,
         /** El nombre del archivo en el volumen, o null si no tiene. */
         public private(set) ?string $imagen = null,
-        public readonly bool $habilitada = false,
+        public private(set) bool $habilitada = false,
     ) {
     }
 
@@ -50,6 +50,14 @@ final class Sala
     public function cambiarImagen(string $imagen): void
     {
         $this->imagen = $imagen;
+    }
+
+    /**
+     * La publica o la retira del sitio. Lo decide el administrador, no el organizador.
+     */
+    public function cambiarHabilitacion(bool $habilitada): void
+    {
+        $this->habilitada = $habilitada;
     }
 
     /**

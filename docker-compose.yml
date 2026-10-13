@@ -94,6 +94,18 @@ services:
       - ./nucleo:/src/backend-indiecinema/nucleo:ro
       - ../frontend-indiecinema:/src/frontend-indiecinema:ro
 
+  # El buzón de prueba (Mailpit): recibe los correos de los subsistemas y los muestra en
+  # http://localhost:8025, sin mandarlos a nadie. Arranca sólo con el perfil «buzon», que se activa
+  # en el .env de desarrollo. En el VPS no existe, y los correos salen por el servidor de la
+  # sección [correo] de config.ini.
+  buzon:
+    image: axllent/mailpit:v1.31.5
+    profiles: [buzon]
+    restart: unless-stopped
+    # Sólo desde la misma máquina: lo que llega puede tener datos de quien escribió.
+    ports: ["127.0.0.1:${PUERTO_BUZON:-8025}:8025"]
+    networks: [interna]
+
   mysql:
     image: mysql:8.4
     restart: unless-stopped

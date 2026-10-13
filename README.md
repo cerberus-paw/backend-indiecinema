@@ -211,7 +211,7 @@ docker run --rm -u "$(id -u):$(id -g)" -v "$PWD/..:/app" -w /app/backend-indieci
 | http://localhost:8080/salas | el listado público de salas habilitadas |
 | http://localhost:8080/organizador/salas | «Mis salas», con sesión de organizador |
 | http://localhost:8080/cuenta/ | cuentas (`/cuenta/ingresar` y `/cuenta/registro`) |
-| http://localhost:8080/cuenta/administracion/usuarios | usuarios y roles, con buscador por nombre o correo; sólo el administrador |
+| http://localhost:8080/cuenta/administracion/usuarios | usuarios y roles, con buscador por nombre o correo y filtros de rol y estado; sólo el administrador |
 | http://localhost:8080/funcion/ | funciones (403 hasta que tenga su `public/index.php`) |
 | http://localhost:8080/estaticos/… | CSS, JavaScript e imágenes del paquete front |
 

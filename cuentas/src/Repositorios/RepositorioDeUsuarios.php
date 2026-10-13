@@ -5,7 +5,10 @@ declare(strict_types=1);
 namespace IndieCinema\Cuentas\Repositorios;
 
 use IndieCinema\Cuentas\Modelo\EstadoCuenta;
+use IndieCinema\Cuentas\Modelo\FiltrosDeUsuarios;
+use IndieCinema\Cuentas\Modelo\PaginaDeUsuarios;
 use IndieCinema\Cuentas\Modelo\Usuario;
+use IndieCinema\Cuentas\Modelo\UsuarioEnListado;
 use IndieCinema\Cuentas\Servicios\CorreoYaRegistrado;
 use IndieCinema\Nucleo\BaseDeDatos;
 use IndieCinema\Nucleo\Seguridad\Rol;
@@ -50,6 +53,70 @@ final class RepositorioDeUsuarios
             EstadoCuenta::from((string) $fila['estado']),
             array_map(static fn (array $rol): Rol => Rol::from((string) $rol['tipo']), $roles),
         );
+    }
+
+    /**
+     * Una página del listado del administrador, por nombre y después por correo, que es único y
+     * deja el orden fijo entre dos usuarios con el mismo nombre.
+     *
+     * - El texto, en el nombre o en el correo. El nombre se compara sin distinguir mayúsculas ni
+     *   tildes (la intercalación de la columna); el correo, sólo si el texto es ASCII, como la
+     *   columna: un texto con tildes no puede estar en un correo. Va como parámetro, con los
+     *   comodines de LIKE escapados.
+     * - El rol es el mayor de cada usuario, el que muestra la tabla: los roles se acumulan, y un
+     *   organizador también es espectador, pero filtrar por espectador trae a los que son sólo eso.
+     *
+     * @param positive-int $numero
+     * @param positive-int $tamano
+     */
+    public function pagina(FiltrosDeUsuarios $filtros, int $numero, int $tamano): PaginaDeUsuarios
+    {
+        $condiciones = ['TRUE'];
+        $parametros = [];
+        $texto = trim((string) $filtros->texto);
+        if ($texto !== '') {
+            $ascii = mb_check_encoding($texto, 'ASCII');
+            $condiciones[] = $ascii ? "(u.nombre LIKE ? ESCAPE '!' OR u.correo LIKE ? ESCAPE '!')" : "u.nombre LIKE ? ESCAPE '!'";
+            array_push($parametros, ...array_fill(0, $ascii ? 2 : 1, self::contiene($texto)));
+        }
+        if ($filtros->rol !== null) {
+            $condiciones[] = 'EXISTS (SELECT 1 FROM rol WHERE rol.usuario_id = u.id AND rol.tipo = ?)';
+            $parametros[] = $filtros->rol->value;
+            $mayores = array_filter(Rol::cases(), static fn (Rol $rol): bool => $rol->alcanza($filtros->rol) && $rol !== $filtros->rol);
+            if ($mayores !== []) {
+                $condiciones[] = 'NOT EXISTS (SELECT 1 FROM rol WHERE rol.usuario_id = u.id AND rol.tipo IN ('
+                    . implode(', ', array_fill(0, count($mayores), '?')) . '))';
+                array_push($parametros, ...array_map(static fn (Rol $rol): string => $rol->value, array_values($mayores)));
+            }
+        }
+        if ($filtros->estado !== null) {
+            $condiciones[] = 'u.estado = ?';
+            $parametros[] = $filtros->estado->value;
+        }
+        $condicion = implode(' AND ', $condiciones);
+
+        $total = (int) $this->base->valor("SELECT COUNT(*) FROM usuario u WHERE {$condicion}", $parametros);
+        $pagina = new PaginaDeUsuarios([], $numero, $tamano, $total);
+        // Una página que no existe no se consulta: así el OFFSET no se pasa de un entero.
+        if ($total === 0 || !$pagina->existe()) {
+            return $pagina;
+        }
+
+        // Los roles en la misma consulta: ordenar un ENUM sigue el orden en que se declaró, que es
+        // el de Rol, de menor a mayor.
+        $filas = $this->base->filas(
+            "SELECT u.id, u.nombre, u.correo, u.estado,
+                    GROUP_CONCAT(r.tipo ORDER BY r.tipo SEPARATOR ',') AS roles
+             FROM usuario u
+             LEFT JOIN rol r ON r.usuario_id = u.id
+             WHERE {$condicion}
+             GROUP BY u.id
+             ORDER BY u.nombre, u.correo
+             LIMIT ? OFFSET ?",
+            [...$parametros, $tamano, ($numero - 1) * $tamano],
+        );
+
+        return new PaginaDeUsuarios(array_map(self::usuarioEnListado(...), $filas), $numero, $tamano, $total);
     }
 
     /**
@@ -102,6 +169,32 @@ final class RepositorioDeUsuarios
             'UPDATE usuario SET estado = ? WHERE id = ?',
             [$estado->value, $usuarioId],
         ));
+    }
+
+    /**
+     * El patrón de «contiene» para un texto del administrador, tal cual: sin esto, un «%» o un «_»
+     * serían comodines. Es el mismo escape que usa programación (Like): «!» y no la barra, que
+     * cambia de significado con el modo NO_BACKSLASH_ESCAPES de MySQL.
+     */
+    private static function contiene(string $texto): string
+    {
+        return '%' . str_replace(['!', '%', '_'], ['!!', '!%', '!_'], $texto) . '%';
+    }
+
+    /**
+     * @param array<string, mixed> $fila
+     */
+    private static function usuarioEnListado(array $fila): UsuarioEnListado
+    {
+        $roles = $fila['roles'] === null ? [] : explode(',', (string) $fila['roles']);
+
+        return new UsuarioEnListado(
+            (string) $fila['id'],
+            (string) $fila['nombre'],
+            (string) $fila['correo'],
+            EstadoCuenta::from((string) $fila['estado']),
+            array_map(static fn (string $rol): Rol => Rol::from($rol), $roles),
+        );
     }
 
     /**

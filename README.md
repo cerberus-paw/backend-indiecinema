@@ -215,7 +215,8 @@ docker run --rm -u "$(id -u):$(id -g)" -v "$PWD/..:/app" -w /app/backend-indieci
 | http://localhost:8080/salas | el listado público de salas habilitadas |
 | http://localhost:8080/organizador/salas | «Mis salas», con sesión de organizador |
 | http://localhost:8080/cuenta/ | cuentas (`/cuenta/ingresar` y `/cuenta/registro`) |
-| http://localhost:8080/cuenta/solicitud | la solicitud para ser organizador, con sesión de espectador; le llega al equipo por correo |
+| http://localhost:8080/cuenta/solicitud | la solicitud para ser organizador, con sesión de espectador: se guarda y le llega al equipo por correo |
+| http://localhost:8080/cuenta/administracion/solicitudes | la bandeja de solicitudes, para aprobarlas (le da el rol de organizador) o rechazarlas con un motivo; sólo el administrador |
 | http://localhost:8025 | el buzón de prueba (Mailpit): los correos que mandan los subsistemas, sin que salgan a nadie |
 | http://localhost:8080/administracion/salas | todas las salas, para habilitarlas o deshabilitarlas; sólo el administrador |
 | http://localhost:8080/cuenta/administracion/usuarios | usuarios y roles, con buscador por nombre o correo, filtros de rol y estado, y dar o quitar el rol de organizador; sólo el administrador |
@@ -430,11 +431,12 @@ listado de salas, las salas del administrador (habilitar, deshabilitar y quién 
 con las próximas funciones, «Acerca de», con los enlaces del encabezado y del pie, las opciones del
 menú y del pie que ve cada rol, y la página de error, que vuelve a la portada); en cuentas, el
 registro de punta a punta, la solicitud para ser organizador, con las mismas validaciones en el
-navegador y en el servidor y el correo al equipo, el listado de usuarios del administrador con su
-buscador, su paginado, dar y quitar el rol de organizador y quién entra (en cuentas y en
-programación, una prueba recorre todas las rutas del panel y comprueba que sólo entra el
-administrador), y las restricciones de las tablas usuario y rol (correo único, roles sin repetir y
-sólo de un usuario que existe). Para correrlas, uno descartable:
+navegador y en el servidor, el correo al equipo y su estado, la bandeja del administrador (aprobar
+le da el rol), el listado de usuarios del administrador con su buscador, su paginado, dar y quitar
+el rol de organizador y quién entra (en cuentas y en programación, una prueba recorre todas las
+rutas del panel y comprueba que sólo entra el administrador), y las restricciones de las tablas
+usuario, rol y solicitud (correo único, roles sin repetir y sólo de un usuario que existe, y una
+sola solicitud pendiente por usuario). Para correrlas, uno descartable:
 
 ```
 docker run -d --rm --name mysql-pruebas -e MYSQL_ROOT_PASSWORD=pruebas -e MYSQL_DATABASE=pruebas -p 127.0.0.1:3307:3306 mysql:8.4

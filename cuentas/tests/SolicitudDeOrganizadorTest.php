@@ -8,6 +8,7 @@ use Dom\HTMLDocument;
 use IndieCinema\Cuentas\Controladores\FormularioDeSolicitud;
 use IndieCinema\Cuentas\Pruebas\Controladores\FormularioDeSolicitudTest;
 use IndieCinema\Nucleo\Aplicacion;
+use IndieCinema\Nucleo\BaseDeDatos;
 use IndieCinema\Nucleo\Configuracion;
 use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
@@ -18,12 +19,14 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * La solicitud para ser organizador de punta a punta: la aplicación entera con las rutas de
- * cuentas, la plantilla del paquete front y un servidor SMTP de mentira, que recibe el correo al
- * equipo. En desarrollo, para que Twig falle si la plantilla usa una variable que el controlador
- * no le pasa. No necesita MySQL: la solicitud todavía no se guarda.
+ * cuentas, la plantilla del paquete front, un MySQL de verdad con las tablas de las migraciones
+ * y un servidor SMTP de mentira, que recibe el correo al equipo. En desarrollo, para que Twig
+ * falle si la plantilla usa una variable que el controlador no le pasa.
  */
 final class SolicitudDeOrganizadorTest extends TestCase
 {
+    use ConBaseDePruebas;
+
     private const SECRETO = 'secreto-de-nginx';
     private const URL = '/solicitud';
     private const ESPECTADOR = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
@@ -31,6 +34,8 @@ final class SolicitudDeOrganizadorTest extends TestCase
     private const EQUIPO = 'equipo@indiecinema.test';
 
     private static ServidorSmtpDePrueba $correo;
+
+    private BaseDeDatos $base;
 
     public static function setUpBeforeClass(): void
     {
@@ -45,6 +50,25 @@ final class SolicitudDeOrganizadorTest extends TestCase
     protected function setUp(): void
     {
         self::$correo->vaciar();
+        $this->base = self::baseConTablasNuevas($this->configuracion());
+        $this->base->ejecutar(
+            "INSERT INTO usuario (id, nombre, correo, contrasena_hash) VALUES (?, 'Eva Prueba', 'eva@ejemplo.com', 'sin uso')",
+            [self::ESPECTADOR],
+        );
+    }
+
+    /**
+     * @param ?string $servidorDeCorreo por defecto, el de mentira
+     */
+    private function configuracion(?string $servidorDeCorreo = null): Configuracion
+    {
+        return new Configuracion([
+            'app' => ['subsistema' => 'cuentas', 'prefijo' => '/cuenta', 'entorno' => 'desarrollo'],
+            'base' => self::baseDePruebas(),
+            'nginx' => ['secreto' => self::SECRETO],
+            'correo' => ['servidor' => $servidorDeCorreo ?? self::$correo->url(), 'remitente' => 'no-responder@indiecinema.test'],
+            'solicitudes' => ['destino' => self::EQUIPO],
+        ]);
     }
 
     /**
@@ -52,15 +76,10 @@ final class SolicitudDeOrganizadorTest extends TestCase
      *
      * @param array<string, mixed> $cuerpo
      */
-    private function pedir(string $metodo = 'GET', array $cuerpo = [], ?string $rol = 'espectador', string $url = self::URL): Respuesta
+    private function pedir(string $metodo = 'GET', array $cuerpo = [], ?string $rol = 'espectador', string $url = self::URL, ?Configuracion $configuracion = null): Respuesta
     {
         parse_str((string) parse_url($url, PHP_URL_QUERY), $consulta);
-        $configuracion = new Configuracion([
-            'app' => ['subsistema' => 'cuentas', 'prefijo' => '/cuenta', 'entorno' => 'desarrollo'],
-            'nginx' => ['secreto' => self::SECRETO],
-            'correo' => ['servidor' => self::$correo->url(), 'remitente' => 'no-responder@indiecinema.test'],
-            'solicitudes' => ['destino' => self::EQUIPO],
-        ]);
+        $configuracion ??= $this->configuracion();
         $cabeceras = $rol === null ? [] : ['X-Nginx-Secreto' => self::SECRETO, 'X-Usuario-Id' => self::ESPECTADOR, 'X-Rol' => $rol];
         $aplicacion = new Aplicacion(dirname(__DIR__), $configuracion, new Log('cuentas', fopen('php://memory', 'w+')));
 
@@ -171,6 +190,16 @@ final class SolicitudDeOrganizadorTest extends TestCase
         $correos = self::$correo->correos();
         self::assertCount(1, $correos);
         self::assertSame(['<' . self::EQUIPO . '>'], $correos[0]['para']);
+        // Y quedó guardada, pendiente, con lo que mandó.
+        $guardada = $this->base->fila('SELECT usuario_id, sala, localidad, correo, telefono, estado FROM solicitud');
+        self::assertSame([
+            'usuario_id' => self::ESPECTADOR,
+            'sala' => 'El Galpón de la Estación',
+            'localidad' => 'Luján',
+            'correo' => 'galpon@ejemplo.com',
+            'telefono' => '+54 2323 44-1234',
+            'estado' => 'pendiente',
+        ], $guardada);
 
         $aviso = $this->pedir(url: '/solicitud?enviada=1');
         self::assertSame(200, $aviso->estado());
@@ -197,5 +226,52 @@ final class SolicitudDeOrganizadorTest extends TestCase
         self::assertStringContainsString('Ya sos organizador', $pantalla->cuerpo());
         self::assertStringNotContainsString('action="/cuenta/solicitud"', $pantalla->cuerpo());
         self::assertSame(409, $this->enviar(rol: $rol)->estado());
+    }
+
+    public function testMientrasEstaPendienteMuestraElEstadoYNoElFormulario(): void
+    {
+        $this->enviar();
+        $pantalla = $this->pedir()->cuerpo();
+
+        self::assertStringContainsString('En revisión', $pantalla);
+        self::assertStringContainsString('«El Galpón de la Estación»', $pantalla);
+        self::assertStringNotContainsString('action="/cuenta/solicitud"', $pantalla);
+    }
+
+    public function testNoSePuedeMandarOtraMientrasEstaPendiente(): void
+    {
+        $this->enviar();
+        $otra = $this->enviar(['sala' => 'Otra sala']);
+
+        self::assertSame(409, $otra->estado());
+        self::assertStringContainsString('En revisión', $otra->cuerpo());
+        self::assertSame(1, $this->base->valor('SELECT COUNT(*) FROM solicitud'));
+    }
+
+    public function testSiLaRechazaronMuestraElMotivoYDejaMandarOtra(): void
+    {
+        $this->enviar();
+        $this->base->ejecutar("UPDATE solicitud SET estado = 'rechazada', motivo = 'Falta <b>la habilitación</b>.', resuelta_en = NOW()");
+
+        $pantalla = $this->pedir()->cuerpo();
+        self::assertStringContainsString('no fue aprobada', $pantalla);
+        self::assertStringContainsString('Falta &lt;b&gt;la habilitación&lt;/b&gt;.', $pantalla);
+        self::assertStringContainsString('action="/cuenta/solicitud"', $pantalla);
+
+        self::assertSame(303, $this->enviar()->estado());
+        self::assertSame(2, $this->base->valor('SELECT COUNT(*) FROM solicitud'));
+    }
+
+    /**
+     * El correo es el aviso: si no sale, la solicitud queda igual y el administrador la ve en su
+     * bandeja.
+     */
+    public function testSiFallaElCorreoLaSolicitudQuedaGuardada(): void
+    {
+        // En el puerto 1 no escucha nadie.
+        $respuesta = $this->pedir('POST', ['_csrf' => self::CSRF] + FormularioDeSolicitudTest::camposValidos(), configuracion: $this->configuracion('smtp://127.0.0.1:1'));
+
+        self::assertSame(303, $respuesta->estado());
+        self::assertSame(1, $this->base->valor("SELECT COUNT(*) FROM solicitud WHERE estado = 'pendiente'"));
     }
 }

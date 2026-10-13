@@ -169,4 +169,12 @@ final class InicioTest extends TestCase
         self::assertSame(200, $respuesta->estado());
         self::assertSame(4, substr_count($respuesta->cuerpo(), '<article class="tarjeta-funcion">'));
     }
+
+    public function testElAdministradorVaASuPanel(): void
+    {
+        $respuesta = $this->pedir(['X-Nginx-Secreto' => self::SECRETO, 'X-Usuario-Id' => 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'X-Rol' => 'administrador']);
+
+        self::assertSame(303, $respuesta->estado());
+        self::assertSame('/cuenta/administracion/usuarios', $respuesta->cabecera('Location'));
+    }
 }

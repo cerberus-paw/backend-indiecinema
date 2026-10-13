@@ -220,7 +220,7 @@ docker run --rm -u "$(id -u):$(id -g)" -v "$PWD/..:/app" -w /app/backend-indieci
 | http://localhost:8025 | el buzón de prueba (Mailpit): los correos que mandan los subsistemas, sin que salgan a nadie |
 | http://localhost:8080/administracion/salas | todas las salas, para habilitarlas o deshabilitarlas; sólo el administrador |
 | http://localhost:8080/cuenta/administracion/usuarios | usuarios y roles, con buscador por nombre o correo, filtros de rol y estado, y dar o quitar el rol de organizador; sólo el administrador |
-| http://localhost:8080/funcion/ | funciones (403 hasta que tenga su `public/index.php`) |
+| http://localhost:8080/funcion/ | funciones: todavía sin pantallas, responde la página de error (404) |
 | http://localhost:8080/estaticos/… | CSS, JavaScript e imágenes del paquete front |
 
 Las rutas `/interno/` dan 404 desde afuera: sólo se llaman entre subsistemas, por la red del
@@ -409,14 +409,15 @@ compose, y los archivos van al volumen de programación.
 
 ## Pruebas
 
-El núcleo, cuentas y programación tienen las suyas (las de cuentas y programación necesitan el
-`composer install` de arriba, que trae PHPUnit):
+El núcleo y los tres subsistemas tienen las suyas (las de los subsistemas necesitan el
+`composer install` de arriba, que trae PHPUnit). Funciones, por ahora, sólo prueba que arranca:
 
 ```
 composer install -d nucleo
 composer pruebas -d nucleo
 composer pruebas -d cuentas
 composer pruebas -d programacion
+composer pruebas -d funciones
 ```
 
 Las que tocan la base corren contra un MySQL de verdad: sin la variable `PRUEBAS_MYSQL_HOST` se
@@ -444,6 +445,7 @@ docker run -d --rm --name mysql-pruebas -e MYSQL_ROOT_PASSWORD=pruebas -e MYSQL_
 env PRUEBAS_MYSQL_HOST=127.0.0.1 PRUEBAS_MYSQL_PUERTO=3307 PRUEBAS_MYSQL_CLAVE=pruebas composer pruebas -d nucleo
 env PRUEBAS_MYSQL_HOST=127.0.0.1 PRUEBAS_MYSQL_PUERTO=3307 PRUEBAS_MYSQL_CLAVE=pruebas composer pruebas -d cuentas
 env PRUEBAS_MYSQL_HOST=127.0.0.1 PRUEBAS_MYSQL_PUERTO=3307 PRUEBAS_MYSQL_CLAVE=pruebas composer pruebas -d programacion
+env PRUEBAS_MYSQL_HOST=127.0.0.1 PRUEBAS_MYSQL_PUERTO=3307 PRUEBAS_MYSQL_CLAVE=pruebas composer pruebas -d funciones
 docker stop mysql-pruebas
 ```
 

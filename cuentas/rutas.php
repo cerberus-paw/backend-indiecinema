@@ -2,13 +2,12 @@
 
 declare(strict_types=1);
 
-use IndieCinema\Cuentas\Controladores\AdministracionDeSolicitudes;
 use IndieCinema\Cuentas\Controladores\AdministracionDeUsuarios;
 use IndieCinema\Cuentas\Controladores\Ingreso;
 use IndieCinema\Cuentas\Controladores\Inicio;
 use IndieCinema\Cuentas\Controladores\Registro;
 use IndieCinema\Cuentas\Controladores\SesionInterna;
-use IndieCinema\Cuentas\Controladores\SolicitudDeOrganizador;
+use IndieCinema\Cuentas\Controladores\UsuariosInternos;
 use IndieCinema\Nucleo\Http\EstadoInterno;
 use IndieCinema\Nucleo\Ruteo\Router;
 use IndieCinema\Nucleo\Seguridad\Rol;
@@ -28,22 +27,18 @@ return static function (Router $router): void {
     // Sin rol mínimo: trabaja con la cookie, y sin sesión válida igual la borra.
     $router->post('/salir', [Ingreso::class, 'salir']);
 
-    // Un espectador pide ser organizador para abrir su sala.
-    $router->get('/solicitud', [SolicitudDeOrganizador::class, 'mostrar'], Rol::Espectador);
-    $router->post('/solicitud', [SolicitudDeOrganizador::class, 'enviar'], Rol::Espectador);
-
     // El listado de usuarios con su buscador, y «Guardar cambios», que da o quita el rol de
     // organizador a los que se les cambió en la tabla; sólo para el administrador.
     $router->get('/administracion/usuarios', [AdministracionDeUsuarios::class, 'listar'], Rol::Administrador);
     $router->post('/administracion/usuarios/roles', [AdministracionDeUsuarios::class, 'guardarRoles'], Rol::Administrador);
 
-    // La bandeja de solicitudes para ser organizador: aprobar una le da el rol.
-    $router->get('/administracion/solicitudes', [AdministracionDeSolicitudes::class, 'listar'], Rol::Administrador);
-    $router->post('/administracion/solicitudes/{id}/aprobar', [AdministracionDeSolicitudes::class, 'aprobar'], Rol::Administrador);
-    $router->post('/administracion/solicitudes/{id}/rechazar', [AdministracionDeSolicitudes::class, 'rechazar'], Rol::Administrador);
-
     // El auth_request de nginx, en cada pedido del sitio: quién es el de la cookie.
     $router->interna('GET', '/interno/sesion', [SesionInterna::class, 'validar'], ['nginx']);
+
+    // Para la bandeja de solicitudes de sala de programación: quién la mandó y, al aprobarla, el
+    // rol de organizador (pedir ser organizador es pedir una sala, como en la E2).
+    $router->interna('GET', '/interno/usuarios/{id}', [UsuariosInternos::class, 'mostrar'], ['programacion']);
+    $router->interna('POST', '/interno/usuarios/{id}/roles', [UsuariosInternos::class, 'darRol'], ['programacion']);
 
     // Para comprobar que los otros subsistemas llegan hasta acá con su token.
     $router->interna('GET', '/interno/estado', [EstadoInterno::class, 'mostrar'], ['programacion', 'funciones']);

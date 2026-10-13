@@ -73,10 +73,12 @@ final class ParametrosDeUsuarios
     /**
      * La URL de otra página con la misma búsqueda y los mismos filtros. La primera va sin el
      * número, así es la misma que arma el formulario.
+     *
+     * @param array<string, string> $extra otros parámetros, como el aviso de un cambio
      */
-    public function urlDePagina(int $numero): string
+    public function urlDePagina(int $numero, array $extra = []): string
     {
-        $consulta = http_build_query($this->valores + ($numero > 1 ? ['pagina' => $numero] : []), '', '&', PHP_QUERY_RFC3986);
+        $consulta = http_build_query($this->valores + ($numero > 1 ? ['pagina' => $numero] : []) + $extra, '', '&', PHP_QUERY_RFC3986);
 
         return self::RUTA . ($consulta === '' ? '' : "?{$consulta}");
     }

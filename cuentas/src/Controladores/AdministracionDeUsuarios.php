@@ -10,13 +10,15 @@ use IndieCinema\Nucleo\Controlador;
 use IndieCinema\Nucleo\Http\ExcepcionHttp;
 use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
-use IndieCinema\Nucleo\Seguridad\Rol;
+use IndieCinema\Nucleo\Seguridad\Usuario;
+use LogicException;
 
 /**
  * GET /cuenta/administracion/usuarios: «Usuarios y roles» del administrador, como el wireframe de
  * la E2, con un buscador por nombre o correo y los filtros de rol y estado, que viajan en la URL
- * (un formulario GET), así funciona sin JavaScript y se puede compartir. Sólo el administrador
- * llega: lo controla el rol de la ruta.
+ * (un formulario GET), así funciona sin JavaScript y se puede compartir. Desde cada fila se da o
+ * se quita el rol de organizador, con un POST. Sólo el administrador llega: lo controla el rol de
+ * la ruta, y el núcleo ya controló el token CSRF de los POST.
  */
 final class AdministracionDeUsuarios extends Controlador
 {
@@ -48,6 +50,7 @@ final class AdministracionDeUsuarios extends Controlador
             'usuarios' => array_map(self::datos(...), $pagina->usuarios),
             'filtros' => $parametros->valores,
             'avisos' => $parametros->avisos,
+            'mensaje_exito' => $this->mensaje($peticion),
             'paginado' => [
                 'numero' => $pagina->numero,
                 'total_paginas' => $total,
@@ -57,6 +60,70 @@ final class AdministracionDeUsuarios extends Controlador
                 'paginas' => self::paginas($pagina->numero, $total, $parametros),
             ],
         ]);
+    }
+
+    /**
+     * @throws ExcepcionHttp 404 si el usuario no existe
+     */
+    public function darOrganizador(Peticion $peticion): Respuesta
+    {
+        $usuario = $this->servicio->darOrganizador((string) $peticion->parametro('id'), self::administrador($peticion));
+
+        return self::volverAlListado($peticion, ['organizador_dado' => $usuario->id]);
+    }
+
+    /**
+     * @throws ExcepcionHttp 404 si el usuario no existe
+     */
+    public function quitarOrganizador(Peticion $peticion): Respuesta
+    {
+        $usuario = $this->servicio->quitarOrganizador((string) $peticion->parametro('id'), self::administrador($peticion));
+
+        return self::volverAlListado($peticion, ['organizador_quitado' => $usuario->id]);
+    }
+
+    private static function administrador(Peticion $peticion): Usuario
+    {
+        return $peticion->usuario() ?? throw new LogicException('La ruta pide el rol de administrador: sin sesión no llega acá.');
+    }
+
+    /**
+     * 303 al listado con los filtros que tenía (llegan en campos ocultos del formulario) y el
+     * aviso: recargar no vuelve a mandar el cambio, y el administrador no pierde la búsqueda. Va
+     * a la primera página, porque con el cambio el usuario puede salir del filtro y la página en
+     * la que estaba, dejar de existir. Es la URL completa, con el prefijo: no pasa por redirigir().
+     *
+     * @param array<string, string> $aviso
+     */
+    private static function volverAlListado(Peticion $peticion, array $aviso): Respuesta
+    {
+        $parametros = ParametrosDeUsuarios::desdeConsulta([
+            'q' => $peticion->cuerpo()['q'] ?? null,
+            'rol' => $peticion->cuerpo()['rol'] ?? null,
+            'estado' => $peticion->cuerpo()['estado'] ?? null,
+        ]);
+
+        return Respuesta::redireccion($parametros->urlDePagina(1, $aviso));
+    }
+
+    /**
+     * El aviso del cambio que se acaba de hacer, con el nombre del usuario, o null.
+     */
+    private function mensaje(Peticion $peticion): ?string
+    {
+        $avisos = [
+            'organizador_dado' => 'Le diste el rol de organizador a «%s». Lo va a tener la próxima vez que ingrese.',
+            'organizador_quitado' => 'Le quitaste el rol de organizador a «%s».',
+        ];
+        foreach ($avisos as $clave => $texto) {
+            $id = $peticion->consulta($clave);
+            $usuario = is_string($id) ? $this->servicio->buscarEnListado($id) : null;
+            if ($usuario !== null) {
+                return sprintf($texto, $usuario->nombre);
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -72,8 +139,7 @@ final class AdministracionDeUsuarios extends Controlador
             'id' => $usuario->id,
             'nombre' => $usuario->nombre,
             'correo' => $usuario->correo,
-            // Todo usuario nace espectador: la lista nunca está vacía.
-            'rol' => ($usuario->roles[array_key_last($usuario->roles)] ?? Rol::Espectador)->value,
+            'rol' => $usuario->mayorRol()->value,
             'estado' => $usuario->estado->value,
         ];
     }

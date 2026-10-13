@@ -26,8 +26,11 @@ return static function (Router $router): void {
     // Sin rol mínimo: trabaja con la cookie, y sin sesión válida igual la borra.
     $router->post('/salir', [Ingreso::class, 'salir']);
 
-    // El listado de usuarios con su buscador, sólo para el administrador.
+    // El listado de usuarios con su buscador, y dar o quitar el rol de organizador; sólo para el
+    // administrador.
     $router->get('/administracion/usuarios', [AdministracionDeUsuarios::class, 'listar'], Rol::Administrador);
+    $router->post('/administracion/usuarios/{id}/dar-organizador', [AdministracionDeUsuarios::class, 'darOrganizador'], Rol::Administrador);
+    $router->post('/administracion/usuarios/{id}/quitar-organizador', [AdministracionDeUsuarios::class, 'quitarOrganizador'], Rol::Administrador);
 
     // El auth_request de nginx, en cada pedido del sitio: quién es el de la cookie.
     $router->interna('GET', '/interno/sesion', [SesionInterna::class, 'validar'], ['nginx']);

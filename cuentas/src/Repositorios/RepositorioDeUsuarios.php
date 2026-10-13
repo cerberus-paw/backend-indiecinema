@@ -57,6 +57,24 @@ final class RepositorioDeUsuarios
     }
 
     /**
+     * Un usuario como lo ve el administrador, con sus roles, o null si no existe.
+     */
+    public function buscarEnListado(string $id): ?UsuarioEnListado
+    {
+        $fila = $this->base->fila(
+            "SELECT u.id, u.nombre, u.correo, u.estado, u.creado_en,
+                    GROUP_CONCAT(r.tipo ORDER BY r.tipo SEPARATOR ',') AS roles
+             FROM usuario u
+             LEFT JOIN rol r ON r.usuario_id = u.id
+             WHERE u.id = ?
+             GROUP BY u.id",
+            [$id],
+        );
+
+        return $fila === null ? null : self::usuarioEnListado($fila);
+    }
+
+    /**
      * Una página del listado del administrador, por nombre y después por correo, que es único y
      * deja el orden fijo entre dos usuarios con el mismo nombre.
      *

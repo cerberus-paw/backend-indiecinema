@@ -25,4 +25,13 @@ final readonly class UsuarioEnListado
         public DateTimeImmutable $creadoEn,
     ) {
     }
+
+    /**
+     * El mayor de sus roles, el que muestra la tabla: se acumulan, y el organizador también es
+     * espectador. Todo usuario nace espectador, así que la lista nunca está vacía.
+     */
+    public function mayorRol(): Rol
+    {
+        return $this->roles[array_key_last($this->roles)] ?? Rol::Espectador;
+    }
 }

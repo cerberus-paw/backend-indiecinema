@@ -412,7 +412,8 @@ compose, y los archivos van al volumen de programación.
 ## Pruebas
 
 El núcleo y los tres subsistemas tienen las suyas (las de los subsistemas necesitan el
-`composer install` de arriba, que trae PHPUnit). Funciones, por ahora, sólo prueba que arranca:
+`composer install` de arriba, que trae PHPUnit). Funciones, por ahora, prueba que arranca y que
+lee una función de programación por la API interna:
 
 ```
 composer install -d nucleo

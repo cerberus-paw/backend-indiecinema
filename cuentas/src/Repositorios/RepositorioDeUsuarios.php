@@ -61,7 +61,7 @@ final class RepositorioDeUsuarios
     public function buscarEnListado(string $id): ?UsuarioEnListado
     {
         $fila = $this->base->fila(
-            "SELECT u.id, u.nombre, u.correo, u.estado, u.creado_en,
+            "SELECT u.id, u.nombre, u.correo, u.estado,
                     GROUP_CONCAT(r.tipo ORDER BY r.tipo SEPARATOR ',') AS roles
              FROM usuario u
              LEFT JOIN rol r ON r.usuario_id = u.id

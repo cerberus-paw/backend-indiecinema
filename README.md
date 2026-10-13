@@ -212,7 +212,7 @@ docker run --rm -u "$(id -u):$(id -g)" -v "$PWD/..:/app" -w /app/backend-indieci
 | http://localhost:8080/organizador/salas | «Mis salas», con sesión de organizador |
 | http://localhost:8080/cuenta/ | cuentas (`/cuenta/ingresar` y `/cuenta/registro`) |
 | http://localhost:8080/administracion/salas | todas las salas, para habilitarlas o deshabilitarlas; sólo el administrador |
-| http://localhost:8080/cuenta/administracion/usuarios | usuarios y roles, con buscador por nombre o correo y filtros de rol y estado; sólo el administrador |
+| http://localhost:8080/cuenta/administracion/usuarios | usuarios y roles, con buscador por nombre o correo, filtros de rol y estado, y dar o quitar el rol de organizador; sólo el administrador |
 | http://localhost:8080/funcion/ | funciones (403 hasta que tenga su `public/index.php`) |
 | http://localhost:8080/estaticos/… | CSS, JavaScript e imágenes del paquete front |
 
@@ -423,9 +423,9 @@ la ve, sus próximas funciones y el camino de la función a su sala y de vuelta,
 listado de salas, las salas del administrador (habilitar, deshabilitar y quién entra), la portada
 con las próximas funciones, «Acerca de», con los enlaces del encabezado y del pie, las opciones del
 menú y del pie que ve cada rol, y la página de error, que vuelve a la portada); en cuentas, el
-registro de punta a punta, el listado de usuarios del administrador con su buscador, su paginado y
-quién entra, y las restricciones de las tablas usuario y rol (correo único, roles sin repetir y sólo
-de un usuario que existe). Para correrlas, uno descartable:
+registro de punta a punta, el listado de usuarios del administrador con su buscador, su paginado,
+dar y quitar el rol de organizador y quién entra, y las restricciones de las tablas usuario y rol
+(correo único, roles sin repetir y sólo de un usuario que existe). Para correrlas, uno descartable:
 
 ```
 docker run -d --rm --name mysql-pruebas -e MYSQL_ROOT_PASSWORD=pruebas -e MYSQL_DATABASE=pruebas -p 127.0.0.1:3307:3306 mysql:8.4

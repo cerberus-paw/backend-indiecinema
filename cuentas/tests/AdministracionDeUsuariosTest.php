@@ -114,7 +114,7 @@ final class AdministracionDeUsuariosTest extends TestCase
         self::assertStringNotContainsString('class="paginado"', $cuerpo);
     }
 
-    public function testCadaFilaMuestraElCorreoLosRolesElEstadoYElAlta(): void
+    public function testCadaFilaMuestraElCorreoElMayorRolYElEstado(): void
     {
         $id = $this->agregar('José Gómez', 'jgomez@correo.org', [Rol::Organizador]);
         $this->agregar('Marta Gil', 'marta@ejemplo.com', estado: EstadoCuenta::Suspendida);
@@ -124,11 +124,12 @@ final class AdministracionDeUsuariosTest extends TestCase
         preg_match("#<tr data-usuario=\"{$id}\">.*?</tr>#s", $cuerpo, $fila);
         self::assertNotEmpty($fila, $cuerpo);
         self::assertStringContainsString('jgomez@correo.org', $fila[0]);
-        // Los roles de menor a mayor: el organizador sigue siendo espectador.
-        preg_match_all('#<li class="usuario-rol rol-([a-z]+)">#', $fila[0], $roles);
-        self::assertSame(['espectador', 'organizador'], $roles[1]);
+        // Un solo rol, el mayor, como el wireframe: el organizador también es espectador.
+        preg_match_all('#class="usuario-rol rol-([a-z]+)"#', $fila[0], $roles);
+        self::assertSame(['organizador'], $roles[1]);
         self::assertStringContainsString('estado-cuenta-activa', $fila[0]);
-        self::assertStringContainsString(date('d/m/Y'), $fila[0]);
+        // La inicial en el avatar.
+        self::assertStringContainsString('<span class="tabla-admin-avatar" aria-hidden="true">J</span>', $fila[0]);
         self::assertStringContainsString('estado-cuenta-suspendida', $cuerpo);
     }
 
@@ -199,7 +200,7 @@ final class AdministracionDeUsuariosTest extends TestCase
 
         self::assertSame(200, $respuesta->estado());
         self::assertCount(5, self::nombres($respuesta));
-        self::assertStringContainsString('La búsqueda no se aplicó', $respuesta->cuerpo());
+        self::assertStringContainsString('Algunos filtros no se aplicaron', $respuesta->cuerpo());
     }
 
     public function testElNombreSeMuestraEscapado(): void
@@ -220,19 +221,122 @@ final class AdministracionDeUsuariosTest extends TestCase
         self::assertStringContainsString('Todavía no hay usuarios registrados.', $respuesta->cuerpo());
     }
 
-    public function testPaginaConservandoLaBusqueda(): void
+    public function testPaginaConservandoLosFiltros(): void
     {
         $this->cargarUsuarios();
 
-        $respuesta = $this->pedir(self::URL . '?q=ejemplo.com&pagina=2', usuarios: ['por_pagina' => 1]);
+        // De ejemplo.com, sólo espectadores: Marta Gil y Pedro Vidal.
+        $respuesta = $this->pedir(self::URL . '?q=ejemplo.com&rol=espectador&pagina=2', usuarios: ['por_pagina' => 1]);
         $cuerpo = $respuesta->cuerpo();
 
-        self::assertSame(['Marta Gil'], self::nombres($respuesta));
-        self::assertStringContainsString('3 usuarios', $cuerpo);
-        self::assertStringContainsString('Página 2 de 3', $cuerpo);
-        // La primera página va sin el número, como la arma el formulario.
-        self::assertStringContainsString('href="/cuenta/administracion/usuarios?q=ejemplo.com" class="boton boton-secundario boton-chico" rel="prev"', $cuerpo);
-        self::assertStringContainsString('href="/cuenta/administracion/usuarios?q=ejemplo.com&amp;pagina=3" class="boton boton-secundario boton-chico" rel="next"', $cuerpo);
+        self::assertSame(['Pedro Vidal'], self::nombres($respuesta));
+        self::assertStringContainsString('2 usuarios', $cuerpo);
+        // Los números, con los filtros; la primera va sin el número, como la arma el formulario.
+        self::assertSame(
+            [
+                '/cuenta/administracion/usuarios?q=ejemplo.com&amp;rol=espectador',
+                '/cuenta/administracion/usuarios?q=ejemplo.com&amp;rol=espectador&amp;pagina=2',
+            ],
+            self::paginas($cuerpo),
+        );
+        self::assertMatchesRegularExpression('#class="paginado-numero actual" aria-current="page">2<#', $cuerpo);
+    }
+
+    public function testElPaginadoNumeraLaPrimeraLaUltimaYLasDeAlrededor(): void
+    {
+        foreach (range(1, 10) as $numero) {
+            $this->agregar(sprintf('Usuario %02d', $numero), "u{$numero}@ejemplo.com");
+        }
+
+        $enLaPrimera = $this->pedir(usuarios: ['por_pagina' => 1])->cuerpo();
+        $enLaSexta = $this->pedir(self::URL . '?pagina=6', usuarios: ['por_pagina' => 1])->cuerpo();
+
+        self::assertSame(['1', '2', '3', '4', '5', '…', '10'], self::numerosDelPaginado($enLaPrimera));
+        self::assertSame(['1', '…', '4', '5', '6', '7', '8', '…', '10'], self::numerosDelPaginado($enLaSexta));
+    }
+
+    /**
+     * Los href del paginado, en orden.
+     *
+     * @return list<string>
+     */
+    private static function paginas(string $cuerpo): array
+    {
+        preg_match_all('#<a href="([^"]*)" class="paginado-numero#', $cuerpo, $enlaces);
+
+        return $enlaces[1];
+    }
+
+    /**
+     * Lo que se lee en el paginado: los números y los «…».
+     *
+     * @return list<string>
+     */
+    private static function numerosDelPaginado(string $cuerpo): array
+    {
+        preg_match('#<nav class="paginado-numerado".*?</nav>#s', $cuerpo, $paginado);
+        preg_match_all('#>(\d+|…)<#u', $paginado[0] ?? '', $numeros);
+
+        return $numeros[1];
+    }
+
+    /**
+     * @return iterable<string, array{string, list<string>}>
+     */
+    public static function filtros(): iterable
+    {
+        // El rol que se filtra es el mayor: espectador trae a los que son sólo eso.
+        yield 'espectadores' => ['rol=espectador', ['Marta Gil', 'Pedro Vidal']];
+        yield 'organizadores' => ['rol=organizador', ['José Gómez']];
+        yield 'moderadores' => ['rol=moderador', ['Zoe 100% Cine']];
+        yield 'administradores' => ['rol=administrador', ['Ana Pérez']];
+        yield 'suspendidas' => ['estado=suspendida', ['Marta Gil']];
+        yield 'pendientes' => ['estado=pendiente', ['Pedro Vidal']];
+        yield 'con la búsqueda' => ['q=ejemplo&estado=activa', ['Ana Pérez']];
+    }
+
+    /**
+     * @param list<string> $esperados
+     */
+    #[DataProvider('filtros')]
+    public function testFiltraPorRolYEstado(string $consulta, array $esperados): void
+    {
+        $this->cargarUsuarios();
+
+        $respuesta = $this->pedir(self::URL . "?{$consulta}");
+
+        self::assertSame(200, $respuesta->estado(), $respuesta->cuerpo());
+        self::assertSame($esperados, self::nombres($respuesta));
+        // Los desplegables quedan en lo elegido.
+        parse_str($consulta, $valores);
+        foreach (['rol', 'estado'] as $filtro) {
+            if (isset($valores[$filtro])) {
+                self::assertStringContainsString("<option value=\"{$valores[$filtro]}\" selected>", $respuesta->cuerpo());
+            }
+        }
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function filtrosInvalidos(): iterable
+    {
+        yield 'un rol que no existe' => ['rol=director'];
+        yield 'visitante no es un rol de una cuenta' => ['rol=visitante'];
+        yield 'un estado que no existe' => ['estado=borrada'];
+        yield 'un arreglo' => ['estado[]=activa'];
+    }
+
+    #[DataProvider('filtrosInvalidos')]
+    public function testUnFiltroInvalidoSeDejaAfueraYAvisa(string $consulta): void
+    {
+        $this->cargarUsuarios();
+
+        $respuesta = $this->pedir(self::URL . "?{$consulta}");
+
+        self::assertSame(200, $respuesta->estado());
+        self::assertCount(5, self::nombres($respuesta));
+        self::assertStringContainsString('Algunos filtros no se aplicaron', $respuesta->cuerpo());
     }
 
     /**

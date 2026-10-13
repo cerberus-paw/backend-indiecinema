@@ -211,6 +211,7 @@ docker run --rm -u "$(id -u):$(id -g)" -v "$PWD/..:/app" -w /app/backend-indieci
 | http://localhost:8080/salas | el listado público de salas habilitadas |
 | http://localhost:8080/organizador/salas | «Mis salas», con sesión de organizador |
 | http://localhost:8080/cuenta/ | cuentas (`/cuenta/ingresar` y `/cuenta/registro`) |
+| http://localhost:8080/cuenta/solicitud | la solicitud para ser organizador, con sesión de espectador |
 | http://localhost:8080/administracion/salas | todas las salas, para habilitarlas o deshabilitarlas; sólo el administrador |
 | http://localhost:8080/cuenta/administracion/usuarios | usuarios y roles, con buscador por nombre o correo, filtros de rol y estado, y dar o quitar el rol de organizador; sólo el administrador |
 | http://localhost:8080/funcion/ | funciones (403 hasta que tenga su `public/index.php`) |
@@ -423,7 +424,8 @@ la ve, sus próximas funciones y el camino de la función a su sala y de vuelta,
 listado de salas, las salas del administrador (habilitar, deshabilitar y quién entra), la portada
 con las próximas funciones, «Acerca de», con los enlaces del encabezado y del pie, las opciones del
 menú y del pie que ve cada rol, y la página de error, que vuelve a la portada); en cuentas, el
-registro de punta a punta, el listado de usuarios del administrador con su buscador, su paginado,
+registro de punta a punta, la solicitud para ser organizador, con las mismas validaciones en el
+navegador y en el servidor, el listado de usuarios del administrador con su buscador, su paginado,
 dar y quitar el rol de organizador y quién entra (en cuentas y en programación, una prueba recorre
 todas las rutas del panel y comprueba que sólo entra el administrador), y las restricciones de las
 tablas usuario y rol (correo único, roles sin repetir y sólo de un usuario que existe). Para

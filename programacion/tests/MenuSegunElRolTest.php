@@ -18,8 +18,9 @@ use PHPUnit\Framework\TestCase;
  *
  * Los roles son acumulativos, como las rutas (Rol::alcanza()): lo del organizador lo ven también el
  * moderador y el administrador, que pueden entrar a esas pantallas; lo de administración, sólo el
- * administrador. Se comparan los enlaces
- * completos, así una opción de más (o una que lleva a una pantalla que no existe) rompe la prueba.
+ * administrador. La solicitud para abrir una sala, al revés, la ve sólo el espectador: los demás
+ * ya pueden publicar salas. Se comparan los enlaces completos, así una opción de más (o una que
+ * lleva a una pantalla que no existe) rompe la prueba.
  */
 final class MenuSegunElRolTest extends TestCase
 {
@@ -31,6 +32,7 @@ final class MenuSegunElRolTest extends TestCase
     private const PIE_PUBLICO = ['/cartelera', '/salas', '/acerca-de#quienes-somos', '/acerca-de#como-funciona'];
     private const SIN_SESION = ['/cuenta/ingresar', '/cuenta/registro'];
     private const CON_SESION = ['/cuenta/'];
+    private const DEL_ESPECTADOR = ['/cuenta/solicitud'];
     private const DEL_ORGANIZADOR = ['/organizador/salas', '/organizador/salas/nueva'];
     private const DEL_ADMINISTRADOR = ['/cuenta/administracion/usuarios', '/administracion/salas'];
 
@@ -95,7 +97,7 @@ final class MenuSegunElRolTest extends TestCase
     public static function roles(): iterable
     {
         yield 'sin sesión' => [null, self::SIN_SESION];
-        yield 'espectador' => ['espectador', self::CON_SESION];
+        yield 'espectador' => ['espectador', [...self::CON_SESION, ...self::DEL_ESPECTADOR]];
         yield 'organizador' => ['organizador', [...self::CON_SESION, ...self::DEL_ORGANIZADOR]];
         yield 'moderador' => ['moderador', [...self::CON_SESION, ...self::DEL_ORGANIZADOR]];
         yield 'administrador' => ['administrador', [...self::CON_SESION, ...self::DEL_ORGANIZADOR, ...self::DEL_ADMINISTRADOR]];

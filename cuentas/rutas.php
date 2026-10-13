@@ -7,6 +7,7 @@ use IndieCinema\Cuentas\Controladores\Ingreso;
 use IndieCinema\Cuentas\Controladores\Inicio;
 use IndieCinema\Cuentas\Controladores\Registro;
 use IndieCinema\Cuentas\Controladores\SesionInterna;
+use IndieCinema\Cuentas\Controladores\SolicitudDeOrganizador;
 use IndieCinema\Nucleo\Http\EstadoInterno;
 use IndieCinema\Nucleo\Ruteo\Router;
 use IndieCinema\Nucleo\Seguridad\Rol;
@@ -25,6 +26,10 @@ return static function (Router $router): void {
     $router->post('/ingresar', [Ingreso::class, 'ingresar']);
     // Sin rol mínimo: trabaja con la cookie, y sin sesión válida igual la borra.
     $router->post('/salir', [Ingreso::class, 'salir']);
+
+    // Un espectador pide ser organizador para abrir su sala.
+    $router->get('/solicitud', [SolicitudDeOrganizador::class, 'mostrar'], Rol::Espectador);
+    $router->post('/solicitud', [SolicitudDeOrganizador::class, 'enviar'], Rol::Espectador);
 
     // El listado de usuarios con su buscador, y dar o quitar el rol de organizador; sólo para el
     // administrador.

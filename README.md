@@ -424,8 +424,10 @@ listado de salas, las salas del administrador (habilitar, deshabilitar y quién 
 con las próximas funciones, «Acerca de», con los enlaces del encabezado y del pie, las opciones del
 menú y del pie que ve cada rol, y la página de error, que vuelve a la portada); en cuentas, el
 registro de punta a punta, el listado de usuarios del administrador con su buscador, su paginado,
-dar y quitar el rol de organizador y quién entra, y las restricciones de las tablas usuario y rol
-(correo único, roles sin repetir y sólo de un usuario que existe). Para correrlas, uno descartable:
+dar y quitar el rol de organizador y quién entra (en cuentas y en programación, una prueba recorre
+todas las rutas del panel y comprueba que sólo entra el administrador), y las restricciones de las
+tablas usuario y rol (correo único, roles sin repetir y sólo de un usuario que existe). Para
+correrlas, uno descartable:
 
 ```
 docker run -d --rm --name mysql-pruebas -e MYSQL_ROOT_PASSWORD=pruebas -e MYSQL_DATABASE=pruebas -p 127.0.0.1:3307:3306 mysql:8.4

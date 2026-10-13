@@ -157,7 +157,7 @@ final class AdministracionDeUsuariosTest extends TestCase
         self::assertStringContainsString('action="/cuenta/administracion/usuarios"', $cuerpo);
         // Sin búsqueda no hay «Limpiar», ni paginado con una sola página.
         self::assertStringNotContainsString('Limpiar', $cuerpo);
-        self::assertStringNotContainsString('class="paginado"', $cuerpo);
+        self::assertStringNotContainsString('class="paginado-numerado"', $cuerpo);
     }
 
     public function testCadaFilaMuestraElCorreoElMayorRolYElEstado(): void

@@ -47,6 +47,22 @@ final class RepositorioDeSalas
     }
 
     /**
+     * Todas las que no están dadas de baja, para el administrador: primero las que esperan que
+     * las habilite, de la más vieja a la más nueva (la que más esperó, arriba), y después las
+     * habilitadas, por nombre.
+     *
+     * @return list<Sala>
+     */
+    public function paraAdministrar(): array
+    {
+        return array_map(self::sala(...), $this->base->filas(
+            'SELECT ' . self::COLUMNAS . ' FROM sala
+             WHERE dada_de_baja_en IS NULL
+             ORDER BY habilitada, IF(habilitada, NULL, creada_en), nombre',
+        ));
+    }
+
+    /**
      * Las que se ven en el sitio: habilitadas y no dadas de baja, por nombre.
      *
      * @param ?string $texto si viene, sólo las que lo tienen en el nombre o la localidad. Como en
@@ -108,6 +124,15 @@ final class RepositorioDeSalas
                 $sala->id,
             ],
         );
+    }
+
+    /**
+     * Guarda sólo el flag de habilitada, que cambia el administrador: los datos de la sala son
+     * del organizador y no se pisan con lo que se leyó antes.
+     */
+    public function guardarHabilitacion(Sala $sala): void
+    {
+        $this->base->ejecutar('UPDATE sala SET habilitada = ? WHERE id = ?', [(int) $sala->habilitada, $sala->id]);
     }
 
     /**

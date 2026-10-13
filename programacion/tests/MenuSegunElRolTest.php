@@ -32,7 +32,7 @@ final class MenuSegunElRolTest extends TestCase
     private const SIN_SESION = ['/cuenta/ingresar', '/cuenta/registro'];
     private const CON_SESION = ['/cuenta/'];
     private const DEL_ORGANIZADOR = ['/organizador/salas', '/organizador/salas/nueva'];
-    private const DEL_ADMINISTRADOR = ['/cuenta/administracion/usuarios'];
+    private const DEL_ADMINISTRADOR = ['/cuenta/administracion/usuarios', '/administracion/salas'];
 
     /**
      * El encabezado y el pie de /acerca-de, por separado.

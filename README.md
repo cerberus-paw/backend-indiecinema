@@ -418,8 +418,8 @@ paginado e intentos de inyección SQL, y `/cartelera` con los filtros por la URL
 inválidos y el 404, `/cartelera.csv` con los mismos filtros, la ficha de la función en cada
 estado, con sus 404, la ficha de la sala, con quién la ve, sus próximas funciones y el camino de
 la función a su sala y de vuelta, el buscador del listado de salas, la portada con las próximas
-funciones, «Acerca de», con los enlaces del encabezado y del pie, y la página de error, que
-vuelve a la portada); en cuentas, el registro de punta a punta y las restricciones de las tablas
+funciones, «Acerca de», con los enlaces del encabezado y del pie, las opciones del menú y del
+pie que ve cada rol, y la página de error, que vuelve a la portada); en cuentas, el registro de punta a punta y las restricciones de las tablas
 usuario y rol (correo único, roles sin repetir y sólo de un usuario que existe). Para correrlas, uno descartable:
 
 ```

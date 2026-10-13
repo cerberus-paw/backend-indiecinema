@@ -19,6 +19,7 @@ use PHPUnit\Framework\TestCase;
 final class ArranqueTest extends TestCase
 {
     private const TOKEN_DE_EJEMPLO = 'cambiar';
+    private const SECRETO_DE_EJEMPLO = 'cambiar';
 
     /**
      * @param array<string, string> $cabeceras
@@ -62,5 +63,26 @@ final class ArranqueTest extends TestCase
         self::assertSame(404, $respuesta->estado());
         self::assertStringContainsString('<header class="encabezado', $respuesta->cuerpo());
         self::assertStringContainsString('<footer', $respuesta->cuerpo());
+    }
+
+    /**
+     * La página llega con la sesión que verificó nginx: el encabezado muestra al usuario. Sin el
+     * secreto de nginx, las mismas cabeceras no se creen y llega como visitante.
+     */
+    public function testLaPaginaMuestraLaSesionQueMandaNginx(): void
+    {
+        $sesion = [
+            'X-Usuario-Id' => 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+            'X-Rol' => 'espectador',
+            'X-Usuario-Nombre' => rawurlencode('Eva Prueba'),
+        ];
+
+        $conSesion = $this->pedir('/', ['X-Nginx-Secreto' => self::SECRETO_DE_EJEMPLO] + $sesion)->cuerpo();
+        $sinElSecreto = $this->pedir('/', $sesion)->cuerpo();
+
+        self::assertStringContainsString('Eva Prueba', $conSesion);
+        self::assertStringNotContainsString('href="/cuenta/ingresar"', $conSesion);
+        self::assertStringNotContainsString('Eva Prueba', $sinElSecreto);
+        self::assertStringContainsString('href="/cuenta/ingresar"', $sinElSecreto);
     }
 }

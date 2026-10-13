@@ -47,22 +47,6 @@ final class RepositorioDeSalas
     }
 
     /**
-     * Todas las que no están dadas de baja, para el administrador: primero las que esperan que
-     * las habilite, de la más vieja a la más nueva (la que más esperó, arriba), y después las
-     * habilitadas, por nombre.
-     *
-     * @return list<Sala>
-     */
-    public function paraAdministrar(): array
-    {
-        return array_map(self::sala(...), $this->base->filas(
-            'SELECT ' . self::COLUMNAS . ' FROM sala
-             WHERE dada_de_baja_en IS NULL
-             ORDER BY habilitada, IF(habilitada, NULL, creada_en), nombre',
-        ));
-    }
-
-    /**
      * Las que se ven en el sitio: habilitadas y no dadas de baja, por nombre.
      *
      * @param ?string $texto si viene, sólo las que lo tienen en el nombre o la localidad. Como en
@@ -136,9 +120,12 @@ final class RepositorioDeSalas
     }
 
     /**
+     * La sala de una fila con las columnas de COLUMNAS. Pública para el repositorio de solicitudes,
+     * que trae cada solicitud con su sala en la misma consulta.
+     *
      * @param array<string, mixed> $fila
      */
-    private static function sala(array $fila): Sala
+    public static function sala(array $fila): Sala
     {
         return new Sala(
             (string) $fila['id'],

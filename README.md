@@ -150,8 +150,16 @@ todo el sitio se vea igual aunque lo sirvan subsistemas distintos.
   `GET /interno/estado` responde quién es y a quién reconoció, para probar la conexión. La
   primera ruta de verdad es `GET /interno/funciones/{id}` de programación: le da a funciones el
   estado, la fecha, el precio, el cupo, los títulos, la sala y el organizador de una función.
+  Cuentas tiene `GET /interno/usuarios/{id}` y `POST /interno/usuarios/{id}/roles`, que llama
+  programación desde la bandeja de solicitudes de sala.
+- **Pedir ser organizador es pedir una sala**, como el recorrido de la E2 (sección 7): la
+  solicitud de sala (`/solicitar-sala`) guarda la sala sin publicar y le avisa al equipo por
+  correo; aprobarla la publica y programación le pide a cuentas el rol de organizador. Primero el
+  rol: si cuentas no responde no cambia nada, y nunca queda una sala publicada cuyo dueño no
+  puede entrar a «Mis salas». La resuelve el administrador mientras no haya moderación.
 - **Los correos salen por SMTP con el curl de PHP** (`ClienteSmtp` del núcleo), sin librerías.
-  El servidor está en `[correo]` del `config.ini`: en desarrollo, el buzón de prueba del compose;
+  El servidor está en `[correo]` del `config.ini` de programación, que manda el aviso de cada
+  solicitud de sala: en desarrollo, el buzón de prueba del compose;
   en el VPS, el del proveedor, que con usuario exige `smtps://` o STARTTLS para no mandar la clave
   sin cifrar.
 - **Las tareas programadas las dispara el cron del servidor** con
@@ -218,10 +226,9 @@ docker run --rm -u "$(id -u):$(id -g)" -v "$PWD/..:/app" -w /app/backend-indieci
 | http://localhost:8080/organizador/salas | «Mis salas», con sesión de organizador |
 | http://localhost:8080/organizador/funciones | «Mis funciones»: las de sus salas, en cualquier estado y con su fecha |
 | http://localhost:8080/cuenta/ | cuentas (`/cuenta/ingresar` y `/cuenta/registro`) |
-| http://localhost:8080/cuenta/solicitud | la solicitud para ser organizador, con sesión de espectador: se guarda y le llega al equipo por correo |
-| http://localhost:8080/cuenta/administracion/solicitudes | la bandeja de solicitudes, para aprobarlas (le da el rol de organizador) o rechazarlas con un motivo; sólo el administrador |
+| http://localhost:8080/solicitar-sala | la solicitud de sala, con sesión: se guarda la sala sin publicar y le llega al equipo por correo |
+| http://localhost:8080/administracion/solicitudes | la bandeja de solicitudes de sala, para aprobarlas (publica la sala y da el rol de organizador) o rechazarlas con un motivo, y el historial; sólo el administrador |
 | http://localhost:8025 | el buzón de prueba (Mailpit): los correos que mandan los subsistemas, sin que salgan a nadie |
-| http://localhost:8080/administracion/salas | todas las salas, para habilitarlas o deshabilitarlas; sólo el administrador |
 | http://localhost:8080/cuenta/administracion/usuarios | usuarios y roles, con los números de las cuentas, buscador por nombre o correo, filtros de rol, estado y año de alta, y el rol de cada uno en un desplegable (espectador u organizador), con «Guardar cambios» para toda la tabla; sólo el administrador |
 | http://localhost:8080/funcion/ | funciones: todavía sin pantallas, responde la página de error (404) |
 | http://localhost:8080/estaticos/… | CSS, JavaScript e imágenes del paquete front |
@@ -434,16 +441,18 @@ paginado e intentos de inyección SQL, y `/cartelera` con los filtros por la URL
 inválidos y el 404, la misma consulta en JSON según la cabecera `Accept`, `/cartelera.csv` con los
 mismos filtros, la ficha de la función en cada estado, con sus 404, la ficha de la sala, con quién
 la ve, sus próximas funciones y el camino de la función a su sala y de vuelta, el buscador del
-listado de salas, las salas del administrador (habilitar, deshabilitar y quién entra), la portada
+listado de salas, la solicitud de sala con las mismas validaciones en el navegador y en el
+servidor, la foto y el correo al equipo, la bandeja del administrador contra una cuentas de
+mentira (aprobar pide el rol y publica la sala, rechazar exige motivo, el historial y retirar la
+sala, y quién entra), la tabla de solicitudes con una pendiente por sala, la portada
 con las próximas funciones, «Acerca de», con los enlaces del encabezado y del pie, las opciones del
 menú y del pie que ve cada rol, y la página de error, que vuelve a la portada); en cuentas, el
-registro de punta a punta, la solicitud para ser organizador, con las mismas validaciones en el
-navegador y en el servidor, el correo al equipo y su estado, la bandeja del administrador (aprobar
-le da el rol), el listado de usuarios del administrador con su buscador, su paginado, dar y quitar
+registro de punta a punta, la API interna de usuarios (quién es y el rol de organizador, sólo para
+programación), el listado de usuarios del administrador con su buscador, su paginado, dar y quitar
 el rol de organizador y quién entra (en cuentas y en programación, una prueba recorre todas las
 rutas del panel y comprueba que sólo entra el administrador), y las restricciones de las tablas
-usuario, rol y solicitud (correo único, roles sin repetir y sólo de un usuario que existe, y una
-sola solicitud pendiente por usuario). Para correrlas, uno descartable:
+usuario y rol (correo único, y roles sin repetir y sólo de un usuario que existe). Para correrlas,
+uno descartable:
 
 ```
 docker run -d --rm --name mysql-pruebas -e MYSQL_ROOT_PASSWORD=pruebas -e MYSQL_DATABASE=pruebas -p 127.0.0.1:3307:3306 mysql:8.4

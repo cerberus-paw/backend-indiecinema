@@ -12,8 +12,9 @@ use IndieCinema\Programacion\Servicios\ServicioDeSalas;
 use LogicException;
 
 /**
- * «Mis salas», alta y edición de la sala, en /organizador/salas/…. Las rutas piden el rol de
- * organizador y el núcleo ya controló el token CSRF de los POST antes de llegar acá.
+ * «Mis salas» y la edición de la sala, en /organizador/salas/…; las nuevas entran por la
+ * solicitud de sala (SolicitudDeSala). Las rutas piden el rol de organizador y el núcleo ya
+ * controló el token CSRF de los POST antes de llegar acá.
  */
 final class SalasDelOrganizador extends Controlador
 {
@@ -30,25 +31,6 @@ final class SalasDelOrganizador extends Controlador
         return $this->vista('mis_salas.html.twig', ['salas' => array_map(TarjetaDeSala::datos(...), $salas)]);
     }
 
-    public function nueva(Peticion $peticion): Respuesta
-    {
-        return $this->formulario(null, []);
-    }
-
-    public function crear(Peticion $peticion): Respuesta
-    {
-        $formulario = FormularioDeSala::desdeCampos($peticion->cuerpo(), $peticion->archivo('imagen'), imagenObligatoria: true);
-        $datos = $formulario->datos();
-        if ($datos === null || $formulario->imagen === null) {
-            return $this->formulario(null, ['formulario' => $formulario], 422);
-        }
-
-        $sala = $this->servicio->crear(self::organizador($peticion), $datos, $formulario->imagen);
-
-        // 303 a la edición: recargar no la vuelve a crear, y el organizador ve lo que guardó.
-        return $this->redirigir("/organizador/salas/{$sala->id}/editar?guardada=1");
-    }
-
     public function editar(Peticion $peticion): Respuesta
     {
         $sala = $this->servicio->paraEditar((string) $peticion->parametro('id'), self::organizador($peticion));
@@ -56,7 +38,7 @@ final class SalasDelOrganizador extends Controlador
         return $this->formulario($sala->id, [
             'formulario' => FormularioDeSala::desdeDatos($sala->datos),
             'mensaje_exito' => $peticion->consulta('guardada') === '1'
-                ? 'Se publica en el sitio cuando la habilite un administrador.'
+                ? ($sala->habilitada ? 'Los cambios ya se ven en el sitio.' : 'Se publica en el sitio cuando aprueben su solicitud.')
                 : null,
         ]);
     }
@@ -78,16 +60,15 @@ final class SalasDelOrganizador extends Controlador
     }
 
     /**
-     * @param ?string                                                        $id    null en el alta
      * @param array{formulario?: FormularioDeSala, mensaje_exito?: ?string} $extra
      */
-    private function formulario(?string $id, array $extra, int $estado = 200): Respuesta
+    private function formulario(string $id, array $extra, int $estado = 200): Respuesta
     {
         $formulario = $extra['formulario'] ?? null;
 
         return $this->vista(self::PLANTILLA, [
-            'es_edicion' => $id !== null,
-            'accion' => $id === null ? '/organizador/salas/nueva' : "/organizador/salas/{$id}/editar",
+            'es_edicion' => true,
+            'accion' => "/organizador/salas/{$id}/editar",
             'valores' => $formulario?->valores ?? [],
             'errores' => $formulario?->errores ?? [],
             'error_general' => $formulario?->errores ? 'Revisá los campos marcados.' : null,

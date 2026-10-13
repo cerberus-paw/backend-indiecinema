@@ -17,8 +17,9 @@ use PHPUnit\Framework\TestCase;
  * páginas.
  *
  * Los roles son acumulativos, como las rutas (Rol::alcanza()): lo del organizador lo ve también el
- * moderador, que puede entrar a esas pantallas. La solicitud para abrir una sala, al revés, la ve
- * sólo el espectador: los demás ya pueden publicar salas. El administrador no usa el sitio público,
+ * moderador, que puede entrar a esas pantallas. La solicitud de sala la ven los dos: el
+ * espectador como «Abrir una sala» y el organizador como «Publicar una sala», que es el mismo
+ * trámite. El administrador no usa el sitio público,
  * como el wireframe de su panel: ve sólo el logo y sus secciones, sin la cartelera, las salas ni
  * «Mi cuenta». Se comparan los enlaces completos, así una opción de más (o una que lleva a una
  * pantalla que no existe) rompe la prueba.
@@ -33,9 +34,9 @@ final class MenuSegunElRolTest extends TestCase
     private const PIE_PUBLICO = ['/cartelera', '/salas', '/acerca-de#quienes-somos', '/acerca-de#como-funciona'];
     private const SIN_SESION = ['/cuenta/ingresar', '/cuenta/registro'];
     private const CON_SESION = ['/cuenta/'];
-    private const DEL_ESPECTADOR = ['/cuenta/solicitud'];
-    private const DEL_ORGANIZADOR = ['/organizador/salas', '/organizador/funciones', '/organizador/funciones/nueva', '/organizador/salas/nueva'];
-    private const DEL_ADMINISTRADOR = ['/cuenta/administracion/usuarios', '/cuenta/administracion/solicitudes', '/administracion/salas'];
+    private const DEL_ESPECTADOR = ['/solicitar-sala'];
+    private const DEL_ORGANIZADOR = ['/organizador/salas', '/organizador/funciones', '/organizador/funciones/nueva', '/solicitar-sala'];
+    private const DEL_ADMINISTRADOR = ['/cuenta/administracion/usuarios', '/administracion/solicitudes'];
 
     /**
      * El encabezado y el pie de /acerca-de, por separado.

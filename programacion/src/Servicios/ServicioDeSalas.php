@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace IndieCinema\Programacion\Servicios;
 
 use IndieCinema\Nucleo\Http\ExcepcionHttp;
+use IndieCinema\Nucleo\Seguridad\Rol;
 use IndieCinema\Nucleo\Seguridad\Usuario;
 use IndieCinema\Nucleo\Uuid;
 use IndieCinema\Programacion\Modelo\DatosDeSala;
@@ -52,16 +53,6 @@ final class ServicioDeSalas
     }
 
     /**
-     * Todas, para el administrador: primero las que esperan que las habilite.
-     *
-     * @return list<Sala>
-     */
-    public function paraAdministrar(): array
-    {
-        return $this->salas->paraAdministrar();
-    }
-
-    /**
      * Publica la sala en el sitio o la retira. Cada cambio queda en el log, con quién lo hizo: es
      * el registro de auditoría que pide la historia. Una sala retirada deja de verse en el listado
      * público y sus funciones, en la cartelera.
@@ -81,14 +72,6 @@ final class ServicioDeSalas
             'administrador' => $administrador->id,
             'sala' => $sala->id,
         ]);
-
-        return $sala;
-    }
-
-    public function crear(Usuario $organizador, DatosDeSala $datos, ImagenSubida $imagen): Sala
-    {
-        $sala = Sala::nueva($organizador->id, $datos, $this->archivos->guardar($imagen));
-        $this->guardandoImagen((string) $sala->imagen, fn () => $this->salas->agregar($sala));
 
         return $sala;
     }
@@ -155,14 +138,16 @@ final class ServicioDeSalas
 
     /**
      * El nombre de la imagen de la sala, si quien pide la puede ver: una sala sin habilitar sólo
-     * la ve su organizador. Si no, 404, como si no existiera.
+     * la ven su organizador y el administrador, que la mira en su bandeja antes de habilitarla.
+     * Si no, 404, como si no existiera.
      *
      * @throws ExcepcionHttp 404
      */
     public function imagenParaMostrar(string $id, ?Usuario $usuario): string
     {
         $sala = $this->buscar($id);
-        if (!$sala->laPuedeVer($usuario?->id) || $sala->imagen === null) {
+        $administrador = $usuario?->alcanza(Rol::Administrador) ?? false;
+        if ((!$sala->laPuedeVer($usuario?->id) && !$administrador) || $sala->imagen === null) {
             throw ExcepcionHttp::noEncontrada();
         }
 

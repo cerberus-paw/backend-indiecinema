@@ -112,6 +112,11 @@ final class RepositorioDeUsuarios
             $condiciones[] = 'u.estado = ?';
             $parametros[] = $filtros->estado->value;
         }
+        if ($filtros->alta !== null) {
+            // Un rango y no YEAR(creado_en): así la condición puede usar un índice de la columna.
+            $condiciones[] = 'u.creado_en >= ? AND u.creado_en < ?';
+            array_push($parametros, sprintf('%04d-01-01', $filtros->alta), sprintf('%04d-01-01', $filtros->alta + 1));
+        }
         $condicion = implode(' AND ', $condiciones);
 
         $total = (int) $this->base->valor("SELECT COUNT(*) FROM usuario u WHERE {$condicion}", $parametros);
@@ -136,6 +141,20 @@ final class RepositorioDeUsuarios
         );
 
         return new PaginaDeUsuarios(array_map(self::usuarioEnListado(...), $filas), $numero, $tamano, $total);
+    }
+
+    /**
+     * Los años en que se creó alguna cuenta, del más nuevo al más viejo: las opciones del filtro
+     * de alta.
+     *
+     * @return list<int>
+     */
+    public function aniosDeAlta(): array
+    {
+        return array_map(
+            static fn (array $fila): int => (int) $fila['anio'],
+            $this->base->filas('SELECT DISTINCT YEAR(creado_en) AS anio FROM usuario ORDER BY anio DESC'),
+        );
     }
 
     /**

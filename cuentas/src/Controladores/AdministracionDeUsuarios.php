@@ -16,8 +16,8 @@ use LogicException;
 
 /**
  * GET /cuenta/administracion/usuarios: «Usuarios y roles» del administrador, como el wireframe de
- * la E2, con las tarjetas de números, un buscador por nombre o correo y los filtros de rol y
- * estado, que viajan en la URL (un formulario GET), así funciona sin JavaScript y se puede
+ * la E2, con las tarjetas de números, un buscador por nombre o correo y los filtros de rol,
+ * estado y año de alta, que viajan en la URL (un formulario GET), así funciona sin JavaScript y se puede
  * compartir. En cada fila, el rol es un desplegable: elegir otro y guardar es un POST. Sólo el
  * administrador llega: lo controla el rol de la ruta, y el núcleo ya controló el token CSRF de los
  * POST.
@@ -40,6 +40,7 @@ final class AdministracionDeUsuarios extends Controlador
             'q' => $peticion->consulta('q'),
             'rol' => $peticion->consulta('rol'),
             'estado' => $peticion->consulta('estado'),
+            'alta' => $peticion->consulta('alta'),
             'pagina' => $peticion->consulta('pagina'),
         ]);
         if ($parametros->pagina === null) {
@@ -54,6 +55,7 @@ final class AdministracionDeUsuarios extends Controlador
             'resumen' => ['usuarios' => $resumen->usuarios, 'nuevos' => $resumen->nuevos, 'organizadores' => $resumen->organizadores],
             'usuarios' => array_map(self::datos(...), $pagina->usuarios),
             'filtros' => $parametros->valores,
+            'anios_de_alta' => self::aniosDeAlta($this->servicio->aniosDeAlta(), $parametros->filtros->alta),
             'avisos' => $parametros->avisos,
             'mensaje_exito' => $this->mensaje($peticion),
             'paginado' => [
@@ -110,6 +112,7 @@ final class AdministracionDeUsuarios extends Controlador
             'q' => $peticion->cuerpo()['q'] ?? null,
             'rol' => $peticion->cuerpo()['rol'] ?? null,
             'estado' => $peticion->cuerpo()['estado'] ?? null,
+            'alta' => $peticion->cuerpo()['alta'] ?? null,
         ]);
 
         return Respuesta::redireccion($parametros->urlDePagina(1, $aviso));
@@ -151,6 +154,24 @@ final class AdministracionDeUsuarios extends Controlador
             'rol' => $usuario->mayorRol()->value,
             'estado' => $usuario->estado->value,
         ];
+    }
+
+    /**
+     * Los años del filtro de alta, con el elegido aunque no tenga cuentas: si no, el desplegable
+     * diría «todas» con el filtro aplicado.
+     *
+     * @param list<int> $anios
+     *
+     * @return list<int>
+     */
+    private static function aniosDeAlta(array $anios, ?int $elegido): array
+    {
+        if ($elegido !== null && !in_array($elegido, $anios, true)) {
+            $anios[] = $elegido;
+            rsort($anios);
+        }
+
+        return $anios;
     }
 
     /**

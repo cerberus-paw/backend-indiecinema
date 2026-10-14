@@ -64,6 +64,17 @@ final class ServicioDeUsuarios
     }
 
     /**
+     * Las opciones del filtro de alta: los años en que se creó alguna cuenta, del más nuevo al más
+     * viejo.
+     *
+     * @return list<int>
+     */
+    public function aniosDeAlta(): array
+    {
+        return $this->usuarios->aniosDeAlta();
+    }
+
+    /**
      * Los números de las tarjetas, sobre todas las cuentas: no cambian con la búsqueda.
      */
     public function resumen(): ResumenDeUsuarios

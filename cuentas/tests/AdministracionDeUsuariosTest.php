@@ -363,6 +363,36 @@ final class AdministracionDeUsuariosTest extends TestCase
         }
     }
 
+    public function testFiltraPorElAnioDeAlta(): void
+    {
+        $this->cargarUsuarios();
+        $this->base->ejecutar("UPDATE usuario SET creado_en = '2025-06-01 10:00:00' WHERE nombre = 'José Gómez'");
+        $this->base->ejecutar("UPDATE usuario SET creado_en = '2024-12-31 23:59:59' WHERE nombre = 'Marta Gil'");
+
+        $respuesta = $this->pedir(self::URL . '?alta=2025');
+        $cuerpo = $respuesta->cuerpo();
+
+        self::assertSame(['José Gómez'], self::nombres($respuesta));
+        // El 31 de diciembre a la noche todavía es del año anterior.
+        self::assertSame(['Marta Gil'], self::nombres($this->pedir(self::URL . '?alta=2024')));
+        // Las opciones son los años con cuentas, del más nuevo al más viejo, y queda el elegido.
+        preg_match('#<select name="alta"[^>]*>(.*?)</select>#s', $cuerpo, $desplegable);
+        preg_match_all('#<option value="(\d{4})"#', $desplegable[1] ?? '', $anios);
+        self::assertSame([(int) date('Y'), 2025, 2024], array_map(intval(...), $anios[1]));
+        self::assertStringContainsString('<option value="2025" selected>2025</option>', $desplegable[1] ?? '');
+    }
+
+    public function testUnAnioSinCuentasQuedaElegidoYNoTraeANadie(): void
+    {
+        $this->cargarUsuarios();
+
+        $respuesta = $this->pedir(self::URL . '?alta=2019');
+
+        self::assertSame([], self::nombres($respuesta));
+        self::assertStringContainsString('No hay usuarios que coincidan', $respuesta->cuerpo());
+        self::assertStringContainsString('<option value="2019" selected>2019</option>', $respuesta->cuerpo());
+    }
+
     /**
      * @return iterable<string, array{string}>
      */
@@ -372,6 +402,10 @@ final class AdministracionDeUsuariosTest extends TestCase
         yield 'visitante no es un rol de una cuenta' => ['rol=visitante'];
         yield 'un estado que no existe' => ['estado=borrada'];
         yield 'un arreglo' => ['estado[]=activa'];
+        yield 'un año que no es un número' => ['alta=hola'];
+        yield 'un año de antes de 1970' => ['alta=1969'];
+        yield 'un año de cinco cifras' => ['alta=20255'];
+        yield 'el año como arreglo' => ['alta[]=2025'];
     }
 
     #[DataProvider('filtrosInvalidos')]
@@ -509,10 +543,10 @@ final class AdministracionDeUsuariosTest extends TestCase
         $id = $this->agregar('Eva Espectadora', 'eva@ejemplo.com');
 
         // El filtro de rol viaja como rol y el rol elegido, como nuevo_rol: no se pisan.
-        $respuesta = $this->enviar(self::URL . "/{$id}/rol", ['nuevo_rol' => 'organizador', 'q' => 'eva', 'rol' => 'espectador', 'estado' => 'activa']);
+        $respuesta = $this->enviar(self::URL . "/{$id}/rol", ['nuevo_rol' => 'organizador', 'q' => 'eva', 'rol' => 'espectador', 'estado' => 'activa', 'alta' => '2025']);
 
         self::assertSame(
-            "/cuenta/administracion/usuarios?q=eva&rol=espectador&estado=activa&organizador_dado={$id}",
+            "/cuenta/administracion/usuarios?q=eva&rol=espectador&estado=activa&alta=2025&organizador_dado={$id}",
             $respuesta->cabecera('Location'),
         );
     }

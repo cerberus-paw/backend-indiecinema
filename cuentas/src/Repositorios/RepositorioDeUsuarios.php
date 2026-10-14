@@ -7,6 +7,7 @@ namespace IndieCinema\Cuentas\Repositorios;
 use IndieCinema\Cuentas\Modelo\EstadoCuenta;
 use IndieCinema\Cuentas\Modelo\FiltrosDeUsuarios;
 use IndieCinema\Cuentas\Modelo\PaginaDeUsuarios;
+use IndieCinema\Cuentas\Modelo\ResumenDeUsuarios;
 use IndieCinema\Cuentas\Modelo\Usuario;
 use IndieCinema\Cuentas\Modelo\UsuarioEnListado;
 use IndieCinema\Cuentas\Servicios\CorreoYaRegistrado;
@@ -111,6 +112,11 @@ final class RepositorioDeUsuarios
             $condiciones[] = 'u.estado = ?';
             $parametros[] = $filtros->estado->value;
         }
+        if ($filtros->alta !== null) {
+            // Un rango y no YEAR(creado_en): así la condición puede usar un índice de la columna.
+            $condiciones[] = 'u.creado_en >= ? AND u.creado_en < ?';
+            array_push($parametros, sprintf('%04d-01-01', $filtros->alta), sprintf('%04d-01-01', $filtros->alta + 1));
+        }
         $condicion = implode(' AND ', $condiciones);
 
         $total = (int) $this->base->valor("SELECT COUNT(*) FROM usuario u WHERE {$condicion}", $parametros);
@@ -135,6 +141,40 @@ final class RepositorioDeUsuarios
         );
 
         return new PaginaDeUsuarios(array_map(self::usuarioEnListado(...), $filas), $numero, $tamano, $total);
+    }
+
+    /**
+     * Los años en que se creó alguna cuenta, del más nuevo al más viejo: las opciones del filtro
+     * de alta.
+     *
+     * @return list<int>
+     */
+    public function aniosDeAlta(): array
+    {
+        return array_map(
+            static fn (array $fila): int => (int) $fila['anio'],
+            $this->base->filas('SELECT DISTINCT YEAR(creado_en) AS anio FROM usuario ORDER BY anio DESC'),
+        );
+    }
+
+    /**
+     * Los números de las tarjetas de «Usuarios y roles». «Este mes» sale del reloj de la base, el
+     * mismo que pone usuario.creado_en.
+     */
+    public function resumen(): ResumenDeUsuarios
+    {
+        $cuentas = $this->base->fila(
+            "SELECT COUNT(*) AS usuarios,
+                    COUNT(CASE WHEN creado_en >= DATE_FORMAT(CURRENT_DATE, '%Y-%m-01') THEN 1 END) AS nuevos
+             FROM usuario",
+        );
+        $organizadores = $this->base->valor(
+            "SELECT COUNT(*) FROM usuario u
+             WHERE u.estado = 'activa'
+               AND EXISTS (SELECT 1 FROM rol WHERE rol.usuario_id = u.id AND rol.tipo = 'organizador')",
+        );
+
+        return new ResumenDeUsuarios((int) ($cuentas['usuarios'] ?? 0), (int) ($cuentas['nuevos'] ?? 0), (int) $organizadores);
     }
 
     /**

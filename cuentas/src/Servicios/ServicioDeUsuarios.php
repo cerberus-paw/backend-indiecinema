@@ -6,6 +6,7 @@ namespace IndieCinema\Cuentas\Servicios;
 
 use IndieCinema\Cuentas\Modelo\FiltrosDeUsuarios;
 use IndieCinema\Cuentas\Modelo\PaginaDeUsuarios;
+use IndieCinema\Cuentas\Modelo\ResumenDeUsuarios;
 use IndieCinema\Cuentas\Modelo\UsuarioEnListado;
 use IndieCinema\Cuentas\Repositorios\RepositorioDeUsuarios;
 use IndieCinema\Nucleo\Configuracion;
@@ -18,16 +19,19 @@ use RuntimeException;
 
 /**
  * Los usuarios para el administrador: el listado con la búsqueda y los filtros, por páginas del
- * tamaño que dice config.ini, y dar o quitar el rol de organizador. Que quien pide sea
- * administrador lo controla la ruta.
+ * tamaño que dice config.ini, los números de las tarjetas, y dar o quitar el rol de organizador.
+ * Que quien pide sea administrador lo controla la ruta.
  *
  * Desde la web sólo se da y se quita el de organizador: el de moderador y el de administrador no
  * tienen pantalla, y el primer administrador sale de los datos de prueba.
  */
 final class ServicioDeUsuarios
 {
-    /** Si config.ini no dice otra cosa. */
-    private const POR_PAGINA = 20;
+    /**
+     * Si config.ini no dice otra cosa: con las tarjetas y los filtros arriba, la página entra
+     * entera en la pantalla de una notebook.
+     */
+    private const POR_PAGINA = 5;
     private const MAXIMO_POR_PAGINA = 100;
 
     private readonly int $porPagina;
@@ -63,11 +67,68 @@ final class ServicioDeUsuarios
     }
 
     /**
+     * Las opciones del filtro de alta: los años en que se creó alguna cuenta, del más nuevo al más
+     * viejo.
+     *
+     * @return list<int>
+     */
+    public function aniosDeAlta(): array
+    {
+        return $this->usuarios->aniosDeAlta();
+    }
+
+    /**
+     * Los números de las tarjetas, sobre todas las cuentas: no cambian con la búsqueda.
+     */
+    public function resumen(): ResumenDeUsuarios
+    {
+        return $this->usuarios->resumen();
+    }
+
+    /**
      * El usuario como lo ve el administrador, o null si no existe.
      */
     public function buscarEnListado(string $id): ?UsuarioEnListado
     {
         return Uuid::esValido($id) ? $this->usuarios->buscarEnListado($id) : null;
+    }
+
+    /**
+     * «Guardar cambios» de la tabla: deja a cada usuario de espectador o de organizador. Al
+     * moderador y al administrador no se los cambia desde la web, y su desplegable está apagado.
+     *
+     * Primero se revisan todos: con uno que no se puede hacer, no se cambia ninguno. El que ya
+     * tiene ese rol no cambia ni se registra.
+     *
+     * @param array<string, Rol> $cambios id del usuario => el rol que le eligieron
+     *
+     * @return array<string, Rol> los que cambiaron
+     *
+     * @throws ExcepcionHttp 404 si un usuario no existe; 400 si un rol no es espectador ni
+     *                       organizador, o si un usuario es moderador o administrador
+     */
+    public function cambiarRoles(array $cambios, Usuario $administrador): array
+    {
+        $cambiables = [Rol::Espectador, Rol::Organizador];
+        $hechos = [];
+        foreach ($cambios as $id => $rol) {
+            $actual = $this->buscar($id)->mayorRol();
+            if (!in_array($rol, $cambiables, true) || !in_array($actual, $cambiables, true)) {
+                throw ExcepcionHttp::solicitudInvalida('Desde la web sólo se pasa de espectador a organizador, o al revés.');
+            }
+            if ($rol !== $actual) {
+                $hechos[$id] = $rol;
+            }
+        }
+        foreach ($hechos as $id => $rol) {
+            if ($rol === Rol::Organizador) {
+                $this->darOrganizador($id, $administrador);
+            } else {
+                $this->quitarOrganizador($id, $administrador);
+            }
+        }
+
+        return $hechos;
     }
 
     /**

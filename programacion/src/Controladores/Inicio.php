@@ -7,12 +7,16 @@ namespace IndieCinema\Programacion\Controladores;
 use IndieCinema\Nucleo\Controlador;
 use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
+use IndieCinema\Nucleo\Seguridad\Rol;
 use IndieCinema\Programacion\Servicios\ServicioDeCartelera;
 use IndieCinema\Programacion\Servicios\ServicioDeSalas;
 
 /**
  * GET /: la portada, para cualquiera, con o sin sesión. Las próximas funciones de la cartelera,
  * algunas salas y un buscador que lleva a la cartelera filtrada.
+ *
+ * El administrador no usa el sitio público (su encabezado no tiene la cartelera ni las salas):
+ * va a su panel. Como el ingreso lleva a la portada, así entra directo ahí.
  */
 final class Inicio extends Controlador
 {
@@ -28,6 +32,10 @@ final class Inicio extends Controlador
 
     public function mostrar(Peticion $peticion): Respuesta
     {
+        if ($peticion->usuario()?->alcanza(Rol::Administrador)) {
+            return Respuesta::redireccion('/cuenta/administracion/usuarios');
+        }
+
         $proximas = $this->cartelera->proximas(self::FUNCIONES);
         $salas = $this->salas->publicadas();
 

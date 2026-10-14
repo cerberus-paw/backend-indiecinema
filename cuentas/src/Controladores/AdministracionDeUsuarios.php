@@ -10,15 +10,17 @@ use IndieCinema\Nucleo\Controlador;
 use IndieCinema\Nucleo\Http\ExcepcionHttp;
 use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
+use IndieCinema\Nucleo\Seguridad\Rol;
 use IndieCinema\Nucleo\Seguridad\Usuario;
 use LogicException;
 
 /**
  * GET /cuenta/administracion/usuarios: «Usuarios y roles» del administrador, como el wireframe de
- * la E2, con un buscador por nombre o correo y los filtros de rol y estado, que viajan en la URL
- * (un formulario GET), así funciona sin JavaScript y se puede compartir. Desde cada fila se da o
- * se quita el rol de organizador, con un POST. Sólo el administrador llega: lo controla el rol de
- * la ruta, y el núcleo ya controló el token CSRF de los POST.
+ * la E2, con las tarjetas de números, un buscador por nombre o correo y los filtros de rol,
+ * estado y año de alta, que viajan en la URL (un formulario GET), así funciona sin JavaScript y se puede
+ * compartir. En cada fila, el rol es un desplegable, y «Guardar cambios» manda en un POST los de
+ * toda la tabla. Sólo el administrador llega: lo controla el rol de la ruta, y el núcleo ya
+ * controló el token CSRF de los POST.
  */
 final class AdministracionDeUsuarios extends Controlador
 {
@@ -38,6 +40,7 @@ final class AdministracionDeUsuarios extends Controlador
             'q' => $peticion->consulta('q'),
             'rol' => $peticion->consulta('rol'),
             'estado' => $peticion->consulta('estado'),
+            'alta' => $peticion->consulta('alta'),
             'pagina' => $peticion->consulta('pagina'),
         ]);
         if ($parametros->pagina === null) {
@@ -46,9 +49,13 @@ final class AdministracionDeUsuarios extends Controlador
         $pagina = $this->servicio->pagina($parametros->filtros, $parametros->pagina);
         $total = $pagina->totalDePaginas();
 
+        $resumen = $this->servicio->resumen();
+
         return $this->vista('administracion_usuarios.html.twig', [
+            'resumen' => ['usuarios' => $resumen->usuarios, 'nuevos' => $resumen->nuevos, 'organizadores' => $resumen->organizadores],
             'usuarios' => array_map(self::datos(...), $pagina->usuarios),
             'filtros' => $parametros->valores,
+            'anios_de_alta' => self::aniosDeAlta($this->servicio->aniosDeAlta(), $parametros->filtros->alta),
             'avisos' => $parametros->avisos,
             'mensaje_exito' => $this->mensaje($peticion),
             'paginado' => [
@@ -63,23 +70,41 @@ final class AdministracionDeUsuarios extends Controlador
     }
 
     /**
-     * @throws ExcepcionHttp 404 si el usuario no existe
+     * «Guardar cambios»: los desplegables de la tabla llegan en roles[id], y en antes[id], el rol
+     * con el que se mostró cada uno. Sólo se cambia el que el administrador tocó: así no pisa lo
+     * que cambió otro administrador desde que se cargó la página. Si no cambió nada, vuelve sin
+     * aviso.
+     *
+     * @throws ExcepcionHttp 404 si un usuario no existe; 400 si un rol no se puede elegir
      */
-    public function darOrganizador(Peticion $peticion): Respuesta
+    public function guardarRoles(Peticion $peticion): Respuesta
     {
-        $usuario = $this->servicio->darOrganizador((string) $peticion->parametro('id'), self::administrador($peticion));
+        $roles = $peticion->campo('roles');
+        $antes = $peticion->campo('antes');
+        if (!is_array($roles)) {
+            throw ExcepcionHttp::solicitudInvalida('No llegó ningún rol para guardar.');
+        }
+        $cambios = [];
+        foreach ($roles as $id => $valor) {
+            $rol = is_string($valor) ? Rol::tryFrom($valor) : null;
+            if ($rol === null) {
+                throw ExcepcionHttp::solicitudInvalida('Elegí espectador u organizador.');
+            }
+            if (!is_array($antes) || ($antes[$id] ?? null) !== $valor) {
+                $cambios[(string) $id] = $rol;
+            }
+        }
+        $hechos = $this->servicio->cambiarRoles($cambios, self::administrador($peticion));
 
-        return self::volverAlListado($peticion, ['organizador_dado' => $usuario->id]);
-    }
+        // Con uno solo, el aviso lo nombra; con varios, dice cuántos.
+        $id = (string) array_key_first($hechos);
 
-    /**
-     * @throws ExcepcionHttp 404 si el usuario no existe
-     */
-    public function quitarOrganizador(Peticion $peticion): Respuesta
-    {
-        $usuario = $this->servicio->quitarOrganizador((string) $peticion->parametro('id'), self::administrador($peticion));
-
-        return self::volverAlListado($peticion, ['organizador_quitado' => $usuario->id]);
+        return self::volverAlListado($peticion, match (true) {
+            $hechos === [] => [],
+            count($hechos) > 1 => ['roles_cambiados' => (string) count($hechos)],
+            $hechos[$id] === Rol::Organizador => ['organizador_dado' => $id],
+            default => ['organizador_quitado' => $id],
+        });
     }
 
     private static function administrador(Peticion $peticion): Usuario
@@ -101,13 +126,15 @@ final class AdministracionDeUsuarios extends Controlador
             'q' => $peticion->cuerpo()['q'] ?? null,
             'rol' => $peticion->cuerpo()['rol'] ?? null,
             'estado' => $peticion->cuerpo()['estado'] ?? null,
+            'alta' => $peticion->cuerpo()['alta'] ?? null,
         ]);
 
         return Respuesta::redireccion($parametros->urlDePagina(1, $aviso));
     }
 
     /**
-     * El aviso del cambio que se acaba de hacer, con el nombre del usuario, o null.
+     * El aviso del cambio que se acaba de hacer, con el nombre del usuario o con cuántos fueron, o
+     * null.
      */
     private function mensaje(Peticion $peticion): ?string
     {
@@ -121,6 +148,11 @@ final class AdministracionDeUsuarios extends Controlador
             if ($usuario !== null) {
                 return sprintf($texto, $usuario->nombre);
             }
+        }
+        // Con varios cambios no entran los nombres: dice cuántos fueron.
+        $cuantos = $peticion->consulta('roles_cambiados');
+        if (is_string($cuantos) && preg_match('/^([2-9]|[1-9][0-9]{1,2})$/D', $cuantos) === 1) {
+            return "Cambiaste el rol de {$cuantos} usuarios. Lo van a ver la próxima vez que ingresen.";
         }
 
         return null;
@@ -142,6 +174,24 @@ final class AdministracionDeUsuarios extends Controlador
             'rol' => $usuario->mayorRol()->value,
             'estado' => $usuario->estado->value,
         ];
+    }
+
+    /**
+     * Los años del filtro de alta, con el elegido aunque no tenga cuentas: si no, el desplegable
+     * diría «todas» con el filtro aplicado.
+     *
+     * @param list<int> $anios
+     *
+     * @return list<int>
+     */
+    private static function aniosDeAlta(array $anios, ?int $elegido): array
+    {
+        if ($elegido !== null && !in_array($elegido, $anios, true)) {
+            $anios[] = $elegido;
+            rsort($anios);
+        }
+
+        return $anios;
     }
 
     /**

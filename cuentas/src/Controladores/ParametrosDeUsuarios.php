@@ -25,6 +25,8 @@ final class ParametrosDeUsuarios
     private const LARGO_TEXTO = 254;
     /** Hasta acá, una página más no cambia nada: sólo evita pasar un número enorme a la base. */
     private const PAGINA = '/^[1-9][0-9]{0,8}$/D';
+    /** Un año de cuatro cifras desde 1970: ninguna cuenta es más vieja. */
+    private const ANIO = '/^(19[7-9][0-9]|[2-9][0-9]{3})$/D';
 
     public private(set) FiltrosDeUsuarios $filtros;
 
@@ -56,9 +58,10 @@ final class ParametrosDeUsuarios
         // Visitante no es un rol de una cuenta: es quien no tiene.
         $rol = $parametros->opcion($consulta['rol'] ?? null, 'El rol', static fn (string $valor): ?Rol => ($rol = Rol::tryFrom($valor)) === Rol::Visitante ? null : $rol);
         $estado = $parametros->opcion($consulta['estado'] ?? null, 'El estado', EstadoCuenta::tryFrom(...));
-        $parametros->filtros = new FiltrosDeUsuarios($texto, $rol, $estado);
+        $alta = $parametros->opcion($consulta['alta'] ?? null, 'El año de alta', static fn (string $valor): ?int => preg_match(self::ANIO, $valor) === 1 ? (int) $valor : null);
+        $parametros->filtros = new FiltrosDeUsuarios($texto, $rol, $estado, $alta);
         $parametros->valores = array_filter(
-            ['q' => $texto, 'rol' => $rol?->value, 'estado' => $estado?->value],
+            ['q' => $texto, 'rol' => $rol?->value, 'estado' => $estado?->value, 'alta' => $alta === null ? null : (string) $alta],
             static fn (?string $valor): bool => $valor !== null,
         );
 

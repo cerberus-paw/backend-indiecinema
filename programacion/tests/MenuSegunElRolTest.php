@@ -16,11 +16,12 @@ use PHPUnit\Framework\TestCase;
  * /acerca-de, que es estática y no necesita la base; el encabezado y el pie son los de todas las
  * páginas.
  *
- * Los roles son acumulativos, como las rutas (Rol::alcanza()): lo del organizador lo ven también el
- * moderador y el administrador, que pueden entrar a esas pantallas; lo de administración, sólo el
- * administrador. La solicitud para abrir una sala, al revés, la ve sólo el espectador: los demás
- * ya pueden publicar salas. Se comparan los enlaces completos, así una opción de más (o una que
- * lleva a una pantalla que no existe) rompe la prueba.
+ * Los roles son acumulativos, como las rutas (Rol::alcanza()): lo del organizador lo ve también el
+ * moderador, que puede entrar a esas pantallas. La solicitud para abrir una sala, al revés, la ve
+ * sólo el espectador: los demás ya pueden publicar salas. El administrador no usa el sitio público,
+ * como el wireframe de su panel: ve sólo el logo y sus secciones, sin la cartelera, las salas ni
+ * «Mi cuenta». Se comparan los enlaces completos, así una opción de más (o una que lleva a una
+ * pantalla que no existe) rompe la prueba.
  */
 final class MenuSegunElRolTest extends TestCase
 {
@@ -100,7 +101,7 @@ final class MenuSegunElRolTest extends TestCase
         yield 'espectador' => ['espectador', [...self::CON_SESION, ...self::DEL_ESPECTADOR]];
         yield 'organizador' => ['organizador', [...self::CON_SESION, ...self::DEL_ORGANIZADOR]];
         yield 'moderador' => ['moderador', [...self::CON_SESION, ...self::DEL_ORGANIZADOR]];
-        yield 'administrador' => ['administrador', [...self::CON_SESION, ...self::DEL_ORGANIZADOR, ...self::DEL_ADMINISTRADOR]];
+        yield 'administrador' => ['administrador', self::DEL_ADMINISTRADOR];
     }
 
     /**
@@ -110,9 +111,11 @@ final class MenuSegunElRolTest extends TestCase
     public function testCadaRolVeSoloSusOpciones(?string $rol, array $propios): void
     {
         $pagina = $this->pedir($rol);
+        // Del sitio público, el administrador conserva sólo el logo.
+        $administrador = $rol === 'administrador';
 
-        self::assertSame(self::juntos(self::ENCABEZADO_PUBLICO, $propios), self::enlaces($pagina['encabezado']));
-        self::assertSame(self::juntos(self::PIE_PUBLICO, $propios), self::enlaces($pagina['pie']));
+        self::assertSame(self::juntos($administrador ? ['/'] : self::ENCABEZADO_PUBLICO, $propios), self::enlaces($pagina['encabezado']));
+        self::assertSame(self::juntos($administrador ? [] : self::PIE_PUBLICO, $propios), self::enlaces($pagina['pie']));
     }
 
     /**

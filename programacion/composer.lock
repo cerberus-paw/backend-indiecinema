@@ -12,7 +12,7 @@
             "dist": {
                 "type": "path",
                 "url": "../../frontend-indiecinema",
-                "reference": "be1d82dd71e211ec7b20f187cc955fbfc0cc9242"
+                "reference": "5766e415d761f73ee5ae9743927a9e894710c2ea"
             },
             "type": "library",
             "license": [

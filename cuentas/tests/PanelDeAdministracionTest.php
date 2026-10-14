@@ -20,8 +20,8 @@ use PHPUnit\Framework\TestCase;
  * El control de acceso del panel del administrador en cuentas, ruta por ruta: todas las de
  * /administracion/ piden ese rol, y quien no lo tiene recibe 403 (o 401 sin sesión) antes de
  * llegar al controlador. Recorre las rutas de rutas.php, así una ruta nueva del panel que se
- * olvide del rol hace fallar la prueba. Las del panel en programación
- * (salas) tienen la misma prueba allá.
+ * olvide del rol hace fallar la prueba. Las del panel en programación (la bandeja de
+ * solicitudes de sala) tienen la misma prueba allá.
  *
  * No necesita la base: el rol se controla antes de que un controlador la pida, así que corre
  * siempre, también sin MySQL. Los POST llevan el token CSRF, para que el 403 sea por el rol.

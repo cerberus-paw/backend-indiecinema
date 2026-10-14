@@ -66,14 +66,6 @@ location ~ ^/cuenta/registro/?$ {
     rewrite ^/cuenta(/.*)$ $1 break;
     include conf.d/subsistema.inc;
 }
-# 2 por minuto por IP: pasan 3 seguidos y después uno cada 30 segundos.
-location ~ ^/cuenta/solicitud/?$ {
-    limit_req zone=solicitud burst=2 nodelay;
-    set $subsistema cuentas;
-    set $secreto "${NGINX_SECRETO_CUENTAS}";
-    rewrite ^/cuenta(/.*)$ $1 break;
-    include conf.d/subsistema.inc;
-}
 location /cuenta/ {
     set $subsistema cuentas;
     set $secreto "${NGINX_SECRETO_CUENTAS}";
@@ -88,6 +80,16 @@ location /funcion/ {
     set $subsistema funciones;
     set $secreto "${NGINX_SECRETO_FUNCIONES}";
     rewrite ^/funcion(/.*)$ $1 break;
+    include conf.d/subsistema.inc;
+}
+
+# La solicitud de sala, de programación. 2 por minuto por IP: pasan 3 seguidos y después uno
+# cada 30 segundos.
+location ~ ^/solicitar-sala/?$ {
+    limit_req zone=solicitud burst=2 nodelay;
+    set $subsistema programacion;
+    set $secreto "${NGINX_SECRETO_PROGRAMACION}";
+    rewrite ^(.*)$ $1 break;
     include conf.d/subsistema.inc;
 }
 

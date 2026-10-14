@@ -11,7 +11,7 @@ use PDOException;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Las tablas usuario, rol y solicitud tal como las dejan las migraciones, contra un MySQL de verdad: lo que
+ * Las tablas usuario y rol tal como las dejan las migraciones, contra un MySQL de verdad: lo que
  * se prueba son las restricciones de la base, no las de la aplicación.
  */
 final class MigracionesTest extends TestCase
@@ -21,7 +21,6 @@ final class MigracionesTest extends TestCase
     private const CLAVE_DUPLICADA = 1062;
     private const FALTA_EL_PADRE = 1452;
     private const VALOR_INVALIDO = 1265;
-    private const RESTRICCION_VIOLADA = 3819;
 
     private BaseDeDatos $base;
 
@@ -38,18 +37,6 @@ final class MigracionesTest extends TestCase
             [$id, 'Ana Pérez', $correo, password_hash('una clave larga', PASSWORD_ARGON2ID), 'activa'],
         );
         $this->base->ejecutar('INSERT INTO rol (usuario_id, tipo) VALUES (?, ?)', [$id, $rol]);
-
-        return $id;
-    }
-
-    private function solicitar(string $usuarioId): string
-    {
-        $id = Uuid::nuevo();
-        $this->base->ejecutar(
-            "INSERT INTO solicitud (id, usuario_id, sala, localidad, correo, presentacion, enviada_en)
-             VALUES (?, ?, 'El Galpón', 'Luján', 'galpon@ejemplo.com', 'Un galpón reciclado.', NOW())",
-            [$id, $usuarioId],
-        );
 
         return $id;
     }
@@ -112,38 +99,5 @@ final class MigracionesTest extends TestCase
         $this->base->ejecutar('DELETE FROM usuario WHERE id = ?', [$id]);
 
         self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM rol'));
-    }
-
-    public function testUnUsuarioTieneComoMuchoUnaSolicitudPendiente(): void
-    {
-        $id = $this->registrar('ana@ejemplo.com');
-        $primera = $this->solicitar($id);
-
-        $this->assertRechaza(self::CLAVE_DUPLICADA, fn () => $this->solicitar($id));
-
-        // Resuelta la primera, puede mandar otra; y otro usuario, la suya.
-        $this->base->ejecutar("UPDATE solicitud SET estado = 'rechazada', resuelta_en = NOW() WHERE id = ?", [$primera]);
-        $this->solicitar($id);
-        $this->solicitar($this->registrar('jose@ejemplo.com'));
-        self::assertSame(3, $this->base->valor('SELECT COUNT(*) FROM solicitud'));
-    }
-
-    public function testUnaSolicitudResueltaTieneFechaYUnaPendienteNo(): void
-    {
-        $solicitud = $this->solicitar($this->registrar('ana@ejemplo.com'));
-
-        $this->assertRechaza(self::RESTRICCION_VIOLADA, fn () => $this->base->ejecutar("UPDATE solicitud SET estado = 'aprobada' WHERE id = ?", [$solicitud]));
-        $this->assertRechaza(self::RESTRICCION_VIOLADA, fn () => $this->base->ejecutar('UPDATE solicitud SET resuelta_en = NOW() WHERE id = ?', [$solicitud]));
-    }
-
-    public function testNoHaySolicitudesSinUsuarioYAlBorrarloSeVan(): void
-    {
-        $this->assertRechaza(self::FALTA_EL_PADRE, fn () => $this->solicitar(Uuid::nuevo()));
-
-        $id = $this->registrar('ana@ejemplo.com');
-        $this->solicitar($id);
-        $this->base->ejecutar('DELETE FROM usuario WHERE id = ?', [$id]);
-
-        self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM solicitud'));
     }
 }

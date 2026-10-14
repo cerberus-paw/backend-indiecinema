@@ -122,7 +122,7 @@ final class ServicioDeUsuarios
         }
         foreach ($hechos as $id => $rol) {
             if ($rol === Rol::Organizador) {
-                $this->darOrganizador($id, $administrador);
+                $this->darOrganizador($id, $administrador->id);
             } else {
                 $this->quitarOrganizador($id, $administrador);
             }
@@ -138,9 +138,13 @@ final class ServicioDeUsuarios
      * El repositorio cierra sus sesiones en la misma transacción, así el rol nuevo se ve en el
      * próximo ingreso, y el cambio queda en el log con quién lo hizo: es el registro de auditoría.
      *
+     * @param string $administradorId quién lo da: el administrador desde «Usuarios y roles», o el
+     *                                que aprobó la solicitud de sala en programación, que llama
+     *                                por la API interna sin su sesión
+     *
      * @throws ExcepcionHttp 404 si el usuario no existe
      */
-    public function darOrganizador(string $id, Usuario $administrador): UsuarioEnListado
+    public function darOrganizador(string $id, string $administradorId): UsuarioEnListado
     {
         $usuario = $this->buscar($id);
         if ($usuario->mayorRol()->alcanza(Rol::Organizador)) {
@@ -148,7 +152,7 @@ final class ServicioDeUsuarios
         }
         $this->usuarios->agregarRol($usuario->id, Rol::Organizador);
         $this->log->notice('{administrador} le dio el rol de organizador a {usuario}.', [
-            'administrador' => $administrador->id,
+            'administrador' => $administradorId,
             'usuario' => $usuario->id,
         ]);
 

@@ -90,6 +90,28 @@ final class FormularioDeSala
     }
 
     /**
+     * Las reglas para el navegador, las mismas con las que valida este formulario: campo => las
+     * claves que espera el parcial de campo del paquete front (requerido, maximo, valor_minimo,
+     * valor_maximo y aceptar), así se le pasan tal cual y un límite cambia en un solo lugar. El
+     * servidor igual valida todo: el navegador se puede saltear.
+     *
+     * @return array<string, array<string, mixed>>
+     */
+    public static function reglas(bool $imagenObligatoria): array
+    {
+        $reglas = [];
+        foreach (self::TEXTOS as $campo => [, $maximo]) {
+            $reglas[$campo] = ['requerido' => true, 'maximo' => $maximo];
+        }
+        foreach (self::NUMEROS as $campo => [$minimo, $maximo]) {
+            $reglas[$campo] = ['requerido' => true, 'valor_minimo' => $minimo, 'valor_maximo' => $maximo];
+        }
+        $reglas['imagen'] = ['requerido' => $imagenObligatoria, 'aceptar' => implode(',', array_keys(self::TIPOS_DE_IMAGEN))];
+
+        return $reglas;
+    }
+
+    /**
      * Los datos validados, o null si hay errores.
      */
     public function datos(): ?DatosDeSala

@@ -179,6 +179,7 @@ final class MigracionesTest extends TestCase
         self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM obra_genero'));
         self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM funcion'));
         self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM funcion_obra'));
+        self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM solicitud_sala'));
     }
 
     public function testLaObraQuedaGuardadaConSusValoresYTimestamps(): void
@@ -532,5 +533,69 @@ final class MigracionesTest extends TestCase
 
         self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM funcion_obra'));
         self::assertSame(1, $this->base->valor('SELECT COUNT(*) FROM obra WHERE id = ?', [$obraId]));
+    }
+
+    private function solicitar(string $salaId): string
+    {
+        $id = Uuid::nuevo();
+        $this->base->ejecutar(
+            "INSERT INTO solicitud_sala (id, sala_id, usuario_id, enviada_en) VALUES (?, ?, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', NOW())",
+            [$id, $salaId],
+        );
+
+        return $id;
+    }
+
+    public function testUnaSalaTieneComoMuchoUnaSolicitudPendiente(): void
+    {
+        $sala = $this->insertarSala();
+        $primera = $this->solicitar($sala);
+
+        $this->assertRechaza(self::REPETIDO, fn () => $this->solicitar($sala));
+
+        // Rechazada la primera, se corrige y va otra; y otra sala, la suya.
+        $this->base->ejecutar("UPDATE solicitud_sala SET estado = 'rechazada', motivo = 'Falta la póliza.', resuelta_en = NOW() WHERE id = ?", [$primera]);
+        $this->solicitar($sala);
+        $this->solicitar($this->insertarSala());
+        self::assertSame(3, $this->base->valor('SELECT COUNT(*) FROM solicitud_sala'));
+    }
+
+    public function testUnaSolicitudResueltaTieneFechaYMotivoYUnaPendienteNo(): void
+    {
+        $solicitud = $this->solicitar($this->insertarSala());
+
+        $this->assertRechaza(self::RESTRICCION_CHECK, fn () => $this->base->ejecutar("UPDATE solicitud_sala SET estado = 'aprobada', motivo = 'Bien.' WHERE id = ?", [$solicitud]));
+        $this->assertRechaza(self::RESTRICCION_CHECK, fn () => $this->base->ejecutar("UPDATE solicitud_sala SET estado = 'aprobada', resuelta_en = NOW() WHERE id = ?", [$solicitud]));
+        $this->assertRechaza(self::RESTRICCION_CHECK, fn () => $this->base->ejecutar('UPDATE solicitud_sala SET resuelta_en = NOW() WHERE id = ?', [$solicitud]));
+    }
+
+    public function testNoHaySolicitudesSinSalaYUnaSalaConSolicitudesNoSeBorra(): void
+    {
+        $this->assertRechaza(self::REFERENCIA_INEXISTENTE, fn () => $this->solicitar(Uuid::nuevo()));
+
+        $sala = $this->insertarSala();
+        $this->solicitar($sala);
+        $this->assertRechaza(self::REFERENCIADO, fn () => $this->base->ejecutar('DELETE FROM sala WHERE id = ?', [$sala]));
+    }
+
+    /**
+     * La 008 se corre sobre las salas que ya había: las que esperaban entran a la bandeja como
+     * pendientes, con el id de su sala; las publicadas y las dadas de baja, no.
+     */
+    public function testLasSalasQueEsperabanEntranALaBandeja(): void
+    {
+        $esperaba = $this->insertarSala();
+        // Publicada: insertarSala() la deja habilitada.
+        $this->insertarSala();
+        $deBaja = $this->insertarSala();
+        $this->base->ejecutar('UPDATE sala SET habilitada = FALSE WHERE id IN (?, ?)', [$esperaba, $deBaja]);
+        $this->base->ejecutar('UPDATE sala SET dada_de_baja_en = NOW() WHERE id = ?', [$deBaja]);
+
+        $this->base->ejecutar((string) file_get_contents(dirname(__DIR__) . '/migraciones/008_solicitudes_de_salas_sin_habilitar.sql'));
+
+        self::assertSame(
+            [['id' => $esperaba, 'sala_id' => $esperaba, 'usuario_id' => 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'estado' => 'pendiente']],
+            $this->base->filas('SELECT id, sala_id, usuario_id, estado FROM solicitud_sala'),
+        );
     }
 }

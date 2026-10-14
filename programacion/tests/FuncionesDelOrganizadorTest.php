@@ -274,6 +274,12 @@ final class FuncionesDelOrganizadorTest extends TestCase
         // Debe mostrar las obras del catálogo
         self::assertStringContainsString('Zama', $cuerpo);
         self::assertStringContainsString('La ciénaga', $cuerpo);
+        // Los parámetros que hereda la función, de la sala y no escritos en la plantilla
+        self::assertStringContainsString("data-sala=\"{$propiaHabilitada->id}\"", $cuerpo);
+        self::assertMatchesRegularExpression(
+            '#<dt>Tiempo entre funciones</dt>\s*<dd>' . $propiaHabilitada->datos->tiempoEntreFunciones . ' min</dd>#',
+            $cuerpo,
+        );
     }
 
     public function testUnEspectadorNoVeElFormularioDeAltaYSinSesionPideIngresar(): void

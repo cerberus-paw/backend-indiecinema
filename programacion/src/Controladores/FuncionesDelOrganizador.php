@@ -83,13 +83,29 @@ final class FuncionesDelOrganizador extends Controlador
 
         return $this->vista(self::PLANTILLA_ALTA, [
             'accion' => '/organizador/funciones/nueva',
-            'salas' => array_map(TarjetaDeSala::datos(...), $salas),
+            'salas' => array_map(self::datosSala(...), $salas),
             'obras' => array_map(self::datosObra(...), $obras),
             'valores' => $formulario?->valores ?? [],
             'errores' => $formulario?->errores ?? [],
             'error_general' => $extra['error_general'] ?? null,
             'mensaje_exito' => null,
         ], $estado);
+    }
+
+    /**
+     * La sala para el desplegable y, al lado del formulario, sus parámetros: los que hereda la
+     * función, como en el wireframe.
+     *
+     * @return array<string, mixed>
+     */
+    private static function datosSala(Sala $sala): array
+    {
+        return [
+            ...TarjetaDeSala::datos($sala),
+            'peliculas_por_funcion' => $sala->datos->peliculasPorFuncion,
+            'duracion_funcion' => $sala->datos->duracionFuncion,
+            'tiempo_entre_funciones' => $sala->datos->tiempoEntreFunciones,
+        ];
     }
 
     /**

@@ -15,6 +15,9 @@ use IndieCinema\Programacion\Modelo\Sala;
  */
 final class FormularioDeFuncion
 {
+    /** Hasta ocho cifras y dos decimales, lo que entra en funcion.precio_base (Funcion::PRECIO_MAXIMO). */
+    private const PRECIO = '/^[0-9]{1,8}([.,][0-9]{1,2})?$/D';
+
     /** @var array<string, mixed> lo que mandó, para volver a mostrarlo si hay errores */
     public private(set) array $valores = [];
 
@@ -86,7 +89,7 @@ final class FormularioDeFuncion
         }
 
         // 2. Obras del catálogo
-        $rawObras = $campos['obras'] ?? ($campos['obras_ids'] ?? ($campos['obra_id'] ?? []));
+        $rawObras = $campos['obras'] ?? [];
         $obrasSeleccionadas = is_array($rawObras) ? $rawObras : [$rawObras];
         $obrasIds = array_values(array_filter(
             array_map(static fn (mixed $id): string => self::texto($id), $obrasSeleccionadas),
@@ -100,8 +103,15 @@ final class FormularioDeFuncion
             $this->errores['obras'] = 'Una obra no puede estar dos veces en la misma función.';
         } else {
             $idsCatalogo = array_column($obrasDisponibles, 'id');
+            $duraciones = array_column($obrasDisponibles, 'duracionMinutos', 'id');
+            $duracion = array_sum(array_intersect_key($duraciones, array_flip($obrasIds)));
             if (array_diff($obrasIds, $idsCatalogo) !== []) {
                 $this->errores['obras'] = 'Una de las obras seleccionadas no existe en el catálogo.';
+            } elseif ($salaElegida !== null && count($obrasIds) > $salaElegida->datos->peliculasPorFuncion) {
+                // Los parámetros que la función hereda de la sala, como dice el panel del costado.
+                $this->errores['obras'] = "En esta sala entran hasta {$salaElegida->datos->peliculasPorFuncion} películas por función.";
+            } elseif ($salaElegida !== null && $duracion > $salaElegida->datos->duracionFuncion) {
+                $this->errores['obras'] = "Las obras duran {$duracion} minutos y en esta sala una función puede durar hasta {$salaElegida->datos->duracionFuncion}.";
             } else {
                 $this->obrasIds = $obrasIds;
             }
@@ -138,10 +148,14 @@ final class FormularioDeFuncion
         $this->valores['precio'] = $precioRaw;
         if ($precioRaw === '') {
             $this->errores['precio'] = 'Falta el precio de la entrada.';
-        } elseif (!is_numeric($precioRaw) || (float) $precioRaw < 0) {
+        } elseif (preg_match('/^-/', $precioRaw) === 1 && is_numeric($precioRaw)) {
             $this->errores['precio'] = 'El precio no puede ser negativo.';
+        } elseif (preg_match(self::PRECIO, $precioRaw) !== 1) {
+            // Sólo cifras y hasta dos decimales: «1e12» también es un número para PHP, y no entra
+            // en la columna.
+            $this->errores['precio'] = 'El precio tiene que ser un número de hasta 99.999.999,99, sin puntos de miles.';
         } else {
-            $this->precio = (float) $precioRaw;
+            $this->precio = (float) str_replace(',', '.', $precioRaw);
         }
 
         // 5. Cupo disponible

@@ -83,17 +83,25 @@ final class Sala
 
     /**
      * Una función ya programada en esta sala, con sus obras, fecha y hora confirmadas (E3-11.2).
+     * Hereda los parámetros de la sala: cuántas películas entran en una función, cuánto puede durar
+     * y cuánto tiempo hay que dejar entre una función y la siguiente.
      *
-     * @param list<string> $obrasIds
+     * @param list<string>                                         $obrasIds
+     * @param int                                                  $duracion lo que duran las obras, en minutos
+     * @param list<array{DateTimeImmutable, DateTimeImmutable}>    $ocupado  desde y hasta cuándo va cada
+     *                                                                       función ya programada en la sala
      *
-     * @throws ReglaIncumplida si la sala no está habilitada, si el cupo no entra en ella, o si
-     *                         Funcion::programada() rechaza los datos
+     * @throws ReglaIncumplida si la sala no está habilitada, si el cupo no entra en ella, si las
+     *                         obras son más o duran más de lo que la sala admite, si se pisa con
+     *                         otra función, o si Funcion::programada() rechaza los datos
      */
     public function programarFuncion(
         array $obrasIds,
         int $cupo,
         float $precioBase,
         DateTimeImmutable $fechaHora,
+        int $duracion,
+        array $ocupado = [],
         DateTimeImmutable $ahora = new DateTimeImmutable(),
     ): Funcion {
         if (!$this->habilitada) {
@@ -101,6 +109,24 @@ final class Sala
         }
         if ($cupo > $this->datos->capacidad) {
             throw new ReglaIncumplida("El cupo no puede ser mayor a la capacidad de la sala ({$this->datos->capacidad}).");
+        }
+        if (count($obrasIds) > $this->datos->peliculasPorFuncion) {
+            throw new ReglaIncumplida("En esta sala entran hasta {$this->datos->peliculasPorFuncion} películas por función.");
+        }
+        if ($duracion > $this->datos->duracionFuncion) {
+            throw new ReglaIncumplida("Las obras duran {$duracion} minutos y en esta sala una función puede durar hasta {$this->datos->duracionFuncion}.");
+        }
+        // Entre una función y la siguiente tiene que quedar el tiempo que pide la sala, de los dos
+        // lados: ni empezar pegada a la anterior ni terminar pegada a la que sigue.
+        $pausa = "{$this->datos->tiempoEntreFunciones} minutes";
+        $termina = $fechaHora->modify("+{$duracion} minutes");
+        foreach ($ocupado as [$desde, $hasta]) {
+            if ($fechaHora < $hasta->modify("+{$pausa}") && $termina->modify("+{$pausa}") > $desde) {
+                throw new ReglaIncumplida(
+                    "Se pisa con otra función de la sala, que va de {$desde->format('H:i')} a {$hasta->format('H:i')}: "
+                    . "entre una y otra tienen que quedar {$this->datos->tiempoEntreFunciones} minutos.",
+                );
+            }
         }
 
         return Funcion::programada($this->id, $obrasIds, $cupo, $precioBase, $fechaHora, $ahora);

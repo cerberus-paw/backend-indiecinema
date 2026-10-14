@@ -23,6 +23,7 @@ use IndieCinema\Programacion\Repositorios\RepositorioDeFunciones;
 use IndieCinema\Programacion\Repositorios\RepositorioDeGeneros;
 use IndieCinema\Programacion\Repositorios\RepositorioDeObras;
 use IndieCinema\Programacion\Repositorios\RepositorioDeSalas;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -488,5 +489,150 @@ final class FuncionesDelOrganizadorTest extends TestCase
         ]);
 
         self::assertSame(403, $respuesta->estado());
+    }
+    /**
+     * Manda el alta de una función con una obra, salvo lo que se le cambie.
+     *
+     * @param array<string, mixed> $campos
+     */
+    private function programar(Sala $sala, array $campos = []): Respuesta
+    {
+        return $this->enviar('/organizador/funciones/nueva', $campos + [
+            'sala_id' => $sala->id,
+            'obras' => [$this->obras['Zama']],
+            'fecha' => '2030-10-25',
+            'hora' => '20:30',
+            'precio' => '2500',
+            'cupo' => '40',
+        ]);
+    }
+
+    private function cuantasFunciones(Sala $sala): int
+    {
+        return (int) $this->base->valor('SELECT COUNT(*) FROM funcion WHERE sala_id = ?', [$sala->id]);
+    }
+
+    public function testRechazaMasObrasDeLasQueLaSalaPasaPorFuncion(): void
+    {
+        // Una película por función, y tiempo de sobra para las dos.
+        $sala = Sala::nueva(self::ORGANIZADORA, new DatosDeSala('El Microcine', 'Una sala chica.', 'Mitre 10', 'Luján', 60, 1, 300, 15), 'sala.jpg');
+        $this->salas->agregar($sala);
+        $this->base->ejecutar('UPDATE sala SET habilitada = TRUE WHERE id = ?', [$sala->id]);
+
+        $respuesta = $this->programar($sala, ['obras' => array_values($this->obras)]);
+
+        self::assertSame(422, $respuesta->estado());
+        self::assertStringContainsString('En esta sala entran hasta 1 películas por función.', $respuesta->cuerpo());
+        self::assertSame(0, $this->cuantasFunciones($sala));
+    }
+
+    public function testRechazaObrasQueDuranMasQueLaFuncionDeLaSala(): void
+    {
+        // La sala de las pruebas admite dos películas y 120 minutos; las dos obras suman 206.
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+
+        $respuesta = $this->programar($sala, ['obras' => array_values($this->obras)]);
+
+        self::assertSame(422, $respuesta->estado());
+        self::assertStringContainsString('Las obras duran 206 minutos y en esta sala una función puede durar hasta 120.', $respuesta->cuerpo());
+        self::assertSame(0, $this->cuantasFunciones($sala));
+    }
+
+    /**
+     * Con una función de 20:30 a 22:13 (103 minutos) y 15 minutos entre funciones.
+     *
+     * @return iterable<string, array{string, bool}>
+     */
+    public static function horariosContraOtraFuncion(): iterable
+    {
+        yield 'a la misma hora' => ['20:30', false];
+        yield 'empieza mientras la otra sigue' => ['21:00', false];
+        yield 'empieza sin dejar la pausa' => ['22:20', false];
+        yield 'empieza justo con la pausa' => ['22:28', true];
+        yield 'termina sin dejar la pausa antes' => ['18:40', false];
+        yield 'termina justo con la pausa antes' => ['18:32', true];
+    }
+
+    #[DataProvider('horariosContraOtraFuncion')]
+    public function testNoSePisaConOtraFuncionDeLaSala(string $hora, bool $entra): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        self::assertSame(303, $this->programar($sala)->estado());
+
+        $respuesta = $this->programar($sala, ['hora' => $hora, 'obras' => [$this->obras['La ciénaga']]]);
+
+        if ($entra) {
+            self::assertSame(303, $respuesta->estado(), $respuesta->cuerpo());
+            self::assertSame(2, $this->cuantasFunciones($sala));
+        } else {
+            // Vuelve al formulario con el motivo, no un error del servidor.
+            self::assertSame(422, $respuesta->estado());
+            self::assertStringContainsString('Se pisa con otra función de la sala, que va de 20:30 a 22:13', $respuesta->cuerpo());
+            self::assertSame(1, $this->cuantasFunciones($sala));
+        }
+    }
+
+    public function testEnOtraSalaOEnOtroDiaNoSePisa(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $otra = $this->sala(self::ORGANIZADORA, 'El Sótano');
+        self::assertSame(303, $this->programar($sala)->estado());
+
+        self::assertSame(303, $this->programar($otra)->estado());
+        self::assertSame(303, $this->programar($sala, ['fecha' => '2030-10-26'])->estado());
+    }
+
+    public function testUnaFuncionCanceladaNoOcupaLaSala(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        self::assertSame(303, $this->programar($sala)->estado());
+        $this->base->ejecutar("UPDATE funcion SET estado = 'cancelada' WHERE sala_id = ?", [$sala->id]);
+
+        self::assertSame(303, $this->programar($sala)->estado());
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function preciosQueNoEntran(): iterable
+    {
+        yield 'con exponente' => ['1e12'];
+        yield 'nueve cifras' => ['100000000'];
+        yield 'tres decimales' => ['2500.125'];
+        yield 'con puntos de miles' => ['2.500.000'];
+        yield 'con letras' => ['dos mil'];
+    }
+
+    #[DataProvider('preciosQueNoEntran')]
+    public function testRechazaUnPrecioQueNoEntraEnLaColumna(string $precio): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+
+        $respuesta = $this->programar($sala, ['precio' => $precio]);
+
+        self::assertSame(422, $respuesta->estado());
+        self::assertStringContainsString('El precio tiene que ser un número de hasta 99.999.999,99', $respuesta->cuerpo());
+        self::assertSame(0, $this->cuantasFunciones($sala));
+    }
+
+    public function testAceptaElPrecioConComaYElMasAlto(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+
+        self::assertSame(303, $this->programar($sala, ['precio' => '2500,50'])->estado());
+        self::assertSame(303, $this->programar($sala, ['precio' => '99999999.99', 'fecha' => '2030-10-26'])->estado());
+        self::assertSame(
+            ['2500.50', '99999999.99'],
+            array_column($this->base->filas('SELECT precio_base FROM funcion WHERE sala_id = ? ORDER BY precio_base', [$sala->id]), 'precio_base'),
+        );
+    }
+
+    public function testElAvisoDeProgramadaSoloConUnIdDeVerdad(): void
+    {
+        $this->sala(self::ORGANIZADORA, 'El Galpón');
+
+        self::assertStringContainsString('La función quedó programada', $this->pedir('GET', '/organizador/funciones?programada=' . Uuid::nuevo())->cuerpo());
+        self::assertStringNotContainsString('La función quedó programada', $this->pedir('GET', '/organizador/funciones?programada=cualquiera')->cuerpo());
+        self::assertStringNotContainsString('La función quedó programada', $this->pedir('GET', '/organizador/funciones')->cuerpo());
     }
 }

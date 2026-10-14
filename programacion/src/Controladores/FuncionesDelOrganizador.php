@@ -8,8 +8,10 @@ use IndieCinema\Nucleo\Controlador;
 use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Seguridad\Usuario;
+use IndieCinema\Nucleo\Uuid;
 use IndieCinema\Programacion\Modelo\FuncionDelOrganizador;
 use IndieCinema\Programacion\Modelo\Obra;
+use IndieCinema\Programacion\Modelo\ReglaIncumplida;
 use IndieCinema\Programacion\Modelo\Sala;
 use IndieCinema\Programacion\Servicios\ServicioDeFuncionesDelOrganizador;
 use LogicException;
@@ -32,7 +34,8 @@ final class FuncionesDelOrganizador extends Controlador
 
         return $this->vista('mis_funciones.html.twig', [
             'funciones' => array_map(self::datos(...), $funciones),
-            'programada' => $peticion->consulta('programada'),
+            // El aviso de que se acaba de programar una: sólo si lo que llega tiene forma de id.
+            'programada' => is_string($programada = $peticion->consulta('programada')) && Uuid::esValido($programada),
         ]);
     }
 
@@ -59,14 +62,20 @@ final class FuncionesDelOrganizador extends Controlador
             ], 422);
         }
 
-        $funcion = $this->servicio->programar(
-            $organizador,
-            $formulario->salaId,
-            $formulario->obrasIds,
-            $formulario->cupo,
-            $formulario->precio,
-            $formulario->fechaHora,
-        );
+        // Lo que el formulario no puede saber solo, como que se pisa con otra función de la sala,
+        // lo dice el servicio: vuelve al formulario con el motivo en vez de un error del servidor.
+        try {
+            $funcion = $this->servicio->programar(
+                $organizador,
+                $formulario->salaId,
+                $formulario->obrasIds,
+                $formulario->cupo,
+                $formulario->precio,
+                $formulario->fechaHora,
+            );
+        } catch (ReglaIncumplida $regla) {
+            return $this->formularioAlta($salas, $obras, ['formulario' => $formulario, 'error_general' => $regla->getMessage()], 422);
+        }
 
         // 303 al listado: al recargar no vuelve a crear la función.
         return $this->redirigir("/organizador/funciones?programada={$funcion->id}");

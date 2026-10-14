@@ -20,6 +20,9 @@ use IndieCinema\Nucleo\Uuid;
  */
 final class Funcion
 {
+    /** Lo más que entra en la columna funcion.precio_base, DECIMAL(10, 2). */
+    public const PRECIO_MAXIMO = 99_999_999.99;
+
     /**
      * @param non-empty-list<string> $obrasIds las candidatas mientras está en votación; después,
      *                                         las que se proyectan
@@ -88,6 +91,9 @@ final class Funcion
         }
         if ($precioBase < 0) {
             throw new ReglaIncumplida('El precio no puede ser negativo.');
+        }
+        if ($precioBase > self::PRECIO_MAXIMO) {
+            throw new ReglaIncumplida('El precio es demasiado alto.');
         }
         if ($fechaHora <= $ahora) {
             throw new ReglaIncumplida('La fecha de la función tiene que ser futura.');

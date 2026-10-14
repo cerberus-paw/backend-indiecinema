@@ -66,11 +66,13 @@ final class ServicioDeFuncionesDelOrganizador
     }
 
     /**
-     * Da de alta y programa una nueva función en una sala propia habilitada (E3-11.2).
+     * Da de alta y programa una nueva función en una sala propia habilitada (E3-11.2), con los
+     * parámetros de la sala: cuántas obras, cuánto duran y que no se pise con otra función.
      *
      * @param list<string> $obrasIds
      *
-     * @throws ReglaIncumplida
+     * @throws ReglaIncumplida si la sala no es suya, si una obra no está en el catálogo o si la
+     *                         sala no admite la función
      */
     public function programar(
         Usuario $organizador,
@@ -85,7 +87,13 @@ final class ServicioDeFuncionesDelOrganizador
             throw new ReglaIncumplida('La sala no existe o no pertenece a tu cuenta.');
         }
 
-        $funcion = $sala->programarFuncion($obrasIds, $cupo, $precioBase, $fechaHora);
+        $duraciones = array_column($this->obras->todas(), 'duracionMinutos', 'id');
+        $duracion = 0;
+        foreach ($obrasIds as $obraId) {
+            $duracion += $duraciones[$obraId] ?? throw new ReglaIncumplida('Una de las obras no está en el catálogo.');
+        }
+
+        $funcion = $sala->programarFuncion($obrasIds, $cupo, $precioBase, $fechaHora, $duracion, $this->funciones->ocupadoEnLaSala($sala->id));
         $this->funciones->agregar($funcion);
 
         return $funcion;

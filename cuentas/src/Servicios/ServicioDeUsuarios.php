@@ -27,8 +27,11 @@ use RuntimeException;
  */
 final class ServicioDeUsuarios
 {
-    /** Si config.ini no dice otra cosa. */
-    private const POR_PAGINA = 20;
+    /**
+     * Si config.ini no dice otra cosa: con las tarjetas y los filtros arriba, la página entra
+     * entera en la pantalla de una notebook.
+     */
+    private const POR_PAGINA = 5;
     private const MAXIMO_POR_PAGINA = 100;
 
     private readonly int $porPagina;

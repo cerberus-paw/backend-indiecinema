@@ -37,6 +37,7 @@ final class FuncionesDelOrganizador extends Controlador
             'funciones' => array_map(self::datos(...), $funciones),
             // El aviso de que se acaba de programar una: sólo si lo que llega tiene forma de id.
             'programada' => is_string($programada = $peticion->consulta('programada')) && Uuid::esValido($programada),
+            'cancelada' => (bool) $peticion->consulta('cancelada'),
         ]);
     }
 
@@ -167,6 +168,43 @@ final class FuncionesDelOrganizador extends Controlador
         }
 
         return $this->redirigir("/cartelera/{$funcion->id}?guardada=1");
+    }
+
+    public function confirmarCancelacion(Peticion $peticion): Respuesta
+    {
+        $organizador = self::organizador($peticion);
+        $id = (string) $peticion->parametro('id');
+        if (!Uuid::esValido($id)) {
+            throw ExcepcionHttp::noEncontrada();
+        }
+
+        try {
+            $funcion = $this->servicio->paraCancelar($organizador, $id);
+        } catch (ReglaIncumplida $error) {
+            throw ExcepcionHttp::solicitudInvalida($error->getMessage());
+        }
+
+        return $this->vista('cancelar_funcion.html.twig', [
+            'funcion' => self::datos($funcion),
+            'accion' => "/organizador/funciones/{$id}/cancelar",
+        ]);
+    }
+
+    public function cancelar(Peticion $peticion): Respuesta
+    {
+        $organizador = self::organizador($peticion);
+        $id = (string) $peticion->parametro('id');
+        if (!Uuid::esValido($id)) {
+            throw ExcepcionHttp::noEncontrada();
+        }
+
+        try {
+            $this->servicio->cancelar($id, $organizador);
+        } catch (ReglaIncumplida $error) {
+            throw ExcepcionHttp::solicitudInvalida($error->getMessage());
+        }
+
+        return $this->redirigir('/organizador/funciones?cancelada=1');
     }
 
     /**

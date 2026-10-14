@@ -153,4 +153,38 @@ final class ServicioDeFuncionesDelOrganizador
 
         return $funcion;
     }
+
+    /**
+     * La función para la confirmación de cancelación (E3-11.4).
+     *
+     * @throws ExcepcionHttp 404 si la función no existe o la sala no es del organizador
+     * @throws ReglaIncumplida si la función ya está cancelada o finalizada
+     */
+    public function paraCancelar(Usuario $organizador, string $id): FuncionDelOrganizador
+    {
+        $funcion = $this->paraEditar($organizador, $id);
+        if ($funcion->estado->esFinal()) {
+            throw new ReglaIncumplida("Una función {$funcion->estado->etiqueta()} no se puede cancelar.");
+        }
+
+        $funcionDelOrganizador = $this->funciones->delOrganizadorPorId($organizador->id, $id);
+        if ($funcionDelOrganizador === null) {
+            throw ExcepcionHttp::noEncontrada();
+        }
+
+        return $funcionDelOrganizador;
+    }
+
+    /**
+     * Cancela una función propia del organizador (E3-11.4).
+     *
+     * @throws ExcepcionHttp 404 si la función no existe o la sala no es del organizador
+     * @throws ReglaIncumplida si la función ya está cancelada o finalizada
+     */
+    public function cancelar(string $id, Usuario $organizador): void
+    {
+        $funcion = $this->paraEditar($organizador, $id);
+        $funcion->cancelar();
+        $this->funciones->guardar($funcion);
+    }
 }

@@ -862,4 +862,161 @@ final class FuncionesDelOrganizadorTest extends TestCase
         self::assertSame(200, $fichaPublica->estado());
         self::assertStringNotContainsString('Editar función', $fichaPublica->cuerpo());
     }
+
+    public function testConfirmarCancelacionRequiereRolOrganizador(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $funcion = $this->programada($sala, '2030-10-25 20:30:00');
+
+        // Sin sesión
+        self::assertSame(401, $this->pedir('GET', "/organizador/funciones/{$funcion->id}/cancelar", null)->estado());
+        // Como espectador
+        self::assertSame(403, $this->pedir('GET', "/organizador/funciones/{$funcion->id}/cancelar", self::ORGANIZADORA, 'espectador')->estado());
+    }
+
+    public function testConfirmarCancelacionDevuelve404SiNoExisteOEsAjena(): void
+    {
+        $salaAjena = $this->sala(self::OTRO_ORGANIZADOR, 'El Sótano');
+        $funcionAjena = $this->programada($salaAjena, '2030-10-25 20:30:00');
+
+        // Id inexistente
+        self::assertSame(404, $this->pedir('GET', '/organizador/funciones/' . Uuid::nuevo() . '/cancelar')->estado());
+        // Id no UUID
+        self::assertSame(404, $this->pedir('GET', '/organizador/funciones/no-uuid/cancelar')->estado());
+        // Función de otro organizador
+        self::assertSame(404, $this->pedir('GET', "/organizador/funciones/{$funcionAjena->id}/cancelar")->estado());
+    }
+
+    public function testConfirmarCancelacionMuestraPantallaConDatosDeLaFuncion(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $funcion = $this->programada($sala, '2030-10-25 20:30:00');
+
+        $respuesta = $this->pedir('GET', "/organizador/funciones/{$funcion->id}/cancelar");
+
+        self::assertSame(200, $respuesta->estado());
+        $cuerpo = $respuesta->cuerpo();
+        self::assertStringContainsString('Cancelar función', $cuerpo);
+        self::assertStringContainsString('¿Estás seguro de que deseás cancelar esta función?', $cuerpo);
+        self::assertStringContainsString('Zama', $cuerpo);
+        self::assertStringContainsString('El Galpón', $cuerpo);
+        self::assertStringContainsString('Vie 25 oct · 20:30', $cuerpo);
+        self::assertStringContainsString('40 lugares', $cuerpo);
+        self::assertStringContainsString('programada', $cuerpo);
+        self::assertStringContainsString("/organizador/funciones/{$funcion->id}/cancelar", $cuerpo);
+        self::assertStringContainsString('Confirmar cancelación', $cuerpo);
+    }
+
+    public function testConfirmarCancelacionRechazaFuncionYaCanceladaOFinalizada(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $cancelada = $this->programada($sala, '2030-10-25 20:30:00');
+        $cancelada->cancelar();
+        $this->funciones->guardar($cancelada);
+
+        $finalizada = $this->programada($sala, '2020-03-05 20:30:00', programadaEl: '2020-01-01');
+        $finalizada->finalizar(new DateTimeImmutable('2020-03-05 23:00:00'));
+        $this->funciones->guardar($finalizada);
+
+        self::assertSame(400, $this->pedir('GET', "/organizador/funciones/{$cancelada->id}/cancelar")->estado());
+        self::assertSame(400, $this->pedir('GET', "/organizador/funciones/{$finalizada->id}/cancelar")->estado());
+    }
+
+    public function testCancelarRequierePermisosYCsrf(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $funcion = $this->programada($sala, '2030-10-25 20:30:00');
+
+        // Sin sesión
+        $sinSesion = $this->pedir('POST', "/organizador/funciones/{$funcion->id}/cancelar", null, 'organizador', [
+            '_csrf' => self::CSRF,
+        ]);
+        self::assertSame(401, $sinSesion->estado());
+
+        // Con rol espectador
+        $espectador = $this->pedir('POST', "/organizador/funciones/{$funcion->id}/cancelar", self::ORGANIZADORA, 'espectador', [
+            '_csrf' => self::CSRF,
+        ]);
+        self::assertSame(403, $espectador->estado());
+
+        // Sin CSRF válido
+        $sinCsrf = $this->pedir('POST', "/organizador/funciones/{$funcion->id}/cancelar", self::ORGANIZADORA, 'organizador', [
+            '_csrf' => 'token-invalido',
+        ]);
+        self::assertSame(403, $sinCsrf->estado());
+
+        // Función ajena
+        $salaAjena = $this->sala(self::OTRO_ORGANIZADOR, 'El Sótano');
+        $funcionAjena = $this->programada($salaAjena, '2030-10-25 20:30:00');
+        $ajena = $this->enviar("/organizador/funciones/{$funcionAjena->id}/cancelar", []);
+        self::assertSame(404, $ajena->estado());
+    }
+
+    public function testCancelarRechazaFuncionYaCanceladaOFinalizada(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $cancelada = $this->programada($sala, '2030-10-25 20:30:00');
+        $cancelada->cancelar();
+        $this->funciones->guardar($cancelada);
+
+        $finalizada = $this->programada($sala, '2020-03-05 20:30:00', programadaEl: '2020-01-01');
+        $finalizada->finalizar(new DateTimeImmutable('2020-03-05 23:00:00'));
+        $this->funciones->guardar($finalizada);
+
+        self::assertSame(400, $this->enviar("/organizador/funciones/{$cancelada->id}/cancelar", [])->estado());
+        self::assertSame(400, $this->enviar("/organizador/funciones/{$finalizada->id}/cancelar", [])->estado());
+    }
+
+    public function testCancelacionDePuntaAPuntaDesapareceDeCarteleraYQuedaEnPanel(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'Cine Club El Galpón', capacidad: 60);
+
+        // 1. Programamos una función
+        $alta = $this->programar($sala, [
+            'obras' => [$this->obras['Zama']],
+            'fecha' => '2030-11-15',
+            'hora' => '20:30',
+            'precio' => '3000',
+            'cupo' => '50',
+        ]);
+        self::assertSame(303, $alta->estado());
+        $funcionId = (string) $this->base->valor('SELECT id FROM funcion WHERE sala_id = ?', [$sala->id]);
+
+        // Verificamos que aparece en la cartelera pública
+        $carteleraAntes = $this->pedir('GET', '/cartelera', null);
+        self::assertSame(200, $carteleraAntes->estado());
+        self::assertStringContainsString('Zama', $carteleraAntes->cuerpo());
+        self::assertStringContainsString('Cine Club El Galpón', $carteleraAntes->cuerpo());
+
+        // 2. Ejecutamos la cancelación (POST con confirmación)
+        $respuestaCancelar = $this->enviar("/organizador/funciones/{$funcionId}/cancelar", []);
+        self::assertSame(303, $respuestaCancelar->estado());
+        self::assertSame('/organizador/funciones?cancelada=1', $respuestaCancelar->cabecera('Location'));
+
+        // 3. Verificamos que la función cancelada sale de la cartelera pública (criterio de aceptación)
+        $carteleraDespues = $this->pedir('GET', '/cartelera', null);
+        self::assertSame(200, $carteleraDespues->estado());
+        self::assertStringNotContainsString($funcionId, $carteleraDespues->cuerpo());
+        self::assertStringNotContainsString('Zama', $carteleraDespues->cuerpo());
+
+        // 4. Verificamos que queda en el panel del organizador con aviso y estado cancelada
+        $panel = $this->pedir('GET', '/organizador/funciones?cancelada=1', self::ORGANIZADORA, 'organizador');
+        self::assertSame(200, $panel->estado());
+        $cuerpoPanel = $panel->cuerpo();
+        self::assertStringContainsString('La función fue cancelada', $cuerpoPanel);
+        self::assertStringContainsString('Zama', $cuerpoPanel);
+        self::assertStringContainsString('cancelada', $cuerpoPanel);
+        // Al ser estado final, ya no tiene botón de editar ni cancelar en las acciones
+        self::assertStringNotContainsString("/organizador/funciones/{$funcionId}/editar", $cuerpoPanel);
+        self::assertStringNotContainsString("/organizador/funciones/{$funcionId}/cancelar", $cuerpoPanel);
+
+        // 5. Verificamos que en su ficha pública muestra el aviso de función cancelada
+        $ficha = $this->pedir('GET', "/cartelera/{$funcionId}", null);
+        self::assertSame(200, $ficha->estado());
+        $cuerpoFicha = $ficha->cuerpo();
+        self::assertStringContainsString('Función cancelada', $cuerpoFicha);
+        self::assertStringContainsString('Esta función fue cancelada', $cuerpoFicha);
+        self::assertStringNotContainsString('Editar función', $cuerpoFicha);
+        self::assertStringNotContainsString('Cancelar función', $cuerpoFicha);
+    }
 }

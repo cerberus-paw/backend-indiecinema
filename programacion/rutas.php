@@ -48,6 +48,8 @@ return static function (Router $router): void {
     $router->post('/organizador/funciones/nueva', [FuncionesDelOrganizador::class, 'crear'], Rol::Organizador);
     $router->get('/organizador/funciones/{id}/editar', [FuncionesDelOrganizador::class, 'editar'], Rol::Organizador);
     $router->post('/organizador/funciones/{id}/editar', [FuncionesDelOrganizador::class, 'actualizar'], Rol::Organizador);
+    $router->get('/organizador/funciones/{id}/cancelar', [FuncionesDelOrganizador::class, 'confirmarCancelacion'], Rol::Organizador);
+    $router->post('/organizador/funciones/{id}/cancelar', [FuncionesDelOrganizador::class, 'cancelar'], Rol::Organizador);
     // La bandeja de solicitudes de sala del administrador: aprobar una habilita la sala y le da el
     // rol de organizador a quien la mandó. Desde una aprobada, la sala se retira o se vuelve a
     // publicar.

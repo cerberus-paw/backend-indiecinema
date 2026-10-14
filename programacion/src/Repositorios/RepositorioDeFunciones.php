@@ -210,6 +210,17 @@ final class RepositorioDeFunciones
         }, $filas);
     }
 
+    public function delOrganizadorPorId(string $organizadorId, string $funcionId): ?FuncionDelOrganizador
+    {
+        foreach ($this->delOrganizador($organizadorId) as $funcion) {
+            if ($funcion->id === $funcionId) {
+                return $funcion;
+            }
+        }
+
+        return null;
+    }
+
     /**
      * La función y sus obras juntas: una función sin obras no tiene que quedar en la base.
      */

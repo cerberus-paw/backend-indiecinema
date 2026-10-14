@@ -233,4 +233,14 @@ final class RepositorioDeFuncionesTest extends TestCase
         self::assertSame(4800.0, $leida->precioBase);
         self::assertEquals($nuevaFecha, $leida->fechaHora);
     }
+
+    public function testDelOrganizadorPorId(): void
+    {
+        $funcion = $this->funcionNueva();
+
+        $delOrg = $this->funciones->delOrganizadorPorId(self::ORGANIZADORA, $funcion->id);
+        self::assertNotNull($delOrg);
+        self::assertSame($funcion->id, $delOrg->id);
+        self::assertNull($this->funciones->delOrganizadorPorId(self::ORGANIZADORA, Uuid::nuevo()));
+    }
 }

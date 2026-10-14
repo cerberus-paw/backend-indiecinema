@@ -18,9 +18,9 @@ use LogicException;
  * GET /cuenta/administracion/usuarios: «Usuarios y roles» del administrador, como el wireframe de
  * la E2, con las tarjetas de números, un buscador por nombre o correo y los filtros de rol,
  * estado y año de alta, que viajan en la URL (un formulario GET), así funciona sin JavaScript y se puede
- * compartir. En cada fila, el rol es un desplegable: elegir otro y guardar es un POST. Sólo el
- * administrador llega: lo controla el rol de la ruta, y el núcleo ya controló el token CSRF de los
- * POST.
+ * compartir. En cada fila, el rol es un desplegable, y «Guardar cambios» manda en un POST los de
+ * toda la tabla. Sólo el administrador llega: lo controla el rol de la ruta, y el núcleo ya
+ * controló el token CSRF de los POST.
  */
 final class AdministracionDeUsuarios extends Controlador
 {
@@ -70,25 +70,39 @@ final class AdministracionDeUsuarios extends Controlador
     }
 
     /**
-     * El desplegable del rol de una fila. El campo es nuevo_rol y no rol, que es el filtro que
-     * viaja en los campos ocultos para volver a la misma búsqueda. Si no cambió nada, vuelve sin
+     * «Guardar cambios»: los desplegables de la tabla llegan en roles[id], y en antes[id], el rol
+     * con el que se mostró cada uno. Sólo se cambia el que el administrador tocó: así no pisa lo
+     * que cambió otro administrador desde que se cargó la página. Si no cambió nada, vuelve sin
      * aviso.
      *
-     * @throws ExcepcionHttp 404 si el usuario no existe; 400 si el rol no se puede elegir
+     * @throws ExcepcionHttp 404 si un usuario no existe; 400 si un rol no se puede elegir
      */
-    public function cambiarRol(Peticion $peticion): Respuesta
+    public function guardarRoles(Peticion $peticion): Respuesta
     {
-        $id = (string) $peticion->parametro('id');
-        $valor = $peticion->campo('nuevo_rol');
-        $rol = is_string($valor) ? Rol::tryFrom($valor) : null;
-        if ($rol === null) {
-            throw ExcepcionHttp::solicitudInvalida('Elegí espectador u organizador.');
+        $roles = $peticion->campo('roles');
+        $antes = $peticion->campo('antes');
+        if (!is_array($roles)) {
+            throw ExcepcionHttp::solicitudInvalida('No llegó ningún rol para guardar.');
         }
-        $cambio = $this->servicio->cambiarRol($id, $rol, self::administrador($peticion));
+        $cambios = [];
+        foreach ($roles as $id => $valor) {
+            $rol = is_string($valor) ? Rol::tryFrom($valor) : null;
+            if ($rol === null) {
+                throw ExcepcionHttp::solicitudInvalida('Elegí espectador u organizador.');
+            }
+            if (!is_array($antes) || ($antes[$id] ?? null) !== $valor) {
+                $cambios[(string) $id] = $rol;
+            }
+        }
+        $hechos = $this->servicio->cambiarRoles($cambios, self::administrador($peticion));
+
+        // Con uno solo, el aviso lo nombra; con varios, dice cuántos.
+        $id = (string) array_key_first($hechos);
 
         return self::volverAlListado($peticion, match (true) {
-            !$cambio => [],
-            $rol === Rol::Organizador => ['organizador_dado' => $id],
+            $hechos === [] => [],
+            count($hechos) > 1 => ['roles_cambiados' => (string) count($hechos)],
+            $hechos[$id] === Rol::Organizador => ['organizador_dado' => $id],
             default => ['organizador_quitado' => $id],
         });
     }
@@ -119,7 +133,8 @@ final class AdministracionDeUsuarios extends Controlador
     }
 
     /**
-     * El aviso del cambio que se acaba de hacer, con el nombre del usuario, o null.
+     * El aviso del cambio que se acaba de hacer, con el nombre del usuario o con cuántos fueron, o
+     * null.
      */
     private function mensaje(Peticion $peticion): ?string
     {
@@ -133,6 +148,11 @@ final class AdministracionDeUsuarios extends Controlador
             if ($usuario !== null) {
                 return sprintf($texto, $usuario->nombre);
             }
+        }
+        // Con varios cambios no entran los nombres: dice cuántos fueron.
+        $cuantos = $peticion->consulta('roles_cambiados');
+        if (is_string($cuantos) && preg_match('/^([2-9]|[1-9][0-9]{1,2})$/D', $cuantos) === 1) {
+            return "Cambiaste el rol de {$cuantos} usuarios. Lo van a ver la próxima vez que ingresen.";
         }
 
         return null;

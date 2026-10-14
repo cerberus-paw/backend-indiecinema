@@ -94,31 +94,41 @@ final class ServicioDeUsuarios
     }
 
     /**
-     * El desplegable del rol de cada fila: deja al usuario de espectador o de organizador. Al
-     * moderador y al administrador no se los cambia desde la web, y el desplegable ni los ofrece.
+     * «Guardar cambios» de la tabla: deja a cada usuario de espectador o de organizador. Al
+     * moderador y al administrador no se los cambia desde la web, y su desplegable está apagado.
      *
-     * @return bool si cambió algo: elegir el rol que ya tenía no cambia nada ni se registra
+     * Primero se revisan todos: con uno que no se puede hacer, no se cambia ninguno. El que ya
+     * tiene ese rol no cambia ni se registra.
      *
-     * @throws ExcepcionHttp 404 si el usuario no existe; 400 si el rol no es espectador ni
-     *                       organizador, o si el usuario es moderador o administrador
+     * @param array<string, Rol> $cambios id del usuario => el rol que le eligieron
+     *
+     * @return array<string, Rol> los que cambiaron
+     *
+     * @throws ExcepcionHttp 404 si un usuario no existe; 400 si un rol no es espectador ni
+     *                       organizador, o si un usuario es moderador o administrador
      */
-    public function cambiarRol(string $id, Rol $rol, Usuario $administrador): bool
+    public function cambiarRoles(array $cambios, Usuario $administrador): array
     {
-        $actual = $this->buscar($id)->mayorRol();
         $cambiables = [Rol::Espectador, Rol::Organizador];
-        if (!in_array($rol, $cambiables, true) || !in_array($actual, $cambiables, true)) {
-            throw ExcepcionHttp::solicitudInvalida('Desde la web sólo se pasa de espectador a organizador, o al revés.');
+        $hechos = [];
+        foreach ($cambios as $id => $rol) {
+            $actual = $this->buscar($id)->mayorRol();
+            if (!in_array($rol, $cambiables, true) || !in_array($actual, $cambiables, true)) {
+                throw ExcepcionHttp::solicitudInvalida('Desde la web sólo se pasa de espectador a organizador, o al revés.');
+            }
+            if ($rol !== $actual) {
+                $hechos[$id] = $rol;
+            }
         }
-        if ($rol === $actual) {
-            return false;
-        }
-        if ($rol === Rol::Organizador) {
-            $this->darOrganizador($id, $administrador);
-        } else {
-            $this->quitarOrganizador($id, $administrador);
+        foreach ($hechos as $id => $rol) {
+            if ($rol === Rol::Organizador) {
+                $this->darOrganizador($id, $administrador);
+            } else {
+                $this->quitarOrganizador($id, $administrador);
+            }
         }
 
-        return true;
+        return $hechos;
     }
 
     /**

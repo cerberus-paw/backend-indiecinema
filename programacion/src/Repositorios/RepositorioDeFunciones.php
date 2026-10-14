@@ -115,6 +115,32 @@ final class RepositorioDeFunciones
     }
 
     /**
+     * Desde y hasta cuándo va cada función programada de la sala: lo que duran sus obras elegidas.
+     * Las canceladas no ocupan la sala, y las que todavía no tienen fecha tampoco.
+     *
+     * @return list<array{DateTimeImmutable, DateTimeImmutable}>
+     */
+    public function ocupadoEnLaSala(string $salaId): array
+    {
+        $filas = $this->base->filas(
+            "SELECT f.fecha_hora, COALESCE(SUM(o.duracion), 0) AS duracion
+             FROM funcion f
+             LEFT JOIN funcion_obra fo ON fo.funcion_id = f.id AND fo.estado = 'elegida'
+             LEFT JOIN obra o ON o.id = fo.obra_id
+             WHERE f.sala_id = ? AND f.estado = 'programada'
+             GROUP BY f.id, f.fecha_hora
+             ORDER BY f.fecha_hora",
+            [$salaId],
+        );
+
+        return array_map(static function (array $fila): array {
+            $desde = new DateTimeImmutable((string) $fila['fecha_hora']);
+
+            return [$desde, $desde->modify('+' . (int) $fila['duracion'] . ' minutes')];
+        }, $filas);
+    }
+
+    /**
      * Las funciones de todas las salas de un organizador, como las muestra su panel, en cualquier
      * estado: también las canceladas y las que todavía no tienen fecha.
      *

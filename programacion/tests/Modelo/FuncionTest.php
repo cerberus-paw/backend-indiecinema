@@ -221,4 +221,48 @@ final class FuncionTest extends TestCase
             self::assertEquals($antes, $funcion);
         }
     }
+
+    public function testActualizarModificaDatosDeFuncion(): void
+    {
+        $funcion = self::programada();
+        $otraSala = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+        $nuevaFecha = new DateTimeImmutable('2026-11-15 21:00:00');
+
+        $funcion->actualizar(
+            salaId: $otraSala,
+            obrasIds: [self::OTRA_OBRA],
+            cupo: 50,
+            precioBase: 4200.0,
+            fechaHora: $nuevaFecha,
+            ahora: self::ahora(),
+        );
+
+        self::assertSame($otraSala, $funcion->salaId);
+        self::assertSame([self::OTRA_OBRA], $funcion->obrasIds);
+        self::assertSame(50, $funcion->cupo);
+        self::assertSame(4200.0, $funcion->precioBase);
+        self::assertEquals($nuevaFecha, $funcion->fechaHora);
+        self::assertSame(EstadoFuncion::Programada, $funcion->estado);
+    }
+
+    public function testActualizarRechazaEstadosFinales(): void
+    {
+        $cancelada = self::cancelada();
+        $finalizada = self::finalizada();
+
+        $this->expectException(ReglaIncumplida::class);
+        $this->expectExceptionMessage('no se puede modificar');
+
+        $cancelada->actualizar(self::SALA, [self::OBRA], 40, 2000.0, new DateTimeImmutable('2026-11-15 21:00:00'), self::ahora());
+    }
+
+    public function testActualizarRechazaFechaPasada(): void
+    {
+        $funcion = self::programada();
+
+        $this->expectException(ReglaIncumplida::class);
+        $this->expectExceptionMessage('La fecha de la función tiene que ser futura.');
+
+        $funcion->actualizar(self::SALA, [self::OBRA], 40, 2000.0, new DateTimeImmutable('2025-01-01 10:00:00'), self::ahora());
+    }
 }

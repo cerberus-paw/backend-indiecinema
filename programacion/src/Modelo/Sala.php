@@ -104,6 +104,45 @@ final class Sala
         array $ocupado = [],
         DateTimeImmutable $ahora = new DateTimeImmutable(),
     ): Funcion {
+        $this->controlarReglasDeFuncion($obrasIds, $cupo, $fechaHora, $duracion, $ocupado);
+
+        return Funcion::programada($this->id, $obrasIds, $cupo, $precioBase, $fechaHora, $ahora);
+    }
+
+    /**
+     * Aplica los cambios de edición a una función en esta sala (E3-11.3).
+     *
+     * @param list<string>                                      $obrasIds
+     * @param int                                               $duracion lo que duran las obras, en minutos
+     * @param list<array{DateTimeImmutable, DateTimeImmutable}> $ocupado  ocupación de la sala (excluyendo esta función)
+     *
+     * @throws ReglaIncumplida si la sala no admite los nuevos datos o si se pisa con otra función
+     */
+    public function actualizarFuncion(
+        Funcion $funcion,
+        array $obrasIds,
+        int $cupo,
+        float $precioBase,
+        DateTimeImmutable $fechaHora,
+        int $duracion,
+        array $ocupado = [],
+        DateTimeImmutable $ahora = new DateTimeImmutable(),
+    ): void {
+        $this->controlarReglasDeFuncion($obrasIds, $cupo, $fechaHora, $duracion, $ocupado);
+        $funcion->actualizar($this->id, $obrasIds, $cupo, $precioBase, $fechaHora, $ahora);
+    }
+
+    /**
+     * @param list<string>                                      $obrasIds
+     * @param list<array{DateTimeImmutable, DateTimeImmutable}> $ocupado
+     */
+    private function controlarReglasDeFuncion(
+        array $obrasIds,
+        int $cupo,
+        DateTimeImmutable $fechaHora,
+        int $duracion,
+        array $ocupado,
+    ): void {
         if (!$this->habilitada) {
             throw new ReglaIncumplida('La sala todavía no está habilitada para programar funciones.');
         }
@@ -128,7 +167,5 @@ final class Sala
                 );
             }
         }
-
-        return Funcion::programada($this->id, $obrasIds, $cupo, $precioBase, $fechaHora, $ahora);
     }
 }

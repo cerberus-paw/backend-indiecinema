@@ -208,4 +208,29 @@ final class RepositorioDeFuncionesTest extends TestCase
             self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM funcion_obra'));
         }
     }
+
+    public function testActualizarPersisteCambiosDeSalaObrasFechaCupoYPrecio(): void
+    {
+        $funcion = $this->funcionNueva();
+        $otraSala = $this->salaHabilitada('Segunda Sala');
+        $nuevaFecha = new DateTimeImmutable('2026-11-15 21:00:00');
+
+        $funcion->actualizar(
+            salaId: $otraSala->id,
+            obrasIds: [$this->obras[0]],
+            cupo: 55,
+            precioBase: 4800.0,
+            fechaHora: $nuevaFecha,
+            ahora: new DateTimeImmutable(self::AHORA),
+        );
+
+        $this->funciones->actualizar($funcion);
+
+        $leida = $this->leer($funcion);
+        self::assertSame($otraSala->id, $leida->salaId);
+        self::assertSame([$this->obras[0]], $leida->obrasIds);
+        self::assertSame(55, $leida->cupo);
+        self::assertSame(4800.0, $leida->precioBase);
+        self::assertEquals($nuevaFecha, $leida->fechaHora);
+    }
 }

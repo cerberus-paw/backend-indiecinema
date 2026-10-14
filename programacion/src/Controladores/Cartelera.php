@@ -8,6 +8,7 @@ use IndieCinema\Nucleo\Controlador;
 use IndieCinema\Nucleo\Http\ExcepcionHttp;
 use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
+use IndieCinema\Nucleo\Seguridad\Rol;
 use IndieCinema\Programacion\Modelo\DetalleDeFuncion;
 use IndieCinema\Programacion\Modelo\EstadoFuncion;
 use IndieCinema\Programacion\Modelo\FuncionEnCartelera;
@@ -104,8 +105,18 @@ final class Cartelera extends Controlador
         $id = (string) $peticion->parametro('id');
         $detalle = $this->servicio->detalle($id);
 
+        $usuario = $peticion->usuario();
+        $esPropia = $usuario !== null
+            && $usuario->alcanza(Rol::Organizador)
+            && $detalle->sala->organizadorId !== null
+            && $detalle->sala->organizadorId === $usuario->id;
+        $editable = $esPropia && !$detalle->estado->esFinal();
+
         return $this->vista('ficha_funcion.html.twig', [
-            'funcion' => self::datosDeDetalle($detalle),
+            'funcion' => self::datosDeDetalle($detalle, $editable),
+            'editable' => $editable,
+            'guardada' => (bool) $peticion->consulta('guardada'),
+            'editada' => (bool) $peticion->consulta('editada'),
         ]);
     }
 
@@ -125,6 +136,7 @@ final class Cartelera extends Controlador
      * escritos como en la tarjeta.
      *
      * @return array{
+     *     id: string,
      *     titulo: string,
      *     estado: string,
      *     estado_etiqueta: string,
@@ -133,13 +145,15 @@ final class Cartelera extends Controlador
      *     cupo: int,
      *     fecha: ?string,
      *     obras_elegidas: bool,
+     *     editable: bool,
      *     sala: array{url: string, nombre: string, descripcion: string, direccion: string, localidad: string, capacidad: int, imagen: ?string},
      *     obras: list<array{titulo: string, sinopsis: string, anio: int, director: string, duracion: int, generos: list<string>}>
      * }
      */
-    private static function datosDeDetalle(DetalleDeFuncion $detalle): array
+    private static function datosDeDetalle(DetalleDeFuncion $detalle, bool $editable = false): array
     {
         return [
+            'id' => $detalle->id,
             'titulo' => implode(' + ', array_map(static fn (ObraEnDetalle $obra): string => $obra->titulo, $detalle->obras)),
             'estado' => $detalle->estado->value,
             'estado_etiqueta' => $detalle->estado->etiqueta(),
@@ -148,6 +162,7 @@ final class Cartelera extends Controlador
             'cupo' => $detalle->cupo,
             'fecha' => $detalle->fechaHora !== null ? TarjetaDeFuncion::fecha($detalle->fechaHora) : null,
             'obras_elegidas' => $detalle->obrasElegidas,
+            'editable' => $editable,
             'sala' => [
                 'url' => "/salas/{$detalle->sala->id}",
                 'nombre' => $detalle->sala->nombre,

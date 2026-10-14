@@ -29,10 +29,10 @@ final class Funcion
      */
     public function __construct(
         public readonly string $id,
-        public readonly string $salaId,
+        public private(set) string $salaId,
         public private(set) array $obrasIds,
-        public readonly float $precioBase,
-        public readonly int $cupo,
+        public private(set) float $precioBase,
+        public private(set) int $cupo,
         public private(set) EstadoFuncion $estado = EstadoFuncion::EnVotacionTitulos,
         public private(set) ?DateTimeImmutable $fechaHora = null,
     ) {
@@ -100,6 +100,50 @@ final class Funcion
         }
 
         return new self(Uuid::nuevo(), $salaId, $obrasIds, $precioBase, $cupo, EstadoFuncion::Programada, $fechaHora);
+    }
+
+    /**
+     * Modifica los datos de la función (E3-11.3).
+     *
+     * @param list<string> $obrasIds
+     *
+     * @throws ReglaIncumplida si la función ya es final, sin obras, con obras repetidas, cupo no positivo, precio negativo o fecha no futura
+     */
+    public function actualizar(
+        string $salaId,
+        array $obrasIds,
+        int $cupo,
+        float $precioBase,
+        DateTimeImmutable $fechaHora,
+        DateTimeImmutable $ahora = new DateTimeImmutable(),
+    ): void {
+        if ($this->estado->esFinal()) {
+            throw new ReglaIncumplida("Una función {$this->estado->etiqueta()} no se puede modificar.");
+        }
+        if ($obrasIds === []) {
+            throw new ReglaIncumplida('La función necesita al menos una obra.');
+        }
+        if (count(array_unique($obrasIds)) !== count($obrasIds)) {
+            throw new ReglaIncumplida('Una obra no puede estar dos veces en la misma función.');
+        }
+        if ($cupo <= 0) {
+            throw new ReglaIncumplida('El cupo tiene que ser de al menos un lugar.');
+        }
+        if ($precioBase < 0) {
+            throw new ReglaIncumplida('El precio no puede ser negativo.');
+        }
+        if ($precioBase > self::PRECIO_MAXIMO) {
+            throw new ReglaIncumplida('El precio es demasiado alto.');
+        }
+        if ($fechaHora <= $ahora) {
+            throw new ReglaIncumplida('La fecha de la función tiene que ser futura.');
+        }
+
+        $this->salaId = $salaId;
+        $this->obrasIds = array_values($obrasIds);
+        $this->cupo = $cupo;
+        $this->precioBase = $precioBase;
+        $this->fechaHora = $fechaHora;
     }
 
     /**

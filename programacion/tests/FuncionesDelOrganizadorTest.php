@@ -635,4 +635,231 @@ final class FuncionesDelOrganizadorTest extends TestCase
         self::assertStringNotContainsString('La función quedó programada', $this->pedir('GET', '/organizador/funciones?programada=cualquiera')->cuerpo());
         self::assertStringNotContainsString('La función quedó programada', $this->pedir('GET', '/organizador/funciones')->cuerpo());
     }
+
+    /**
+     * Manda la actualización de una función, salvo lo que se le cambie.
+     *
+     * @param array<string, mixed> $campos
+     */
+    private function actualizar(string $id, Sala $sala, array $campos = []): Respuesta
+    {
+        return $this->enviar("/organizador/funciones/{$id}/editar", $campos + [
+            'sala_id' => $sala->id,
+            'obras' => [$this->obras['Zama']],
+            'fecha' => '2030-10-25',
+            'hora' => '20:30',
+            'precio' => '2500',
+            'cupo' => '40',
+        ]);
+    }
+
+    public function testFormularioEdicionRequiereRolOrganizador(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $funcion = $this->programada($sala, '2030-10-25 20:30:00');
+
+        // Sin sesión
+        self::assertSame(401, $this->pedir('GET', "/organizador/funciones/{$funcion->id}/editar", null)->estado());
+        // Como espectador
+        self::assertSame(403, $this->pedir('GET', "/organizador/funciones/{$funcion->id}/editar", self::ORGANIZADORA, 'espectador')->estado());
+    }
+
+    public function testFormularioEdicionDevuelve404SiNoExisteOEsAjena(): void
+    {
+        $salaAjena = $this->sala(self::OTRO_ORGANIZADOR, 'El Sótano');
+        $funcionAjena = $this->programada($salaAjena, '2030-10-25 20:30:00');
+
+        // Id inexistente
+        self::assertSame(404, $this->pedir('GET', '/organizador/funciones/' . Uuid::nuevo() . '/editar')->estado());
+        // Id no UUID
+        self::assertSame(404, $this->pedir('GET', '/organizador/funciones/no-uuid/editar')->estado());
+        // Función de otro organizador
+        self::assertSame(404, $this->pedir('GET', "/organizador/funciones/{$funcionAjena->id}/editar")->estado());
+    }
+
+    public function testFormularioEdicionMuestraDatosPrecargadosYParametros(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $funcion = $this->programada($sala, '2030-10-25 20:30:00');
+
+        $respuesta = $this->pedir('GET', "/organizador/funciones/{$funcion->id}/editar");
+
+        self::assertSame(200, $respuesta->estado());
+        $cuerpo = $respuesta->cuerpo();
+        self::assertStringContainsString('Editar función', $cuerpo);
+        self::assertStringContainsString("/organizador/funciones/{$funcion->id}/editar", $cuerpo);
+        self::assertStringContainsString('El Galpón', $cuerpo);
+        self::assertStringContainsString('2030-10-25', $cuerpo);
+        self::assertStringContainsString('20:30', $cuerpo);
+        self::assertStringContainsString('3500', $cuerpo);
+        self::assertStringContainsString('40', $cuerpo);
+    }
+
+    public function testActualizarRequierePermisosYCsrf(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $funcion = $this->programada($sala, '2030-10-25 20:30:00');
+
+        // Sin sesión
+        $sinSesion = $this->pedir('POST', "/organizador/funciones/{$funcion->id}/editar", null, 'organizador', [
+            '_csrf' => self::CSRF,
+            'sala_id' => $sala->id,
+            'obras' => [$this->obras['Zama']],
+            'fecha' => '2030-10-26',
+            'hora' => '20:30',
+            'precio' => '3000',
+            'cupo' => '35',
+        ]);
+        self::assertSame(401, $sinSesion->estado());
+
+        // Con rol espectador
+        $espectador = $this->pedir('POST', "/organizador/funciones/{$funcion->id}/editar", self::ORGANIZADORA, 'espectador', [
+            '_csrf' => self::CSRF,
+            'sala_id' => $sala->id,
+            'obras' => [$this->obras['Zama']],
+            'fecha' => '2030-10-26',
+            'hora' => '20:30',
+            'precio' => '3000',
+            'cupo' => '35',
+        ]);
+        self::assertSame(403, $espectador->estado());
+
+        // Sin CSRF válido
+        $sinCsrf = $this->pedir('POST', "/organizador/funciones/{$funcion->id}/editar", self::ORGANIZADORA, 'organizador', [
+            '_csrf' => 'token-invalido',
+            'sala_id' => $sala->id,
+            'obras' => [$this->obras['Zama']],
+            'fecha' => '2030-10-26',
+            'hora' => '20:30',
+            'precio' => '3000',
+            'cupo' => '35',
+        ]);
+        self::assertSame(403, $sinCsrf->estado());
+
+        // Función ajena
+        $salaAjena = $this->sala(self::OTRO_ORGANIZADOR, 'El Sótano');
+        $funcionAjena = $this->programada($salaAjena, '2030-10-25 20:30:00');
+        $ajena = $this->actualizar($funcionAjena->id, $sala);
+        self::assertSame(404, $ajena->estado());
+    }
+
+    public function testActualizarRechazaDatosInvalidos(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón', capacidad: 50);
+        $funcion = $this->programada($sala, '2030-10-25 20:30:00');
+
+        // Precio negativo
+        $precioNegativo = $this->actualizar($funcion->id, $sala, ['precio' => '-100']);
+        self::assertSame(422, $precioNegativo->estado());
+        self::assertStringContainsString('El precio no puede ser negativo.', $precioNegativo->cuerpo());
+
+        // Cupo superior a capacidad
+        $cupoExcedido = $this->actualizar($funcion->id, $sala, ['cupo' => '80']);
+        self::assertSame(422, $cupoExcedido->estado());
+        self::assertStringContainsString('El cupo no puede ser mayor a la capacidad de la sala (50).', $cupoExcedido->cuerpo());
+
+        // Fecha pasada
+        $fechaPasada = $this->actualizar($funcion->id, $sala, ['fecha' => '2020-01-01']);
+        self::assertSame(422, $fechaPasada->estado());
+        self::assertStringContainsString('La fecha de la función tiene que ser futura.', $fechaPasada->cuerpo());
+    }
+
+    public function testActualizarMismaFuncionNoColisionaConsigoMisma(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $funcion = $this->programada($sala, '2030-10-25 20:30:00');
+
+        // Modificamos precio y cupo pero mantenemos la misma sala, fecha y hora
+        $respuesta = $this->actualizar($funcion->id, $sala, [
+            'fecha' => '2030-10-25',
+            'hora' => '20:30',
+            'precio' => '4900',
+            'cupo' => '45',
+        ]);
+
+        self::assertSame(303, $respuesta->estado());
+        self::assertSame("/cartelera/{$funcion->id}?guardada=1", $respuesta->cabecera('Location'));
+    }
+
+    public function testActualizarRechazaColisionConOtraFuncion(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        // Función 1 de 20:30 a 22:13
+        $this->programada($sala, '2030-10-25 20:30:00');
+        // Función 2 en otro horario
+        $funcion2 = $this->programada($sala, '2030-10-25 23:00:00');
+
+        // Intentamos mover función 2 para que se pise con función 1
+        $respuesta = $this->actualizar($funcion2->id, $sala, [
+            'fecha' => '2030-10-25',
+            'hora' => '21:00',
+        ]);
+
+        self::assertSame(422, $respuesta->estado());
+        self::assertStringContainsString('Se pisa con otra función de la sala', $respuesta->cuerpo());
+    }
+
+    public function testEdicionDePuntaAPuntaYCambiosSeVenEnLaFicha(): void
+    {
+        $sala1 = $this->sala(self::ORGANIZADORA, 'Cine Club El Galpón', capacidad: 60);
+        $sala2 = $this->sala(self::ORGANIZADORA, 'Sala Alternativa', capacidad: 80);
+
+        // Creamos la función originalmente
+        $alta = $this->programar($sala1, [
+            'obras' => [$this->obras['Zama']],
+            'fecha' => '2030-11-10',
+            'hora' => '19:00',
+            'precio' => '2000',
+            'cupo' => '30',
+        ]);
+        self::assertSame(303, $alta->estado());
+        $funcionId = (string) $this->base->valor('SELECT id FROM funcion WHERE sala_id = ?', [$sala1->id]);
+
+        // Editamos la función con nuevos datos
+        $edicion = $this->actualizar($funcionId, $sala2, [
+            'obras' => [$this->obras['La ciénaga']],
+            'fecha' => '2030-11-20',
+            'hora' => '21:30',
+            'precio' => '4500',
+            'cupo' => '55',
+        ]);
+        self::assertSame(303, $edicion->estado());
+        self::assertSame("/cartelera/{$funcionId}?guardada=1", $edicion->cabecera('Location'));
+
+        // Verificamos el criterio: «Listo cuando: Los cambios se ven en la ficha.»
+        // Como organizadora dueña:
+        $fichaDuenia = $this->pedir('GET', "/cartelera/{$funcionId}?guardada=1", self::ORGANIZADORA, 'organizador');
+        self::assertSame(200, $fichaDuenia->estado());
+        $cuerpoDuenia = $fichaDuenia->cuerpo();
+
+        // Aviso de cambios guardados
+        self::assertStringContainsString('¡Cambios guardados!', $cuerpoDuenia);
+        self::assertStringContainsString('La función se actualizó correctamente', $cuerpoDuenia);
+        // Obra nueva y no la anterior
+        self::assertStringContainsString('La ciénaga', $cuerpoDuenia);
+        self::assertStringNotContainsString('Zama', $cuerpoDuenia);
+        // Sala nueva
+        self::assertStringContainsString('Sala Alternativa', $cuerpoDuenia);
+        // Precio nuevo y cupo nuevo
+        self::assertStringContainsString('$ 4.500', $cuerpoDuenia);
+        self::assertStringContainsString('55 lugares', $cuerpoDuenia);
+        // Botón de editar visible para la dueña
+        self::assertStringContainsString("/organizador/funciones/{$funcionId}/editar", $cuerpoDuenia);
+        self::assertStringContainsString('Editar función', $cuerpoDuenia);
+
+        // Como espectador en la cartelera pública:
+        $fichaEspectador = $this->pedir('GET', "/cartelera/{$funcionId}", self::ORGANIZADORA, 'espectador');
+        self::assertSame(200, $fichaEspectador->estado());
+        $cuerpoEspectador = $fichaEspectador->cuerpo();
+        self::assertStringContainsString('La ciénaga', $cuerpoEspectador);
+        self::assertStringContainsString('Sala Alternativa', $cuerpoEspectador);
+        self::assertStringContainsString('$ 4.500', $cuerpoEspectador);
+        self::assertStringContainsString('55 lugares', $cuerpoEspectador);
+        self::assertStringNotContainsString('Editar función', $cuerpoEspectador);
+
+        // Sin sesión en la cartelera pública:
+        $fichaPublica = $this->pedir('GET', "/cartelera/{$funcionId}", null);
+        self::assertSame(200, $fichaPublica->estado());
+        self::assertStringNotContainsString('Editar función', $fichaPublica->cuerpo());
+    }
 }

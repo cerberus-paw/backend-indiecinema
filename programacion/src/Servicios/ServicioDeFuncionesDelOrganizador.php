@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace IndieCinema\Programacion\Servicios;
 
 use DateTimeImmutable;
+use IndieCinema\Nucleo\Http\ExcepcionHttp;
 use IndieCinema\Nucleo\Seguridad\Usuario;
 use IndieCinema\Programacion\Modelo\Funcion;
 use IndieCinema\Programacion\Modelo\FuncionDelOrganizador;
@@ -95,6 +96,60 @@ final class ServicioDeFuncionesDelOrganizador
 
         $funcion = $sala->programarFuncion($obrasIds, $cupo, $precioBase, $fechaHora, $duracion, $this->funciones->ocupadoEnLaSala($sala->id));
         $this->funciones->agregar($funcion);
+
+        return $funcion;
+    }
+
+    /**
+     * La función para editarla, si es de una sala del organizador. Si no existe o es de otro, la
+     * respuesta es 404: así un organizador no puede averiguar qué ids existen (E3-11.3).
+     *
+     * @throws ExcepcionHttp 404
+     */
+    public function paraEditar(Usuario $organizador, string $id): Funcion
+    {
+        $funcion = $this->funciones->buscar($id) ?? throw ExcepcionHttp::noEncontrada();
+        $sala = $this->salas->buscar($funcion->salaId);
+        if ($sala === null || !$sala->esDe($organizador->id)) {
+            throw ExcepcionHttp::noEncontrada();
+        }
+
+        return $funcion;
+    }
+
+    /**
+     * Actualiza una función propia del organizador (E3-11.3).
+     *
+     * @param list<string> $obrasIds
+     *
+     * @throws ExcepcionHttp 404 si la función no existe o la sala no es del organizador
+     * @throws ReglaIncumplida si los datos no cumplen las reglas de la sala o de la función
+     */
+    public function actualizar(
+        Usuario $organizador,
+        string $funcionId,
+        string $nuevaSalaId,
+        array $obrasIds,
+        int $cupo,
+        float $precioBase,
+        DateTimeImmutable $fechaHora,
+    ): Funcion {
+        $funcion = $this->paraEditar($organizador, $funcionId);
+
+        $sala = $this->salas->buscar($nuevaSalaId);
+        if ($sala === null || !$sala->esDe($organizador->id)) {
+            throw new ReglaIncumplida('La sala no existe o no pertenece a tu cuenta.');
+        }
+
+        $duraciones = array_column($this->obras->todas(), 'duracionMinutos', 'id');
+        $duracion = 0;
+        foreach ($obrasIds as $obraId) {
+            $duracion += $duraciones[$obraId] ?? throw new ReglaIncumplida('Una de las obras no está en el catálogo.');
+        }
+
+        $ocupado = $this->funciones->ocupadoEnLaSala($sala->id, $funcion->id);
+        $sala->actualizarFuncion($funcion, $obrasIds, $cupo, $precioBase, $fechaHora, $duracion, $ocupado);
+        $this->funciones->actualizar($funcion);
 
         return $funcion;
     }

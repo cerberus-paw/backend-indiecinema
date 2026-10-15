@@ -102,6 +102,26 @@ final class Funcion
     }
 
     /**
+     * Si el organizador puede cancelar la función (E3-11.4): en votación o programada, mientras
+     * todavía no se dio. Una programada cuya fecha ya pasó ya se proyectó, aunque nada la haya
+     * pasado a finalizada.
+     *
+     * cancelar() controla sólo el ciclo de vida; la fecha la mira quien ofrece cancelar. Es
+     * estático por lo mismo que seEdita().
+     */
+    public static function seCancela(
+        EstadoFuncion $estado,
+        ?DateTimeImmutable $fechaHora,
+        DateTimeImmutable $ahora = new DateTimeImmutable(),
+    ): bool {
+        if (!$estado->puedePasarA(EstadoFuncion::Cancelada)) {
+            return false;
+        }
+
+        return $estado !== EstadoFuncion::Programada || ($fechaHora !== null && $fechaHora > $ahora);
+    }
+
+    /**
      * Modifica los datos de la función (E3-11.3), si se puede editar (seEdita()).
      *
      * @param list<string> $obrasIds

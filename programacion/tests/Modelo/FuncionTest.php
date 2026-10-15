@@ -294,6 +294,19 @@ final class FuncionTest extends TestCase
         self::assertEquals($antes, $funcion);
     }
 
+    public function testSeCancelaMientrasNoTermino(): void
+    {
+        $despuesDeLaFuncion = new DateTimeImmutable('2026-10-25 10:00:00');
+        $cancela = static fn (Funcion $funcion, DateTimeImmutable $ahora): bool => Funcion::seCancela($funcion->estado, $funcion->fechaHora, $ahora);
+
+        self::assertTrue($cancela(self::enVotacion(), self::ahora()));
+        self::assertTrue($cancela(self::enAcuerdo(), self::ahora()));
+        self::assertTrue($cancela(self::programada(), self::ahora()));
+        self::assertFalse($cancela(self::programada(), $despuesDeLaFuncion), 'programada que ya se dio');
+        self::assertFalse($cancela(self::cancelada(), self::ahora()));
+        self::assertFalse($cancela(self::finalizada(), $despuesDeLaFuncion));
+    }
+
     public function testActualizarRechazaFechaPasada(): void
     {
         $funcion = self::programada();

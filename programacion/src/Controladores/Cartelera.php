@@ -112,9 +112,10 @@ final class Cartelera extends Controlador
             && $detalle->sala->organizadorId !== null
             && $detalle->sala->organizadorId === $usuario->id;
         $editable = $esPropia && Funcion::seEdita($detalle->estado, $detalle->fechaHora);
+        $cancelable = $esPropia && Funcion::seCancela($detalle->estado, $detalle->fechaHora);
 
         return $this->vista('ficha_funcion.html.twig', [
-            'funcion' => self::datosDeDetalle($detalle, $editable),
+            'funcion' => self::datosDeDetalle($detalle, $editable, $cancelable),
             // El aviso de que se acaba de guardar: sólo para el organizador que la editó. La ficha
             // es pública, y si no, lo vería cualquiera que abra el enlace con el parámetro puesto.
             'guardada' => $esPropia && $peticion->consulta('guardada') === '1',
@@ -147,11 +148,12 @@ final class Cartelera extends Controlador
      *     fecha: ?string,
      *     obras_elegidas: bool,
      *     editable: bool,
+     *     cancelable: bool,
      *     sala: array{url: string, nombre: string, descripcion: string, direccion: string, localidad: string, capacidad: int, imagen: ?string},
      *     obras: list<array{titulo: string, sinopsis: string, anio: int, director: string, duracion: int, generos: list<string>}>
      * }
      */
-    private static function datosDeDetalle(DetalleDeFuncion $detalle, bool $editable = false): array
+    private static function datosDeDetalle(DetalleDeFuncion $detalle, bool $editable = false, bool $cancelable = false): array
     {
         return [
             'id' => $detalle->id,
@@ -164,6 +166,7 @@ final class Cartelera extends Controlador
             'fecha' => $detalle->fechaHora !== null ? TarjetaDeFuncion::fecha($detalle->fechaHora) : null,
             'obras_elegidas' => $detalle->obrasElegidas,
             'editable' => $editable,
+            'cancelable' => $cancelable,
             'sala' => [
                 'url' => "/salas/{$detalle->sala->id}",
                 'nombre' => $detalle->sala->nombre,

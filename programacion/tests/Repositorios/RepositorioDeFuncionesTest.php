@@ -261,4 +261,14 @@ final class RepositorioDeFuncionesTest extends TestCase
         self::assertSame([$this->obras[1]], $this->leer($funcion)->obrasIds);
         self::assertSame(1, $this->base->valor('SELECT COUNT(*) FROM funcion_obra WHERE funcion_id = ?', [$funcion->id]));
     }
+
+    public function testDelOrganizadorPorId(): void
+    {
+        $funcion = $this->funcionNueva();
+
+        $delOrg = $this->funciones->delOrganizadorPorId(self::ORGANIZADORA, $funcion->id);
+        self::assertNotNull($delOrg);
+        self::assertSame($funcion->id, $delOrg->id);
+        self::assertNull($this->funciones->delOrganizadorPorId(self::ORGANIZADORA, Uuid::nuevo()));
+    }
 }

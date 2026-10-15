@@ -190,24 +190,59 @@ final class RepositorioDeFunciones
             $titulos[$obra['funcion_id']][] = $obra;
         }
 
-        return array_map(static function (array $fila) use ($titulos): FuncionDelOrganizador {
-            $obras = $titulos[$fila['id']] ?? [];
-            // Como en buscar(): si ya hay elegidas son ésas; si no, las candidatas.
-            $elegidas = array_filter($obras, static fn (array $obra): bool => $obra['estado'] === 'elegida');
+        return array_map(
+            static fn (array $fila): FuncionDelOrganizador => self::funcionDelOrganizador($fila, $titulos[$fila['id']] ?? []),
+            $filas,
+        );
+    }
 
-            return new FuncionDelOrganizador(
-                (string) $fila['id'],
-                EstadoFuncion::from((string) $fila['estado']),
-                $fila['fecha_hora'] === null ? null : new DateTimeImmutable((string) $fila['fecha_hora']),
-                (float) $fila['precio_base'],
-                (int) $fila['cupo'],
-                (string) $fila['sala_id'],
-                (string) $fila['sala_nombre'],
-                (bool) $fila['sala_habilitada'],
-                array_values(array_map(static fn (array $obra): string => (string) $obra['titulo'], $elegidas ?: $obras)),
-                $elegidas !== [],
-            );
-        }, $filas);
+    /**
+     * Una función de las salas del organizador, como la muestra su panel, o null si no existe, es
+     * de otro organizador o su sala se dio de baja.
+     */
+    public function delOrganizadorPorId(string $organizadorId, string $funcionId): ?FuncionDelOrganizador
+    {
+        $fila = $this->base->fila(
+            'SELECT f.id, f.estado, f.fecha_hora, f.precio_base, f.cupo,
+                    s.id AS sala_id, s.nombre AS sala_nombre, s.habilitada AS sala_habilitada
+             FROM funcion f
+             JOIN sala s ON s.id = f.sala_id
+             WHERE f.id = ? AND s.organizador_id = ? AND s.dada_de_baja_en IS NULL',
+            [$funcionId, $organizadorId],
+        );
+        if ($fila === null) {
+            return null;
+        }
+        $obras = $this->base->filas(
+            'SELECT fo.estado, o.titulo FROM funcion_obra fo JOIN obra o ON o.id = fo.obra_id
+             WHERE fo.funcion_id = ? ORDER BY o.titulo, o.id',
+            [$funcionId],
+        );
+
+        return self::funcionDelOrganizador($fila, $obras);
+    }
+
+    /**
+     * @param array<string, mixed>       $fila
+     * @param list<array<string, mixed>> $obras con el estado en funcion_obra y el título de la obra
+     */
+    private static function funcionDelOrganizador(array $fila, array $obras): FuncionDelOrganizador
+    {
+        // Como en buscar(): si ya hay elegidas son ésas; si no, las candidatas.
+        $elegidas = array_filter($obras, static fn (array $obra): bool => $obra['estado'] === 'elegida');
+
+        return new FuncionDelOrganizador(
+            (string) $fila['id'],
+            EstadoFuncion::from((string) $fila['estado']),
+            $fila['fecha_hora'] === null ? null : new DateTimeImmutable((string) $fila['fecha_hora']),
+            (float) $fila['precio_base'],
+            (int) $fila['cupo'],
+            (string) $fila['sala_id'],
+            (string) $fila['sala_nombre'],
+            (bool) $fila['sala_habilitada'],
+            array_values(array_map(static fn (array $obra): string => (string) $obra['titulo'], $elegidas ?: $obras)),
+            $elegidas !== [],
+        );
     }
 
     /**

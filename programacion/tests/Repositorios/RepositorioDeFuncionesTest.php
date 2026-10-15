@@ -211,7 +211,13 @@ final class RepositorioDeFuncionesTest extends TestCase
 
     public function testActualizarPersisteCambiosDeSalaObrasFechaCupoYPrecio(): void
     {
+        // Programada después de votar: la segunda obra quedó como candidata sin elegir.
         $funcion = $this->funcionNueva();
+        $funcion->cerrarVotacionTitulos([$this->obras[0]]);
+        $this->funciones->guardar($funcion);
+        $funcion->fijarFechaHora(new DateTimeImmutable(self::FECHA), new DateTimeImmutable(self::AHORA));
+        $this->funciones->guardar($funcion);
+
         $otraSala = $this->salaHabilitada('Segunda Sala');
         $nuevaFecha = new DateTimeImmutable('2026-11-15 21:00:00');
 
@@ -232,6 +238,28 @@ final class RepositorioDeFuncionesTest extends TestCase
         self::assertSame(55, $leida->cupo);
         self::assertSame(4800.0, $leida->precioBase);
         self::assertEquals($nuevaFecha, $leida->fechaHora);
+        self::assertSame(EstadoFuncion::Programada, $leida->estado);
+        // La candidata que no salió elegida sigue ahí, para el historial de la votación.
+        self::assertSame(1, $this->base->valor(
+            "SELECT COUNT(*) FROM funcion_obra WHERE funcion_id = ? AND obra_id = ? AND estado = 'candidata'",
+            [$funcion->id, $this->obras[1]],
+        ));
+    }
+
+    public function testActualizarConUnaCandidataLaPasaAElegidaSinRepetirla(): void
+    {
+        $funcion = $this->funcionNueva();
+        $funcion->cerrarVotacionTitulos([$this->obras[0]]);
+        $this->funciones->guardar($funcion);
+        $funcion->fijarFechaHora(new DateTimeImmutable(self::FECHA), new DateTimeImmutable(self::AHORA));
+        $this->funciones->guardar($funcion);
+
+        $funcion->actualizar($this->sala->id, [$this->obras[1]], 40, 3500.0, new DateTimeImmutable(self::FECHA), new DateTimeImmutable(self::AHORA));
+        $this->funciones->actualizar($funcion);
+
+        self::assertSame([$this->obras[1]], $this->elegidasEnLaBase($funcion));
+        self::assertSame([$this->obras[1]], $this->leer($funcion)->obrasIds);
+        self::assertSame(1, $this->base->valor('SELECT COUNT(*) FROM funcion_obra WHERE funcion_id = ?', [$funcion->id]));
     }
 
     public function testDelOrganizadorPorId(): void

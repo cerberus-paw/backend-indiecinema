@@ -10,6 +10,7 @@ use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Seguridad\Usuario;
 use IndieCinema\Nucleo\Uuid;
+use IndieCinema\Programacion\Modelo\Funcion;
 use IndieCinema\Programacion\Modelo\FuncionDelOrganizador;
 use IndieCinema\Programacion\Modelo\Obra;
 use IndieCinema\Programacion\Modelo\ReglaIncumplida;
@@ -273,7 +274,7 @@ final class FuncionesDelOrganizador extends Controlador
      * La fila de la tabla, con la fecha y el precio ya escritos como se leen, igual que en la
      * tarjeta de la cartelera. La plantilla recibe datos y no la entidad.
      *
-     * @return array{id: string, titulo: string, titulos_elegidos: bool, sala: string, sala_id: string, sala_habilitada: bool, estado: string, estado_valor: string, es_final: bool, fecha: ?string, precio: string, cupo: int}
+     * @return array{id: string, titulo: string, titulos_elegidos: bool, sala: string, sala_id: string, sala_habilitada: bool, estado: string, estado_valor: string, es_final: bool, editable: bool, fecha: ?string, precio: string, cupo: int}
      */
     private static function datos(FuncionDelOrganizador $funcion): array
     {
@@ -288,6 +289,7 @@ final class FuncionesDelOrganizador extends Controlador
             'estado' => $funcion->estado->etiqueta(),
             'estado_valor' => $funcion->estado->value,
             'es_final' => $funcion->estado->esFinal(),
+            'editable' => Funcion::seEdita($funcion->estado, $funcion->fechaHora),
             // null mientras la función no tiene fecha: la plantilla lo dice con palabras.
             'fecha' => $funcion->fechaHora === null ? null : TarjetaDeFuncion::fecha($funcion->fechaHora),
             'precio' => TarjetaDeFuncion::precio($funcion->precioBase),

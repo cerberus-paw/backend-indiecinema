@@ -274,23 +274,29 @@ final class RepositorioDeFunciones
 
     /**
      * Persiste los cambios de la función editada (E3-11.3): sala, obras, fecha/hora, precio y cupo.
+     * Sólo se edita una programada, así que sus obras son las elegidas.
+     *
+     * Las candidatas que no salieron elegidas se quedan como están, para el historial de la
+     * votación: se borran sólo las elegidas que ya no van, y una candidata que ahora se proyecta
+     * pasa a elegida en vez de repetirse.
      */
     public function actualizar(Funcion $funcion): void
     {
-        $estadoDeLasObras = $funcion->estado === EstadoFuncion::EnVotacionTitulos ? 'candidata' : 'elegida';
-        $this->base->enTransaccion(function (BaseDeDatos $base) use ($funcion, $estadoDeLasObras): void {
+        $this->base->enTransaccion(function (BaseDeDatos $base) use ($funcion): void {
             $base->ejecutar(
-                'UPDATE funcion SET sala_id = ?, precio_base = ?, cupo = ?, estado = ?, fecha_hora = ? WHERE id = ?',
-                [
-                    $funcion->salaId, self::precio($funcion->precioBase), $funcion->cupo,
-                    $funcion->estado, $funcion->fechaHora, $funcion->id,
-                ],
+                'UPDATE funcion SET sala_id = ?, precio_base = ?, cupo = ?, fecha_hora = ? WHERE id = ?',
+                [$funcion->salaId, self::precio($funcion->precioBase), $funcion->cupo, $funcion->fechaHora, $funcion->id],
             );
-            $base->ejecutar('DELETE FROM funcion_obra WHERE funcion_id = ?', [$funcion->id]);
+            $marcas = implode(', ', array_fill(0, count($funcion->obrasIds), '?'));
+            $base->ejecutar(
+                "DELETE FROM funcion_obra WHERE funcion_id = ? AND estado = 'elegida' AND obra_id NOT IN ({$marcas})",
+                [$funcion->id, ...$funcion->obrasIds],
+            );
             foreach ($funcion->obrasIds as $obraId) {
                 $base->ejecutar(
-                    'INSERT INTO funcion_obra (funcion_id, obra_id, estado) VALUES (?, ?, ?)',
-                    [$funcion->id, $obraId, $estadoDeLasObras],
+                    "INSERT INTO funcion_obra (funcion_id, obra_id, estado) VALUES (?, ?, 'elegida')
+                     ON DUPLICATE KEY UPDATE estado = 'elegida'",
+                    [$funcion->id, $obraId],
                 );
             }
         });

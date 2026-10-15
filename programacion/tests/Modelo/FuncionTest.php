@@ -245,15 +245,53 @@ final class FuncionTest extends TestCase
         self::assertSame(EstadoFuncion::Programada, $funcion->estado);
     }
 
-    public function testActualizarRechazaEstadosFinales(): void
+    /**
+     * @return iterable<string, array{callable(): Funcion}>
+     */
+    public static function estadosQueNoSeEditan(): iterable
     {
-        $cancelada = self::cancelada();
-        $finalizada = self::finalizada();
+        yield 'en votación de títulos' => [self::enVotacion(...)];
+        yield 'en acuerdo de fecha' => [self::enAcuerdo(...)];
+        yield 'cancelada' => [self::cancelada(...)];
+        yield 'finalizada' => [self::finalizada(...)];
+    }
 
-        $this->expectException(ReglaIncumplida::class);
-        $this->expectExceptionMessage('no se puede modificar');
+    /**
+     * Sólo se edita una programada: en votación no hay nada que editar y las finales ya terminaron.
+     *
+     * @param callable(): Funcion $crear
+     */
+    #[DataProvider('estadosQueNoSeEditan')]
+    public function testActualizarSoloUnaProgramada(callable $crear): void
+    {
+        $funcion = $crear();
+        $antes = clone $funcion;
 
-        $cancelada->actualizar(self::SALA, [self::OBRA], 40, 2000.0, new DateTimeImmutable('2026-11-15 21:00:00'), self::ahora());
+        try {
+            $funcion->actualizar(self::SALA, [self::OBRA], 50, 2000.0, new DateTimeImmutable('2026-11-15 21:00:00'), self::ahora());
+            self::fail('Se editó una función que no está programada.');
+        } catch (ReglaIncumplida $error) {
+            self::assertStringContainsString('no se puede modificar', $error->getMessage());
+        }
+        self::assertEquals($antes, $funcion);
+    }
+
+    /**
+     * Una programada cuya fecha ya pasó ya se proyectó, aunque nada la haya pasado a finalizada.
+     */
+    public function testActualizarRechazaUnaQueYaSeDio(): void
+    {
+        $funcion = self::programada();
+        $antes = clone $funcion;
+        $despuesDeLaFuncion = new DateTimeImmutable('2026-10-25 10:00:00');
+
+        try {
+            $funcion->actualizar(self::SALA, [self::OBRA], 50, 2000.0, new DateTimeImmutable('2026-11-15 21:00:00'), $despuesDeLaFuncion);
+            self::fail('Se editó una función que ya se dio.');
+        } catch (ReglaIncumplida $error) {
+            self::assertSame('Una función que ya se dio no se puede modificar.', $error->getMessage());
+        }
+        self::assertEquals($antes, $funcion);
     }
 
     public function testActualizarRechazaFechaPasada(): void

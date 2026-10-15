@@ -114,9 +114,9 @@ final class Cartelera extends Controlador
 
         return $this->vista('ficha_funcion.html.twig', [
             'funcion' => self::datosDeDetalle($detalle, $editable),
-            'editable' => $editable,
-            'guardada' => (bool) $peticion->consulta('guardada'),
-            'editada' => (bool) $peticion->consulta('editada'),
+            // El aviso de que se acaba de guardar: sólo para el organizador que la editó. La ficha
+            // es pública, y si no, lo vería cualquiera que abra el enlace con el parámetro puesto.
+            'guardada' => $esPropia && $peticion->consulta('guardada') === '1',
         ]);
     }
 

@@ -10,6 +10,7 @@ use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Seguridad\Usuario;
 use IndieCinema\Nucleo\Uuid;
+use IndieCinema\Programacion\Modelo\Funcion;
 use IndieCinema\Programacion\Modelo\FuncionDelOrganizador;
 use IndieCinema\Programacion\Modelo\Obra;
 use IndieCinema\Programacion\Modelo\ReglaIncumplida;
@@ -250,7 +251,7 @@ final class FuncionesDelOrganizador extends Controlador
             'estado' => $funcion->estado->etiqueta(),
             'estado_valor' => $funcion->estado->value,
             'es_final' => $funcion->estado->esFinal(),
-            'editable' => $funcion->estado->seEdita(),
+            'editable' => Funcion::seEdita($funcion->estado, $funcion->fechaHora),
             // null mientras la función no tiene fecha: la plantilla lo dice con palabras.
             'fecha' => $funcion->fechaHora === null ? null : TarjetaDeFuncion::fecha($funcion->fechaHora),
             'precio' => TarjetaDeFuncion::precio($funcion->precioBase),

@@ -678,9 +678,10 @@ final class FuncionesDelOrganizadorTest extends TestCase
     }
 
     /**
-     * Sólo se edita una función programada. Una en votación (de títulos o de fecha) todavía no
-     * tiene nada que editar, y una cancelada o finalizada ya terminó: ni se abre el formulario ni
-     * se guarda, aunque se escriba la dirección a mano, y ni el panel ni la ficha muestran el botón.
+     * Sólo se edita una función programada que todavía no se dio. Una en votación (de títulos o de
+     * fecha) no tiene nada que editar, y una cancelada, finalizada o con la fecha ya pasada ya
+     * terminó: ni se abre el formulario ni se guarda, aunque se escriba la dirección a mano, y ni el
+     * panel ni la ficha muestran el botón.
      */
     public function testSoloSeEditaUnaFuncionProgramada(): void
     {
@@ -702,33 +703,42 @@ final class FuncionesDelOrganizadorTest extends TestCase
         $finalizada->finalizar(new DateTimeImmutable('2030-11-21 10:00:00'));
         $this->funciones->guardar($finalizada);
 
+        // Programada, pero su fecha ya pasó: se proyectó aunque nadie la haya finalizado.
+        $yaSeDio = $this->programada($sala, '2020-05-01 20:30:00', programadaEl: '2020-04-01 10:00:00');
+
         $programada = $this->programada($sala, '2030-12-05 20:30:00');
 
-        $noEditables = [$enVotacion, $enAcuerdo, $cancelada, $finalizada];
-        foreach ($noEditables as $funcion) {
-            self::assertSame(404, $this->pedir('GET', "/organizador/funciones/{$funcion->id}/editar")->estado(), $funcion->estado->value);
-            self::assertSame(404, $this->actualizar($funcion->id, $sala, ['cupo' => '10'])->estado(), $funcion->estado->value);
+        $noEditables = [
+            'en votación de títulos' => $enVotacion,
+            'en acuerdo de fecha' => $enAcuerdo,
+            'cancelada' => $cancelada,
+            'finalizada' => $finalizada,
+            'programada que ya se dio' => $yaSeDio,
+        ];
+        foreach ($noEditables as $caso => $funcion) {
+            self::assertSame(404, $this->pedir('GET', "/organizador/funciones/{$funcion->id}/editar")->estado(), $caso);
+            self::assertSame(404, $this->actualizar($funcion->id, $sala, ['cupo' => '10'])->estado(), $caso);
         }
 
         // Y ninguna cambió: ni el cupo ni la fecha, que en votación sigue sin estar.
-        foreach ($noEditables as $funcion) {
+        foreach ($noEditables as $caso => $funcion) {
             $fila = $this->base->fila('SELECT cupo, fecha_hora FROM funcion WHERE id = ?', [$funcion->id]) ?? self::fail('No está la función.');
-            self::assertSame(40, (int) $fila['cupo'], $funcion->estado->value);
-            self::assertSame($funcion->fechaHora?->format('Y-m-d H:i:s'), $fila['fecha_hora'], $funcion->estado->value);
+            self::assertSame(40, (int) $fila['cupo'], $caso);
+            self::assertSame($funcion->fechaHora?->format('Y-m-d H:i:s'), $fila['fecha_hora'], $caso);
         }
 
         // En el panel, el botón de editar sólo está en la programada.
         $panel = $this->pedir('GET', '/organizador/funciones')->cuerpo();
         self::assertStringContainsString("/organizador/funciones/{$programada->id}/editar", $panel);
-        foreach ($noEditables as $funcion) {
-            self::assertStringNotContainsString("/organizador/funciones/{$funcion->id}/editar", $panel, $funcion->estado->value);
+        foreach ($noEditables as $caso => $funcion) {
+            self::assertStringNotContainsString("/organizador/funciones/{$funcion->id}/editar", $panel, $caso);
         }
 
         // Y en la ficha, aunque la mire su organizadora.
-        foreach ($noEditables as $funcion) {
+        foreach ($noEditables as $caso => $funcion) {
             $ficha = $this->pedir('GET', "/cartelera/{$funcion->id}");
-            self::assertSame(200, $ficha->estado(), $funcion->estado->value);
-            self::assertStringNotContainsString('Editar función', $ficha->cuerpo(), $funcion->estado->value);
+            self::assertSame(200, $ficha->estado(), $caso);
+            self::assertStringNotContainsString('Editar función', $ficha->cuerpo(), $caso);
         }
     }
 

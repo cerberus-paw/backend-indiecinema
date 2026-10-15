@@ -86,11 +86,27 @@ final class Funcion
     }
 
     /**
-     * Modifica los datos de la función (E3-11.3). Sólo una programada (EstadoFuncion::seEdita()).
+     * Si el organizador puede editar la función (E3-11.3): sólo una programada que todavía no se
+     * dio. En votación las obras son las candidatas que se están votando y la fecha sale del
+     * acuerdo; cancelada y finalizada ya terminaron. Y una programada cuya fecha ya pasó ya se
+     * proyectó: nada la pasa a finalizada sola, y con otra fecha volvería a la cartelera.
+     *
+     * Es estático para que lo usen también la ficha y el panel, que no leen la entidad.
+     */
+    public static function seEdita(
+        EstadoFuncion $estado,
+        ?DateTimeImmutable $fechaHora,
+        DateTimeImmutable $ahora = new DateTimeImmutable(),
+    ): bool {
+        return $estado === EstadoFuncion::Programada && $fechaHora !== null && $fechaHora > $ahora;
+    }
+
+    /**
+     * Modifica los datos de la función (E3-11.3), si se puede editar (seEdita()).
      *
      * @param list<string> $obrasIds
      *
-     * @throws ReglaIncumplida si no está programada, sin obras, con obras repetidas, cupo no positivo, precio negativo o fecha no futura
+     * @throws ReglaIncumplida si no está programada o ya se dio, sin obras, con obras repetidas, cupo no positivo, precio negativo o fecha no futura
      */
     public function actualizar(
         string $salaId,
@@ -100,8 +116,10 @@ final class Funcion
         DateTimeImmutable $fechaHora,
         DateTimeImmutable $ahora = new DateTimeImmutable(),
     ): void {
-        if (!$this->estado->seEdita()) {
-            throw new ReglaIncumplida("Una función {$this->estado->etiqueta()} no se puede modificar.");
+        if (!self::seEdita($this->estado, $this->fechaHora, $ahora)) {
+            throw new ReglaIncumplida($this->estado === EstadoFuncion::Programada
+                ? 'Una función que ya se dio no se puede modificar.'
+                : "Una función {$this->estado->etiqueta()} no se puede modificar.");
         }
         self::controlarDatosDeProgramada($obrasIds, $cupo, $precioBase, $fechaHora, $ahora);
 

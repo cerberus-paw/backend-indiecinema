@@ -276,6 +276,24 @@ final class FuncionTest extends TestCase
         self::assertEquals($antes, $funcion);
     }
 
+    /**
+     * Una programada cuya fecha ya pasó ya se proyectó, aunque nada la haya pasado a finalizada.
+     */
+    public function testActualizarRechazaUnaQueYaSeDio(): void
+    {
+        $funcion = self::programada();
+        $antes = clone $funcion;
+        $despuesDeLaFuncion = new DateTimeImmutable('2026-10-25 10:00:00');
+
+        try {
+            $funcion->actualizar(self::SALA, [self::OBRA], 50, 2000.0, new DateTimeImmutable('2026-11-15 21:00:00'), $despuesDeLaFuncion);
+            self::fail('Se editó una función que ya se dio.');
+        } catch (ReglaIncumplida $error) {
+            self::assertSame('Una función que ya se dio no se puede modificar.', $error->getMessage());
+        }
+        self::assertEquals($antes, $funcion);
+    }
+
     public function testActualizarRechazaFechaPasada(): void
     {
         $funcion = self::programada();

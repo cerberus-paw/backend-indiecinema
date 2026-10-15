@@ -11,6 +11,7 @@ use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Seguridad\Rol;
 use IndieCinema\Programacion\Modelo\DetalleDeFuncion;
 use IndieCinema\Programacion\Modelo\EstadoFuncion;
+use IndieCinema\Programacion\Modelo\Funcion;
 use IndieCinema\Programacion\Modelo\FuncionEnCartelera;
 use IndieCinema\Programacion\Modelo\Genero;
 use IndieCinema\Programacion\Modelo\ObraEnDetalle;
@@ -110,7 +111,7 @@ final class Cartelera extends Controlador
             && $usuario->alcanza(Rol::Organizador)
             && $detalle->sala->organizadorId !== null
             && $detalle->sala->organizadorId === $usuario->id;
-        $editable = $esPropia && $detalle->estado->seEdita();
+        $editable = $esPropia && Funcion::seEdita($detalle->estado, $detalle->fechaHora);
 
         return $this->vista('ficha_funcion.html.twig', [
             'funcion' => self::datosDeDetalle($detalle, $editable),

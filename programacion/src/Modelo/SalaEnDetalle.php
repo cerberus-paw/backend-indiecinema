@@ -18,6 +18,7 @@ final readonly class SalaEnDetalle
         public int $capacidad,
         /** El nombre del archivo en el volumen, o null si no tiene. */
         public ?string $imagen,
+        public ?string $organizadorId = null,
     ) {
     }
 }

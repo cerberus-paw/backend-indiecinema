@@ -29,10 +29,10 @@ final class Funcion
      */
     public function __construct(
         public readonly string $id,
-        public readonly string $salaId,
+        public private(set) string $salaId,
         public private(set) array $obrasIds,
-        public readonly float $precioBase,
-        public readonly int $cupo,
+        public private(set) float $precioBase,
+        public private(set) int $cupo,
         public private(set) EstadoFuncion $estado = EstadoFuncion::EnVotacionTitulos,
         public private(set) ?DateTimeImmutable $fechaHora = null,
     ) {
@@ -80,6 +80,70 @@ final class Funcion
         DateTimeImmutable $fechaHora,
         DateTimeImmutable $ahora = new DateTimeImmutable(),
     ): self {
+        self::controlarDatosDeProgramada($obrasIds, $cupo, $precioBase, $fechaHora, $ahora);
+
+        return new self(Uuid::nuevo(), $salaId, $obrasIds, $precioBase, $cupo, EstadoFuncion::Programada, $fechaHora);
+    }
+
+    /**
+     * Si el organizador puede editar la función (E3-11.3): sólo una programada que todavía no se
+     * dio. En votación las obras son las candidatas que se están votando y la fecha sale del
+     * acuerdo; cancelada y finalizada ya terminaron. Y una programada cuya fecha ya pasó ya se
+     * proyectó: nada la pasa a finalizada sola, y con otra fecha volvería a la cartelera.
+     *
+     * Es estático para que lo usen también la ficha y el panel, que no leen la entidad.
+     */
+    public static function seEdita(
+        EstadoFuncion $estado,
+        ?DateTimeImmutable $fechaHora,
+        DateTimeImmutable $ahora = new DateTimeImmutable(),
+    ): bool {
+        return $estado === EstadoFuncion::Programada && $fechaHora !== null && $fechaHora > $ahora;
+    }
+
+    /**
+     * Modifica los datos de la función (E3-11.3), si se puede editar (seEdita()).
+     *
+     * @param list<string> $obrasIds
+     *
+     * @throws ReglaIncumplida si no está programada o ya se dio, sin obras, con obras repetidas, cupo no positivo, precio negativo o fecha no futura
+     */
+    public function actualizar(
+        string $salaId,
+        array $obrasIds,
+        int $cupo,
+        float $precioBase,
+        DateTimeImmutable $fechaHora,
+        DateTimeImmutable $ahora = new DateTimeImmutable(),
+    ): void {
+        if (!self::seEdita($this->estado, $this->fechaHora, $ahora)) {
+            throw new ReglaIncumplida($this->estado === EstadoFuncion::Programada
+                ? 'Una función que ya se dio no se puede modificar.'
+                : "Una función {$this->estado->etiqueta()} no se puede modificar.");
+        }
+        self::controlarDatosDeProgramada($obrasIds, $cupo, $precioBase, $fechaHora, $ahora);
+
+        $this->salaId = $salaId;
+        $this->obrasIds = array_values($obrasIds);
+        $this->cupo = $cupo;
+        $this->precioBase = $precioBase;
+        $this->fechaHora = $fechaHora;
+    }
+
+    /**
+     * Las reglas de los datos de una función programada, al crearla y al editarla.
+     *
+     * @param list<string> $obrasIds
+     *
+     * @throws ReglaIncumplida sin obras, con obras repetidas, cupo no positivo, precio negativo o fecha no futura
+     */
+    private static function controlarDatosDeProgramada(
+        array $obrasIds,
+        int $cupo,
+        float $precioBase,
+        DateTimeImmutable $fechaHora,
+        DateTimeImmutable $ahora,
+    ): void {
         if ($obrasIds === []) {
             throw new ReglaIncumplida('La función necesita al menos una obra.');
         }
@@ -98,8 +162,6 @@ final class Funcion
         if ($fechaHora <= $ahora) {
             throw new ReglaIncumplida('La fecha de la función tiene que ser futura.');
         }
-
-        return new self(Uuid::nuevo(), $salaId, $obrasIds, $precioBase, $cupo, EstadoFuncion::Programada, $fechaHora);
     }
 
     /**

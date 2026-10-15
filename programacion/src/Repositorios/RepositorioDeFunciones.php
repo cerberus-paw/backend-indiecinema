@@ -120,17 +120,24 @@ final class RepositorioDeFunciones
      *
      * @return list<array{DateTimeImmutable, DateTimeImmutable}>
      */
-    public function ocupadoEnLaSala(string $salaId): array
+    public function ocupadoEnLaSala(string $salaId, ?string $exceptoFuncionId = null): array
     {
+        $parametros = [$salaId];
+        $filtro = '';
+        if ($exceptoFuncionId !== null) {
+            $filtro = ' AND f.id != ?';
+            $parametros[] = $exceptoFuncionId;
+        }
+
         $filas = $this->base->filas(
             "SELECT f.fecha_hora, COALESCE(SUM(o.duracion), 0) AS duracion
              FROM funcion f
              LEFT JOIN funcion_obra fo ON fo.funcion_id = f.id AND fo.estado = 'elegida'
              LEFT JOIN obra o ON o.id = fo.obra_id
-             WHERE f.sala_id = ? AND f.estado = 'programada'
+             WHERE f.sala_id = ? AND f.estado = 'programada'{$filtro}
              GROUP BY f.id, f.fecha_hora
              ORDER BY f.fecha_hora",
-            [$salaId],
+            $parametros,
         );
 
         return array_map(static function (array $fila): array {
@@ -251,6 +258,36 @@ final class RepositorioDeFunciones
                 "UPDATE funcion_obra SET estado = 'elegida' WHERE funcion_id = ? AND obra_id IN ({$marcas})",
                 [$funcion->id, ...$funcion->obrasIds],
             );
+        });
+    }
+
+    /**
+     * Persiste los cambios de la función editada (E3-11.3): sala, obras, fecha/hora, precio y cupo.
+     * Sólo se edita una programada, así que sus obras son las elegidas.
+     *
+     * Las candidatas que no salieron elegidas se quedan como están, para el historial de la
+     * votación: se borran sólo las elegidas que ya no van, y una candidata que ahora se proyecta
+     * pasa a elegida en vez de repetirse.
+     */
+    public function actualizar(Funcion $funcion): void
+    {
+        $this->base->enTransaccion(function (BaseDeDatos $base) use ($funcion): void {
+            $base->ejecutar(
+                'UPDATE funcion SET sala_id = ?, precio_base = ?, cupo = ?, fecha_hora = ? WHERE id = ?',
+                [$funcion->salaId, self::precio($funcion->precioBase), $funcion->cupo, $funcion->fechaHora, $funcion->id],
+            );
+            $marcas = implode(', ', array_fill(0, count($funcion->obrasIds), '?'));
+            $base->ejecutar(
+                "DELETE FROM funcion_obra WHERE funcion_id = ? AND estado = 'elegida' AND obra_id NOT IN ({$marcas})",
+                [$funcion->id, ...$funcion->obrasIds],
+            );
+            foreach ($funcion->obrasIds as $obraId) {
+                $base->ejecutar(
+                    "INSERT INTO funcion_obra (funcion_id, obra_id, estado) VALUES (?, ?, 'elegida')
+                     ON DUPLICATE KEY UPDATE estado = 'elegida'",
+                    [$funcion->id, $obraId],
+                );
+            }
         });
     }
 

@@ -94,7 +94,7 @@ final class RepositorioDeCartelera
             'SELECT f.id, f.estado, f.fecha_hora, f.precio_base, f.cupo,
                     s.id AS sala_id, s.nombre AS sala_nombre, s.descripcion AS sala_descripcion,
                     s.direccion AS sala_direccion, s.localidad AS sala_localidad,
-                    s.capacidad AS sala_capacidad, s.imagen AS sala_imagen '
+                    s.capacidad AS sala_capacidad, s.imagen AS sala_imagen, s.organizador_id AS sala_organizador_id '
             . self::DESDE . '
              WHERE f.id = ? AND s.habilitada = TRUE AND s.dada_de_baja_en IS NULL',
             [$id],
@@ -154,6 +154,7 @@ final class RepositorioDeCartelera
             (string) $fila['sala_localidad'],
             (int) $fila['sala_capacidad'],
             $fila['sala_imagen'] === null ? null : (string) $fila['sala_imagen'],
+            isset($fila['sala_organizador_id']) ? (string) $fila['sala_organizador_id'] : null,
         );
 
         $fechaHora = $fila['fecha_hora'] === null ? null : new DateTimeImmutable((string) $fila['fecha_hora']);

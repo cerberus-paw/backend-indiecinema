@@ -104,13 +104,17 @@ final class ServicioDeFuncionesDelOrganizador
      * La función para editarla, si es de una sala del organizador. Si no existe o es de otro, la
      * respuesta es 404: así un organizador no puede averiguar qué ids existen (E3-11.3).
      *
+     * Una cancelada o finalizada tampoco se edita, y también es 404: el panel y la ficha ya no le
+     * muestran el botón, así que la única forma de llegar es escribiendo la dirección, y no tiene
+     * sentido abrir un formulario que no va a poder guardar.
+     *
      * @throws ExcepcionHttp 404
      */
     public function paraEditar(Usuario $organizador, string $id): Funcion
     {
         $funcion = $this->funciones->buscar($id) ?? throw ExcepcionHttp::noEncontrada();
         $sala = $this->salas->buscar($funcion->salaId);
-        if ($sala === null || !$sala->esDe($organizador->id)) {
+        if ($sala === null || !$sala->esDe($organizador->id) || $funcion->estado->esFinal()) {
             throw ExcepcionHttp::noEncontrada();
         }
 

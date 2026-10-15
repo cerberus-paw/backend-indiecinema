@@ -677,6 +677,39 @@ final class FuncionesDelOrganizadorTest extends TestCase
         self::assertSame(404, $this->pedir('GET', "/organizador/funciones/{$funcionAjena->id}/editar")->estado());
     }
 
+    /**
+     * Una función cancelada o finalizada no se edita: ni se abre el formulario ni se guarda, aunque
+     * se escriba la dirección a mano.
+     */
+    public function testNoSeEditaUnaFuncionCanceladaNiUnaFinalizada(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+
+        $cancelada = $this->programada($sala, '2030-10-25 20:30:00');
+        $cancelada->cancelar();
+        $this->funciones->guardar($cancelada);
+
+        // Finalizar pide que la función ya se haya dado: se la programa y se la finaliza con un
+        // reloj posterior a su fecha.
+        $finalizada = $this->programada($sala, '2030-11-20 21:00:00', programadaEl: '2030-11-19 10:00:00');
+        $finalizada->finalizar(new DateTimeImmutable('2030-11-21 10:00:00'));
+        $this->funciones->guardar($finalizada);
+
+        foreach ([$cancelada, $finalizada] as $funcion) {
+            self::assertSame(404, $this->pedir('GET', "/organizador/funciones/{$funcion->id}/editar")->estado(), $funcion->estado->value);
+            self::assertSame(404, $this->actualizar($funcion->id, $sala, ['cupo' => '10'])->estado(), $funcion->estado->value);
+        }
+
+        // Y ninguna cambió.
+        self::assertSame(
+            [40, 40],
+            array_map(intval(...), array_column(
+                $this->base->filas('SELECT cupo FROM funcion WHERE id IN (?, ?)', [$cancelada->id, $finalizada->id]),
+                'cupo',
+            )),
+        );
+    }
+
     public function testFormularioEdicionMuestraDatosPrecargadosYParametros(): void
     {
         $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');

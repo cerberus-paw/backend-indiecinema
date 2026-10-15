@@ -245,15 +245,27 @@ final class FuncionTest extends TestCase
         self::assertSame(EstadoFuncion::Programada, $funcion->estado);
     }
 
-    public function testActualizarRechazaEstadosFinales(): void
+    /**
+     * @return iterable<string, array{callable(): Funcion}>
+     */
+    public static function estadosFinales(): iterable
     {
-        $cancelada = self::cancelada();
-        $finalizada = self::finalizada();
+        yield 'cancelada' => [self::cancelada(...)];
+        yield 'finalizada' => [self::finalizada(...)];
+    }
+
+    /**
+     * @param callable(): Funcion $crear
+     */
+    #[DataProvider('estadosFinales')]
+    public function testActualizarRechazaEstadosFinales(callable $crear): void
+    {
+        $funcion = $crear();
 
         $this->expectException(ReglaIncumplida::class);
         $this->expectExceptionMessage('no se puede modificar');
 
-        $cancelada->actualizar(self::SALA, [self::OBRA], 40, 2000.0, new DateTimeImmutable('2026-11-15 21:00:00'), self::ahora());
+        $funcion->actualizar(self::SALA, [self::OBRA], 40, 2000.0, new DateTimeImmutable('2026-11-15 21:00:00'), self::ahora());
     }
 
     public function testActualizarRechazaFechaPasada(): void

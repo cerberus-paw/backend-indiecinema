@@ -19,7 +19,7 @@ use IndieCinema\Programacion\Servicios\ServicioDeFuncionesDelOrganizador;
 use LogicException;
 
 /**
- * «Mis funciones», alta y edición para programar una función, en /organizador/funciones/….
+ * «Mis funciones», alta, edición y cancelación de funciones, en /organizador/funciones/….
  * Las rutas piden el rol de organizador y el núcleo controla el token CSRF en los POST.
  */
 final class FuncionesDelOrganizador extends Controlador
@@ -38,7 +38,7 @@ final class FuncionesDelOrganizador extends Controlador
             'funciones' => array_map(self::datos(...), $funciones),
             // El aviso de que se acaba de programar una: sólo si lo que llega tiene forma de id.
             'programada' => is_string($programada = $peticion->consulta('programada')) && Uuid::esValido($programada),
-            'cancelada' => (bool) $peticion->consulta('cancelada'),
+            'cancelada' => $peticion->consulta('cancelada') === '1',
         ]);
     }
 
@@ -179,14 +179,8 @@ final class FuncionesDelOrganizador extends Controlador
             throw ExcepcionHttp::noEncontrada();
         }
 
-        try {
-            $funcion = $this->servicio->paraCancelar($organizador, $id);
-        } catch (ReglaIncumplida $error) {
-            throw ExcepcionHttp::solicitudInvalida($error->getMessage());
-        }
-
         return $this->vista('cancelar_funcion.html.twig', [
-            'funcion' => self::datos($funcion),
+            'funcion' => self::datos($this->servicio->paraCancelar($organizador, $id)),
             'accion' => "/organizador/funciones/{$id}/cancelar",
         ]);
     }
@@ -199,11 +193,7 @@ final class FuncionesDelOrganizador extends Controlador
             throw ExcepcionHttp::noEncontrada();
         }
 
-        try {
-            $this->servicio->cancelar($id, $organizador);
-        } catch (ReglaIncumplida $error) {
-            throw ExcepcionHttp::solicitudInvalida($error->getMessage());
-        }
+        $this->servicio->cancelar($organizador, $id);
 
         return $this->redirigir('/organizador/funciones?cancelada=1');
     }
@@ -274,7 +264,7 @@ final class FuncionesDelOrganizador extends Controlador
      * La fila de la tabla, con la fecha y el precio ya escritos como se leen, igual que en la
      * tarjeta de la cartelera. La plantilla recibe datos y no la entidad.
      *
-     * @return array{id: string, titulo: string, titulos_elegidos: bool, sala: string, sala_id: string, sala_habilitada: bool, estado: string, estado_valor: string, es_final: bool, editable: bool, fecha: ?string, precio: string, cupo: int}
+     * @return array{id: string, titulo: string, titulos_elegidos: bool, sala: string, sala_id: string, sala_habilitada: bool, estado: string, estado_valor: string, es_final: bool, editable: bool, cancelable: bool, fecha: ?string, precio: string, cupo: int}
      */
     private static function datos(FuncionDelOrganizador $funcion): array
     {
@@ -290,6 +280,7 @@ final class FuncionesDelOrganizador extends Controlador
             'estado_valor' => $funcion->estado->value,
             'es_final' => $funcion->estado->esFinal(),
             'editable' => Funcion::seEdita($funcion->estado, $funcion->fechaHora),
+            'cancelable' => Funcion::seCancela($funcion->estado, $funcion->fechaHora),
             // null mientras la función no tiene fecha: la plantilla lo dice con palabras.
             'fecha' => $funcion->fechaHora === null ? null : TarjetaDeFuncion::fecha($funcion->fechaHora),
             'precio' => TarjetaDeFuncion::precio($funcion->precioBase),

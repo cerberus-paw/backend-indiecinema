@@ -101,20 +101,18 @@ final class ServicioDeFuncionesDelOrganizador
     }
 
     /**
-     * La función para editarla, si es de una sala del organizador. Si no existe o es de otro, la
-     * respuesta es 404: así un organizador no puede averiguar qué ids existen (E3-11.3).
-     *
-     * Una que no se puede editar (Funcion::seEdita(): no está programada o ya se dio) también es
-     * 404: el panel y la ficha no le muestran el botón, así que la única forma de llegar es
-     * escribiendo la dirección, y no tiene sentido abrir un formulario que no va a poder guardar.
+     * La función para editarla, si es de una sala del organizador y se puede editar
+     * (Funcion::seEdita(): está programada y todavía no se dio). Si no, la respuesta es 404, como
+     * en propia(): el panel y la ficha no le muestran el botón, así que la única forma de llegar
+     * es escribiendo la dirección, y no tiene sentido abrir un formulario que no va a poder
+     * guardar (E3-11.3).
      *
      * @throws ExcepcionHttp 404
      */
     public function paraEditar(Usuario $organizador, string $id): Funcion
     {
-        $funcion = $this->funciones->buscar($id) ?? throw ExcepcionHttp::noEncontrada();
-        $sala = $this->salas->buscar($funcion->salaId);
-        if ($sala === null || !$sala->esDe($organizador->id) || !Funcion::seEdita($funcion->estado, $funcion->fechaHora)) {
+        $funcion = $this->propia($organizador, $id);
+        if (!Funcion::seEdita($funcion->estado, $funcion->fechaHora)) {
             throw ExcepcionHttp::noEncontrada();
         }
 
@@ -159,36 +157,53 @@ final class ServicioDeFuncionesDelOrganizador
     }
 
     /**
-     * La función para la confirmación de cancelación (E3-11.4).
+     * La función para la pantalla que confirma la cancelación, como la muestra el panel (E3-11.4).
+     * Como en paraEditar(), es 404 si no es del organizador o no se puede cancelar
+     * (Funcion::seCancela()).
      *
-     * @throws ExcepcionHttp 404 si la función no existe o la sala no es del organizador
-     * @throws ReglaIncumplida si la función ya está cancelada o finalizada
+     * @throws ExcepcionHttp 404
      */
     public function paraCancelar(Usuario $organizador, string $id): FuncionDelOrganizador
     {
-        $funcion = $this->paraEditar($organizador, $id);
-        if ($funcion->estado->esFinal()) {
-            throw new ReglaIncumplida("Una función {$funcion->estado->etiqueta()} no se puede cancelar.");
-        }
-
-        $funcionDelOrganizador = $this->funciones->delOrganizadorPorId($organizador->id, $id);
-        if ($funcionDelOrganizador === null) {
+        $funcion = $this->funciones->delOrganizadorPorId($organizador->id, $id);
+        if ($funcion === null || !Funcion::seCancela($funcion->estado, $funcion->fechaHora)) {
             throw ExcepcionHttp::noEncontrada();
         }
 
-        return $funcionDelOrganizador;
+        return $funcion;
     }
 
     /**
-     * Cancela una función propia del organizador (E3-11.4).
+     * Cancela una función propia del organizador: es una baja lógica, la función queda en su panel
+     * pero sale de la cartelera (E3-11.4).
      *
-     * @throws ExcepcionHttp 404 si la función no existe o la sala no es del organizador
-     * @throws ReglaIncumplida si la función ya está cancelada o finalizada
+     * @throws ExcepcionHttp 404 si no es del organizador o no se puede cancelar
      */
-    public function cancelar(string $id, Usuario $organizador): void
+    public function cancelar(Usuario $organizador, string $id): void
     {
-        $funcion = $this->paraEditar($organizador, $id);
+        $funcion = $this->propia($organizador, $id);
+        if (!Funcion::seCancela($funcion->estado, $funcion->fechaHora)) {
+            throw ExcepcionHttp::noEncontrada();
+        }
+
         $funcion->cancelar();
         $this->funciones->guardar($funcion);
+    }
+
+    /**
+     * La función, si es de una sala del organizador. Si no existe o es de otro, la respuesta es
+     * 404: así un organizador no puede averiguar qué ids existen.
+     *
+     * @throws ExcepcionHttp 404
+     */
+    private function propia(Usuario $organizador, string $id): Funcion
+    {
+        $funcion = $this->funciones->buscar($id) ?? throw ExcepcionHttp::noEncontrada();
+        $sala = $this->salas->buscar($funcion->salaId);
+        if ($sala === null || !$sala->esDe($organizador->id)) {
+            throw ExcepcionHttp::noEncontrada();
+        }
+
+        return $funcion;
     }
 }

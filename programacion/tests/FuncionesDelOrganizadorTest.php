@@ -972,9 +972,25 @@ final class FuncionesDelOrganizadorTest extends TestCase
         self::assertStringContainsString('Confirmar cancelación', $cuerpo);
     }
 
-    public function testConfirmarCancelacionRechazaFuncionYaCanceladaOFinalizada(): void
+    /**
+     * Se cancela una función en votación (de títulos o de fecha) o programada que todavía no se
+     * dio. Una cancelada, finalizada o con la fecha ya pasada ya terminó: es 404 al abrir la
+     * confirmación y al cancelar, como en la edición, y ni el panel ni la ficha muestran el botón.
+     */
+    public function testSoloSeCancelaUnaFuncionQueNoTermino(): void
     {
         $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+
+        $enAcuerdo = $this->funcion($sala);
+        $enAcuerdo->cerrarVotacionTitulos([$this->obras['Zama']]);
+        $this->funciones->guardar($enAcuerdo);
+
+        $cancelables = [
+            'en votación de títulos' => $this->funcion($sala),
+            'en acuerdo de fecha' => $enAcuerdo,
+            'programada' => $this->programada($sala, '2030-12-05 20:30:00'),
+        ];
+
         $cancelada = $this->programada($sala, '2030-10-25 20:30:00');
         $cancelada->cancelar();
         $this->funciones->guardar($cancelada);
@@ -983,8 +999,34 @@ final class FuncionesDelOrganizadorTest extends TestCase
         $finalizada->finalizar(new DateTimeImmutable('2020-03-05 23:00:00'));
         $this->funciones->guardar($finalizada);
 
-        self::assertSame(400, $this->pedir('GET', "/organizador/funciones/{$cancelada->id}/cancelar")->estado());
-        self::assertSame(400, $this->pedir('GET', "/organizador/funciones/{$finalizada->id}/cancelar")->estado());
+        $noCancelables = [
+            'cancelada' => $cancelada,
+            'finalizada' => $finalizada,
+            // Programada, pero su fecha ya pasó: se proyectó aunque nadie la haya finalizado.
+            'programada que ya se dio' => $this->programada($sala, '2020-05-01 20:30:00', programadaEl: '2020-04-01 10:00:00'),
+        ];
+
+        $panel = $this->pedir('GET', '/organizador/funciones')->cuerpo();
+        foreach ($cancelables as $caso => $funcion) {
+            self::assertSame(200, $this->pedir('GET', "/organizador/funciones/{$funcion->id}/cancelar")->estado(), $caso);
+            self::assertStringContainsString("/organizador/funciones/{$funcion->id}/cancelar", $panel, $caso);
+            self::assertStringContainsString('Cancelar función', $this->pedir('GET', "/cartelera/{$funcion->id}")->cuerpo(), $caso);
+        }
+        foreach ($noCancelables as $caso => $funcion) {
+            self::assertSame(404, $this->pedir('GET', "/organizador/funciones/{$funcion->id}/cancelar")->estado(), $caso);
+            self::assertSame(404, $this->enviar("/organizador/funciones/{$funcion->id}/cancelar", [])->estado(), $caso);
+            self::assertStringNotContainsString("/organizador/funciones/{$funcion->id}/cancelar", $panel, $caso);
+            self::assertStringNotContainsString('Cancelar función', $this->pedir('GET', "/cartelera/{$funcion->id}")->cuerpo(), $caso);
+            // Y quedó como estaba.
+            self::assertSame($funcion->estado->value, $this->base->valor('SELECT estado FROM funcion WHERE id = ?', [$funcion->id]), $caso);
+        }
+
+        // Una en votación se cancela de punta a punta, y se queda con sus candidatas.
+        $enVotacion = $cancelables['en votación de títulos'];
+        self::assertSame(303, $this->enviar("/organizador/funciones/{$enVotacion->id}/cancelar", [])->estado());
+        $leida = $this->funciones->buscar($enVotacion->id) ?? self::fail('No está la función.');
+        self::assertSame(EstadoFuncion::Cancelada, $leida->estado);
+        self::assertEqualsCanonicalizing($enVotacion->obrasIds, $leida->obrasIds);
     }
 
     public function testCancelarRequierePermisosYCsrf(): void
@@ -1015,21 +1057,6 @@ final class FuncionesDelOrganizadorTest extends TestCase
         $funcionAjena = $this->programada($salaAjena, '2030-10-25 20:30:00');
         $ajena = $this->enviar("/organizador/funciones/{$funcionAjena->id}/cancelar", []);
         self::assertSame(404, $ajena->estado());
-    }
-
-    public function testCancelarRechazaFuncionYaCanceladaOFinalizada(): void
-    {
-        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
-        $cancelada = $this->programada($sala, '2030-10-25 20:30:00');
-        $cancelada->cancelar();
-        $this->funciones->guardar($cancelada);
-
-        $finalizada = $this->programada($sala, '2020-03-05 20:30:00', programadaEl: '2020-01-01');
-        $finalizada->finalizar(new DateTimeImmutable('2020-03-05 23:00:00'));
-        $this->funciones->guardar($finalizada);
-
-        self::assertSame(400, $this->enviar("/organizador/funciones/{$cancelada->id}/cancelar", [])->estado());
-        self::assertSame(400, $this->enviar("/organizador/funciones/{$finalizada->id}/cancelar", [])->estado());
     }
 
     public function testCancelacionDePuntaAPuntaDesapareceDeCarteleraYQuedaEnPanel(): void

@@ -678,12 +678,19 @@ final class FuncionesDelOrganizadorTest extends TestCase
     }
 
     /**
-     * Una función cancelada o finalizada no se edita: ni se abre el formulario ni se guarda, aunque
-     * se escriba la dirección a mano.
+     * Sólo se edita una función programada. Una en votación (de títulos o de fecha) todavía no
+     * tiene nada que editar, y una cancelada o finalizada ya terminó: ni se abre el formulario ni
+     * se guarda, aunque se escriba la dirección a mano, y ni el panel ni la ficha muestran el botón.
      */
-    public function testNoSeEditaUnaFuncionCanceladaNiUnaFinalizada(): void
+    public function testSoloSeEditaUnaFuncionProgramada(): void
     {
         $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+
+        $enVotacion = $this->funcion($sala);
+
+        $enAcuerdo = $this->funcion($sala);
+        $enAcuerdo->cerrarVotacionTitulos([$this->obras['Zama']]);
+        $this->funciones->guardar($enAcuerdo);
 
         $cancelada = $this->programada($sala, '2030-10-25 20:30:00');
         $cancelada->cancelar();
@@ -695,19 +702,34 @@ final class FuncionesDelOrganizadorTest extends TestCase
         $finalizada->finalizar(new DateTimeImmutable('2030-11-21 10:00:00'));
         $this->funciones->guardar($finalizada);
 
-        foreach ([$cancelada, $finalizada] as $funcion) {
+        $programada = $this->programada($sala, '2030-12-05 20:30:00');
+
+        $noEditables = [$enVotacion, $enAcuerdo, $cancelada, $finalizada];
+        foreach ($noEditables as $funcion) {
             self::assertSame(404, $this->pedir('GET', "/organizador/funciones/{$funcion->id}/editar")->estado(), $funcion->estado->value);
             self::assertSame(404, $this->actualizar($funcion->id, $sala, ['cupo' => '10'])->estado(), $funcion->estado->value);
         }
 
-        // Y ninguna cambió.
-        self::assertSame(
-            [40, 40],
-            array_map(intval(...), array_column(
-                $this->base->filas('SELECT cupo FROM funcion WHERE id IN (?, ?)', [$cancelada->id, $finalizada->id]),
-                'cupo',
-            )),
-        );
+        // Y ninguna cambió: ni el cupo ni la fecha, que en votación sigue sin estar.
+        foreach ($noEditables as $funcion) {
+            $fila = $this->base->fila('SELECT cupo, fecha_hora FROM funcion WHERE id = ?', [$funcion->id]) ?? self::fail('No está la función.');
+            self::assertSame(40, (int) $fila['cupo'], $funcion->estado->value);
+            self::assertSame($funcion->fechaHora?->format('Y-m-d H:i:s'), $fila['fecha_hora'], $funcion->estado->value);
+        }
+
+        // En el panel, el botón de editar sólo está en la programada.
+        $panel = $this->pedir('GET', '/organizador/funciones')->cuerpo();
+        self::assertStringContainsString("/organizador/funciones/{$programada->id}/editar", $panel);
+        foreach ($noEditables as $funcion) {
+            self::assertStringNotContainsString("/organizador/funciones/{$funcion->id}/editar", $panel, $funcion->estado->value);
+        }
+
+        // Y en la ficha, aunque la mire su organizadora.
+        foreach ($noEditables as $funcion) {
+            $ficha = $this->pedir('GET', "/cartelera/{$funcion->id}");
+            self::assertSame(200, $ficha->estado(), $funcion->estado->value);
+            self::assertStringNotContainsString('Editar función', $ficha->cuerpo(), $funcion->estado->value);
+        }
     }
 
     public function testFormularioEdicionMuestraDatosPrecargadosYParametros(): void

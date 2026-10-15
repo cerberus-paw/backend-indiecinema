@@ -110,7 +110,7 @@ final class Cartelera extends Controlador
             && $usuario->alcanza(Rol::Organizador)
             && $detalle->sala->organizadorId !== null
             && $detalle->sala->organizadorId === $usuario->id;
-        $editable = $esPropia && !$detalle->estado->esFinal();
+        $editable = $esPropia && $detalle->estado->seEdita();
 
         return $this->vista('ficha_funcion.html.twig', [
             'funcion' => self::datosDeDetalle($detalle, $editable),

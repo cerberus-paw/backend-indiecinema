@@ -38,6 +38,16 @@ enum EstadoFuncion: string
         };
     }
 
+    /**
+     * Si el organizador puede editar sus datos (E3-11.3): sólo programada. En votación las obras
+     * son las candidatas que se están votando y la fecha sale del acuerdo; cancelada y finalizada
+     * ya terminaron.
+     */
+    public function seEdita(): bool
+    {
+        return $this === self::Programada;
+    }
+
     public function esFinal(): bool
     {
         return $this->siguientes() === [];

@@ -248,24 +248,32 @@ final class FuncionTest extends TestCase
     /**
      * @return iterable<string, array{callable(): Funcion}>
      */
-    public static function estadosFinales(): iterable
+    public static function estadosQueNoSeEditan(): iterable
     {
+        yield 'en votación de títulos' => [self::enVotacion(...)];
+        yield 'en acuerdo de fecha' => [self::enAcuerdo(...)];
         yield 'cancelada' => [self::cancelada(...)];
         yield 'finalizada' => [self::finalizada(...)];
     }
 
     /**
+     * Sólo se edita una programada: en votación no hay nada que editar y las finales ya terminaron.
+     *
      * @param callable(): Funcion $crear
      */
-    #[DataProvider('estadosFinales')]
-    public function testActualizarRechazaEstadosFinales(callable $crear): void
+    #[DataProvider('estadosQueNoSeEditan')]
+    public function testActualizarSoloUnaProgramada(callable $crear): void
     {
         $funcion = $crear();
+        $antes = clone $funcion;
 
-        $this->expectException(ReglaIncumplida::class);
-        $this->expectExceptionMessage('no se puede modificar');
-
-        $funcion->actualizar(self::SALA, [self::OBRA], 40, 2000.0, new DateTimeImmutable('2026-11-15 21:00:00'), self::ahora());
+        try {
+            $funcion->actualizar(self::SALA, [self::OBRA], 50, 2000.0, new DateTimeImmutable('2026-11-15 21:00:00'), self::ahora());
+            self::fail('Se editó una función que no está programada.');
+        } catch (ReglaIncumplida $error) {
+            self::assertStringContainsString('no se puede modificar', $error->getMessage());
+        }
+        self::assertEquals($antes, $funcion);
     }
 
     public function testActualizarRechazaFechaPasada(): void

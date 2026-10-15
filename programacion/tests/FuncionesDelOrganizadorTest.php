@@ -1111,4 +1111,329 @@ final class FuncionesDelOrganizadorTest extends TestCase
         self::assertStringNotContainsString('Editar función', $cuerpoFicha);
         self::assertStringNotContainsString('Cancelar función', $cuerpoFicha);
     }
+
+    /*
+     * De acá para abajo, E3-11.5 (IC-124): validación y control de acceso. Lo que se le escapa a
+     * una pantalla que ya anda con los datos de siempre: cabeceras falsificadas, salas que dejaron
+     * de estar, roles que alcanzan al organizador sin ser el dueño y campos que no son lo que
+     * dicen ser. Cada rechazo comprueba además que no quedó nada en la base.
+     */
+
+    /**
+     * El núcleo sólo cree las cabeceras de sesión que vienen con el secreto de nginx. Sin él son
+     * las que mandó el navegador, y se ignoran: ni el panel ni el alta se abren con una sesión
+     * inventada.
+     */
+    public function testLasCabecerasDeSesionSinElSecretoDeNginxNoDanAcceso(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $deMentira = ['X-Usuario-Id' => self::ORGANIZADORA, 'X-Rol' => 'organizador'];
+
+        foreach (['/organizador/funciones', '/organizador/funciones/nueva'] as $ruta) {
+            self::assertSame(401, $this->sinSecreto('GET', $ruta, $deMentira)->estado(), $ruta);
+        }
+        self::assertSame(401, $this->sinSecreto('POST', '/organizador/funciones/nueva', $deMentira, [
+            '_csrf' => self::CSRF,
+            'sala_id' => $sala->id,
+            'obras' => [$this->obras['Zama']],
+            'fecha' => '2030-10-25',
+            'hora' => '20:30',
+            'precio' => '2500',
+            'cupo' => '40',
+        ])->estado());
+        self::assertSame(0, $this->cuantasFunciones($sala));
+    }
+
+    /**
+     * Los roles son acumulativos: el administrador alcanza las rutas del organizador. Entra, pero
+     * como organizador de lo suyo, que no es nada.
+     */
+    public function testUnAdministradorEntraPeroNoVeNiProgramaLoAjeno(): void
+    {
+        $ajena = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $funcionAjena = $this->programada($ajena, '2030-09-19 20:30:00');
+
+        $panel = $this->pedir('GET', '/organizador/funciones', self::OTRO_ORGANIZADOR, 'administrador');
+        self::assertSame(200, $panel->estado());
+        self::assertStringNotContainsString($funcionAjena->id, $panel->cuerpo());
+        self::assertStringNotContainsString('El Galpón', $panel->cuerpo());
+
+        $respuesta = $this->enviar('/organizador/funciones/nueva', [
+            'sala_id' => $ajena->id,
+            'obras' => [$this->obras['Zama']],
+            'fecha' => '2030-10-25',
+            'hora' => '20:30',
+            'precio' => '2500',
+            'cupo' => '40',
+        ], self::OTRO_ORGANIZADOR, 'administrador');
+
+        self::assertSame(422, $respuesta->estado());
+        self::assertSame(1, $this->cuantasFunciones($ajena));
+    }
+
+    /**
+     * Una sala dada de baja ya no se ve en ningún lado: tampoco se le programan funciones, aunque
+     * siga figurando como habilitada y el id se mande a mano.
+     */
+    public function testNoSeProgramaEnUnaSalaDadaDeBaja(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $this->base->ejecutar('UPDATE sala SET dada_de_baja_en = NOW() WHERE id = ?', [$sala->id]);
+
+        $formulario = $this->pedir('GET', '/organizador/funciones/nueva');
+        self::assertStringNotContainsString('El Galpón', $formulario->cuerpo());
+
+        $respuesta = $this->programar($sala);
+
+        self::assertSame(422, $respuesta->estado());
+        self::assertSame(0, $this->cuantasFunciones($sala));
+    }
+
+    public function testRechazaUnaObraRepetida(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+
+        $respuesta = $this->programar($sala, ['obras' => [$this->obras['Zama'], $this->obras['Zama']]]);
+
+        self::assertSame(422, $respuesta->estado());
+        self::assertStringContainsString('Una obra no puede estar dos veces en la misma función.', $respuesta->cuerpo());
+        self::assertSame(0, $this->cuantasFunciones($sala));
+    }
+
+    public function testRechazaUnaObraQueNoEstaEnElCatalogo(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+
+        $respuesta = $this->programar($sala, ['obras' => [Uuid::nuevo()]]);
+
+        self::assertSame(422, $respuesta->estado());
+        self::assertStringContainsString('Una de las obras seleccionadas no existe en el catálogo.', $respuesta->cuerpo());
+        self::assertSame(0, $this->cuantasFunciones($sala));
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function cuposQueNoSon(): iterable
+    {
+        yield 'vacío' => [''];
+        yield 'cero' => ['0'];
+        yield 'negativo' => ['-5'];
+        yield 'con coma' => ['40,5'];
+        yield 'palabras' => ['cuarenta'];
+    }
+
+    #[DataProvider('cuposQueNoSon')]
+    public function testRechazaUnCupoQueNoEsAlMenosUnLugar(string $cupo): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+
+        $respuesta = $this->programar($sala, ['cupo' => $cupo]);
+
+        self::assertSame(422, $respuesta->estado());
+        self::assertStringContainsString('El cupo tiene que ser de al menos un lugar.', $respuesta->cuerpo());
+        self::assertSame(0, $this->cuantasFunciones($sala));
+    }
+
+    /**
+     * @return iterable<string, array{string, string}>
+     */
+    public static function fechasQueNoSon(): iterable
+    {
+        yield 'día que no existe' => ['2030-02-30', '20:30'];
+        yield 'mes que no existe' => ['2030-13-01', '20:30'];
+        yield 'hora que no existe' => ['2030-10-25', '25:00'];
+        yield 'otro formato' => ['25/10/2030', '20:30'];
+        yield 'palabras' => ['mañana', 'tarde'];
+    }
+
+    /**
+     * Una fecha que no es una fecha vuelve al formulario con su aviso, no revienta.
+     */
+    #[DataProvider('fechasQueNoSon')]
+    public function testRechazaUnaFechaOUnHorarioMalFormados(string $fecha, string $hora): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+
+        $respuesta = $this->programar($sala, ['fecha' => $fecha, 'hora' => $hora]);
+
+        self::assertSame(422, $respuesta->estado());
+        self::assertStringContainsString('La fecha y el horario no tienen un formato válido.', $respuesta->cuerpo());
+        self::assertSame(0, $this->cuantasFunciones($sala));
+    }
+
+    /**
+     * El formulario vacío no es un error del servidor: vuelve con lo que falta, campo por campo.
+     */
+    public function testUnPostVacioVuelveAlFormularioConTodosLosErrores(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+
+        $respuesta = $this->enviar('/organizador/funciones/nueva', []);
+
+        self::assertSame(422, $respuesta->estado());
+        foreach ([
+            'Falta seleccionar la sala.',
+            'Tenés que elegir al menos una obra del catálogo.',
+            'Falta la fecha de la función.',
+            'Falta el horario de la función.',
+            'Falta el precio de la entrada.',
+            'El cupo tiene que ser de al menos un lugar.',
+        ] as $aviso) {
+            self::assertStringContainsString($aviso, $respuesta->cuerpo(), $aviso);
+        }
+        self::assertSame(0, $this->cuantasFunciones($sala));
+    }
+
+    /**
+     * Como pedir(), pero con las cabeceras tal cual: sirve para mandarlas sin el secreto de nginx.
+     *
+     * @param array<string, string> $cabeceras
+     * @param array<string, mixed>  $cuerpo
+     */
+    private function sinSecreto(string $metodo, string $ruta, array $cabeceras, array $cuerpo = []): Respuesta
+    {
+        $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion, new Log('programacion', $this->salidaDelLog));
+
+        return $aplicacion->atender(new Peticion($metodo, $ruta, [], $cuerpo, $cabeceras, ['csrf' => self::CSRF]));
+    }
+
+    /*
+     * La edición y la cancelación, con la misma mirada: que una función propia no sea la puerta
+     * para tocar lo ajeno, y que lo que se rechaza no deje nada a medio cambiar.
+     */
+
+    /**
+     * La función es suya, pero la sala a la que la quiere mover no: el formulario sólo acepta las
+     * salas habilitadas del que pide, y la función se queda donde estaba.
+     */
+    public function testNoSeMueveUnaFuncionAUnaSalaAjena(): void
+    {
+        $propia = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $ajena = $this->sala(self::OTRO_ORGANIZADOR, 'El Sótano');
+        $funcion = $this->programada($propia, '2030-10-25 20:30:00');
+
+        $respuesta = $this->actualizar($funcion->id, $ajena);
+
+        self::assertSame(422, $respuesta->estado());
+        self::assertSame($propia->id, $this->base->valor('SELECT sala_id FROM funcion WHERE id = ?', [$funcion->id]));
+    }
+
+    /**
+     * Tampoco a una sala propia que no está habilitada o que se dio de baja: en las dos la función
+     * dejaría de poder verse.
+     */
+    public function testNoSeMueveUnaFuncionAUnaSalaPropiaQueNoEsta(): void
+    {
+        $propia = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $funcion = $this->programada($propia, '2030-10-25 20:30:00');
+
+        $sinHabilitar = $this->sala(self::ORGANIZADORA, 'La Terraza');
+        $this->base->ejecutar('UPDATE sala SET habilitada = FALSE WHERE id = ?', [$sinHabilitar->id]);
+        $dadaDeBaja = $this->sala(self::ORGANIZADORA, 'El Sótano Propio');
+        $this->base->ejecutar('UPDATE sala SET dada_de_baja_en = NOW() WHERE id = ?', [$dadaDeBaja->id]);
+
+        foreach (['sin habilitar' => $sinHabilitar, 'dada de baja' => $dadaDeBaja] as $caso => $destino) {
+            self::assertSame(422, $this->actualizar($funcion->id, $destino)->estado(), $caso);
+            self::assertSame(
+                $propia->id,
+                $this->base->valor('SELECT sala_id FROM funcion WHERE id = ?', [$funcion->id]),
+                $caso,
+            );
+        }
+    }
+
+    /**
+     * Las obras se validan igual que en el alta, y un rechazo no deja la función a medio cambiar.
+     */
+    public function testLaEdicionValidaLasObrasYNoGuardaNadaSiRechaza(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $funcion = $this->programada($sala, '2030-10-25 20:30:00');
+        $antes = $this->base->fila('SELECT sala_id, fecha_hora, precio_base, cupo FROM funcion WHERE id = ?', [$funcion->id]);
+
+        $repetida = $this->actualizar($funcion->id, $sala, [
+            'obras' => [$this->obras['Zama'], $this->obras['Zama']],
+            'cupo' => '55',
+        ]);
+        self::assertSame(422, $repetida->estado());
+        self::assertStringContainsString('Una obra no puede estar dos veces en la misma función.', $repetida->cuerpo());
+
+        $inventada = $this->actualizar($funcion->id, $sala, ['obras' => [Uuid::nuevo()], 'cupo' => '55']);
+        self::assertSame(422, $inventada->estado());
+        self::assertStringContainsString('Una de las obras seleccionadas no existe en el catálogo.', $inventada->cuerpo());
+
+        // Ni el cupo que venía en el mismo formulario quedó guardado.
+        self::assertEquals($antes, $this->base->fila('SELECT sala_id, fecha_hora, precio_base, cupo FROM funcion WHERE id = ?', [$funcion->id]));
+    }
+
+    /**
+     * La confirmación de la cancelación es una pantalla: mirarla no cancela nada.
+     */
+    public function testAbrirLaConfirmacionNoCancelaLaFuncion(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $funcion = $this->programada($sala, '2030-10-25 20:30:00');
+
+        self::assertSame(200, $this->pedir('GET', "/organizador/funciones/{$funcion->id}/cancelar")->estado());
+        self::assertSame(
+            EstadoFuncion::Programada->value,
+            $this->base->valor('SELECT estado FROM funcion WHERE id = ?', [$funcion->id]),
+        );
+    }
+
+    /**
+     * Las cabeceras de sesión sin el secreto de nginx tampoco abren la edición ni la cancelación,
+     * y no cambian nada.
+     */
+    public function testSinElSecretoDeNginxNoSeEditaNiSeCancela(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $funcion = $this->programada($sala, '2030-10-25 20:30:00');
+        $deMentira = ['X-Usuario-Id' => self::ORGANIZADORA, 'X-Rol' => 'organizador'];
+
+        foreach (['editar', 'cancelar'] as $accion) {
+            self::assertSame(401, $this->sinSecreto('GET', "/organizador/funciones/{$funcion->id}/{$accion}", $deMentira)->estado(), $accion);
+            self::assertSame(401, $this->sinSecreto('POST', "/organizador/funciones/{$funcion->id}/{$accion}", $deMentira, [
+                '_csrf' => self::CSRF,
+                'sala_id' => $sala->id,
+                'obras' => [$this->obras['Zama']],
+                'fecha' => '2030-11-30',
+                'hora' => '21:00',
+                'precio' => '9999',
+                'cupo' => '7',
+            ])->estado(), $accion);
+        }
+
+        $fila = $this->base->fila('SELECT estado, cupo FROM funcion WHERE id = ?', [$funcion->id]);
+        self::assertSame(EstadoFuncion::Programada->value, $fila['estado']);
+        self::assertSame(40, (int) $fila['cupo']);
+    }
+
+    /**
+     * El administrador alcanza las rutas del organizador, pero no es el dueño: ni edita ni cancela
+     * las funciones de otro.
+     */
+    public function testUnAdministradorNoEditaNiCancelaLoAjeno(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $funcion = $this->programada($sala, '2030-10-25 20:30:00');
+
+        foreach (['editar', 'cancelar'] as $accion) {
+            self::assertSame(404, $this->pedir('GET', "/organizador/funciones/{$funcion->id}/{$accion}", self::OTRO_ORGANIZADOR, 'administrador')->estado(), $accion);
+            self::assertSame(404, $this->pedir('POST', "/organizador/funciones/{$funcion->id}/{$accion}", self::OTRO_ORGANIZADOR, 'administrador', [
+                '_csrf' => self::CSRF,
+                'sala_id' => $sala->id,
+                'obras' => [$this->obras['Zama']],
+                'fecha' => '2030-11-30',
+                'hora' => '21:00',
+                'precio' => '9999',
+                'cupo' => '7',
+            ])->estado(), $accion);
+        }
+
+        $fila = $this->base->fila('SELECT estado, cupo FROM funcion WHERE id = ?', [$funcion->id]);
+        self::assertSame(EstadoFuncion::Programada->value, $fila['estado']);
+        self::assertSame(40, (int) $fila['cupo']);
+    }
 }

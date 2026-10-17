@@ -22,6 +22,7 @@ backend-indiecinema/
 │   ├── init/              esquemas, usuarios y permisos; corre una vez, con la base vacía
 │   └── herramientas/      aplicar migraciones y cargar datos de prueba
 ├── herramientas/          servidor de desarrollo sin Docker y despliegue en el VPS
+├── docs/seguridad.md      seguridad por capa: qué protege cada una y dónde está configurado
 ├── nucleo/                MVC común: ruteo, middleware, base de datos, vistas y errores
 ├── cuentas/               /cuenta/   registro, sesión, roles, perfil y seguidos
 ├── programacion/          /          catálogo, salas, funciones, cartelera, votación y rankings

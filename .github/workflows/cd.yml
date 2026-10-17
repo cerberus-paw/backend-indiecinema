@@ -1,0 +1,49 @@
+# Despliegue continuo: cuando la CI pasa en un push a main, publica esa versión en el VPS. Entra por
+# SSH con la clave del secreto SSH_CLAVE_DESPLIEGUE, que en el servidor sólo puede correr
+# herramientas/desplegar.sh (README, «Despliegue continuo»). El front tiene el mismo workflow, y los
+# dos corren ese script, que trae los dos repositorios.
+
+name: CD
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  # Para volver a desplegar a mano, desde la pestaña Actions.
+  workflow_dispatch:
+
+# No lee ni escribe nada del repositorio: sólo entra al servidor.
+permissions: {}
+
+# Uno por vez y sin cancelar: cortar un despliegue a mitad de una migración es peor que esperar.
+concurrency:
+  group: produccion
+  cancel-in-progress: false
+
+jobs:
+  desplegar:
+    name: Desplegar en el VPS
+    # Sólo si la CI pasó en un push a main: también corre en los PR que apuntan a main.
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # El environment guarda la clave y sólo se la da a las corridas de main.
+    environment:
+      name: produccion
+      url: https://indiecinema.duckdns.org
+    steps:
+      - name: Clave y huella del servidor
+        env:
+          CLAVE: ${{ secrets.SSH_CLAVE_DESPLIEGUE }}
+          HUELLA: ${{ vars.SSH_HUELLA_SERVIDOR }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$CLAVE" > ~/.ssh/despliegue
+          chmod 600 ~/.ssh/despliegue
+          printf '%s\n' "$HUELLA" > ~/.ssh/known_hosts
+      # Sin comando: lo elige el servidor. Si la huella no coincide, no se conecta.
+      - name: Desplegar
+        env:
+          SERVIDOR: ${{ vars.SERVIDOR }}
+        run: ssh -i ~/.ssh/despliegue -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o BatchMode=yes "$SERVIDOR"

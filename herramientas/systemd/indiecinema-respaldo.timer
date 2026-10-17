@@ -1,0 +1,12 @@
+[Unit]
+Description=Respaldo diario de IndieCinema a S3
+
+[Timer]
+# 1:30 en Argentina, cuando casi nadie usa el sitio. Con Persistent, si el servidor estaba apagado
+# a esa hora, el respaldo corre apenas arranca.
+OnCalendar=*-*-* 04:30:00 UTC
+RandomizedDelaySec=10min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

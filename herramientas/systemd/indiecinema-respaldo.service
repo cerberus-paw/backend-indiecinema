@@ -1,0 +1,14 @@
+# Respaldo de IndieCinema a S3 (herramientas/respaldo-diario.sh). Lo dispara
+# indiecinema-respaldo.timer; cómo se instala está en docs/respaldos.md.
+[Unit]
+Description=Respaldo de la base y los archivos de IndieCinema a S3
+Wants=network-online.target
+After=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+# El usuario del despliegue, que está en el grupo docker: el respaldo no necesita root.
+User=ubuntu
+WorkingDirectory=/home/ubuntu/indiecinema/backend-indiecinema
+ExecStart=/home/ubuntu/indiecinema/backend-indiecinema/herramientas/respaldo-diario.sh

@@ -20,8 +20,9 @@ backend-indiecinema/
 ├── php/                   Dockerfile común a los subsistemas (php:8.4-apache, sin root)
 ├── mysql/
 │   ├── init/              esquemas, usuarios y permisos; corre una vez, con la base vacía
-│   └── herramientas/      aplicar migraciones y cargar datos de prueba
-├── herramientas/          servidor de desarrollo sin Docker
+│   └── herramientas/      aplicar migraciones, volcar la base y comprobar el aislamiento
+├── herramientas/          servidor de desarrollo sin Docker, respaldo diario y restauración
+├── docs/                  lo del servidor: respaldos
 ├── nucleo/                MVC común: ruteo, middleware, base de datos, vistas y errores
 ├── cuentas/               /cuenta/   registro, sesión, roles, perfil y seguidos
 ├── programacion/          /          catálogo, salas, funciones, cartelera, votación y rankings
@@ -402,6 +403,11 @@ sudo certbot reconfigure --cert-name indiecinema.ejemplo.org --webroot -w /var/w
   --deploy-hook "docker compose --project-directory $PWD exec -T nginx nginx -s reload"
 sudo certbot renew --dry-run
 ```
+
+### Respaldo diario
+
+En el VPS, un timer de systemd sube cada día a S3 la base y los archivos de programación, y
+`herramientas/restaurar.sh` los restaura en cualquier entorno: [docs/respaldos.md](docs/respaldos.md).
 
 ### Sin Docker
 

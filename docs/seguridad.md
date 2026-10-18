@@ -1,14 +1,14 @@
 # Seguridad por capa
 
 Qué protege cada capa de IndieCinema y dónde está configurado. Red y sistema operativo describen
-el VPS de https://indiecinema.duckdns.org tal como quedó el 17/10/2026: una instancia EC2 de AWS
+el VPS de https://indiecinema.duckdns.org tal como quedó el 18/10/2026: una instancia EC2 de AWS
 (t3.small) con IP elástica, donde corre el `docker-compose.yml` de este repositorio.
 
 ## Red
 
 | Control | Dónde | Cómo se comprueba |
 |---|---|---|
-| Cortafuegos fuera de la máquina: sólo entran el 22 (SSH), el 80 y el 443, por IPv4. El SSH queda abierto a cualquier origen porque se entra desde redes distintas; lo cuidan la clave y fail2ban (capa de sistema operativo) | reglas de entrada del security group de la instancia en AWS (ufw no se usa) | consola de EC2 → la instancia → Security |
+| Cortafuegos fuera de la máquina: sólo entran el 22 (SSH), el 80 y el 443, por IPv4. El SSH queda abierto a cualquier origen porque el despliegue continuo entra desde las máquinas de GitHub Actions, que no tienen IP fija; lo cuidan la clave, fail2ban y que la clave del despliegue sólo puede correr el script (capa de sistema operativo) | reglas de entrada del security group de la instancia en AWS (ufw no se usa) | consola de EC2 → la instancia → Security |
 | Sólo HTTPS. Por el 80 se redirige a HTTPS (301) y se atiende el desafío de Let's Encrypt | `nginx/templates/servidor-https.inc.template`, que se activa desde `.env` con `docker-compose.https.yml` | `curl -I http://indiecinema.duckdns.org/` |
 | TLS 1.2 y 1.3, sin versiones anteriores, y cifrados con secreto hacia adelante (ECDHE) | `ssl_protocols` y `ssl_ciphers` en la misma plantilla | `openssl s_client -tls1_1 …` responde `protocol version` |
 | Certificado de Let's Encrypt que se renueva solo: certbot por webroot y un hook que recarga nginx | `certbot.timer` en el servidor (README, «HTTPS en el VPS») | `sudo certbot certificates` |
@@ -27,6 +27,7 @@ el VPS de https://indiecinema.duckdns.org tal como quedó el 17/10/2026: una ins
 | Ubuntu 26.04 LTS con las actualizaciones de seguridad automáticas | `unattended-upgrades` activo y `/etc/apt/apt.conf.d/20auto-upgrades` | `systemctl status unattended-upgrades` |
 | SSH sólo con clave: sin contraseñas y sin entrar como root | `PasswordAuthentication no`, `KbdInteractiveAuthentication no` y `PermitRootLogin no` | `sudo sshd -T` |
 | Bloqueo de quien prueba claves por SSH: 5 intentos en 10 minutos dejan la IP 10 minutos afuera | jaula `sshd` de fail2ban | `sudo fail2ban-client status sshd` |
+| La clave del despliegue continuo (el secreto de GitHub) sólo corre `herramientas/desplegar.sh`: no elige el comando ni abre una terminal o un túnel | `restrict,command=…` en su línea de `~/.ssh/authorized_keys` (README, «Despliegue continuo») | con esa clave, `ssh … id` despliega en vez de correr `id` |
 | Un solo usuario con acceso, `ubuntu`, que despliega con Docker sin ser root | grupo `docker` | `id ubuntu` |
 | Los secretos no están en el repositorio, sólo los lee el usuario del despliegue, y gitleaks revisa cada pull request y cada push a `main` | `.env` (600) y cada `config.ini` (640), que ignora `.gitignore`; `.gitleaks.toml` y la CI | `stat -c '%a %n' .env */config/config.ini` |
 | Cada subsistema corre como `www-data`, sin ninguna capacidad de root, sin poder ganar privilegios y con el sistema de archivos de sólo lectura | `php/Dockerfile` y `x-subsistema` en `docker-compose.yml` (`cap_drop: [ALL]`, `no-new-privileges`, `read_only`) | `docker compose exec programacion id` |

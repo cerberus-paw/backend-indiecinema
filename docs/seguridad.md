@@ -1,8 +1,10 @@
 # Seguridad por capa
 
-Qué protege cada capa de IndieCinema y dónde está configurado. Red y sistema operativo describen
-el VPS de https://indiecinema.duckdns.org tal como quedó el 18/10/2026: una instancia EC2 de AWS
-(t3.small) con IP elástica, donde corre el `docker-compose.yml` de este repositorio.
+Qué protege cada capa de IndieCinema (red, sistema operativo, base de datos y aplicación), dónde
+está configurado y cómo se comprueba; al final, qué se hace en cada etapa del ciclo de vida. Red y
+sistema operativo describen el VPS de https://indiecinema.duckdns.org tal como quedó el
+18/10/2026: una instancia EC2 de AWS (t3.small) con IP elástica, donde corre el
+`docker-compose.yml` de este repositorio.
 
 ## Red
 
@@ -34,6 +36,21 @@ el VPS de https://indiecinema.duckdns.org tal como quedó el 18/10/2026: una ins
 | Un subsistema comprometido no lee el código ni los secretos de los otros: cada uno monta sólo su carpeta | `volumes` de cada subsistema en `docker-compose.yml` | — |
 | Docker aísla los contenedores con AppArmor y seccomp | perfiles por defecto de Docker | `docker info` |
 
+## Base de datos
+
+MySQL 8.4 en su contenedor, sin puertos publicados (ver «Red»): sólo lo alcanzan los subsistemas
+por la red interna del compose.
+
+| Control | Dónde | Cómo se comprueba |
+|---|---|---|
+| Un esquema por subsistema, y un usuario por subsistema que sólo lee y escribe datos del suyo: sin crear, alterar ni borrar tablas, y sin ver los esquemas de los otros. Lo que un subsistema necesita de otro lo pide por la API interna | `mysql/init/01-esquemas-y-usuarios.sh` | `docker compose exec mysql bash /herramientas/comprobar-aislamiento.sh`: en el VPS, el 18/10, los 15 intentos dieron `command denied` |
+| Las tablas las crea y las cambia sólo el usuario de migraciones, que la aplicación nunca usa. Ese usuario y root entran sólo desde adentro del contenedor de MySQL | `mysql/init/02-usuario-de-migraciones.sh` y `MYSQL_ROOT_HOST: localhost` en `docker-compose.yml` | `SELECT user, host FROM mysql.user`: `migraciones` y `root` en `localhost` |
+| El registro de las migraciones aplicadas está en un esquema que ningún subsistema ve, con la huella de cada archivo: la aplicación no puede hacer que una se repita, y una migración editada después de aplicarse se rechaza | `control_migraciones` y `mysql/herramientas/migrar.sh` | `MigracionesTest` de cada subsistema |
+| Las claves de los usuarios de MySQL salen de `.env` al crear la base: no están en el repositorio | variables `MYSQL_CLAVE_*` de `docker-compose.yml` | gitleaks en la CI |
+| En la base no hay secretos en claro: de cada contraseña queda el hash Argon2id, y de cada sesión, el SHA-256 de su identificador | `usuario.contrasena_hash` y `sesion.huella` | `RegistroTest::testConTodoBienGuardaElUsuarioConArgon` |
+| Sentencias preparadas de verdad, no emuladas por PDO, y conexión en `utf8mb4`: los datos nunca se mezclan con el SQL | `PDO::ATTR_EMULATE_PREPARES => false` en `nucleo/src/BaseDeDatos.php` | `CarteleraTest::testUnaInyeccionEnLaBusquedaNoTraeNada` |
+| La base también hace cumplir las reglas del modelo: claves foráneas, únicos (correo, roles sin repetir, una solicitud pendiente por sala) y `CHECK` en rangos y estados | `migraciones/` de cada subsistema | `MigracionesTest` («la base rechaza…») |
+
 ## Aplicación
 
 Revisado pantalla por pantalla el 18/10, sobre todo lo de la Entrega 3: registro, ingreso,
@@ -50,9 +67,30 @@ organizador, y la bandeja y los usuarios del administrador. Las pruebas nombrada
 | Control de dueño: un organizador sólo ve y cambia sus salas y sus funciones. Lo ajeno responde 404, como lo que no existe, así no se averigua qué hay | `ServicioDeSalas` y `ServicioDeFuncionesDelOrganizador` en `programacion/src/Servicios/` | `SalasDelOrganizadorTest::testOtroOrganizadorNoVeNiGuardaLaSalaAjena`, `FuncionesDelOrganizadorTest::testFormularioEdicionDevuelve404SiNoExisteOEsAjena` |
 | Los id de la URL se validan como UUID antes de ir a la base | `nucleo/src/Uuid.php`, en cada servicio que busca por id | `CarteleraTest::testDetalleConIdInvalidoResponde` |
 | Escape de la salida: Twig escapa todo lo que muestra y ninguna plantilla usa `raw`. El JavaScript del front arma lo que muestra sin `innerHTML` | `nucleo/src/Vista.php` (`autoescape`) y las plantillas del front | `SolicitudDeSalaTest::testConErroresVuelveConLoCargadoYEscapado` |
+| Sesión propia en la base de cuentas: el identificador son 32 bytes al azar en una cookie `HttpOnly`, `Secure` y `SameSite=Lax`, y al ingresar siempre es uno nuevo. Se cierra con dos horas sin uso y dura como mucho siete días. Cambiar el rol de un usuario o suspenderlo cierra sus sesiones | `cuentas/src/Modelo/Sesion.php` y `ServicioDeSesiones` | `SesionTest`, `SesionInternaTest::testDosHorasSinUsoLaCierran` |
 | Token CSRF en todo pedido que cambia algo: va en una cookie y en el formulario, y tienen que coincidir. La cookie es `HttpOnly`, `Secure` y `SameSite=Lax` | `nucleo/src/Seguridad/ProteccionCsrf.php`, para todo el sitio | `AplicacionTest::testUnPostSinTokenCsrfSeRechaza` y la prueba «sin el token» de cada formulario |
 | La foto de una sala se acepta por su contenido, no por el nombre ni por lo que dice el navegador: JPG, PNG o WebP, hasta 5 MB y 8000 píxeles de lado. Se guarda con un nombre nuevo y se sirve con el tipo de su extensión | `FormularioDeSala`, `ArchivosDeSalas` e `ImagenDeSala` en `programacion/src/` | `SolicitudDeSalaTest::testUnaSalaNuevaNecesitaUnaFotoDeVerdad` |
 | En el CSV de la cartelera, un texto que una planilla tomaría como fórmula va con un apóstrofo adelante | `programacion/src/Controladores/CsvDeCartelera.php` | `CsvDeCarteleraTest::testUnaFormulaSeEscribeComoTexto` |
 | La API interna (`/interno/`) sólo atiende a los subsistemas que declara cada ruta, cada uno con su token; en la configuración está sólo el SHA-256 del token | `$router->interna()` en cada `rutas.php` y `[llamadores]` en cada `config.ini` | `UsuariosInternosTest::testSoloLasLlamaProgramacionConSuToken`, `FuncionesInternasTest::testSoloLaPideFuncionesConSuToken` |
 | En producción, un error responde 500 sin el detalle, que queda en el log. Con algún valor de ejemplo en `config.ini` el subsistema no arranca | `nucleo/src/Aplicacion.php` y `entorno = "produccion"` | `AplicacionTest::testUnErrorEnProduccionNoMuestraElDetalleYQuedaEnElLog` |
 | Las dependencias se revisan contra los avisos de seguridad conocidos en cada pull request | `composer audit` en `.github/workflows/ci.yml` | la CI |
+
+**Decisiones de la capa de aplicación**
+
+- **Duración de la sesión.** Dos horas sin uso alcanzan para recorrer la cartelera o cargar
+  funciones sin volver a ingresar, y en una computadora compartida no dejan la cuenta abierta
+  para el siguiente. Los siete días de tope hacen que una cookie robada no sirva para siempre.
+- **El registro avisa si el correo ya tiene cuenta.** Sin verificar el correo no hay otra forma de
+  decírselo a quien se equivocó. El ingreso, en cambio, no lo revela. Recorrer correos en masa lo
+  frena el límite de 5 pedidos por minuto por IP en nginx (ver «Red»). Se revisa cuando el
+  registro mande un correo de verificación.
+
+## Por etapa
+
+| Etapa | Qué se hace | Dónde |
+|---|---|---|
+| Diseño | Cada capa con sus controles antes de programar: subsistemas con esquema y usuario propios, sesión validada por nginx con cuentas y API interna con un token por llamador | capítulo 6 de `entrega-2/Entrega_2.pdf`, en el repositorio de entregas |
+| Desarrollo | Cada cambio entra por pull request y lo revisa otro integrante. El núcleo concentra lo que se repite (consultas, escape, CSRF, rol por ruta), así ninguna pantalla lo resuelve por su cuenta | `nucleo/` y `.github/pull_request_template.md` |
+| Prueba | Pruebas de cada control en la CI, en cada pull request: rol y dueño, CSRF, inyección, validación. También gitleaks, `composer audit` y la configuración de nginx desde afuera | `.github/workflows/ci.yml` y `nginx/comprobar-desde-afuera.sh` |
+| Despliegue | Secretos generados en el servidor y fuera del repositorio; con `entorno = "produccion"` no arranca con valores de ejemplo. El despliegue continuo entra con una clave que sólo puede correr el script | `herramientas/desplegar.sh` y `.github/workflows/cd.yml` (README, «Despliegue continuo») |
+| Operación | Actualizaciones de seguridad automáticas, fail2ban, renovación del certificado y logs de cada subsistema | «Sistema operativo» y «Red», arriba; `docker compose logs` |

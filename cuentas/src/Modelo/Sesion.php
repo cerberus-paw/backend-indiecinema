@@ -19,8 +19,19 @@ final readonly class Sesion
     /** La cookie con el identificador, la misma para todos los subsistemas. */
     public const COOKIE = 'sesion';
 
-    /** Cuánto dura desde que se abre, use o no use el sitio. */
+    /**
+     * Cuánto dura como máximo desde que se abre, aunque se siga usando: una cookie robada no sirve
+     * para siempre.
+     */
     public const DURACION = 'P7D';
+
+    /**
+     * Sin uso durante este tiempo, se cierra: en una computadora compartida, quien se olvida de
+     * salir no deja la cuenta abierta al siguiente. Dos horas alcanzan para leer la cartelera o
+     * cargar funciones sin que pida ingresar de nuevo a mitad de camino. Como el uso se anota cada
+     * ANOTAR_USO_CADA, puede cerrarse hasta esos minutos antes.
+     */
+    public const INACTIVIDAD = 'PT2H';
 
     /**
      * Cada cuánto se anota el último uso: la sesión se valida en cada pedido, y escribir en cada
@@ -71,10 +82,11 @@ final readonly class Sesion
     }
 
     /**
-     * Si la sesión sigue viva: hasta el instante del vencimiento, sin incluirlo.
+     * Si la sesión sigue viva: hasta el vencimiento o hasta cumplir INACTIVIDAD desde el último uso
+     * anotado, lo que llegue primero, sin incluir ese instante.
      */
     public function sigueViva(DateTimeImmutable $ahora): bool
     {
-        return $ahora < $this->venceEn;
+        return $ahora < $this->venceEn && $ahora < $this->usadaEn->add(new DateInterval(self::INACTIVIDAD));
     }
 }

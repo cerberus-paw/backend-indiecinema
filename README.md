@@ -112,12 +112,13 @@ todo el sitio se vea igual aunque lo sirvan subsistemas distintos.
   más por cada una. Va codificado con `rawurlencode()`.
 - **La sesión es nuestra y vive en la base de cuentas**, no en `session_start()`: los subsistemas
   no guardan estado. El identificador son 32 bytes de `random_bytes` que viajan en la cookie; la
-  tabla `sesion` guarda sólo su SHA-256, así quien la lea no puede usarlas. Dura siete días desde
-  que se abre, y `Sesion::sigueViva()` decide con el vencimiento. Borrar la fila la cierra en el
-  pedido siguiente: por eso cambiar el rol o el estado de un usuario (sólo por
-  `RepositorioDeUsuarios`) borra sus sesiones en la misma transacción, y al volver a entrar los
-  datos que manda nginx ya están al día. No usamos triggers porque, con el log binario de MySQL,
-  crearlos pide un privilegio de administrador que el usuario de migraciones no tiene.
+  tabla `sesion` guarda sólo su SHA-256, así quien la lea no puede usarlas. Se cierra con dos horas
+  sin uso y dura como mucho siete días desde que se abre; `Sesion::sigueViva()` decide con las dos
+  cosas. Borrar la fila la cierra en el pedido siguiente: por eso cambiar el rol o el estado de un
+  usuario (sólo por `RepositorioDeUsuarios`) borra sus sesiones en la misma transacción, y al
+  volver a entrar los datos que manda nginx ya están al día. No usamos triggers porque, con el log
+  binario de MySQL, crearlos pide un privilegio de administrador que el usuario de migraciones no
+  tiene.
 - **Límite de intentos en nginx.** Ingresar y registrarse admiten 5 POST por minuto por IP, con un
   margen de 3 seguidos; al pasarse, 429. Es el control contra la fuerza bruta en la capa de red:
   frena antes de llegar a PHP y a Argon2id, que es caro a propósito. Cuentan sólo los POST (abrir

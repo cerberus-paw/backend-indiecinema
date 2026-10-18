@@ -21,7 +21,7 @@ backend-indiecinema/
 ├── mysql/
 │   ├── init/              esquemas, usuarios y permisos; corre una vez, con la base vacía
 │   └── herramientas/      aplicar migraciones y cargar datos de prueba
-├── herramientas/          servidor de desarrollo sin Docker
+├── herramientas/          servidor de desarrollo sin Docker y despliegue en el VPS
 ├── nucleo/                MVC común: ruteo, middleware, base de datos, vistas y errores
 ├── cuentas/               /cuenta/   registro, sesión, roles, perfil y seguidos
 ├── programacion/          /          catálogo, salas, funciones, cartelera, votación y rankings
@@ -402,6 +402,16 @@ sudo certbot reconfigure --cert-name indiecinema.ejemplo.org --webroot -w /var/w
   --deploy-hook "docker compose --project-directory $PWD exec -T nginx nginx -s reload"
 sudo certbot renew --dry-run
 ```
+
+### Despliegue continuo
+
+Cuando la CI pasa en un push a `main` del back o del front, el workflow `CD` entra al VPS por SSH y
+corre `herramientas/desplegar.sh`: trae los dos repositorios, instala las dependencias, recrea lo
+que cambió, migra y comprueba que el sitio responda. A mano: Actions → CD → Run workflow. Cada
+repositorio tiene un environment `produccion`, sólo para `main`, con el secreto
+`SSH_CLAVE_DESPLIEGUE` (una clave ed25519 sólo para esto) y las variables `SERVIDOR`
+(`ubuntu@<ip>`) y `SSH_HUELLA_SERVIDOR` (su línea de `known_hosts`). En el servidor, la clave
+pública sólo puede correr ese script: la línea de `authorized_keys` está en su encabezado.
 
 ### Sin Docker
 

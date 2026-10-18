@@ -23,6 +23,7 @@ backend-indiecinema/
 │   └── herramientas/      aplicar migraciones y cargar datos de prueba
 ├── herramientas/          servidor de desarrollo sin Docker y despliegue en el VPS
 ├── docs/seguridad.md      seguridad por capa: qué protege cada una y dónde está configurado
+├── docs/guion-de-prueba.md  el recorrido de punta a punta en el sitio publicado, con cada rol
 ├── nucleo/                MVC común: ruteo, middleware, base de datos, vistas y errores
 ├── cuentas/               /cuenta/   registro, sesión, roles, perfil y seguidos
 ├── programacion/          /          catálogo, salas, funciones, cartelera, votación y rankings

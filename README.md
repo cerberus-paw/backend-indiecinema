@@ -67,7 +67,31 @@ todo el sitio se vea igual aunque lo sirvan subsistemas distintos.
   |---|---|---|
   | `twig/twig` | Plantillas | Escapa el HTML por defecto, que es el control contra XSS que prometimos, y es el motor de las plantillas del paquete front |
   | `psr/log` | Interfaz del registro de errores (PSR-3) | Son sólo interfaces; el registro que escribe el log es nuestro |
-  | `phpunit/phpunit` | Pruebas del núcleo | Sólo en desarrollo, no llega al servidor |
+  | `phpunit/phpunit` | Pruebas del núcleo y de cada subsistema | Sólo en desarrollo, no llega al servidor |
+
+- **El resto de la tecnología.** PHP 8.4, porque es el lenguaje de la materia y con tipos
+  estrictos, clases `readonly` y enumeraciones (roles y estados) el modelo se escribe como lo
+  pensamos. MySQL 8.4 (LTS), porque los datos son relacionales (salas con sus funciones, y
+  funciones con sus obras) y porque con un usuario por esquema la separación en subsistemas también vale en la base.
+  nginx, como único punto de entrada: valida la sesión una sola vez (`auth_request`), limita los
+  intentos y termina el HTTPS. Docker Compose, para que la máquina de cada uno y el VPS corran lo
+  mismo.
+- **Cada problema común de una aplicación web tiene su módulo en el núcleo** (TP3, punto 1), y
+  donde hay una recomendación del PHP-FIG la seguimos o tomamos su idea:
+
+  | Problema | Módulo | PSR |
+  |---|---|---|
+  | Analizar la petición HTTP | `Http/Peticion.php`: se arma una vez desde las globales y no se modifica; cada `con…()` devuelve una copia | la idea de PSR-7 (mensajes inmutables, los `with…()`), sin su interfaz |
+  | Mapear URLs a funcionalidades | `Ruteo/Router.php` y `Ruta.php`, con las rutas y el rol mínimo de cada una en el `rutas.php` del subsistema | — |
+  | Generar la respuesta | `Http/Respuesta.php` (también inmutable), `ExcepcionHttp` y `Errores/ManejadorDeErrores.php` | la idea de PSR-7 |
+  | Registros | `Log.php`, a la salida de errores | PSR-3: implementa `LoggerInterface` de `psr/log` |
+  | Persistencia | `BaseDeDatos.php` (PDO con sentencias preparadas) y los `Repositorios/` de cada subsistema | — |
+  | Configuración | `Configuracion.php`, que lee el `config.ini` del subsistema | — |
+  | Representaciones | `Vista.php` (HTML con Twig) y `Respuesta::json()`; el CSV de la cartelera y las fotos de las salas, en programación | — |
+  | Armar los objetos | `Contenedor.php`, que construye cada controlador mirando su constructor | la idea de PSR-11, sin su interfaz |
+
+  Además, la carga de clases es PSR-4 (el `autoload` de cada `composer.json`), y escribimos con el
+  estilo de PSR-1 y PSR-12, aunque ninguna herramienta lo controla.
 
 - **El núcleo es un paquete de Composer dentro del monorepo** (`nucleo/`, instalado con un
   repositorio `path`). Cuentas, programación y funciones usan el mismo código, así un error se

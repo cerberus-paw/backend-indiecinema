@@ -126,6 +126,18 @@ final class SesionInternaTest extends TestCase
         self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM sesion'));
     }
 
+    public function testDosHorasSinUsoLaCierran(): void
+    {
+        $quieta = $this->sesiones->abrir($this->mariana)->identificador;
+        $reciente = $this->sesiones->abrir($this->mariana)->identificador;
+        $this->base->ejecutar('UPDATE sesion SET usada_en = UTC_TIMESTAMP() - INTERVAL 2 HOUR WHERE huella = ?', [hash('sha256', $quieta)]);
+        $this->base->ejecutar('UPDATE sesion SET usada_en = UTC_TIMESTAMP() - INTERVAL 110 MINUTE WHERE huella = ?', [hash('sha256', $reciente)]);
+
+        self::assertSame(['', '', ''], self::identidad($this->pedir($quieta)));
+        self::assertSame($this->mariana, self::identidad($this->pedir($reciente))[0]);
+        self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM sesion WHERE huella = ?', [hash('sha256', $quieta)]));
+    }
+
     public function testUnaCuentaQueNoEstaActivaNoTieneSesion(): void
     {
         $identificador = $this->sesiones->abrir($this->mariana)->identificador;

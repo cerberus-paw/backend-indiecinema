@@ -461,7 +461,8 @@ menú y del pie que ve cada rol, y la página de error, que vuelve a la portada)
 registro de punta a punta, la API interna de usuarios (quién es y el rol de organizador, sólo para
 programación), el listado de usuarios del administrador con su buscador, su paginado, dar y quitar
 el rol de organizador y quién entra (en cuentas y en programación, una prueba recorre todas las
-rutas del panel y comprueba que sólo entra el administrador), y las restricciones de las tablas
+rutas del panel y comprueba que sólo entra el administrador; en programación, otra hace lo
+mismo con las del organizador y fija cuáles son públicas), y las restricciones de las tablas
 usuario y rol (correo único, y roles sin repetir y sólo de un usuario que existe). Para correrlas,
 uno descartable:
 

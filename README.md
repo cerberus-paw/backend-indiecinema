@@ -9,6 +9,22 @@ de MySQL y una carpeta por subsistema. Lo visual (plantillas, CSS y JavaScript) 
 repositorio, [frontend-indiecinema](https://github.com/cerberus-paw/frontend-indiecinema), que
 cada subsistema instala como paquete de Composer.
 
+## El sitio publicado
+
+https://indiecinema.duckdns.org, con los datos de la demo cargados: salas, obras y funciones.
+
+| Rol | Cómo entrar |
+|---|---|
+| Visitante | sin cuenta: portada, cartelera, fichas y salas |
+| Espectador | «Crear cuenta», con cualquier correo |
+| Organizador | `organizador@indiecinema.test`, dueño de las salas de la demo |
+| Administrador | `admin@indiecinema.test` |
+
+Las contraseñas del organizador y del administrador van en la entrega de Classroom: el
+repositorio es público, y con ellas se entra al sitio de verdad. El recorrido para probarlo todo
+está en [`docs/guion-de-prueba.md`](docs/guion-de-prueba.md). Cada cambio que entra a `main` se
+publica solo (ver «Despliegue continuo»).
+
 ## Estructura
 
 ```
@@ -16,21 +32,24 @@ backend-indiecinema/
 ├── docker-compose.yml     nginx, un contenedor PHP por subsistema y MySQL
 ├── docker-compose.https.yml  HTTPS en el VPS (se activa desde .env)
 ├── .env.ejemplo           puerto y claves de MySQL (copiar a .env)
-├── nginx/templates/       ruteo por prefijo, validación de sesión y límites de intentos (con los secretos de .env)
+├── .github/workflows/     integración continua y despliegue continuo
+├── nginx/
+│   ├── templates/         ruteo por prefijo, validación de sesión y límites de intentos (con los secretos de .env)
+│   └── comprobar-desde-afuera.sh  que /interno/ no se alcance desde afuera
 ├── php/                   Dockerfile común a los subsistemas (php:8.4-apache, sin root)
 ├── mysql/
 │   ├── init/              esquemas, usuarios y permisos; corre una vez, con la base vacía
-│   └── herramientas/      aplicar migraciones y cargar datos de prueba
+│   └── herramientas/      aplicar migraciones y comprobar que cada subsistema sólo ve su esquema
 ├── herramientas/          servidor de desarrollo sin Docker y despliegue en el VPS
 ├── docs/seguridad.md      seguridad por capa: qué protege cada una y dónde está configurado
 ├── docs/guion-de-prueba.md  el recorrido de punta a punta en el sitio publicado, con cada rol
 ├── nucleo/                MVC común: ruteo, middleware, base de datos, vistas y errores
-├── cuentas/               /cuenta/   registro, sesión, roles, perfil y seguidos
-├── programacion/          /          catálogo, salas, funciones, cartelera, votación y rankings
-└── funciones/             /funcion/  acuerdo de fecha, reservas, cobro, asistencia y calificaciones
+├── cuentas/               /cuenta/   registro, ingreso, sesión, roles y usuarios del administrador
+├── programacion/          /          obras, salas, funciones, cartelera y solicitudes de sala
+└── funciones/             /funcion/  por ahora, la lectura de funciones por la API interna
 ```
 
-Moderación y beneficios se suman en la Entrega 4 con la misma forma.
+Lo que todavía no está (las votaciones, las reservas y el cobro) se suma con la misma forma.
 
 Cada subsistema tiene la misma estructura por dentro:
 
@@ -41,13 +60,12 @@ Cada subsistema tiene la misma estructura por dentro:
 ├── rutas.php              método + ruta → controlador, y el rol mínimo de cada ruta
 ├── src/
 │   ├── Controladores/     validan la entrada y deciden la respuesta; sin SQL ni reglas de negocio
-│   ├── Servicios/         reglas del dominio («no se reserva sin cupo»)
+│   ├── Servicios/         reglas del dominio, y los clientes de la API interna de otro subsistema
 │   ├── Modelo/            entidades y enumeraciones de estado
-│   ├── Repositorios/      todo el SQL del subsistema, con consultas preparadas
-│   └── Clientes/          una clase por subsistema consumido por /interno/ (y Mercado Pago)
+│   └── Repositorios/      todo el SQL del subsistema, con consultas preparadas
 ├── migraciones/           001_*.sql, 002_*.sql… sólo sobre el esquema propio
-├── datos-prueba/          usuarios y datos para la demo y las pruebas
-├── bin/                   tareas programadas (cerrar votaciones, liberar reservas vencidas…)
+├── herramientas/          datos-de-prueba.php, que carga los de la demo (cuentas y programación)
+├── datos-prueba/          las fotos de las salas y los afiches de la demo (sólo programación)
 ├── tests/
 └── config/
     ├── config.ejemplo.ini se versiona
@@ -80,7 +98,7 @@ todo el sitio se vea igual aunque lo sirvan subsistemas distintos.
   etiquetan (`entrega-N`) y se despliegan en esa etiqueta.
 - **Cada contenedor monta sólo lo suyo**: su carpeta, el núcleo y el front. Ningún subsistema ve
   el `config.ini` de otro, así que si uno queda comprometido no se lleva los secretos de los
-  demás; la credencial de Mercado Pago existe sólo en funciones.
+  demás; cuando se sume Mercado Pago, su credencial va a estar sólo en funciones.
 - **Los subsistemas corren sin privilegios.** Una sola imagen para los tres (`php:8.4-apache`,
   la versión mínima que pide `composer.json`) con Apache entero como `www-data`, que por eso
   escucha en el 8080. En el compose, sin ninguna capacidad de root y con el sistema de archivos de
@@ -162,12 +180,13 @@ todo el sitio se vea igual aunque lo sirvan subsistemas distintos.
   puede entrar a «Mis salas». La resuelve el administrador mientras no haya moderación.
 - **Los correos salen por SMTP con el curl de PHP** (`ClienteSmtp` del núcleo), sin librerías.
   El servidor está en `[correo]` del `config.ini` de programación, que manda el aviso de cada
-  solicitud de sala: en desarrollo, el buzón de prueba del compose;
-  en el VPS, el del proveedor, que con usuario exige `smtps://` o STARTTLS para no mandar la clave
-  sin cifrar.
-- **Las tareas programadas las dispara el cron del servidor** con
-  `docker compose exec -T <subsistema> php bin/<tarea>.php`, en lugar de sumar un contenedor
-  sólo para eso.
+  solicitud de sala. Por ahora el correo se simula, también en el VPS: va al buzón de prueba del
+  compose (`COMPOSE_PROFILES=buzon` en `.env`), que en el VPS sólo escucha en la máquina y se ve
+  con `ssh -L 8025:127.0.0.1:8025 …`. Con un proveedor de verdad, un servidor con usuario exige
+  `smtps://` o STARTTLS para no mandar la clave sin cifrar.
+- **Las tareas programadas, cuando las haya** (cerrar votaciones, liberar reservas vencidas), las
+  va a disparar el cron del servidor con `docker compose exec -T <subsistema> php bin/<tarea>.php`,
+  en lugar de sumar un contenedor sólo para eso.
 - **Las rutas dentro del contenedor copian las del disco** (`/src/backend-indiecinema/<subsistema>`
   y `/src/frontend-indiecinema`), así los repositorios `path` de Composer funcionan igual si se
   instala desde afuera o desde adentro del contenedor.

@@ -1,3 +1,10 @@
-Salvador Baez
-Mateo Nomico
-Tomás Resnik
+IndieCinema — Trabajo Práctico Integrador
+Programación en Ambiente Web (11086) — UNLu
+Grupo Cerberus
+
+Nombre    Apellido   Legajo
+--------  ---------  ------
+Salvador  Baez       195157
+Mateo     Nomico     168102
+Tomás     Resnik     190168
+Agustina  Ortiz      199523

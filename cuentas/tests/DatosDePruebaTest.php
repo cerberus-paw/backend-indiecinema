@@ -6,6 +6,7 @@ namespace IndieCinema\Cuentas\Pruebas;
 
 use IndieCinema\Cuentas\Repositorios\RepositorioDeSesiones;
 use IndieCinema\Cuentas\Repositorios\RepositorioDeUsuarios;
+use IndieCinema\Cuentas\Servicios\CredencialesInvalidas;
 use IndieCinema\Cuentas\Servicios\DatosDePrueba;
 use IndieCinema\Cuentas\Servicios\ServicioDeIngreso;
 use IndieCinema\Cuentas\Servicios\ServicioDeSesiones;
@@ -16,7 +17,8 @@ use RuntimeException;
 
 /**
  * Los usuarios de prueba contra un MySQL de verdad: que queden con su rol y Argon2id, que se pueda
- * entrar con las contraseñas del README y que nunca se carguen fuera de desarrollo.
+ * entrar con las contraseñas del README, y que en producción se carguen sólo con la confirmación y
+ * con las contraseñas del config.ini, nunca con las públicas.
  */
 final class DatosDePruebaTest extends TestCase
 {
@@ -111,16 +113,74 @@ final class DatosDePruebaTest extends TestCase
         $this->assertSame('Cambiado a mano', $this->base->valor("SELECT nombre FROM usuario WHERE correo = 'eva@indiecinema.test'"));
     }
 
-    public function testNoSeCarganFueraDeDesarrollo(): void
+    public function testNoSeCarganFueraDeDesarrolloSinLaConfirmacion(): void
     {
-        $produccion = new Configuracion(['app' => ['entorno' => 'produccion'], 'base' => self::baseDePruebas()]);
-
         try {
-            DatosDePrueba::para($produccion, $this->usuarios);
+            DatosDePrueba::para($this->produccion(), $this->usuarios);
             $this->fail('Se cargaron datos de prueba en producción.');
         } catch (RuntimeException $error) {
-            $this->assertStringContainsString('desarrollo', $error->getMessage());
+            $this->assertStringContainsString('--confirmar-produccion', $error->getMessage());
         }
         $this->assertSame(0, (int) $this->base->valor('SELECT COUNT(*) FROM usuario'));
+    }
+
+    public function testEnProduccionCargaTresConLasContrasenasDelConfig(): void
+    {
+        $resultado = DatosDePrueba::para($this->produccion(), $this->usuarios, true)->cargar();
+
+        $this->assertSame([
+            'administrador@indiecinema.test' => true,
+            'organizador@indiecinema.test' => true,
+            'eva@indiecinema.test' => true,
+        ], $resultado);
+        $this->assertSame('00000000-0000-4000-8000-000000000002', $this->usuarios->buscarPorCorreo('organizador@indiecinema.test')?->id);
+
+        $ingreso = new ServicioDeIngreso($this->usuarios, new ServicioDeSesiones(new RepositorioDeSesiones($this->base)));
+        $this->assertSame(64, strlen($ingreso->ingresar('administrador@indiecinema.test', 'clave-del-vps-admin', null)->identificador));
+        // La del README, que es pública, no entra al sitio publicado.
+        $this->expectException(CredencialesInvalidas::class);
+        $ingreso->ingresar('administrador@indiecinema.test', 'administrador2026', null);
+    }
+
+    public function testEnProduccionNoCargaNadaSiFaltaUnaContrasena(): void
+    {
+        $sinEspectador = $this->produccion(['administrador' => 'clave-del-vps-admin', 'organizador' => 'clave-del-vps-orga']);
+
+        try {
+            DatosDePrueba::para($sinEspectador, $this->usuarios, true);
+            $this->fail('Cargó usuarios sin todas las contraseñas.');
+        } catch (RuntimeException $error) {
+            $this->assertStringContainsString('datos_de_prueba.espectador', $error->getMessage());
+        }
+        $this->assertSame(0, (int) $this->base->valor('SELECT COUNT(*) FROM usuario'));
+    }
+
+    public function testEnProduccionRechazaLaContrasenaPublicaDelReadme(): void
+    {
+        $conLaPublica = $this->produccion(['administrador' => 'clave-del-vps-admin', 'organizador' => 'organizador2026', 'espectador' => 'clave-del-vps-espe']);
+
+        try {
+            DatosDePrueba::para($conLaPublica, $this->usuarios, true);
+            $this->fail('Aceptó la contraseña pública en producción.');
+        } catch (RuntimeException $error) {
+            $this->assertStringContainsString('datos_de_prueba.organizador', $error->getMessage());
+            $this->assertStringNotContainsString('organizador2026', $error->getMessage());
+        }
+        $this->assertSame(0, (int) $this->base->valor('SELECT COUNT(*) FROM usuario'));
+    }
+
+    /**
+     * @param array<string, string> $contrasenas la sección [datos_de_prueba]
+     */
+    private function produccion(array $contrasenas = [
+        'administrador' => 'clave-del-vps-admin',
+        'organizador' => 'clave-del-vps-orga',
+        'espectador' => 'clave-del-vps-espe',
+    ]): Configuracion {
+        return new Configuracion([
+            'app' => ['entorno' => 'produccion'],
+            'base' => self::baseDePruebas(),
+            'datos_de_prueba' => $contrasenas,
+        ]);
     }
 }

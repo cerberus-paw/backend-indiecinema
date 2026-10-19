@@ -16,11 +16,11 @@ https://indiecinema.duckdns.org, con los datos de la demo cargados: salas, obras
 | Rol | Cómo entrar |
 |---|---|
 | Visitante | sin cuenta: portada, cartelera, fichas y salas |
-| Espectador | «Crear cuenta», con cualquier correo |
+| Espectador | `eva@indiecinema.test`, o «Crear cuenta» con cualquier correo |
 | Organizador | `organizador@indiecinema.test`, dueño de las salas de la demo |
-| Administrador | `admin@indiecinema.test` |
+| Administrador | `administrador@indiecinema.test` |
 
-Las contraseñas del organizador y del administrador van en la entrega de Classroom: el
+Las contraseñas de los tres van en la entrega de Classroom: el
 repositorio es público, y con ellas se entra al sitio de verdad. El recorrido para probarlo todo
 está en [`docs/guion-de-prueba.md`](docs/guion-de-prueba.md). Cada cambio que entra a `main` se
 publica solo (ver «Despliegue continuo»).
@@ -336,8 +336,8 @@ script que carga sus datos de prueba. Primero cuentas, porque las salas y las ob
 programación son de su organizador.
 
 Cuentas carga un administrador, un organizador y dos espectadores. Se cargan con la conexión de
-cuentas, como cualquier registro (Argon2id, el usuario y sus roles juntos), y sólo con
-`entorno = "desarrollo"` en su `config.ini`: estas contraseñas son públicas. Correrlo de nuevo
+cuentas, como cualquier registro (Argon2id, el usuario y sus roles juntos), con estas contraseñas
+sólo en desarrollo, porque son públicas (para producción, ver más abajo). Correrlo de nuevo
 agrega sólo los que falten. A diferencia del registro, cada uno tiene un id fijo, porque los datos
 de programación ponen salas y obras a nombre del organizador; si la base ya tenía estos usuarios
 con otro id, de antes de que fuera fijo, hay que borrarlos y volver a cargarlos:
@@ -398,11 +398,23 @@ explícita, para que los datos inventados no lleguen al sitio real por un comand
 Para cargarlos en el servidor, a propósito:
 
 ```
+docker compose exec cuentas php herramientas/datos-de-prueba.php --confirmar-produccion
 docker compose exec programacion php herramientas/datos-de-prueba.php --confirmar-produccion
 ```
 
-Ahí no están los usuarios de prueba de cuentas (sus contraseñas son públicas y no se cargan en
-producción), así que las salas se ven en el listado público pero nadie las tiene en «Mis salas».
+En producción, cuentas carga sólo el administrador, el organizador y Eva, con las contraseñas
+de la sección `[datos_de_prueba]` de su `config.ini` (está comentada en el ejemplo). Si falta
+alguna, o si es la del README, no carga nada.
+
+Para reiniciar el sitio publicado con sólo los datos de la demo, desde la carpeta del back en el
+VPS (se pierde todo lo demás, también las fotos subidas):
+
+```
+docker compose down -v
+herramientas/desplegar.sh
+docker compose exec -T cuentas php herramientas/datos-de-prueba.php --confirmar-produccion
+docker compose exec -T programacion php herramientas/datos-de-prueba.php --confirmar-produccion
+```
 
 Para comprobar que ningún subsistema sale de su esquema: entra con el usuario de cada uno e
 intenta leer los esquemas de los otros, crear y borrar tablas y leer el control de migraciones.

@@ -10,7 +10,7 @@ Usuarios:
 |---|---|---|
 | Espectador | uno nuevo, que se crea en el paso 7 | la que se elija |
 | Organizador | `organizador@indiecinema.test` | en la entrega de Classroom |
-| Administrador | `admin@indiecinema.test` | en la entrega de Classroom |
+| Administrador | `administrador@indiecinema.test` | en la entrega de Classroom |
 
 Las salas, obras y funciones de la demo son del organizador. La función que se programa en el
 paso 13 se cancela en el 15, así no queda en la cartelera.

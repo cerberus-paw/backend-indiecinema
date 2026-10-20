@@ -12,6 +12,7 @@ use IndieCinema\Nucleo\Configuracion;
 use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Log;
+use IndieCinema\Programacion\Controladores\FormularioDeFuncion;
 use IndieCinema\Programacion\Modelo\DatosDeSala;
 use IndieCinema\Programacion\Modelo\EstadoFuncion;
 use IndieCinema\Programacion\Modelo\Funcion;
@@ -329,6 +330,41 @@ final class FuncionesDelOrganizadorTest extends TestCase
         self::assertSame('elegida', $obraFila['estado']);
     }
 
+    public function testCrearUnaFuncionEnVotacionDeTitulosExitosa(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón', capacidad: 80);
+        $obrasIds = array_values($this->obras);
+
+        $respuesta = $this->enviar('/organizador/funciones/nueva', [
+            'modo' => FormularioDeFuncion::MODO_EN_VOTACION_TITULOS,
+            'sala_id' => $sala->id,
+            'obras' => $obrasIds,
+            'precio' => '2500',
+            'cupo' => '60',
+        ]);
+
+        self::assertSame(303, $respuesta->estado());
+        self::assertSame('/organizador/funciones', $respuesta->cabecera('Location'));
+
+        $funcionFila = $this->base->fila(
+            'SELECT id, estado, fecha_hora, precio_base, cupo FROM funcion WHERE sala_id = ?',
+            [$sala->id],
+        );
+        self::assertNotNull($funcionFila);
+        self::assertSame(EstadoFuncion::EnVotacionTitulos->value, $funcionFila['estado']);
+        self::assertNull($funcionFila['fecha_hora']);
+        self::assertSame('2500.00', $funcionFila['precio_base']);
+        self::assertSame(60, (int) $funcionFila['cupo']);
+
+        $obrasFila = $this->base->filas(
+            'SELECT obra_id, estado FROM funcion_obra WHERE funcion_id = ? ORDER BY obra_id',
+            [$funcionFila['id']],
+        );
+        sort($obrasIds);
+        self::assertSame($obrasIds, array_column($obrasFila, 'obra_id'));
+        self::assertSame(['candidata', 'candidata'], array_column($obrasFila, 'estado'));
+    }
+
     /**
      * Criterio de aceptación E3-11.2: «Una función nueva aparece en la cartelera».
      */
@@ -442,6 +478,50 @@ final class FuncionesDelOrganizadorTest extends TestCase
 
         self::assertSame(422, $respuesta->estado());
         self::assertStringContainsString('La fecha de la función tiene que ser futura.', $respuesta->cuerpo());
+    }
+
+    public function testProgramadaSigueRequiriendoFechaYHora(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+
+        $respuesta = $this->enviar('/organizador/funciones/nueva', [
+            'modo' => FormularioDeFuncion::MODO_PROGRAMADA,
+            'sala_id' => $sala->id,
+            'obras' => [$this->obras['Zama']],
+            'precio' => '2500',
+            'cupo' => '40',
+        ]);
+
+        self::assertSame(422, $respuesta->estado());
+        self::assertStringContainsString('Falta la fecha de la función.', $respuesta->cuerpo());
+        self::assertStringContainsString('Falta el horario de la función.', $respuesta->cuerpo());
+    }
+
+    public function testVotacionDeTitulosPermiteMasObrasCandidatasQueElLimiteDePeliculasPorFuncionDeLaSala(): void
+    {
+        $sala = Sala::nueva(self::ORGANIZADORA, new DatosDeSala('Microcine', 'Sala chica.', 'Av. Mitre 100', 'Luján', 40, 1, 120, 15), 'sala.jpg');
+        $this->salas->agregar($sala);
+        $this->base->ejecutar('UPDATE sala SET habilitada = TRUE WHERE id = ?', [$sala->id]);
+
+        $obrasIds = array_values($this->obras);
+
+        $respuesta = $this->enviar('/organizador/funciones/nueva', [
+            'modo' => FormularioDeFuncion::MODO_EN_VOTACION_TITULOS,
+            'sala_id' => $sala->id,
+            'obras' => $obrasIds,
+            'precio' => '2000',
+            'cupo' => '30',
+        ]);
+
+        self::assertSame(303, $respuesta->estado());
+        self::assertSame('/organizador/funciones', $respuesta->cabecera('Location'));
+
+        $funcionId = (string) $this->base->valor('SELECT id FROM funcion WHERE sala_id = ?', [$sala->id]);
+        $candidatas = array_column(
+            $this->base->filas('SELECT obra_id FROM funcion_obra WHERE funcion_id = ? AND estado = "candidata"', [$funcionId]),
+            'obra_id',
+        );
+        self::assertCount(2, $candidatas);
     }
 
     public function testRechazaCupoMayorQueCapacidad(): void

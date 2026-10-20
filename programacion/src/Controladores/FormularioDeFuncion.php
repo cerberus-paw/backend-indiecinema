@@ -15,6 +15,9 @@ use IndieCinema\Programacion\Modelo\Sala;
  */
 final class FormularioDeFuncion
 {
+    public const MODO_PROGRAMADA = 'programada';
+    public const MODO_EN_VOTACION_TITULOS = 'en_votacion_titulos';
+
     /** Hasta ocho cifras y dos decimales, lo que entra en funcion.precio_base (Funcion::PRECIO_MAXIMO). */
     private const PRECIO = '/^[0-9]{1,8}([.,][0-9]{1,2})?$/D';
 
@@ -28,6 +31,8 @@ final class FormularioDeFuncion
 
     /** @var list<string> */
     public private(set) array $obrasIds = [];
+
+    public private(set) string $modo = self::MODO_PROGRAMADA;
 
     public private(set) ?int $cupo = null;
 
@@ -57,6 +62,11 @@ final class FormularioDeFuncion
         return $this->errores === [];
     }
 
+    public function esProgramada(): bool
+    {
+        return $this->modo === self::MODO_PROGRAMADA;
+    }
+
     /**
      * @param array<string, mixed> $campos
      * @param list<Sala>           $salasHabilitadas
@@ -68,6 +78,14 @@ final class FormularioDeFuncion
         array $obrasDisponibles,
         DateTimeImmutable $ahora,
     ): void {
+        // 0. Modo de alta
+        $modo = self::texto($campos['modo'] ?? null);
+        if (!in_array($modo, [self::MODO_PROGRAMADA, self::MODO_EN_VOTACION_TITULOS], true)) {
+            $modo = self::MODO_PROGRAMADA;
+        }
+        $this->modo = $modo;
+        $this->valores['modo'] = $modo;
+
         // 1. Sala propia
         $salaIdRaw = self::texto($campos['sala_id'] ?? null);
         $this->valores['sala_id'] = $salaIdRaw;
@@ -107,10 +125,10 @@ final class FormularioDeFuncion
             $duracion = array_sum(array_intersect_key($duraciones, array_flip($obrasIds)));
             if (array_diff($obrasIds, $idsCatalogo) !== []) {
                 $this->errores['obras'] = 'Una de las obras seleccionadas no existe en el catálogo.';
-            } elseif ($salaElegida !== null && count($obrasIds) > $salaElegida->datos->peliculasPorFuncion) {
+            } elseif ($this->esProgramada() && $salaElegida !== null && count($obrasIds) > $salaElegida->datos->peliculasPorFuncion) {
                 // Los parámetros que la función hereda de la sala, como dice el panel del costado.
                 $this->errores['obras'] = "En esta sala entran hasta {$salaElegida->datos->peliculasPorFuncion} películas por función.";
-            } elseif ($salaElegida !== null && $duracion > $salaElegida->datos->duracionFuncion) {
+            } elseif ($this->esProgramada() && $salaElegida !== null && $duracion > $salaElegida->datos->duracionFuncion) {
                 $this->errores['obras'] = "Las obras duran {$duracion} minutos y en esta sala una función puede durar hasta {$salaElegida->datos->duracionFuncion}.";
             } else {
                 $this->obrasIds = $obrasIds;
@@ -123,23 +141,25 @@ final class FormularioDeFuncion
         $this->valores['fecha'] = $fecha;
         $this->valores['hora'] = $hora;
 
-        if ($fecha === '') {
-            $this->errores['fecha'] = 'Falta la fecha de la función.';
-        }
-        if ($hora === '') {
-            $this->errores['hora'] = 'Falta el horario de la función.';
-        }
+        if ($this->esProgramada()) {
+            if ($fecha === '') {
+                $this->errores['fecha'] = 'Falta la fecha de la función.';
+            }
+            if ($hora === '') {
+                $this->errores['hora'] = 'Falta el horario de la función.';
+            }
 
-        if ($fecha !== '' && $hora !== '') {
-            // Asegurar hora en formato HH:MM
-            $horaNormalizada = strlen($hora) === 5 ? $hora : (strlen($hora) === 8 ? substr($hora, 0, 5) : $hora);
-            $fechaHora = DateTimeImmutable::createFromFormat('!Y-m-d H:i', "{$fecha} {$horaNormalizada}");
-            if ($fechaHora === false || $fechaHora->format('Y-m-d H:i') !== "{$fecha} {$horaNormalizada}") {
-                $this->errores['fecha'] = 'La fecha y el horario no tienen un formato válido.';
-            } elseif ($fechaHora <= $ahora) {
-                $this->errores['fecha'] = 'La fecha de la función tiene que ser futura.';
-            } else {
-                $this->fechaHora = $fechaHora;
+            if ($fecha !== '' && $hora !== '') {
+                // Asegurar hora en formato HH:MM
+                $horaNormalizada = strlen($hora) === 5 ? $hora : (strlen($hora) === 8 ? substr($hora, 0, 5) : $hora);
+                $fechaHora = DateTimeImmutable::createFromFormat('!Y-m-d H:i', "{$fecha} {$horaNormalizada}");
+                if ($fechaHora === false || $fechaHora->format('Y-m-d H:i') !== "{$fecha} {$horaNormalizada}") {
+                    $this->errores['fecha'] = 'La fecha y el horario no tienen un formato válido.';
+                } elseif ($fechaHora <= $ahora) {
+                    $this->errores['fecha'] = 'La fecha de la función tiene que ser futura.';
+                } else {
+                    $this->fechaHora = $fechaHora;
+                }
             }
         }
 

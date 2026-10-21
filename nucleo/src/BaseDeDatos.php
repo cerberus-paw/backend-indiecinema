@@ -98,7 +98,7 @@ final class BaseDeDatos
     /**
      * Corre $trabajo en una transacción: si termina, se confirma; si lanza una excepción, se
      * deshace y la excepción sigue. Es lo que usa, por ejemplo, el control de cupo de las
-     * reservas con SELECT … FOR UPDATE.
+     * reservas, con la función bloqueada.
      *
      * Si ya hay una abierta, $trabajo corre dentro de esa: así un servicio junta en una sola los
      * cambios de dos repositorios que ya usan la suya (aprobar una solicitud y dar el rol), y se

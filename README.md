@@ -521,7 +521,8 @@ el rol de organizador y quién entra (en cuentas y en programación, una prueba 
 rutas del panel y comprueba que sólo entra el administrador; en programación, otra hace lo
 mismo con las del organizador y fija cuáles son públicas), y las restricciones de las tablas
 usuario y rol (correo único, y roles sin repetir y sólo de un usuario que existe); en funciones, las
-restricciones de la tabla reserva (código único, cantidad positiva y total no negativo). Para correrlas,
+restricciones de la tabla reserva (código único, cantidad positiva y total no negativo) y el cupo de
+la reserva, con varios procesos a la vez por el último lugar. Para correrlas,
 uno descartable:
 
 ```

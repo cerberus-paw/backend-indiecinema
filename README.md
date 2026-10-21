@@ -522,7 +522,7 @@ rutas del panel y comprueba que sólo entra el administrador; en programación, 
 mismo con las del organizador y fija cuáles son públicas), y las restricciones de las tablas
 usuario y rol (correo único, y roles sin repetir y sólo de un usuario que existe); en funciones, las
 restricciones de la tabla reserva (código único, cantidad positiva y total no negativo) y el cupo de
-la reserva, con varios procesos a la vez por el último lugar, y la reserva de punta a punta (sesión,
+la reserva, con varios procesos a la vez por el último lugar, sus cambios de estado, y la reserva de punta a punta (sesión,
 token CSRF, cantidad inválida, sin lugares y la reserva de otro). Para correrlas,
 uno descartable:
 

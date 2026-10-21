@@ -115,19 +115,21 @@ final class Cartelera extends Controlador
             && $detalle->sala->organizadorId === $usuario->id;
         $editable = $esPropia && Funcion::seEdita($detalle->estado, $detalle->fechaHora);
         $cancelable = $esPropia && Funcion::seCancela($detalle->estado, $detalle->fechaHora);
+        $cerrable = $esPropia && $detalle->estado === EstadoFuncion::EnVotacionTitulos;
 
         $votoActual = $usuario !== null ? $this->servicio->votoDe($detalle->id, $usuario->id) : null;
         $conteoVotos = $this->servicio->conteoDeVotos($detalle->id);
 
         return $this->vista('ficha_funcion.html.twig', [
             'funcion' => [
-                ...self::datosDeDetalle($detalle, $editable, $cancelable),
+                ...self::datosDeDetalle($detalle, $editable, $cancelable, $cerrable),
                 'reservable' => Funcion::seReserva($detalle->estado, $detalle->fechaHora),
             ],
             'voto_usuario' => $votoActual,
             'conteo_votos' => $conteoVotos,
             'votado' => $peticion->consulta('votado') === '1',
             'error_voto' => $peticion->consulta('error_voto'),
+            'votacion_cerrada' => $esPropia && $peticion->consulta('votacion_cerrada') === '1',
             // El aviso de que se acaba de guardar: sólo para el organizador que la editó. La ficha
             // es pública, y si no, lo vería cualquiera que abra el enlace con el parámetro puesto.
             'guardada' => $esPropia && $peticion->consulta('guardada') === '1',
@@ -190,12 +192,17 @@ final class Cartelera extends Controlador
      *     obras_elegidas: bool,
      *     editable: bool,
      *     cancelable: bool,
+     *     cerrable: bool,
      *     sala: array{url: string, nombre: string, descripcion: string, direccion: string, localidad: string, capacidad: int, imagen: ?string},
      *     obras: list<array{titulo: string, sinopsis: string, anio: int, director: string, duracion: int, generos: list<string>}>
      * }
      */
-    private static function datosDeDetalle(DetalleDeFuncion $detalle, bool $editable = false, bool $cancelable = false): array
-    {
+    private static function datosDeDetalle(
+        DetalleDeFuncion $detalle,
+        bool $editable = false,
+        bool $cancelable = false,
+        bool $cerrable = false,
+    ): array {
         return [
             'id' => $detalle->id,
             'titulo' => implode(' + ', array_map(static fn (ObraEnDetalle $obra): string => $obra->titulo, $detalle->obras)),
@@ -208,6 +215,7 @@ final class Cartelera extends Controlador
             'obras_elegidas' => $detalle->obrasElegidas,
             'editable' => $editable,
             'cancelable' => $cancelable,
+            'cerrable' => $cerrable,
             'sala' => [
                 'url' => "/salas/{$detalle->sala->id}",
                 'nombre' => $detalle->sala->nombre,

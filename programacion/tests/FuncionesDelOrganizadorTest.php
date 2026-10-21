@@ -1516,4 +1516,146 @@ final class FuncionesDelOrganizadorTest extends TestCase
         self::assertSame(EstadoFuncion::Programada->value, $fila['estado']);
         self::assertSame(40, (int) $fila['cupo']);
     }
+
+    // =========================================================================
+    // Cierre de la votación con la obra más votada (E3-12.4)
+    // =========================================================================
+
+    /**
+     * Criterio E3-12.4: «Listo cuando: La función queda con el título ganador y cambia de estado».
+     */
+    public function testCerrarVotacionConObraMasVotada(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $funcion = $this->funcion($sala);
+
+        // Votos: 2 para La ciénaga, 1 para Zama
+        $u1 = Uuid::nuevo();
+        $u2 = Uuid::nuevo();
+        $u3 = Uuid::nuevo();
+        $this->base->ejecutar('INSERT INTO voto (funcion_id, usuario_id, obra_id) VALUES (?, ?, ?)', [$funcion->id, $u1, $this->obras['La ciénaga']]);
+        $this->base->ejecutar('INSERT INTO voto (funcion_id, usuario_id, obra_id) VALUES (?, ?, ?)', [$funcion->id, $u2, $this->obras['La ciénaga']]);
+        $this->base->ejecutar('INSERT INTO voto (funcion_id, usuario_id, obra_id) VALUES (?, ?, ?)', [$funcion->id, $u3, $this->obras['Zama']]);
+
+        // Cierra la votación
+        $respuesta = $this->enviar("/organizador/funciones/{$funcion->id}/cerrar-votacion", []);
+        self::assertSame(303, $respuesta->estado());
+        self::assertSame('/organizador/funciones?votacion_cerrada=1', $respuesta->cabecera('Location'));
+
+        // Estado en base: en_acuerdo_fecha y obra elegida
+        $fila = $this->base->fila('SELECT estado FROM funcion WHERE id = ?', [$funcion->id]);
+        self::assertSame(EstadoFuncion::EnAcuerdoFecha->value, $fila['estado']);
+
+        $elegidas = $this->base->filas("SELECT obra_id FROM funcion_obra WHERE funcion_id = ? AND estado = 'elegida'", [$funcion->id]);
+        self::assertCount(1, $elegidas);
+        self::assertSame($this->obras['La ciénaga'], (string) $elegidas[0]['obra_id']);
+
+        // El modelo de la función ahora tiene sólo la obra ganadora
+        $leida = $this->funciones->buscar($funcion->id) ?? self::fail('No se encontró la función.');
+        self::assertSame(EstadoFuncion::EnAcuerdoFecha, $leida->estado);
+        self::assertSame([$this->obras['La ciénaga']], $leida->obrasIds);
+
+        // En el panel se muestra sólo el título ganador
+        $panel = $this->pedir('GET', '/organizador/funciones')->cuerpo();
+        self::assertStringContainsString('La ciénaga', $panel);
+        self::assertStringContainsString('en acuerdo de fecha', $panel);
+        self::assertStringNotContainsString("/organizador/funciones/{$funcion->id}/cerrar-votacion", $panel);
+    }
+
+    public function testCerrarVotacionConEmpateODesempataDeterminista(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $funcion = $this->funcion($sala);
+
+        // 1 voto para cada una
+        $u1 = Uuid::nuevo();
+        $u2 = Uuid::nuevo();
+        $this->base->ejecutar('INSERT INTO voto (funcion_id, usuario_id, obra_id) VALUES (?, ?, ?)', [$funcion->id, $u1, $this->obras['Zama']]);
+        $this->base->ejecutar('INSERT INTO voto (funcion_id, usuario_id, obra_id) VALUES (?, ?, ?)', [$funcion->id, $u2, $this->obras['La ciénaga']]);
+
+        $respuesta = $this->enviar("/organizador/funciones/{$funcion->id}/cerrar-votacion", []);
+        self::assertSame(303, $respuesta->estado());
+
+        // Con empate, elige determinísticamente la primera candidata
+        $leida = $this->funciones->buscar($funcion->id) ?? self::fail('No se encontró la función.');
+        self::assertSame(EstadoFuncion::EnAcuerdoFecha, $leida->estado);
+        self::assertSame([$this->obras['Zama']], $leida->obrasIds);
+    }
+
+    public function testCerrarVotacionSinVotosEligePrimeraCandidata(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $funcion = $this->funcion($sala);
+
+        $respuesta = $this->enviar("/organizador/funciones/{$funcion->id}/cerrar-votacion", []);
+        self::assertSame(303, $respuesta->estado());
+
+        $leida = $this->funciones->buscar($funcion->id) ?? self::fail('No se encontró la función.');
+        self::assertSame(EstadoFuncion::EnAcuerdoFecha, $leida->estado);
+        self::assertSame([$this->obras['Zama']], $leida->obrasIds);
+    }
+
+    public function testCerrarVotacionConVolverAFichaRedirigeALaFicha(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $funcion = $this->funcion($sala);
+
+        $respuesta = $this->enviar("/organizador/funciones/{$funcion->id}/cerrar-votacion", ['volver' => 'ficha']);
+        self::assertSame(303, $respuesta->estado());
+        self::assertSame("/cartelera/{$funcion->id}?votacion_cerrada=1", $respuesta->cabecera('Location'));
+    }
+
+    public function testCerrarVotacionRechazaEstadosInvalidos(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+
+        $enAcuerdo = $this->funcion($sala);
+        $enAcuerdo->cerrarVotacionTitulos([$this->obras['Zama']]);
+        $this->funciones->guardar($enAcuerdo);
+
+        $cancelada = $this->programada($sala, '2030-10-25 20:30:00');
+        $cancelada->cancelar();
+        $this->funciones->guardar($cancelada);
+
+        $programada = $this->programada($sala, '2030-12-05 20:30:00');
+
+        $invalidas = [
+            'en acuerdo de fecha' => $enAcuerdo,
+            'cancelada' => $cancelada,
+            'programada' => $programada,
+        ];
+
+        foreach ($invalidas as $caso => $funcionInvalida) {
+            $resp = $this->enviar("/organizador/funciones/{$funcionInvalida->id}/cerrar-votacion", []);
+            self::assertSame(404, $resp->estado(), $caso);
+        }
+    }
+
+    public function testCerrarVotacionRequierePermisosYCsrf(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $funcion = $this->funcion($sala);
+
+        // Sin sesión -> 401
+        $sinSesion = $this->pedir('POST', "/organizador/funciones/{$funcion->id}/cerrar-votacion", null, 'organizador', [
+            '_csrf' => self::CSRF,
+        ]);
+        self::assertSame(401, $sinSesion->estado());
+
+        // Espectador (rol insuficiente) -> 403
+        $espectador = $this->enviar("/organizador/funciones/{$funcion->id}/cerrar-votacion", [], Uuid::nuevo(), 'espectador');
+        self::assertSame(403, $espectador->estado());
+
+        // Otro organizador (no es su sala) -> 404
+        $otroOrg = $this->enviar("/organizador/funciones/{$funcion->id}/cerrar-votacion", [], self::OTRO_ORGANIZADOR, 'organizador');
+        self::assertSame(404, $otroOrg->estado());
+
+        // Administrador (no es el dueño de la sala) -> 404
+        $admin = $this->enviar("/organizador/funciones/{$funcion->id}/cerrar-votacion", [], self::OTRO_ORGANIZADOR, 'administrador');
+        self::assertSame(404, $admin->estado());
+
+        // Sin token CSRF -> 403
+        $sinCsrf = $this->pedir('POST', "/organizador/funciones/{$funcion->id}/cerrar-votacion", self::ORGANIZADORA, 'organizador', []);
+        self::assertSame(403, $sinCsrf->estado());
+    }
 }

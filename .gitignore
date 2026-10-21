@@ -11,3 +11,6 @@
 
 # Hand-offs entre sesiones de Claude Code: son locales de cada uno.
 .claude/handoff/
+
+# Contexto de trabajo local (no versionado).
+.contexto-local/

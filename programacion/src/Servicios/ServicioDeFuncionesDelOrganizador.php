@@ -101,6 +101,36 @@ final class ServicioDeFuncionesDelOrganizador
     }
 
     /**
+     * Da de alta una nueva función en votación de títulos (E3-12.1), sin fecha todavía.
+     *
+     * @param list<string> $obrasIds
+     *
+     * @throws ReglaIncumplida si la sala no es suya o una obra no está en el catálogo
+     */
+    public function crearEnVotacionDeTitulos(
+        Usuario $organizador,
+        string $salaId,
+        array $obrasIds,
+        int $cupo,
+        float $precioBase,
+    ): Funcion {
+        $sala = $this->salas->buscar($salaId);
+        if ($sala === null || !$sala->esDe($organizador->id)) {
+            throw new ReglaIncumplida('La sala no existe o no pertenece a tu cuenta.');
+        }
+
+        $idsCatalogo = array_column($this->obras->todas(), 'id');
+        if (array_diff($obrasIds, $idsCatalogo) !== []) {
+            throw new ReglaIncumplida('Una de las obras no está en el catálogo.');
+        }
+
+        $funcion = $sala->crearFuncion($obrasIds, $cupo, $precioBase);
+        $this->funciones->agregar($funcion);
+
+        return $funcion;
+    }
+
+    /**
      * La función para editarla, si es de una sala del organizador y se puede editar
      * (Funcion::seEdita(): está programada y todavía no se dio). Si no, la respuesta es 404, como
      * en propia(): el panel y la ficha no le muestran el botón, así que la única forma de llegar

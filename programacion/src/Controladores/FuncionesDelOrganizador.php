@@ -58,7 +58,13 @@ final class FuncionesDelOrganizador extends Controlador
         $obras = $this->servicio->catalogoDeObras();
 
         $formulario = FormularioDeFuncion::desdeCampos($peticion->cuerpo(), $salas, $obras);
-        if (!$formulario->esValido() || $formulario->salaId === null || $formulario->fechaHora === null || $formulario->cupo === null || $formulario->precio === null) {
+        if (
+            !$formulario->esValido()
+            || $formulario->salaId === null
+            || $formulario->cupo === null
+            || $formulario->precio === null
+            || ($formulario->esProgramada() && $formulario->fechaHora === null)
+        ) {
             return $this->formularioAlta($salas, $obras, [
                 'formulario' => $formulario,
                 'error_general' => 'Revisá los campos marcados.',
@@ -68,20 +74,34 @@ final class FuncionesDelOrganizador extends Controlador
         // Lo que el formulario no puede saber solo, como que se pisa con otra función de la sala,
         // lo dice el servicio: vuelve al formulario con el motivo en vez de un error del servidor.
         try {
-            $funcion = $this->servicio->programar(
-                $organizador,
-                $formulario->salaId,
-                $formulario->obrasIds,
-                $formulario->cupo,
-                $formulario->precio,
-                $formulario->fechaHora,
-            );
+            if ($formulario->esProgramada()) {
+                $funcion = $this->servicio->programar(
+                    $organizador,
+                    $formulario->salaId,
+                    $formulario->obrasIds,
+                    $formulario->cupo,
+                    $formulario->precio,
+                    $formulario->fechaHora ?? throw new LogicException('Fecha faltante en alta programada.'),
+                );
+            } else {
+                $funcion = $this->servicio->crearEnVotacionDeTitulos(
+                    $organizador,
+                    $formulario->salaId,
+                    $formulario->obrasIds,
+                    $formulario->cupo,
+                    $formulario->precio,
+                );
+            }
         } catch (ReglaIncumplida $regla) {
             return $this->formularioAlta($salas, $obras, ['formulario' => $formulario, 'error_general' => $regla->getMessage()], 422);
         }
 
         // 303 al listado: al recargar no vuelve a crear la función.
-        return $this->redirigir("/organizador/funciones?programada={$funcion->id}");
+        return $this->redirigir(
+            $formulario->esProgramada()
+                ? "/organizador/funciones?programada={$funcion->id}"
+                : '/organizador/funciones',
+        );
     }
 
     public function editar(Peticion $peticion): Respuesta

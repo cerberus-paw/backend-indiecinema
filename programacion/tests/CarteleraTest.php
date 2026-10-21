@@ -32,6 +32,9 @@ final class CarteleraTest extends TestCase
 {
     use ConBaseDePruebas;
 
+    private const SECRETO = 'secreto-de-nginx';
+    private const CSRF = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+
     private BaseDeDatos $base;
     private string $carpeta;
 
@@ -65,7 +68,7 @@ final class CarteleraTest extends TestCase
             'archivos' => ['carpeta' => $this->carpeta],
             'base' => self::baseDePruebas(),
             'cartelera' => $cartelera,
-            'nginx' => ['secreto' => 'secreto-de-nginx'],
+            'nginx' => ['secreto' => self::SECRETO],
         ]);
     }
 
@@ -90,6 +93,31 @@ final class CarteleraTest extends TestCase
         $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion($cartelera), new Log('programacion', $this->salidaDelLog));
 
         return $aplicacion->atender(new Peticion('GET', (string) parse_url($url, PHP_URL_PATH), $consulta, [], $cabeceras));
+    }
+
+    /**
+     * @param array<string, mixed> $cuerpo
+     */
+    private function post(
+        string $ruta,
+        array $cuerpo = [],
+        ?string $usuario = null,
+        string $rol = 'espectador',
+    ): Respuesta {
+        $cabeceras = $usuario === null
+            ? []
+            : ['X-Nginx-Secreto' => self::SECRETO, 'X-Usuario-Id' => $usuario, 'X-Rol' => $rol];
+        parse_str((string) parse_url($ruta, PHP_URL_QUERY), $consulta);
+        $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion(), new Log('programacion', $this->salidaDelLog));
+
+        return $aplicacion->atender(new Peticion(
+            'POST',
+            (string) parse_url($ruta, PHP_URL_PATH),
+            $consulta,
+            ['_csrf' => self::CSRF, ...$cuerpo],
+            $cabeceras,
+            ['csrf' => self::CSRF],
+        ));
     }
 
     /**
@@ -696,5 +724,148 @@ final class CarteleraTest extends TestCase
         $respuesta = $this->pedir("/cartelera/{$id}");
 
         self::assertSame(404, $respuesta->estado());
+    }
+
+    // =========================================================================
+    // Votación de títulos (E3-12.3)
+    // =========================================================================
+
+    /**
+     * Criterio E3-12.3: «La ficha muestra las candidatas y el voto del usuario».
+     */
+    public function testFichaDeFuncionEnVotacionMuestraCandidatasYVotoDelUsuario(): void
+    {
+        $this->cargarDatosDePrueba();
+
+        $salaId = (string) $this->base->valor("SELECT id FROM sala WHERE habilitada = TRUE AND dada_de_baja_en IS NULL LIMIT 1");
+        $obras = $this->base->filas("SELECT id, titulo FROM obra ORDER BY id LIMIT 2");
+        $funcionId = Uuid::nuevo();
+        $this->base->ejecutar(
+            "INSERT INTO funcion (id, sala_id, estado, precio_base, cupo) VALUES (?, ?, 'en_votacion_titulos', 2000, 50)",
+            [$funcionId, $salaId],
+        );
+        foreach ($obras as $obra) {
+            $this->base->ejecutar(
+                "INSERT INTO funcion_obra (funcion_id, obra_id, estado) VALUES (?, ?, 'candidata')",
+                [$funcionId, $obra['id']],
+            );
+        }
+
+        // 1. Visitante sin sesión: ve las obras candidatas y la invitación a iniciar sesión para votar
+        $sinSesion = $this->pedir("/cartelera/{$funcionId}");
+        self::assertSame(200, $sinSesion->estado());
+        self::assertStringContainsString('VOTACIÓN ABIERTA', $sinSesion->cuerpo());
+        self::assertStringContainsString($obras[0]['titulo'], $sinSesion->cuerpo());
+        self::assertStringContainsString($obras[1]['titulo'], $sinSesion->cuerpo());
+        self::assertStringContainsString('Iniciá sesión para votar', $sinSesion->cuerpo());
+        self::assertStringNotContainsString('Tu voto actual', $sinSesion->cuerpo());
+
+        // 2. Espectador autenticado: ve el formulario para votar
+        $espectadorId = Uuid::nuevo();
+        $conSesion = $this->pedir("/cartelera/{$funcionId}", cabeceras: [
+            'X-Nginx-Secreto' => self::SECRETO,
+            'X-Usuario-Id' => $espectadorId,
+            'X-Rol' => 'espectador',
+        ]);
+        self::assertSame(200, $conSesion->estado());
+        self::assertStringContainsString('Votar por este título', $conSesion->cuerpo());
+
+        // 3. Emite su voto por la primera obra
+        $votar = $this->post(
+            "/cartelera/{$funcionId}/votar",
+            ['obra_id' => $obras[0]['id']],
+            $espectadorId,
+        );
+        self::assertSame(303, $votar->estado());
+        self::assertSame("/cartelera/{$funcionId}?votado=1", $votar->cabecera('Location'));
+
+        // 4. Al volver a la ficha, muestra «Tu voto actual» y opción de cambiar el voto
+        $despuesDeVotar = $this->pedir("/cartelera/{$funcionId}", cabeceras: [
+            'X-Nginx-Secreto' => self::SECRETO,
+            'X-Usuario-Id' => $espectadorId,
+            'X-Rol' => 'espectador',
+        ]);
+        self::assertSame(200, $despuesDeVotar->estado());
+        self::assertStringContainsString('Tu voto actual', $despuesDeVotar->cuerpo());
+        self::assertStringContainsString('Cambiar mi voto', $despuesDeVotar->cuerpo());
+        self::assertSame($obras[0]['id'], (string) $this->base->valor("SELECT obra_id FROM voto WHERE funcion_id = ? AND usuario_id = ?", [$funcionId, $espectadorId]));
+    }
+
+    public function testCambiarVotoMientrasLaVotacionEstaAbierta(): void
+    {
+        $this->cargarDatosDePrueba();
+
+        $salaId = (string) $this->base->valor("SELECT id FROM sala WHERE habilitada = TRUE AND dada_de_baja_en IS NULL LIMIT 1");
+        $obras = $this->base->filas("SELECT id, titulo FROM obra ORDER BY id LIMIT 2");
+        $funcionId = Uuid::nuevo();
+        $this->base->ejecutar(
+            "INSERT INTO funcion (id, sala_id, estado, precio_base, cupo) VALUES (?, ?, 'en_votacion_titulos', 2000, 50)",
+            [$funcionId, $salaId],
+        );
+        foreach ($obras as $obra) {
+            $this->base->ejecutar(
+                "INSERT INTO funcion_obra (funcion_id, obra_id, estado) VALUES (?, ?, 'candidata')",
+                [$funcionId, $obra['id']],
+            );
+        }
+
+        $espectadorId = Uuid::nuevo();
+
+        // Vota la primera obra
+        $this->post("/cartelera/{$funcionId}/votar", ['obra_id' => $obras[0]['id']], $espectadorId);
+        self::assertSame(1, (int) $this->base->valor("SELECT COUNT(*) FROM voto WHERE funcion_id = ?", [$funcionId]));
+
+        // Cambia el voto por la segunda obra
+        $cambio = $this->post("/cartelera/{$funcionId}/votar", ['obra_id' => $obras[1]['id']], $espectadorId);
+        self::assertSame(303, $cambio->estado());
+
+        // Comprobamos que sigue habiendo 1 solo voto y ahora apunta a la segunda obra
+        self::assertSame(1, (int) $this->base->valor("SELECT COUNT(*) FROM voto WHERE funcion_id = ?", [$funcionId]));
+        self::assertSame($obras[1]['id'], (string) $this->base->valor("SELECT obra_id FROM voto WHERE funcion_id = ? AND usuario_id = ?", [$funcionId, $espectadorId]));
+    }
+
+    public function testNoSePuedeVotarEnFuncionQueNoEstaEnVotacion(): void
+    {
+        $this->cargarDatosDePrueba();
+
+        // Tomamos una función programada
+        $funcionId = (string) $this->base->valor("SELECT id FROM funcion WHERE estado = 'programada' LIMIT 1");
+        $obraId = (string) $this->base->valor("SELECT obra_id FROM funcion_obra WHERE funcion_id = ? LIMIT 1", [$funcionId]);
+        $espectadorId = Uuid::nuevo();
+
+        $respuesta = $this->post("/cartelera/{$funcionId}/votar", ['obra_id' => $obraId], $espectadorId);
+        self::assertSame(303, $respuesta->estado());
+        self::assertStringContainsString('error_voto', $respuesta->cabecera('Location'));
+        self::assertSame(0, (int) $this->base->valor("SELECT COUNT(*) FROM voto WHERE funcion_id = ?", [$funcionId]));
+    }
+
+    public function testNoSePuedeVotarPorObraQueNoEsCandidata(): void
+    {
+        $this->cargarDatosDePrueba();
+
+        $salaId = (string) $this->base->valor("SELECT id FROM sala WHERE habilitada = TRUE AND dada_de_baja_en IS NULL LIMIT 1");
+        $obras = $this->base->filas("SELECT id, titulo FROM obra ORDER BY id LIMIT 3");
+        $funcionId = Uuid::nuevo();
+        $this->base->ejecutar(
+            "INSERT INTO funcion (id, sala_id, estado, precio_base, cupo) VALUES (?, ?, 'en_votacion_titulos', 2000, 50)",
+            [$funcionId, $salaId],
+        );
+        $this->base->ejecutar("INSERT INTO funcion_obra (funcion_id, obra_id, estado) VALUES (?, ?, 'candidata')", [$funcionId, $obras[0]['id']]);
+        $this->base->ejecutar("INSERT INTO funcion_obra (funcion_id, obra_id, estado) VALUES (?, ?, 'candidata')", [$funcionId, $obras[1]['id']]);
+
+        $espectadorId = Uuid::nuevo();
+        $respuesta = $this->post("/cartelera/{$funcionId}/votar", ['obra_id' => $obras[2]['id']], $espectadorId);
+        self::assertSame(303, $respuesta->estado());
+        self::assertStringContainsString('error_voto', $respuesta->cabecera('Location'));
+        self::assertSame(0, (int) $this->base->valor("SELECT COUNT(*) FROM voto WHERE funcion_id = ?", [$funcionId]));
+    }
+
+    public function testUsuarioSinSesionNoPuedeVotar(): void
+    {
+        $this->cargarDatosDePrueba();
+
+        $funcionId = Uuid::nuevo();
+        $respuesta = $this->post("/cartelera/{$funcionId}/votar", ['obra_id' => Uuid::nuevo()], usuario: null);
+        self::assertSame(401, $respuesta->estado());
     }
 }

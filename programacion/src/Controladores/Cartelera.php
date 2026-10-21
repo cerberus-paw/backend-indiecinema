@@ -120,7 +120,10 @@ final class Cartelera extends Controlador
         $conteoVotos = $this->servicio->conteoDeVotos($detalle->id);
 
         return $this->vista('ficha_funcion.html.twig', [
-            'funcion' => self::datosDeDetalle($detalle, $editable, $cancelable),
+            'funcion' => [
+                ...self::datosDeDetalle($detalle, $editable, $cancelable),
+                'reservable' => Funcion::seReserva($detalle->estado, $detalle->fechaHora),
+            ],
             'voto_usuario' => $votoActual,
             'conteo_votos' => $conteoVotos,
             'votado' => $peticion->consulta('votado') === '1',

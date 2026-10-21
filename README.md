@@ -46,10 +46,10 @@ backend-indiecinema/
 ├── nucleo/                MVC común: ruteo, middleware, base de datos, vistas y errores
 ├── cuentas/               /cuenta/   registro, ingreso, sesión, roles y usuarios del administrador
 ├── programacion/          /          obras, salas, funciones, cartelera y solicitudes de sala
-└── funciones/             /funcion/  por ahora, la lectura de funciones por la API interna
+└── funciones/             /funcion/  la reserva de lugares, con el cupo de cada función
 ```
 
-Lo que todavía no está (las votaciones, las reservas y el cobro) se suma con la misma forma.
+Lo que todavía no está (las votaciones y el cobro) se suma con la misma forma.
 
 Cada subsistema tiene la misma estructura por dentro:
 
@@ -520,7 +520,10 @@ programación), el listado de usuarios del administrador con su buscador, su pag
 el rol de organizador y quién entra (en cuentas y en programación, una prueba recorre todas las
 rutas del panel y comprueba que sólo entra el administrador; en programación, otra hace lo
 mismo con las del organizador y fija cuáles son públicas), y las restricciones de las tablas
-usuario y rol (correo único, y roles sin repetir y sólo de un usuario que existe). Para correrlas,
+usuario y rol (correo único, y roles sin repetir y sólo de un usuario que existe); en funciones, las
+restricciones de la tabla reserva (código único, cantidad positiva y total no negativo) y el cupo de
+la reserva, con varios procesos a la vez por el último lugar, sus cambios de estado, y la reserva de punta a punta (sesión,
+token CSRF, cantidad inválida, sin lugares, la reserva de otro y la cancelación). Para correrlas,
 uno descartable:
 
 ```

@@ -682,6 +682,49 @@ final class CarteleraTest extends TestCase
         self::assertStringNotContainsString('>PROGRAMADA<', $cuerpo);
     }
 
+    public function testLaFichaOfreceReservarYSinSesionPideIngresar(): void
+    {
+        $this->cargarDatosDePrueba();
+        $id = (string) $this->base->valor("SELECT id FROM funcion WHERE estado = 'programada' ORDER BY fecha_hora LIMIT 1");
+
+        $cuerpo = $this->pedir("/cartelera/{$id}")->cuerpo();
+
+        self::assertStringContainsString('Reservá tus lugares', $cuerpo);
+        self::assertStringContainsString('href="/cuenta/ingresar"', $cuerpo);
+        self::assertStringNotContainsString('action="/funcion/reservar/', $cuerpo);
+    }
+
+    public function testConSesionLaFichaMandaLaReservaAFuncionesConElTokenCsrf(): void
+    {
+        $this->cargarDatosDePrueba();
+        $id = (string) $this->base->valor("SELECT id FROM funcion WHERE estado = 'programada' ORDER BY fecha_hora LIMIT 1");
+        $cupo = (int) $this->base->valor('SELECT cupo FROM funcion WHERE id = ?', [$id]);
+
+        $cuerpo = $this->pedir("/cartelera/{$id}", [], [
+            'X-Nginx-Secreto' => 'secreto-de-nginx',
+            'X-Usuario-Id' => 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+            'X-Rol' => 'espectador',
+        ])->cuerpo();
+
+        // Al subsistema funciones, que sí lleva el prefijo: la ficha es de programación.
+        self::assertStringContainsString('action="/funcion/reservar/' . $id . '" method="POST"', $cuerpo);
+        self::assertMatchesRegularExpression('/name="_csrf" value="[0-9a-f]{64}"/', $cuerpo);
+        self::assertMatchesRegularExpression('/name="cantidad"[^>]*min="1"[^>]*max="' . $cupo . '"/s', $cuerpo);
+    }
+
+    public function testUnaFuncionCanceladaOQueYaEmpezoNoOfreceReservar(): void
+    {
+        $this->cargarDatosDePrueba();
+        $ids = $this->base->filas("SELECT id FROM funcion WHERE estado = 'programada' ORDER BY fecha_hora LIMIT 2");
+        $this->base->ejecutar("UPDATE funcion SET estado = 'cancelada' WHERE id = ?", [$ids[0]['id']]);
+        // Ya empezó: programada, con la hora pasada. Sin el CHECK de fecha futura, que lo pone la aplicación.
+        $this->base->ejecutar('UPDATE funcion SET fecha_hora = NOW() - INTERVAL 1 HOUR WHERE id = ?', [$ids[1]['id']]);
+
+        foreach ($ids as $fila) {
+            self::assertStringNotContainsString('Reservá tus lugares', $this->pedir("/cartelera/{$fila['id']}")->cuerpo());
+        }
+    }
+
     public function testDetalleDeFuncionInexistenteResponde404(): void
     {
         $this->cargarDatosDePrueba();

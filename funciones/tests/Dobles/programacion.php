@@ -13,6 +13,9 @@ const PROGRAMADA = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const EN_VOTACION = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const ROTA = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 const LENTA = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+const SIN_PUBLICAR = '99999999-9999-4999-8999-999999999999';
+const PROXIMA = '12121212-1212-4212-8212-121212121212';
+const EMPEZADA = '34343434-3434-4434-8434-343434343434';
 
 header('Content-Type: application/json');
 $cabeceras = getallheaders();
@@ -23,7 +26,7 @@ if (($cabeceras['X-Llamador'] ?? null) !== 'funciones' || ($cabeceras['Authoriza
     return;
 }
 
-$funcion = static fn (string $id, string $estado, ?string $fecha, array $titulos, bool $elegidos): array => [
+$funcion = static fn (string $id, string $estado, ?string $fecha, array $titulos, bool $elegidos, bool $publicada = true): array => [
     'id' => $id,
     'estado' => $estado,
     'fecha_hora' => $fecha,
@@ -31,7 +34,7 @@ $funcion = static fn (string $id, string $estado, ?string $fecha, array $titulos
     'cupo' => 40,
     'titulos' => $titulos,
     'titulos_elegidos' => $elegidos,
-    'sala' => ['id' => 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', 'nombre' => 'Cine Club El Galpón', 'localidad' => 'Luján', 'habilitada' => true],
+    'sala' => ['id' => 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', 'nombre' => 'Cine Club El Galpón', 'localidad' => 'Luján', 'habilitada' => $publicada],
     'organizador_id' => 'ffffffff-ffff-4fff-8fff-ffffffffffff',
 ];
 
@@ -39,6 +42,12 @@ $id = (string) preg_replace('#^/interno/funciones/#', '', (string) parse_url($_S
 match ($id) {
     PROGRAMADA => print json_encode($funcion($id, 'programada', '2026-10-24T20:30:00', ['Zama'], true)),
     EN_VOTACION => print json_encode($funcion($id, 'en_votacion_titulos', null, ['La ciénaga', 'Zama'], false)),
+    // Para las pruebas que reservan con la hora de verdad: dentro de un mes, y una que empezó hace
+    // una hora.
+    PROXIMA => print json_encode($funcion($id, 'programada', date('Y-m-d\\TH:i:s', strtotime('+30 days')), ['Zama'], true)),
+    EMPEZADA => print json_encode($funcion($id, 'programada', date('Y-m-d\\TH:i:s', strtotime('-1 hour')), ['Zama'], true)),
+    // Su sala todavía no se aprobó, o se retiró de la cartelera.
+    SIN_PUBLICAR => print json_encode($funcion($id, 'programada', '2026-10-24T20:30:00', ['Zama'], true, false)),
     // Un cambio en programación que rompe lo que funciones espera.
     ROTA => print json_encode(['id' => $id, 'estado' => 'programada']),
     LENTA => sleep(2),

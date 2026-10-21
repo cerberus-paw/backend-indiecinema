@@ -48,6 +48,31 @@ final readonly class FuncionDeProgramacion
         return $this->salaHabilitada && in_array($this->estado, self::EN_CURSO, true);
     }
 
+    /**
+     * Por qué ya no se puede reservar, para decírselo al espectador; null si se puede. Se puede
+     * mientras no se canceló ni empezó, aunque todavía no tenga fecha.
+     */
+    public function motivoParaNoReservar(DateTimeImmutable $ahora = new DateTimeImmutable()): ?string
+    {
+        if ($this->estado === 'cancelada') {
+            return 'La función se canceló: ya no se puede reservar.';
+        }
+        // Una programada cuya hora ya pasó ya empezó, aunque nada la haya pasado a finalizada.
+        if (!$this->estaEnCurso() || ($this->fechaHora !== null && $this->fechaHora <= $ahora)) {
+            return 'La función ya empezó: ya no se puede reservar.';
+        }
+
+        return null;
+    }
+
+    /**
+     * Las obras juntas, como las nombra la cartelera.
+     */
+    public function titulo(): string
+    {
+        return implode(' + ', $this->titulos);
+    }
+
     public function esDe(string $usuarioId): bool
     {
         return hash_equals($this->organizadorId, $usuarioId);

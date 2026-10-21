@@ -112,6 +112,39 @@ final class ReservaTest extends TestCase
         }
     }
 
+    public function testUnaConfirmadaSeCancelaOQuedaConAsistencia(): void
+    {
+        $reserva = Reserva::nueva($this->funcion(), self::ESPECTADOR, 2, $this->antes());
+
+        $cancelada = $reserva->cancelar();
+        $asistio = $reserva->registrarAsistencia();
+
+        self::assertSame(EstadoReserva::Cancelada, $cancelada->estado);
+        self::assertSame(EstadoReserva::Asistio, $asistio->estado);
+        // El resto no cambia, y la original tampoco: el repositorio necesita saber de dónde venía.
+        self::assertSame([$reserva->id, $reserva->codigo, $reserva->cantidad, $reserva->total], [$cancelada->id, $cancelada->codigo, $cancelada->cantidad, $cancelada->total]);
+        self::assertSame(EstadoReserva::Confirmada, $reserva->estado);
+    }
+
+    public function testCanceladaYConAsistenciaNoCambianMas(): void
+    {
+        $reserva = Reserva::nueva($this->funcion(), self::ESPECTADOR, 1, $this->antes());
+        $casos = [
+            'Una reserva cancelada no puede quedar cancelada.' => fn () => $reserva->cancelar()->cancelar(),
+            'Una reserva cancelada no puede quedar con asistencia.' => fn () => $reserva->cancelar()->registrarAsistencia(),
+            'Una reserva con asistencia no puede quedar cancelada.' => fn () => $reserva->registrarAsistencia()->cancelar(),
+            'Una reserva con asistencia no puede quedar con asistencia.' => fn () => $reserva->registrarAsistencia()->registrarAsistencia(),
+        ];
+        foreach ($casos as $mensaje => $paso) {
+            try {
+                $paso();
+                self::fail("Pasó: {$mensaje}");
+            } catch (ReglaIncumplida $error) {
+                self::assertSame($mensaje, $error->getMessage());
+            }
+        }
+    }
+
     public function testLaCanceladaEsLaUnicaQueNoOcupaLugares(): void
     {
         self::assertTrue(EstadoReserva::Confirmada->ocupaLugares());

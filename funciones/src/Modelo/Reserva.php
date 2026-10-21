@@ -70,11 +70,44 @@ final readonly class Reserva
     }
 
     /**
+     * La reserva cancelada, que suelta sus lugares. La entidad no cambia: el repositorio guarda el
+     * cambio sólo si nadie la cambió antes (RepositorioDeReservas::guardarEstado()).
+     *
+     * @throws ReglaIncumplida si no está confirmada
+     */
+    public function cancelar(): self
+    {
+        return $this->pasarA(EstadoReserva::Cancelada);
+    }
+
+    /**
+     * La reserva de quien ya entró: el organizador la registra con el código en la puerta.
+     *
+     * @throws ReglaIncumplida si no está confirmada
+     */
+    public function registrarAsistencia(): self
+    {
+        return $this->pasarA(EstadoReserva::Asistio);
+    }
+
+    /**
      * La misma reserva con otro código, por si el sorteado ya era de otra.
      */
     public function conOtroCodigo(): self
     {
         return new self($this->id, $this->funcionId, $this->usuarioId, self::nuevoCodigo(), $this->cantidad, $this->total, $this->estado, $this->creadaEn);
+    }
+
+    /**
+     * @throws ReglaIncumplida si el ciclo de vida no lo permite
+     */
+    private function pasarA(EstadoReserva $siguiente): self
+    {
+        if (!$this->estado->puedePasarA($siguiente)) {
+            throw new ReglaIncumplida("Una reserva {$this->estado->etiqueta()} no puede quedar {$siguiente->etiqueta()}.");
+        }
+
+        return new self($this->id, $this->funcionId, $this->usuarioId, $this->codigo, $this->cantidad, $this->total, $siguiente, $this->creadaEn);
     }
 
     /**

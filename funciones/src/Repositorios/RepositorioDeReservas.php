@@ -90,6 +90,21 @@ final class RepositorioDeReservas
     }
 
     /**
+     * Guarda el estado nuevo de la reserva, si todavía está en $anterior. Así, si el espectador
+     * cancela mientras el organizador registra su asistencia, gana el primero y el otro se
+     * entera, en lugar de pisarse.
+     *
+     * @return bool false si otro la cambió antes, y entonces no guardó nada
+     */
+    public function guardarEstado(Reserva $reserva, EstadoReserva $anterior): bool
+    {
+        return $this->base->ejecutar(
+            'UPDATE reserva SET estado = ? WHERE id = ? AND estado = ?',
+            [$reserva->estado, $reserva->id, $anterior],
+        ) === 1;
+    }
+
+    /**
      * @return bool false si el código ya es de otra reserva, y entonces no guardó nada
      */
     public function agregar(Reserva $reserva): bool

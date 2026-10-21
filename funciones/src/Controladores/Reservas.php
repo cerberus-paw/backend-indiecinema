@@ -4,10 +4,13 @@ declare(strict_types=1);
 
 namespace IndieCinema\Funciones\Controladores;
 
+use IndieCinema\Funciones\Modelo\EstadoReserva;
 use IndieCinema\Funciones\Modelo\FuncionDeProgramacion;
 use IndieCinema\Funciones\Modelo\ReglaIncumplida;
+use IndieCinema\Funciones\Modelo\Reserva;
 use IndieCinema\Funciones\Servicios\ServicioDeReservas;
 use IndieCinema\Nucleo\Controlador;
+use IndieCinema\Nucleo\Http\ExcepcionHttp;
 use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Seguridad\Usuario;
@@ -61,14 +64,72 @@ final class Reservas extends Controlador
         [$reserva, $funcion] = $this->servicio->delEspectador(self::usuario($peticion), (string) $peticion->parametro('id'));
 
         return $this->vista('reserva_confirmada.html.twig', [
-            'reserva' => [
-                'codigo' => $reserva->codigo,
-                'cantidad' => $reserva->cantidad,
-                'total' => TextoParaMostrar::monto((float) $reserva->total),
-                'estado' => $reserva->estado->value,
-            ],
+            'reserva' => self::datosDeReserva($reserva, $funcion),
             'funcion' => $funcion === null ? null : self::datosDeFuncion($funcion),
+            // El aviso al volver de cancelarla: sólo si de verdad quedó cancelada.
+            'cancelada' => $peticion->consulta('cancelada') === '1' && $reserva->estado === EstadoReserva::Cancelada,
         ]);
+    }
+
+    /**
+     * La pantalla que confirma la cancelación (E4-01.5). Si ya no se puede cancelar es 404, como
+     * la de cancelar una función: el comprobante no muestra el botón, así que sólo se llega
+     * escribiendo la dirección.
+     */
+    public function confirmarCancelacion(Peticion $peticion): Respuesta
+    {
+        [$reserva, $funcion] = $this->servicio->delEspectador(self::usuario($peticion), (string) $peticion->parametro('id'));
+        if (!ServicioDeReservas::seCancela($reserva, $funcion)) {
+            throw ExcepcionHttp::noEncontrada();
+        }
+
+        return $this->pantallaDeCancelacion($reserva, $funcion);
+    }
+
+    public function cancelar(Peticion $peticion): Respuesta
+    {
+        $usuario = self::usuario($peticion);
+        $id = (string) $peticion->parametro('id');
+        try {
+            $reserva = $this->servicio->cancelar($usuario, $id);
+        } catch (ReglaIncumplida $error) {
+            // Por ejemplo, empezó la función o registraron la asistencia con la pantalla abierta.
+            [$reserva, $funcion] = $this->servicio->delEspectador($usuario, $id);
+
+            return $this->pantallaDeCancelacion($reserva, $funcion, $error->getMessage(), 422);
+        }
+
+        // 303: recargar no la vuelve a mandar.
+        return $this->redirigir("/reservas/{$reserva->id}?cancelada=1");
+    }
+
+    private function pantallaDeCancelacion(Reserva $reserva, ?FuncionDeProgramacion $funcion, ?string $error = null, int $estado = 200): Respuesta
+    {
+        $datos = [
+            'reserva' => self::datosDeReserva($reserva, $funcion),
+            'funcion' => $funcion === null ? null : self::datosDeFuncion($funcion),
+        ];
+        // La plantilla lo muestra si la variable existe: sólo se pasa cuando hay algo que decir.
+        if ($error !== null) {
+            $datos['error_general'] = $error;
+        }
+
+        return $this->vista('cancelar_reserva.html.twig', $datos, $estado);
+    }
+
+    /**
+     * @return array{id: string, codigo: string, cantidad: int, total: string, estado: string, cancelable: bool}
+     */
+    private static function datosDeReserva(Reserva $reserva, ?FuncionDeProgramacion $funcion): array
+    {
+        return [
+            'id' => $reserva->id,
+            'codigo' => $reserva->codigo,
+            'cantidad' => $reserva->cantidad,
+            'total' => TextoParaMostrar::monto((float) $reserva->total),
+            'estado' => $reserva->estado->value,
+            'cancelable' => ServicioDeReservas::seCancela($reserva, $funcion),
+        ];
     }
 
     /**

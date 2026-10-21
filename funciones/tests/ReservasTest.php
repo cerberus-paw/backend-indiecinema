@@ -52,12 +52,48 @@ final class ReservasTest extends TestCase
         $cabeceras = $usuario === null ? [] : ['X-Nginx-Secreto' => self::SECRETO, 'X-Usuario-Id' => $usuario, 'X-Rol' => 'espectador'];
         $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion, new Log('funciones', fopen('php://memory', 'w')));
 
-        return $aplicacion->atender(new Peticion($metodo, $ruta, [], $cuerpo, $cabeceras, ['csrf' => self::CSRF], []));
+        parse_str((string) parse_url($ruta, PHP_URL_QUERY), $consulta);
+
+        return $aplicacion->atender(new Peticion($metodo, (string) parse_url($ruta, PHP_URL_PATH), $consulta, $cuerpo, $cabeceras, ['csrf' => self::CSRF], []));
     }
 
     private function reservar(string $cantidad, string $funcion = self::PROXIMA, ?string $usuario = self::EVA): Respuesta
     {
         return $this->pedir('POST', "/reservar/{$funcion}", $usuario, ['_csrf' => self::CSRF, 'cantidad' => $cantidad]);
+    }
+
+    /**
+     * Una reserva hecha por la página, como la haría el espectador.
+     */
+    private function reservada(string $cantidad = '1', ?string $usuario = self::EVA): string
+    {
+        self::assertSame(303, $this->reservar($cantidad, usuario: $usuario)->estado());
+
+        return (string) $this->base->valor('SELECT id FROM reserva WHERE usuario_id = ? ORDER BY creada_en DESC, id LIMIT 1', [$usuario]);
+    }
+
+    private function cancelar(string $id, ?string $usuario = self::EVA, string $csrf = self::CSRF): Respuesta
+    {
+        return $this->pedir('POST', "/reservas/{$id}/cancelar", $usuario, ['_csrf' => $csrf]);
+    }
+
+    private function estado(string $id): string
+    {
+        return (string) $this->base->valor('SELECT estado FROM reserva WHERE id = ?', [$id]);
+    }
+
+    /**
+     * Ocupa lugares de una función sin pasar por la página, como si los hubieran reservado otros.
+     */
+    private function ocupar(string $funcion, int $cantidad, string $usuario = self::ELIAS): string
+    {
+        $id = Uuid::nuevo();
+        $this->base->ejecutar(
+            'INSERT INTO reserva (id, funcion_id, usuario_id, codigo, cantidad, total, creada_en) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            [$id, $funcion, $usuario, strtoupper(substr(bin2hex(random_bytes(4)), 0, 8)), $cantidad, '0.00', '2026-10-19 10:00:00'],
+        );
+
+        return $id;
     }
 
     private function reservas(): int
@@ -168,5 +204,93 @@ final class ReservasTest extends TestCase
     {
         self::assertSame(404, $this->pedir('GET', '/reservar/' . Uuid::nuevo())->estado());
         self::assertSame(404, $this->reservar('1', Uuid::nuevo())->estado());
+    }
+
+    public function testElComprobanteOfreceCancelarYLaPantallaLoConfirma(): void
+    {
+        $id = $this->reservada('2');
+
+        self::assertStringContainsString('href="/funcion/reservas/' . $id . '/cancelar"', $this->pedir('GET', "/reservas/{$id}")->cuerpo());
+        $pantalla = $this->pedir('GET', "/reservas/{$id}/cancelar");
+        self::assertSame(200, $pantalla->estado());
+        self::assertStringContainsString('¿Querés cancelar esta reserva?', $pantalla->cuerpo());
+        self::assertStringContainsString('action="/funcion/reservas/' . $id . '/cancelar" method="POST"', $pantalla->cuerpo());
+        // Mirarla no la cancela.
+        self::assertSame('confirmada', $this->estado($id));
+    }
+
+    public function testCancelarLaDejaCanceladaYLoAvisa(): void
+    {
+        $id = $this->reservada('2');
+
+        $respuesta = $this->cancelar($id);
+
+        self::assertSame(303, $respuesta->estado());
+        self::assertSame("/funcion/reservas/{$id}?cancelada=1", $respuesta->cabecera('Location'));
+        self::assertSame('cancelada', $this->estado($id));
+        $comprobante = $this->pedir('GET', "/reservas/{$id}?cancelada=1")->cuerpo();
+        self::assertStringContainsString('Cancelaste la reserva', $comprobante);
+        self::assertStringContainsString('Reserva cancelada', $comprobante);
+        self::assertStringNotContainsString('/cancelar"', $comprobante);
+    }
+
+    /**
+     * El criterio de la subtarea: con la función completa, cancelar deja el lugar para otro.
+     */
+    public function testElLugarCanceladoVuelveAQuedarLibre(): void
+    {
+        $id = $this->reservada('1');
+        $this->ocupar(self::PROXIMA, 39);
+        self::assertStringContainsString('La función está agotada.', $this->reservar('1', usuario: self::ELIAS)->cuerpo());
+
+        $this->cancelar($id);
+
+        self::assertSame(303, $this->reservar('1', usuario: self::ELIAS)->estado());
+    }
+
+    public function testLaReservaDeOtroNoSeCancela(): void
+    {
+        $id = $this->reservada();
+
+        self::assertSame(404, $this->pedir('GET', "/reservas/{$id}/cancelar", self::ELIAS)->estado());
+        self::assertSame(404, $this->cancelar($id, self::ELIAS)->estado());
+        self::assertSame('confirmada', $this->estado($id));
+    }
+
+    public function testSinElTokenCsrfNoSeCancela(): void
+    {
+        $id = $this->reservada();
+
+        self::assertSame(403, $this->cancelar($id, csrf: 'otro')->estado());
+        self::assertSame('confirmada', $this->estado($id));
+    }
+
+    public function testUnaCanceladaOConAsistenciaNoSeVuelveACancelar(): void
+    {
+        $cancelada = $this->reservada();
+        $this->cancelar($cancelada);
+        $conAsistencia = $this->reservada();
+        $this->base->ejecutar("UPDATE reserva SET estado = 'asistio' WHERE id = ?", [$conAsistencia]);
+
+        foreach ([$cancelada => 'La reserva ya está cancelada.', $conAsistencia => 'Ya registraron tu asistencia: la reserva no se puede cancelar.'] as $id => $mensaje) {
+            self::assertSame(404, $this->pedir('GET', "/reservas/{$id}/cancelar")->estado());
+            $respuesta = $this->cancelar($id);
+            self::assertSame(422, $respuesta->estado());
+            self::assertStringContainsString($mensaje, $respuesta->cuerpo());
+            self::assertStringNotContainsString('action="/funcion/reservas/' . $id . '/cancelar"', $respuesta->cuerpo());
+        }
+        self::assertSame('asistio', $this->estado($conAsistencia));
+    }
+
+    public function testCuandoLaFuncionEmpezoYaNoSeCancela(): void
+    {
+        $id = $this->ocupar(self::EMPEZADA, 2, self::EVA);
+
+        self::assertStringNotContainsString('/cancelar"', $this->pedir('GET', "/reservas/{$id}")->cuerpo());
+        self::assertSame(404, $this->pedir('GET', "/reservas/{$id}/cancelar")->estado());
+        $respuesta = $this->cancelar($id);
+        self::assertSame(422, $respuesta->estado());
+        self::assertStringContainsString('La función ya empezó: la reserva ya no se puede cancelar.', $respuesta->cuerpo());
+        self::assertSame('confirmada', $this->estado($id));
     }
 }

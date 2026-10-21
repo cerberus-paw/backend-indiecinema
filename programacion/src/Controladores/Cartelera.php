@@ -9,12 +9,14 @@ use IndieCinema\Nucleo\Http\ExcepcionHttp;
 use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Seguridad\Rol;
+use IndieCinema\Nucleo\Uuid;
 use IndieCinema\Programacion\Modelo\DetalleDeFuncion;
 use IndieCinema\Programacion\Modelo\EstadoFuncion;
 use IndieCinema\Programacion\Modelo\Funcion;
 use IndieCinema\Programacion\Modelo\FuncionEnCartelera;
 use IndieCinema\Programacion\Modelo\Genero;
 use IndieCinema\Programacion\Modelo\ObraEnDetalle;
+use IndieCinema\Programacion\Modelo\ReglaIncumplida;
 use IndieCinema\Programacion\Servicios\ServicioDeCartelera;
 
 /**
@@ -114,15 +116,51 @@ final class Cartelera extends Controlador
         $editable = $esPropia && Funcion::seEdita($detalle->estado, $detalle->fechaHora);
         $cancelable = $esPropia && Funcion::seCancela($detalle->estado, $detalle->fechaHora);
 
+        $votoActual = $usuario !== null ? $this->servicio->votoDe($detalle->id, $usuario->id) : null;
+        $conteoVotos = $this->servicio->conteoDeVotos($detalle->id);
+
         return $this->vista('ficha_funcion.html.twig', [
             'funcion' => [
                 ...self::datosDeDetalle($detalle, $editable, $cancelable),
                 'reservable' => Funcion::seReserva($detalle->estado, $detalle->fechaHora),
             ],
+            'voto_usuario' => $votoActual,
+            'conteo_votos' => $conteoVotos,
+            'votado' => $peticion->consulta('votado') === '1',
+            'error_voto' => $peticion->consulta('error_voto'),
             // El aviso de que se acaba de guardar: sólo para el organizador que la editó. La ficha
             // es pública, y si no, lo vería cualquiera que abra el enlace con el parámetro puesto.
             'guardada' => $esPropia && $peticion->consulta('guardada') === '1',
         ]);
+    }
+
+    /**
+     * POST /cartelera/{id}/votar: registra o cambia el voto del espectador (E3-12.3).
+     *
+     * @throws ExcepcionHttp 404 si la función no existe o no es UUID, 403 si no hay sesión
+     */
+    public function votar(Peticion $peticion): Respuesta
+    {
+        $id = (string) $peticion->parametro('id');
+        if (!Uuid::esValido($id)) {
+            throw ExcepcionHttp::noEncontrada();
+        }
+
+        $usuario = $peticion->usuario();
+        if ($usuario === null) {
+            throw ExcepcionHttp::prohibida();
+        }
+
+        $cuerpo = $peticion->cuerpo();
+        $obraId = (string) ($cuerpo['obra_id'] ?? '');
+
+        try {
+            $this->servicio->votar($id, $usuario->id, $obraId);
+        } catch (ReglaIncumplida $regla) {
+            return $this->redirigir("/cartelera/{$id}?error_voto=" . rawurlencode($regla->getMessage()));
+        }
+
+        return $this->redirigir("/cartelera/{$id}?votado=1");
     }
 
     private function parametros(Peticion $peticion): ParametrosDeCartelera
@@ -179,14 +217,15 @@ final class Cartelera extends Controlador
                 'capacidad' => $detalle->sala->capacidad,
                 'imagen' => $detalle->sala->imagen !== null ? "/salas/{$detalle->sala->id}/imagen" : null,
             ],
-            // Sin el afiche: todavía no hay una ruta que lo sirva.
             'obras' => array_map(static fn (ObraEnDetalle $obra): array => [
+                'id' => $obra->id,
                 'titulo' => $obra->titulo,
                 'sinopsis' => $obra->sinopsis,
                 'anio' => $obra->anio,
                 'director' => $obra->director,
                 'duracion' => $obra->duracionMinutos,
                 'generos' => $obra->generos,
+                'afiche' => $obra->afiche,
             ], $detalle->obras),
         ];
     }

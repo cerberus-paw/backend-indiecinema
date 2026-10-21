@@ -8,12 +8,16 @@ use IndieCinema\Nucleo\Configuracion;
 use IndieCinema\Nucleo\Http\ExcepcionHttp;
 use IndieCinema\Nucleo\Uuid;
 use IndieCinema\Programacion\Modelo\DetalleDeFuncion;
+use IndieCinema\Programacion\Modelo\EstadoFuncion;
 use IndieCinema\Programacion\Modelo\FiltrosDeCartelera;
 use IndieCinema\Programacion\Modelo\FuncionEnCartelera;
 use IndieCinema\Programacion\Modelo\Genero;
+use IndieCinema\Programacion\Modelo\ObraEnDetalle;
 use IndieCinema\Programacion\Modelo\PaginaDeCartelera;
+use IndieCinema\Programacion\Modelo\ReglaIncumplida;
 use IndieCinema\Programacion\Repositorios\RepositorioDeCartelera;
 use IndieCinema\Programacion\Repositorios\RepositorioDeGeneros;
+use IndieCinema\Programacion\Repositorios\RepositorioDeVotos;
 use RuntimeException;
 
 /**
@@ -34,6 +38,7 @@ final class ServicioDeCartelera
     public function __construct(
         private readonly RepositorioDeCartelera $cartelera,
         private readonly RepositorioDeGeneros $generos,
+        private readonly RepositorioDeVotos $votos,
         Configuracion $configuracion,
     ) {
         $porPagina = $configuracion->obtener('cartelera.por_pagina', self::POR_PAGINA);
@@ -123,5 +128,44 @@ final class ServicioDeCartelera
         }
 
         return $detalle;
+    }
+
+    /**
+     * La obra votada por el usuario en la función, o null si todavía no votó (E3-12.3).
+     */
+    public function votoDe(string $funcionId, string $usuarioId): ?string
+    {
+        return $this->votos->votoDe($funcionId, $usuarioId);
+    }
+
+    /**
+     * Cantidad de votos por obra en una función.
+     *
+     * @return array<string, int>
+     */
+    public function conteoDeVotos(string $funcionId): array
+    {
+        return $this->votos->conteoPorObra($funcionId);
+    }
+
+    /**
+     * Registra o cambia el voto de un espectador por una obra candidata en una función en votación de títulos (E3-12.3).
+     *
+     * @throws ReglaIncumplida si la función no está en votación de títulos o si la obra no es una candidata
+     */
+    public function votar(string $funcionId, string $usuarioId, string $obraId): void
+    {
+        $detalle = $this->detalle($funcionId);
+
+        if ($detalle->estado !== EstadoFuncion::EnVotacionTitulos) {
+            throw new ReglaIncumplida('La votación de títulos para esta función no está abierta.');
+        }
+
+        $candidatasIds = array_map(static fn (ObraEnDetalle $o): string => $o->id, $detalle->obras);
+        if (!in_array($obraId, $candidatasIds, true)) {
+            throw new ReglaIncumplida('La obra seleccionada no participa de la votación de esta función.');
+        }
+
+        $this->votos->votar($funcionId, $usuarioId, $obraId);
     }
 }

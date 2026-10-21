@@ -115,7 +115,10 @@ final class Cartelera extends Controlador
         $cancelable = $esPropia && Funcion::seCancela($detalle->estado, $detalle->fechaHora);
 
         return $this->vista('ficha_funcion.html.twig', [
-            'funcion' => self::datosDeDetalle($detalle, $editable, $cancelable),
+            'funcion' => [
+                ...self::datosDeDetalle($detalle, $editable, $cancelable),
+                'reservable' => Funcion::seReserva($detalle->estado, $detalle->fechaHora),
+            ],
             // El aviso de que se acaba de guardar: sólo para el organizador que la editó. La ficha
             // es pública, y si no, lo vería cualquiera que abra el enlace con el parámetro puesto.
             'guardada' => $esPropia && $peticion->consulta('guardada') === '1',

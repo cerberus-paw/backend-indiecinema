@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace IndieCinema\Funciones\Servicios;
 
 use DateTimeImmutable;
+use IndieCinema\Funciones\Modelo\FuncionDeProgramacion;
 use IndieCinema\Funciones\Modelo\ReglaIncumplida;
 use IndieCinema\Funciones\Modelo\Reserva;
 use IndieCinema\Funciones\Repositorios\RepositorioDeReservas;
 use IndieCinema\Nucleo\Http\ExcepcionHttp;
 use IndieCinema\Nucleo\Seguridad\Usuario;
+use IndieCinema\Nucleo\Uuid;
 use LogicException;
 
 /**
@@ -25,6 +27,42 @@ final class ServicioDeReservas
         private readonly FuncionesDeProgramacion $funciones,
         private readonly RepositorioDeReservas $reservas,
     ) {
+    }
+
+    /**
+     * La función para la página de la reserva.
+     *
+     * @throws ExcepcionHttp 404 si no existe o su sala no está publicada; 503 si programación no
+     *                       responde
+     */
+    public function funcion(string $funcionId): FuncionDeProgramacion
+    {
+        $funcion = $this->funciones->buscar($funcionId);
+        // Una sala sin publicar no muestra sus funciones: es lo mismo que si no existiera.
+        if ($funcion === null || !$funcion->salaHabilitada) {
+            throw ExcepcionHttp::noEncontrada();
+        }
+
+        return $funcion;
+    }
+
+    /**
+     * Una reserva del espectador, con su función. La de otro es 404, como si no existiera: así no
+     * se puede averiguar qué ids existen.
+     *
+     * @return array{Reserva, ?FuncionDeProgramacion} la función es null si programación ya no la
+     *                                                muestra (su sala se dio de baja)
+     *
+     * @throws ExcepcionHttp 404
+     */
+    public function delEspectador(Usuario $espectador, string $id): array
+    {
+        $reserva = Uuid::esValido($id) ? $this->reservas->buscar($id) : null;
+        if ($reserva === null || !hash_equals($reserva->usuarioId, $espectador->id)) {
+            throw ExcepcionHttp::noEncontrada();
+        }
+
+        return [$reserva, $this->funciones->buscar($reserva->funcionId)];
     }
 
     /**
@@ -44,11 +82,7 @@ final class ServicioDeReservas
         int $cantidad,
         DateTimeImmutable $ahora = new DateTimeImmutable(),
     ): Reserva {
-        $funcion = $this->funciones->buscar($funcionId);
-        // Una sala sin publicar no muestra sus funciones: es lo mismo que si no existiera.
-        if ($funcion === null || !$funcion->salaHabilitada) {
-            throw ExcepcionHttp::noEncontrada();
-        }
+        $funcion = $this->funcion($funcionId);
         $reserva = Reserva::nueva($funcion, $espectador->id, $cantidad, $ahora);
 
         return $this->reservas->conLaFuncionBloqueada($funcion->id, function () use ($funcion, $reserva): Reserva {

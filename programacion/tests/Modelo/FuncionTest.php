@@ -307,6 +307,19 @@ final class FuncionTest extends TestCase
         self::assertFalse($cancela(self::finalizada(), $despuesDeLaFuncion));
     }
 
+    public function testSeReservaMientrasNoSeCanceloNiEmpezo(): void
+    {
+        $despuesDeLaFuncion = new DateTimeImmutable('2026-10-25 10:00:00');
+        $reserva = static fn (Funcion $funcion, DateTimeImmutable $ahora): bool => Funcion::seReserva($funcion->estado, $funcion->fechaHora, $ahora);
+
+        self::assertTrue($reserva(self::enVotacion(), self::ahora()));
+        self::assertTrue($reserva(self::enAcuerdo(), self::ahora()));
+        self::assertTrue($reserva(self::programada(), self::ahora()));
+        self::assertFalse($reserva(self::programada(), $despuesDeLaFuncion), 'programada que ya empezó');
+        self::assertFalse($reserva(self::cancelada(), self::ahora()));
+        self::assertFalse($reserva(self::finalizada(), $despuesDeLaFuncion));
+    }
+
     public function testActualizarRechazaFechaPasada(): void
     {
         $funcion = self::programada();

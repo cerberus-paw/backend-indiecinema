@@ -520,7 +520,8 @@ programación), el listado de usuarios del administrador con su buscador, su pag
 el rol de organizador y quién entra (en cuentas y en programación, una prueba recorre todas las
 rutas del panel y comprueba que sólo entra el administrador; en programación, otra hace lo
 mismo con las del organizador y fija cuáles son públicas), y las restricciones de las tablas
-usuario y rol (correo único, y roles sin repetir y sólo de un usuario que existe). Para correrlas,
+usuario y rol (correo único, y roles sin repetir y sólo de un usuario que existe); en funciones, las
+restricciones de la tabla reserva (código único, cantidad positiva y total no negativo). Para correrlas,
 uno descartable:
 
 ```

@@ -76,6 +76,22 @@ final class CsvDeCarteleraTest extends TestCase
         );
     }
 
+    public function testFuncionEnVotacionSinFechaEnCsv(): void
+    {
+        $funcion = new FuncionEnCartelera(
+            'f-votacion',
+            null,
+            2000.0,
+            's',
+            'Cine Club Areco',
+            'San Antonio de Areco',
+            [new ObraEnCartelera('o', 'Metrópolis', null)],
+            \IndieCinema\Programacion\Modelo\EstadoFuncion::EnVotacionTitulos,
+        );
+
+        self::assertSame([['A definir', 'A definir', 'Metrópolis', 'Cine Club Areco', 'San Antonio de Areco', '2000']], self::filas(CsvDeCartelera::armar([$funcion])));
+    }
+
     /**
      * Lo que rompería las columnas si no fuera entre comillas.
      *

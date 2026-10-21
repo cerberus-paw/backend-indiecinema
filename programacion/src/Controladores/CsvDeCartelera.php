@@ -32,8 +32,8 @@ final class CsvDeCartelera
         foreach ($funciones as $funcion) {
             self::fila($archivo, [
                 // Así las reconoce como fecha y hora cualquier planilla, en cualquier idioma.
-                $funcion->fechaHora->format('Y-m-d'),
-                $funcion->fechaHora->format('H:i'),
+                $funcion->fechaHora?->format('Y-m-d') ?? 'A definir',
+                $funcion->fechaHora?->format('H:i') ?? 'A definir',
                 implode(' + ', array_map(static fn (ObraEnCartelera $obra): string => $obra->titulo, $funcion->obras)),
                 $funcion->sala,
                 $funcion->localidad,

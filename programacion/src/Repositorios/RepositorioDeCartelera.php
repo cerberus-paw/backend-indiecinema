@@ -30,7 +30,7 @@ final class RepositorioDeCartelera
 {
     private const DESDE = 'FROM funcion f JOIN sala s ON s.id = f.sala_id';
     /** La sala y el id desempatan, así una función no cambia de página entre una consulta y otra. */
-    private const ORDEN = 'ORDER BY f.fecha_hora, s.nombre, f.id';
+    private const ORDEN = 'ORDER BY (f.estado = \'en_votacion_titulos\'), f.fecha_hora, s.nombre, f.id';
 
     public function __construct(private readonly BaseDeDatos $base)
     {
@@ -195,18 +195,18 @@ final class RepositorioDeCartelera
     private static function condiciones(FiltrosDeCartelera $filtros, DateTimeImmutable $ahora): array
     {
         $condiciones = [
-            'f.estado = ?',
-            'f.fecha_hora > ?',
+            '((f.estado = ? AND f.fecha_hora > ?) OR f.estado = ?)',
             's.habilitada = TRUE',
             's.dada_de_baja_en IS NULL',
         ];
-        $parametros = [EstadoFuncion::Programada, $ahora];
+        $parametros = [EstadoFuncion::Programada, $ahora, EstadoFuncion::EnVotacionTitulos];
 
         if ($filtros->texto !== null) {
-            // Sólo las obras elegidas: las candidatas que perdieron la votación no se proyectan.
+            // Las obras elegidas o, si está en votación, las candidatas; las perdedoras no.
             $condiciones[] = "(s.nombre LIKE ? ESCAPE '!' OR EXISTS (
                 SELECT 1 FROM funcion_obra fo JOIN obra o ON o.id = fo.obra_id
-                WHERE fo.funcion_id = f.id AND fo.estado = 'elegida'
+                WHERE fo.funcion_id = f.id
+                    AND (fo.estado = 'elegida' OR (f.estado = 'en_votacion_titulos' AND fo.estado = 'candidata'))
                     AND (o.titulo LIKE ? ESCAPE '!' OR o.director LIKE ? ESCAPE '!')
             ))";
             $patron = Like::contiene($filtros->texto);
@@ -224,7 +224,9 @@ final class RepositorioDeCartelera
         if ($filtros->generoId !== null) {
             $condiciones[] = "EXISTS (
                 SELECT 1 FROM funcion_obra fo JOIN obra_genero og ON og.obra_id = fo.obra_id
-                WHERE fo.funcion_id = f.id AND fo.estado = 'elegida' AND og.genero_id = ?
+                WHERE fo.funcion_id = f.id
+                    AND (fo.estado = 'elegida' OR (f.estado = 'en_votacion_titulos' AND fo.estado = 'candidata'))
+                    AND og.genero_id = ?
             )";
             $parametros[] = $filtros->generoId;
         }
@@ -247,7 +249,7 @@ final class RepositorioDeCartelera
     private function funciones(string $resto, array $parametros): array
     {
         return $this->conSusObras($this->base->filas(
-            'SELECT f.id, f.fecha_hora, f.precio_base, s.id AS sala_id, s.nombre AS sala, s.localidad '
+            'SELECT f.id, f.estado, f.fecha_hora, f.precio_base, s.id AS sala_id, s.nombre AS sala, s.localidad '
             . self::DESDE . " WHERE {$resto}",
             $parametros,
         ));
@@ -267,29 +269,36 @@ final class RepositorioDeCartelera
         }
         $ids = array_column($filas, 'id');
         $marcas = implode(', ', array_fill(0, count($ids), '?'));
-        $obras = [];
+        $obrasElegidas = [];
+        $obrasCandidatas = [];
         foreach ($this->base->filas(
-            "SELECT fo.funcion_id, o.id, o.titulo, o.afiche FROM funcion_obra fo
+            "SELECT fo.funcion_id, fo.estado, o.id, o.titulo, o.afiche FROM funcion_obra fo
              JOIN obra o ON o.id = fo.obra_id
-             WHERE fo.estado = 'elegida' AND fo.funcion_id IN ({$marcas})
+             WHERE fo.estado IN ('elegida', 'candidata') AND fo.funcion_id IN ({$marcas})
              ORDER BY o.titulo, o.id",
             $ids,
         ) as $obra) {
-            $obras[$obra['funcion_id']][] = new ObraEnCartelera(
+            $obraObj = new ObraEnCartelera(
                 (string) $obra['id'],
                 (string) $obra['titulo'],
                 $obra['afiche'] === null ? null : (string) $obra['afiche'],
             );
+            if ($obra['estado'] === 'elegida') {
+                $obrasElegidas[$obra['funcion_id']][] = $obraObj;
+            } else {
+                $obrasCandidatas[$obra['funcion_id']][] = $obraObj;
+            }
         }
 
         return array_map(static fn (array $fila): FuncionEnCartelera => new FuncionEnCartelera(
             (string) $fila['id'],
-            new DateTimeImmutable((string) $fila['fecha_hora']),
+            $fila['fecha_hora'] !== null ? new DateTimeImmutable((string) $fila['fecha_hora']) : null,
             (float) $fila['precio_base'],
             (string) $fila['sala_id'],
             (string) $fila['sala'],
             (string) $fila['localidad'],
-            $obras[$fila['id']] ?? [],
+            $obrasElegidas[$fila['id']] ?? $obrasCandidatas[$fila['id']] ?? [],
+            EstadoFuncion::from((string) $fila['estado']),
         ), $filas);
     }
 }

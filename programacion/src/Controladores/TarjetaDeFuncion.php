@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace IndieCinema\Programacion\Controladores;
 
 use DateTimeImmutable;
+use IndieCinema\Programacion\Modelo\EstadoFuncion;
 use IndieCinema\Programacion\Modelo\FuncionEnCartelera;
 use IndieCinema\Programacion\Modelo\ObraEnCartelera;
 
@@ -19,7 +20,7 @@ final class TarjetaDeFuncion
     private const MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
 
     /**
-     * @return array{id: string, titulo: string, estado: string, precio: string, sala: string, localidad: string, fecha: string}
+     * @return array{id: string, titulo: string, estado: string, precio: string, sala: string, localidad: string, fecha: ?string}
      */
     public static function datos(FuncionEnCartelera $funcion): array
     {
@@ -27,11 +28,11 @@ final class TarjetaDeFuncion
             'id' => $funcion->id,
             // Una función con varias obras las proyecta todas: el título las nombra a todas.
             'titulo' => implode(' + ', array_map(static fn (ObraEnCartelera $obra): string => $obra->titulo, $funcion->obras)),
-            'estado' => 'PROGRAMADA',
+            'estado' => $funcion->estado === EstadoFuncion::EnVotacionTitulos ? 'EN_VOTACION_TITULOS' : 'PROGRAMADA',
             'precio' => self::precio($funcion->precioBase),
             'sala' => $funcion->sala,
             'localidad' => $funcion->localidad,
-            'fecha' => self::fecha($funcion->fechaHora),
+            'fecha' => $funcion->fechaHora !== null ? self::fecha($funcion->fechaHora) : null,
         ];
     }
 

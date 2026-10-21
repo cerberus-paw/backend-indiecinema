@@ -911,4 +911,34 @@ final class CarteleraTest extends TestCase
         $respuesta = $this->post("/cartelera/{$funcionId}/votar", ['obra_id' => Uuid::nuevo()], usuario: null);
         self::assertSame(401, $respuesta->estado());
     }
+
+    /**
+     * Criterio E3-12.4: La ficha de la función con votación cerrada muestra únicamente el título ganador.
+     */
+    public function testFichaDeFuncionCerradaMuestraTituloGanadorYNoPermiteVotar(): void
+    {
+        $this->cargarDatosDePrueba();
+
+        $salaId = (string) $this->base->valor("SELECT id FROM sala WHERE habilitada = TRUE AND dada_de_baja_en IS NULL LIMIT 1");
+        $obras = $this->base->filas("SELECT id, titulo FROM obra ORDER BY id LIMIT 2");
+        $funcionId = Uuid::nuevo();
+        $this->base->ejecutar(
+            "INSERT INTO funcion (id, sala_id, estado, precio_base, cupo) VALUES (?, ?, 'en_acuerdo_fecha', 2000, 50)",
+            [$funcionId, $salaId],
+        );
+        $this->base->ejecutar("INSERT INTO funcion_obra (funcion_id, obra_id, estado) VALUES (?, ?, 'elegida')", [$funcionId, $obras[0]['id']]);
+        $this->base->ejecutar("INSERT INTO funcion_obra (funcion_id, obra_id, estado) VALUES (?, ?, 'candidata')", [$funcionId, $obras[1]['id']]);
+
+        $ficha = $this->pedir("/cartelera/{$funcionId}");
+        self::assertSame(200, $ficha->estado());
+        self::assertStringContainsString($obras[0]['titulo'], $ficha->cuerpo());
+        self::assertStringNotContainsString($obras[1]['titulo'], $ficha->cuerpo());
+        self::assertStringNotContainsString('VOTACIÓN ABIERTA', $ficha->cuerpo());
+
+        // Intentar votar en la función cerrada es rechazado
+        $espectadorId = Uuid::nuevo();
+        $voto = $this->post("/cartelera/{$funcionId}/votar", ['obra_id' => $obras[0]['id']], $espectadorId);
+        self::assertSame(303, $voto->estado());
+        self::assertStringContainsString('error_voto', $voto->cabecera('Location'));
+    }
 }

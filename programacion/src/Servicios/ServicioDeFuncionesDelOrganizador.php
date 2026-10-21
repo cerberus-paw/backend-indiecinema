@@ -7,6 +7,7 @@ namespace IndieCinema\Programacion\Servicios;
 use DateTimeImmutable;
 use IndieCinema\Nucleo\Http\ExcepcionHttp;
 use IndieCinema\Nucleo\Seguridad\Usuario;
+use IndieCinema\Programacion\Modelo\EstadoFuncion;
 use IndieCinema\Programacion\Modelo\Funcion;
 use IndieCinema\Programacion\Modelo\FuncionDelOrganizador;
 use IndieCinema\Programacion\Modelo\Obra;
@@ -15,6 +16,7 @@ use IndieCinema\Programacion\Modelo\Sala;
 use IndieCinema\Programacion\Repositorios\RepositorioDeFunciones;
 use IndieCinema\Programacion\Repositorios\RepositorioDeObras;
 use IndieCinema\Programacion\Repositorios\RepositorioDeSalas;
+use IndieCinema\Programacion\Repositorios\RepositorioDeVotos;
 
 /**
  * El panel de funciones del organizador: lo que ve de las funciones de sus salas y el alta
@@ -29,6 +31,7 @@ final class ServicioDeFuncionesDelOrganizador
         private readonly RepositorioDeFunciones $funciones,
         private readonly RepositorioDeSalas $salas,
         private readonly RepositorioDeObras $obras,
+        private readonly RepositorioDeVotos $votos,
     ) {
     }
 
@@ -218,6 +221,26 @@ final class ServicioDeFuncionesDelOrganizador
 
         $funcion->cancelar();
         $this->funciones->guardar($funcion);
+    }
+
+    /**
+     * Cierra la votación de títulos de una función propia con la obra más votada (E3-12.4).
+     * La función pasa a estado «en acuerdo de fecha» y conserva únicamente la obra ganadora.
+     *
+     * @throws ExcepcionHttp 404 si la función no existe, es de otro organizador o no está en votación de títulos
+     */
+    public function cerrarVotacion(Usuario $organizador, string $id): Funcion
+    {
+        $funcion = $this->propia($organizador, $id);
+        if ($funcion->estado !== EstadoFuncion::EnVotacionTitulos) {
+            throw ExcepcionHttp::noEncontrada();
+        }
+
+        $obraGanadora = $this->votos->obraMasVotada($funcion->id, $funcion->obrasIds);
+        $funcion->cerrarVotacionTitulos([$obraGanadora]);
+        $this->funciones->guardar($funcion);
+
+        return $funcion;
     }
 
     /**

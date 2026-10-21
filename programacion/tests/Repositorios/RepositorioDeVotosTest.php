@@ -108,4 +108,38 @@ final class RepositorioDeVotosTest extends TestCase
         self::assertSame(2, $conteo[$this->obra1]);
         self::assertSame(1, $conteo[$this->obra2]);
     }
+
+    public function testObraMasVotadaEligeLaQueTieneMasVotos(): void
+    {
+        $u1 = Uuid::nuevo();
+        $u2 = Uuid::nuevo();
+        $u3 = Uuid::nuevo();
+
+        $this->votos->votar($this->funcionId, $u1, $this->obra2);
+        $this->votos->votar($this->funcionId, $u2, $this->obra2);
+        $this->votos->votar($this->funcionId, $u3, $this->obra1);
+
+        $ganadora = $this->votos->obraMasVotada($this->funcionId, [$this->obra1, $this->obra2]);
+        self::assertSame($this->obra2, $ganadora);
+    }
+
+    public function testObraMasVotadaDesempataDeFormaDeterminista(): void
+    {
+        $u1 = Uuid::nuevo();
+        $u2 = Uuid::nuevo();
+
+        $this->votos->votar($this->funcionId, $u1, $this->obra1);
+        $this->votos->votar($this->funcionId, $u2, $this->obra2);
+
+        // Con empate, elige la primera entre las candidatas con mayor puntaje
+        self::assertSame($this->obra1, $this->votos->obraMasVotada($this->funcionId, [$this->obra1, $this->obra2]));
+        self::assertSame($this->obra2, $this->votos->obraMasVotada($this->funcionId, [$this->obra2, $this->obra1]));
+    }
+
+    public function testObraMasVotadaSinVotosEligePrimeraCandidata(): void
+    {
+        // Sin votos registrados para esta función
+        self::assertSame(0, $this->votos->totalDeVotos($this->funcionId));
+        self::assertSame($this->obra1, $this->votos->obraMasVotada($this->funcionId, [$this->obra1, $this->obra2]));
+    }
 }

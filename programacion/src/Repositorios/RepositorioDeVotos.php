@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace IndieCinema\Programacion\Repositorios;
 
 use IndieCinema\Nucleo\BaseDeDatos;
+use IndieCinema\Programacion\Modelo\ReglaIncumplida;
 
 /**
  * Los votos de los espectadores en las funciones en votación de títulos (E3-12.2).
@@ -67,5 +68,36 @@ final class RepositorioDeVotos
     public function totalDeVotos(string $funcionId): int
     {
         return (int) $this->base->valor('SELECT COUNT(*) FROM voto WHERE funcion_id = ?', [$funcionId]);
+    }
+
+    /**
+     * Determina la obra ganadora de la votación entre las candidatas (E3-12.4).
+     * Es la obra con mayor cantidad de votos. Si hay empate o no hay votos,
+     * se resuelve de forma determinista eligiendo la primera candidata con la cantidad máxima de votos.
+     *
+     * @param list<string> $candidatasIds
+     *
+     * @throws ReglaIncumplida si no hay obras candidatas
+     */
+    public function obraMasVotada(string $funcionId, array $candidatasIds): string
+    {
+        if ($candidatasIds === []) {
+            throw new ReglaIncumplida('No hay obras candidatas.');
+        }
+
+        $conteo = $this->conteoPorObra($funcionId);
+
+        $ganadoraId = $candidatasIds[0];
+        $maxVotos = $conteo[$ganadoraId] ?? 0;
+
+        foreach ($candidatasIds as $obraId) {
+            $votos = $conteo[$obraId] ?? 0;
+            if ($votos > $maxVotos) {
+                $maxVotos = $votos;
+                $ganadoraId = $obraId;
+            }
+        }
+
+        return $ganadoraId;
     }
 }

@@ -171,6 +171,14 @@ final class MigracionesTest extends TestCase
         $this->base->ejecutar('INSERT INTO funcion_obra (funcion_id, obra_id, estado) VALUES (?, ?, ?)', [$funcionId, $obraId, $estado]);
     }
 
+    private function insertarVoto(string $funcionId, string $usuarioId, string $obraId): void
+    {
+        $this->base->ejecutar(
+            'INSERT INTO voto (funcion_id, usuario_id, obra_id) VALUES (?, ?, ?)',
+            [$funcionId, $usuarioId, $obraId],
+        );
+    }
+
     public function testLasMigracionesSeAplicanDesdeCeroYCreanLasTablas(): void
     {
         self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM sala'));
@@ -180,6 +188,7 @@ final class MigracionesTest extends TestCase
         self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM funcion'));
         self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM funcion_obra'));
         self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM solicitud_sala'));
+        self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM voto'));
     }
 
     public function testLaObraQuedaGuardadaConSusValoresYTimestamps(): void
@@ -597,5 +606,98 @@ final class MigracionesTest extends TestCase
             [['id' => $esperaba, 'sala_id' => $esperaba, 'usuario_id' => 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'estado' => 'pendiente']],
             $this->base->filas('SELECT id, sala_id, usuario_id, estado FROM solicitud_sala'),
         );
+    }
+
+    /**
+     * Criterio de aceptación E3-12.2: «No se puede votar dos veces la misma función».
+     * La clave única (usuario_id, funcion_id) rechaza un segundo voto del mismo usuario en la misma función.
+     */
+    public function testNoSePuedeVotarDosVecesLaMismaFuncion(): void
+    {
+        $funcion = $this->funcionValida($this->insertarSala());
+        $this->insertarFuncion($funcion);
+        $obra1 = $this->insertarOtraObra();
+        $obra2 = $this->insertarOtraObra();
+        $this->agregarObra($funcion['id'], $obra1);
+        $this->agregarObra($funcion['id'], $obra2);
+
+        $usuarioId = Uuid::nuevo();
+        $this->insertarVoto($funcion['id'], $usuarioId, $obra1);
+        self::assertSame(1, (int) $this->base->valor('SELECT COUNT(*) FROM voto'));
+
+        // El mismo usuario intenta votar de nuevo en la misma función (por otra obra o por la misma)
+        $this->assertRechaza(self::REPETIDO, fn () => $this->insertarVoto($funcion['id'], $usuarioId, $obra2));
+        self::assertSame(1, (int) $this->base->valor('SELECT COUNT(*) FROM voto'));
+    }
+
+    public function testUnUsuarioPuedeVotarEnDistintasFunciones(): void
+    {
+        $salaId = $this->insertarSala();
+        $funcion1 = $this->funcionValida($salaId);
+        $funcion2 = $this->funcionValida($salaId);
+        $this->insertarFuncion($funcion1);
+        $this->insertarFuncion($funcion2);
+        $obra = $this->insertarOtraObra();
+        $this->agregarObra($funcion1['id'], $obra);
+        $this->agregarObra($funcion2['id'], $obra);
+
+        $usuarioId = Uuid::nuevo();
+        $this->insertarVoto($funcion1['id'], $usuarioId, $obra);
+        $this->insertarVoto($funcion2['id'], $usuarioId, $obra);
+
+        self::assertSame(2, (int) $this->base->valor('SELECT COUNT(*) FROM voto WHERE usuario_id = ?', [$usuarioId]));
+    }
+
+    public function testDistintosUsuariosPuedenVotarLaMismaFuncion(): void
+    {
+        $funcion = $this->funcionValida($this->insertarSala());
+        $this->insertarFuncion($funcion);
+        $obra = $this->insertarOtraObra();
+        $this->agregarObra($funcion['id'], $obra);
+
+        $this->insertarVoto($funcion['id'], Uuid::nuevo(), $obra);
+        $this->insertarVoto($funcion['id'], Uuid::nuevo(), $obra);
+
+        self::assertSame(2, (int) $this->base->valor('SELECT COUNT(*) FROM voto WHERE funcion_id = ?', [$funcion['id']]));
+    }
+
+    public function testNoSePuedeVotarUnaFuncionInexistente(): void
+    {
+        $obraId = $this->insertarOtraObra();
+        $this->assertRechaza(self::REFERENCIA_INEXISTENTE, fn () => $this->insertarVoto(Uuid::nuevo(), Uuid::nuevo(), $obraId));
+        self::assertSame(0, (int) $this->base->valor('SELECT COUNT(*) FROM voto'));
+    }
+
+    public function testNoSePuedeVotarUnaObraInexistente(): void
+    {
+        $funcion = $this->funcionValida($this->insertarSala());
+        $this->insertarFuncion($funcion);
+        $this->assertRechaza(self::REFERENCIA_INEXISTENTE, fn () => $this->insertarVoto($funcion['id'], Uuid::nuevo(), Uuid::nuevo()));
+        self::assertSame(0, (int) $this->base->valor('SELECT COUNT(*) FROM voto'));
+    }
+
+    public function testAlBorrarUnaFuncionSeBorranSusVotos(): void
+    {
+        $funcion = $this->funcionValida($this->insertarSala());
+        $this->insertarFuncion($funcion);
+        $obra = $this->insertarOtraObra();
+        $this->agregarObra($funcion['id'], $obra);
+        $this->insertarVoto($funcion['id'], Uuid::nuevo(), $obra);
+
+        self::assertSame(1, (int) $this->base->valor('SELECT COUNT(*) FROM voto'));
+        $this->base->ejecutar('DELETE FROM funcion WHERE id = ?', [$funcion['id']]);
+        self::assertSame(0, (int) $this->base->valor('SELECT COUNT(*) FROM voto'));
+    }
+
+    public function testUnaObraConVotosNoSePuedeBorrar(): void
+    {
+        $funcion = $this->funcionValida($this->insertarSala());
+        $this->insertarFuncion($funcion);
+        $obra = $this->insertarOtraObra();
+        $this->agregarObra($funcion['id'], $obra);
+        $this->insertarVoto($funcion['id'], Uuid::nuevo(), $obra);
+
+        $this->assertRechaza(self::REFERENCIADO, fn () => $this->base->ejecutar('DELETE FROM obra WHERE id = ?', [$obra]));
+        self::assertSame(1, (int) $this->base->valor('SELECT COUNT(*) FROM voto'));
     }
 }

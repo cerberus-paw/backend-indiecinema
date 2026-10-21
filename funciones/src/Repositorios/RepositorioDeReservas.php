@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace IndieCinema\Funciones\Repositorios;
 
+use DateTimeImmutable;
+use DateTimeZone;
 use IndieCinema\Funciones\Modelo\EstadoReserva;
 use IndieCinema\Funciones\Modelo\Reserva;
 use IndieCinema\Nucleo\BaseDeDatos;
@@ -68,6 +70,22 @@ final class RepositorioDeReservas
         return (int) $this->base->valor(
             'SELECT COALESCE(SUM(cantidad), 0) FROM reserva WHERE funcion_id = ? AND estado IN (' . implode(', ', array_fill(0, count($ocupan), '?')) . ')',
             [$funcionId, ...$ocupan],
+        );
+    }
+
+    public function buscar(string $id): ?Reserva
+    {
+        $fila = $this->base->fila('SELECT * FROM reserva WHERE id = ?', [$id]);
+
+        return $fila === null ? null : new Reserva(
+            $fila['id'],
+            $fila['funcion_id'],
+            $fila['usuario_id'],
+            $fila['codigo'],
+            $fila['cantidad'],
+            $fila['total'],
+            EstadoReserva::from($fila['estado']),
+            new DateTimeImmutable($fila['creada_en'], new DateTimeZone('UTC')),
         );
     }
 

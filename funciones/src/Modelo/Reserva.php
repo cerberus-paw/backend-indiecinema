@@ -51,12 +51,9 @@ final readonly class Reserva
         if ($cantidad < 1) {
             throw new ReglaIncumplida('Reservá al menos un lugar.');
         }
-        if ($funcion->estado === 'cancelada') {
-            throw new ReglaIncumplida('La función se canceló: ya no se puede reservar.');
-        }
-        // Una programada cuya hora ya pasó ya empezó, aunque nada la haya pasado a finalizada.
-        if (!$funcion->estaEnCurso() || ($funcion->fechaHora !== null && $funcion->fechaHora <= $ahora)) {
-            throw new ReglaIncumplida('La función ya empezó: ya no se puede reservar.');
+        $motivo = $funcion->motivoParaNoReservar($ahora);
+        if ($motivo !== null) {
+            throw new ReglaIncumplida($motivo);
         }
 
         return new self(

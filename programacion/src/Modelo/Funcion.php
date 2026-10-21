@@ -102,6 +102,23 @@ final class Funcion
     }
 
     /**
+     * Si la ficha ofrece reservar (E4-01): mientras no se canceló ni se dio, aunque todavía no
+     * tenga fecha. La que decide es la reserva, en funciones, con la misma regla; esto sólo evita
+     * mostrar un formulario que no va a andar. Es estático por lo mismo que seEdita().
+     */
+    public static function seReserva(
+        EstadoFuncion $estado,
+        ?DateTimeImmutable $fechaHora,
+        DateTimeImmutable $ahora = new DateTimeImmutable(),
+    ): bool {
+        if (!in_array($estado, [EstadoFuncion::EnVotacionTitulos, EstadoFuncion::EnAcuerdoFecha, EstadoFuncion::Programada], true)) {
+            return false;
+        }
+
+        return $fechaHora === null || $fechaHora > $ahora;
+    }
+
+    /**
      * Si el organizador puede cancelar la función (E3-11.4): en votación o programada, mientras
      * todavía no se dio. Una programada cuya fecha ya pasó ya se proyectó, aunque nada la haya
      * pasado a finalizada.

@@ -20,6 +20,9 @@ return static function (Router $router): void {
     $router->get('/reservar/{id}', [Reservas::class, 'formulario'], Rol::Espectador);
     $router->post('/reservar/{id}', [Reservas::class, 'reservar'], Rol::Espectador);
     $router->get('/reservas/{id}', [Reservas::class, 'confirmada'], Rol::Espectador);
+    // La cancelación del espectador, con una pantalla que la confirma antes (E4-01.5).
+    $router->get('/reservas/{id}/cancelar', [Reservas::class, 'confirmarCancelacion'], Rol::Espectador);
+    $router->post('/reservas/{id}/cancelar', [Reservas::class, 'cancelar'], Rol::Espectador);
 
     // Para comprobar que los otros subsistemas llegan hasta acá con su token.
     $router->interna('GET', '/interno/estado', [EstadoInterno::class, 'mostrar'], ['cuentas', 'programacion']);

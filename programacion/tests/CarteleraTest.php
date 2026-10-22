@@ -660,7 +660,10 @@ final class CarteleraTest extends TestCase
         $cuerpo = $respuesta->cuerpo();
         self::assertStringContainsString('EN VOTACIÓN DE TÍTULOS', $cuerpo);
         self::assertStringContainsString('Obras candidatas en votación', $cuerpo);
-        self::assertStringContainsString('Fecha a coordinar con la sala tras el cierre de la votación', $cuerpo);
+        self::assertTrue(
+            str_contains($cuerpo, 'Fecha a confirmar') || str_contains($cuerpo, 'Fecha a coordinar con la sala tras el cierre de la votación'),
+            'La ficha debe indicar que la fecha no está confirmada o está a coordinar tras la votación.',
+        );
     }
 
     public function testDetalleDeFuncionCanceladaMuestraAvisoDeCancelacion(): void

@@ -314,23 +314,17 @@ final class FuncionesDelOrganizador extends Controlador
             throw ExcepcionHttp::noEncontrada();
         }
 
-        $detalle = $this->servicio->detalle($id);
-        $esPropia = $detalle->sala->organizadorId !== null && $detalle->sala->organizadorId === $organizador->id;
-        if (!$esPropia) {
-            throw ExcepcionHttp::noEncontrada();
-        }
-
-        $obraPrincipal = $detalle->obras[0] ?? null;
-        $titulo = $obraPrincipal?->titulo ?? 'Función en acuerdo';
+        $funcion = $this->servicio->paraProponerFranjas($organizador, $id);
+        $titulo = $funcion->titulos[0] ?? 'Función en acuerdo';
 
         return $this->vista('proponer_franjas.html.twig', [
             'funcion' => [
-                'id' => $detalle->id,
+                'id' => $funcion->id,
                 'titulo' => $titulo,
-                'cupo' => $detalle->cupo,
-                'precio' => $detalle->precioBase,
-                'sala' => ['nombre' => $detalle->sala->nombre, 'localidad' => $detalle->sala->localidad],
-                'obras' => $detalle->obras,
+                'cupo' => $funcion->cupo,
+                'precio' => $funcion->precioBase,
+                'sala' => ['nombre' => $funcion->salaNombre],
+                'obras' => array_map(static fn (string $t) => ['titulo' => $t], $funcion->titulos),
             ],
             'accion' => "/organizador/funciones/{$id}/proponer-franjas",
             'valores' => [

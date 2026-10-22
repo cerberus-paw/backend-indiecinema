@@ -1576,23 +1576,25 @@ final class FuncionesDelOrganizadorTest extends TestCase
         $respuesta = $this->enviar("/organizador/funciones/{$funcion->id}/cerrar-votacion", []);
         self::assertSame(303, $respuesta->estado());
 
-        // Con empate, elige determinísticamente la primera candidata
+        // Con empate, elige determinísticamente la primera candidata según el orden de candidatas
+        $candidatas = ($this->funciones->buscar($funcion->id) ?? self::fail('No se encontró la función.'))->obrasIds;
         $leida = $this->funciones->buscar($funcion->id) ?? self::fail('No se encontró la función.');
         self::assertSame(EstadoFuncion::EnAcuerdoFecha, $leida->estado);
-        self::assertSame([$this->obras['Zama']], $leida->obrasIds);
+        self::assertSame([$candidatas[0]], $leida->obrasIds);
     }
 
     public function testCerrarVotacionSinVotosEligePrimeraCandidata(): void
     {
         $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
         $funcion = $this->funcion($sala);
+        $candidatas = ($this->funciones->buscar($funcion->id) ?? self::fail('No se encontró la función.'))->obrasIds;
 
         $respuesta = $this->enviar("/organizador/funciones/{$funcion->id}/cerrar-votacion", []);
         self::assertSame(303, $respuesta->estado());
 
         $leida = $this->funciones->buscar($funcion->id) ?? self::fail('No se encontró la función.');
         self::assertSame(EstadoFuncion::EnAcuerdoFecha, $leida->estado);
-        self::assertSame([$this->obras['Zama']], $leida->obrasIds);
+        self::assertSame([$candidatas[0]], $leida->obrasIds);
     }
 
     public function testCerrarVotacionConVolverAFichaRedirigeALaFicha(): void

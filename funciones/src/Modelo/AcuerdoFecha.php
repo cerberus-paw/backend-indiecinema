@@ -60,6 +60,21 @@ final class AcuerdoFecha
         return $lider !== null && $lider->votos >= $this->minimoAsistentes;
     }
 
+    public function franjaGanadora(): ?FranjaHoraria
+    {
+        if ($this->franjaGanadoraId === null) {
+            return null;
+        }
+
+        foreach ($this->franjas as $franja) {
+            if ($franja->id === $this->franjaGanadoraId) {
+                return $franja;
+            }
+        }
+
+        return null;
+    }
+
     /**
      * @return array<string, mixed>
      */
@@ -72,6 +87,7 @@ final class AcuerdoFecha
             'estado' => $this->estado->value,
             'estado_etiqueta' => $this->estado->etiqueta(),
             'franja_ganadora_id' => $this->franjaGanadoraId,
+            'franja_ganadora' => $this->franjaGanadora()?->paraJson(),
             'alcanzo_minimo' => $this->alcanzoMinimo(),
             'creado_en' => $this->creadoEn?->format('Y-m-d H:i:s'),
             'cerrado_en' => $this->cerradoEn?->format('Y-m-d H:i:s'),

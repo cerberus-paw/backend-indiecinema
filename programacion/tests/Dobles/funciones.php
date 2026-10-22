@@ -80,6 +80,12 @@ if ($metodo === 'POST' && preg_match('#^/interno/acuerdos/([^/]+)/confirmar$#', 
         'id' => $matches[1],
         'estado' => 'confirmado',
         'franja_ganadora_id' => 'franja-mock-0',
+        'franja_ganadora' => [
+            'id' => 'franja-mock-0',
+            'inicio' => '2026-10-25 20:00:00',
+            'fin' => '2026-10-25 22:30:00',
+            'votos' => 2,
+        ],
     ]);
 
     return;

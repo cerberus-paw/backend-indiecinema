@@ -57,6 +57,8 @@ return static function (Router $router): void {
     // El organizador propone franjas y mínimo para el acuerdo de fecha (E3-13.2 / IC-154).
     $router->post('/organizador/funciones/{id}/acuerdo', [FuncionesDelOrganizador::class, 'proponerAcuerdo'], Rol::Organizador);
     $router->post('/organizador/funciones/{id}/proponer-acuerdo', [FuncionesDelOrganizador::class, 'proponerAcuerdo'], Rol::Organizador);
+    // El organizador confirma la franja ganadora cuando alcanza el mínimo (E3-13.4 / IC-156).
+    $router->post('/organizador/funciones/{id}/confirmar-acuerdo', [FuncionesDelOrganizador::class, 'confirmarAcuerdo'], Rol::Organizador);
     // La bandeja de solicitudes de sala del administrador: aprobar una habilita la sala y le da el
     // rol de organizador a quien la mandó. Desde una aprobada, la sala se retira o se vuelve a
     // publicar.

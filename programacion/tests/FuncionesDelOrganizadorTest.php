@@ -1733,5 +1733,52 @@ final class FuncionesDelOrganizadorTest extends TestCase
 
         self::assertSame(404, $respuesta->estado());
     }
+
+    /**
+     * Criterio E3-13.4: Si la franja ganadora alcanza el mínimo, la función pasa a programada con esa fecha.
+     */
+    public function testConfirmarAcuerdoSiAlcanzaMinimoPasaAProgramadaConEsaFecha(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $funcion = $this->funcion($sala);
+        $this->enviar("/organizador/funciones/{$funcion->id}/cerrar-votacion", []);
+
+        self::assertSame('en_acuerdo_fecha', $this->base->valor('SELECT estado FROM funcion WHERE id = ?', [$funcion->id]));
+
+        // El organizador confirma la franja ganadora
+        $respuesta = $this->enviar("/organizador/funciones/{$funcion->id}/confirmar-acuerdo", ['volver' => 'ficha']);
+
+        self::assertSame(303, $respuesta->estado());
+        self::assertSame("/cartelera/{$funcion->id}?guardada=1", $respuesta->cabecera('Location'));
+
+        // La función ahora está programada y con la fecha fijada
+        $fila = $this->base->fila('SELECT estado, fecha_hora FROM funcion WHERE id = ?', [$funcion->id]) ?? self::fail();
+        self::assertSame('programada', $fila['estado']);
+        self::assertSame('2026-10-25 20:00:00', $fila['fecha_hora']);
+
+        // La cartelera pública ahora muestra la función como programada
+        $cartelera = $this->pedir('GET', "/cartelera/{$funcion->id}")->cuerpo();
+        self::assertStringContainsStringIgnoringCase('programada', $cartelera);
+        self::assertStringContainsString('25 oct', $cartelera);
+    }
+
+    public function testConfirmarAcuerdoRechazaFuncionEnOtroEstado(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $funcion = $this->funcion($sala); // está en_votacion_titulos
+
+        $respuesta = $this->enviar("/organizador/funciones/{$funcion->id}/confirmar-acuerdo", []);
+        self::assertSame(404, $respuesta->estado());
+    }
+
+    public function testConfirmarAcuerdoRechazaOrganizadorAjeno(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $funcion = $this->funcion($sala);
+        $this->enviar("/organizador/funciones/{$funcion->id}/cerrar-votacion", []);
+
+        $respuesta = $this->enviar("/organizador/funciones/{$funcion->id}/confirmar-acuerdo", [], usuario: self::OTRO_ORGANIZADOR);
+        self::assertSame(404, $respuesta->estado());
+    }
 }
 

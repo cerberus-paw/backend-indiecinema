@@ -78,6 +78,9 @@ final class MigracionesTest extends TestCase
     public function testLasMigracionesSeAplicanDesdeCeroYCreanLasTablas(): void
     {
         self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM reserva'));
+        self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM acuerdo_fecha'));
+        self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM acuerdo_franja'));
+        self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM voto_acuerdo'));
     }
 
     public function testLaReservaQuedaGuardadaConfirmadaYConSusValores(): void
@@ -171,4 +174,131 @@ final class MigracionesTest extends TestCase
             [Uuid::nuevo(), 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 1, '3500.00', '2026-10-21 18:30:00'],
         ));
     }
+
+    public function testUnAcuerdoDeFechaSeGuardaAbiertoYConSusFranjas(): void
+    {
+        $acuerdoId = Uuid::nuevo();
+        $funcionId = Uuid::nuevo();
+        $this->base->ejecutar(
+            'INSERT INTO acuerdo_fecha (id, funcion_id, minimo_asistentes, creado_en) VALUES (?, ?, ?, ?)',
+            [$acuerdoId, $funcionId, 20, '2026-10-22 10:00:00'],
+        );
+
+        $franja1Id = Uuid::nuevo();
+        $franja2Id = Uuid::nuevo();
+        $this->base->ejecutar(
+            'INSERT INTO acuerdo_franja (id, acuerdo_id, fecha_hora_inicio, fecha_hora_fin, creada_en) VALUES (?, ?, ?, ?, ?)',
+            [$franja1Id, $acuerdoId, '2026-10-25 20:00:00', '2026-10-25 22:30:00', '2026-10-22 10:00:00'],
+        );
+        $this->base->ejecutar(
+            'INSERT INTO acuerdo_franja (id, acuerdo_id, fecha_hora_inicio, fecha_hora_fin, creada_en) VALUES (?, ?, ?, ?, ?)',
+            [$franja2Id, $acuerdoId, '2026-10-26 21:00:00', null, '2026-10-22 10:00:00'],
+        );
+
+        $guardado = $this->base->fila('SELECT * FROM acuerdo_fecha WHERE id = ?', [$acuerdoId]);
+        self::assertNotNull($guardado);
+        self::assertSame('abierto', $guardado['estado']);
+        self::assertSame(20, $guardado['minimo_asistentes']);
+        self::assertNull($guardado['franja_ganadora_id']);
+
+        self::assertSame(2, $this->base->valor('SELECT COUNT(*) FROM acuerdo_franja WHERE acuerdo_id = ?', [$acuerdoId]));
+    }
+
+    public function testUnUsuarioTieneComoMaximoUnVotoPorFuncion(): void
+    {
+        $acuerdoId = Uuid::nuevo();
+        $funcionId = Uuid::nuevo();
+        $this->base->ejecutar(
+            'INSERT INTO acuerdo_fecha (id, funcion_id, minimo_asistentes, creado_en) VALUES (?, ?, ?, ?)',
+            [$acuerdoId, $funcionId, 15, '2026-10-22 10:00:00'],
+        );
+
+        $franja1Id = Uuid::nuevo();
+        $franja2Id = Uuid::nuevo();
+        $this->base->ejecutar(
+            'INSERT INTO acuerdo_franja (id, acuerdo_id, fecha_hora_inicio, creada_en) VALUES (?, ?, ?, ?)',
+            [$franja1Id, $acuerdoId, '2026-10-25 20:00:00', '2026-10-22 10:00:00'],
+        );
+        $this->base->ejecutar(
+            'INSERT INTO acuerdo_franja (id, acuerdo_id, fecha_hora_inicio, creada_en) VALUES (?, ?, ?, ?)',
+            [$franja2Id, $acuerdoId, '2026-10-26 20:00:00', '2026-10-22 10:00:00'],
+        );
+
+        $usuarioId = Uuid::nuevo();
+        // Primer voto: éxito
+        $this->base->ejecutar(
+            'INSERT INTO voto_acuerdo (id, acuerdo_id, funcion_id, franja_id, usuario_id, creado_en) VALUES (?, ?, ?, ?, ?, ?)',
+            [Uuid::nuevo(), $acuerdoId, $funcionId, $franja1Id, $usuarioId, '2026-10-22 10:05:00'],
+        );
+
+        // Segundo voto del mismo usuario para la misma función: la base lo rechaza por clave única
+        $this->assertRechaza(self::REPETIDO, fn () => $this->base->ejecutar(
+            'INSERT INTO voto_acuerdo (id, acuerdo_id, funcion_id, franja_id, usuario_id, creado_en) VALUES (?, ?, ?, ?, ?, ?)',
+            [Uuid::nuevo(), $acuerdoId, $funcionId, $franja2Id, $usuarioId, '2026-10-22 10:10:00'],
+        ));
+
+        // Pero sí puede cambiar su voto actualizando la franja:
+        $this->base->ejecutar(
+            'UPDATE voto_acuerdo SET franja_id = ? WHERE acuerdo_id = ? AND usuario_id = ?',
+            [$franja2Id, $acuerdoId, $usuarioId],
+        );
+        self::assertSame($franja2Id, $this->base->valor(
+            'SELECT franja_id FROM voto_acuerdo WHERE acuerdo_id = ? AND usuario_id = ?',
+            [$acuerdoId, $usuarioId],
+        ));
+    }
+
+    public function testLaBaseRechazaUnMinimoDeAsistentesCero(): void
+    {
+        $this->assertRechaza(self::RESTRICCION_CHECK, fn () => $this->base->ejecutar(
+            'INSERT INTO acuerdo_fecha (id, funcion_id, minimo_asistentes, creado_en) VALUES (?, ?, ?, ?)',
+            [Uuid::nuevo(), Uuid::nuevo(), 0, '2026-10-22 10:00:00'],
+        ));
+    }
+
+    public function testBorrarUnAcuerdoBorraSusFranjasYVotosEnCascada(): void
+    {
+        $acuerdoId = Uuid::nuevo();
+        $funcionId = Uuid::nuevo();
+        $this->base->ejecutar(
+            'INSERT INTO acuerdo_fecha (id, funcion_id, minimo_asistentes, creado_en) VALUES (?, ?, ?, ?)',
+            [$acuerdoId, $funcionId, 10, '2026-10-22 10:00:00'],
+        );
+
+        $franjaId = Uuid::nuevo();
+        $this->base->ejecutar(
+            'INSERT INTO acuerdo_franja (id, acuerdo_id, fecha_hora_inicio, creada_en) VALUES (?, ?, ?, ?)',
+            [$franjaId, $acuerdoId, '2026-10-25 20:00:00', '2026-10-22 10:00:00'],
+        );
+
+        $this->base->ejecutar(
+            'INSERT INTO voto_acuerdo (id, acuerdo_id, funcion_id, franja_id, usuario_id, creado_en) VALUES (?, ?, ?, ?, ?, ?)',
+            [Uuid::nuevo(), $acuerdoId, $funcionId, $franjaId, Uuid::nuevo(), '2026-10-22 10:05:00'],
+        );
+
+        $this->base->ejecutar('DELETE FROM acuerdo_fecha WHERE id = ?', [$acuerdoId]);
+
+        self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM acuerdo_franja WHERE acuerdo_id = ?', [$acuerdoId]));
+        self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM voto_acuerdo WHERE acuerdo_id = ?', [$acuerdoId]));
+    }
+
+    public function testElEstadoDelAcuerdoPasaPorLosDelCicloDeVida(): void
+    {
+        $acuerdoId = Uuid::nuevo();
+        $this->base->ejecutar(
+            'INSERT INTO acuerdo_fecha (id, funcion_id, minimo_asistentes, creado_en) VALUES (?, ?, ?, ?)',
+            [$acuerdoId, Uuid::nuevo(), 10, '2026-10-22 10:00:00'],
+        );
+
+        foreach (['confirmado', 'sin_minimo', 'cancelado'] as $estado) {
+            $this->base->ejecutar('UPDATE acuerdo_fecha SET estado = ? WHERE id = ?', [$estado, $acuerdoId]);
+            self::assertSame($estado, $this->base->valor('SELECT estado FROM acuerdo_fecha WHERE id = ?', [$acuerdoId]));
+        }
+
+        $this->assertRechaza(self::VALOR_INVALIDO, fn () => $this->base->ejecutar(
+            'UPDATE acuerdo_fecha SET estado = ? WHERE id = ?',
+            ['estado_invalido', $acuerdoId],
+        ));
+    }
 }
+

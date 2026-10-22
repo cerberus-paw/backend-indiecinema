@@ -254,11 +254,21 @@ final class FuncionesDelOrganizador extends Controlador
 
         if (is_array($franjasEntrada)) {
             foreach ($franjasEntrada as $f) {
-                if (is_array($f) && !empty($f['fecha_hora_inicio'])) {
-                    $franjas[] = [
-                        'fecha_hora_inicio' => (string) $f['fecha_hora_inicio'],
-                        'fecha_hora_fin' => !empty($f['fecha_hora_fin']) ? (string) $f['fecha_hora_fin'] : null,
-                    ];
+                if (is_array($f)) {
+                    if (!empty($f['fecha_hora_inicio'])) {
+                        $franjas[] = [
+                            'fecha_hora_inicio' => (string) $f['fecha_hora_inicio'],
+                            'fecha_hora_fin' => !empty($f['fecha_hora_fin']) ? (string) $f['fecha_hora_fin'] : null,
+                        ];
+                    } elseif (!empty($f['fecha']) && !empty($f['hora_inicio'])) {
+                        $fechaStr = trim((string) $f['fecha']);
+                        $inicioHora = trim((string) $f['hora_inicio']);
+                        $finHora = !empty($f['hora_fin']) ? trim((string) $f['hora_fin']) : null;
+                        $franjas[] = [
+                            'fecha_hora_inicio' => "{$fechaStr} {$inicioHora}:00",
+                            'fecha_hora_fin' => $finHora !== null ? "{$fechaStr} {$finHora}:00" : null,
+                        ];
+                    }
                 }
             }
         }
@@ -291,6 +301,43 @@ final class FuncionesDelOrganizador extends Controlador
         }
 
         return $this->redirigir("/cartelera/{$id}?acuerdo_propuesto=1");
+    }
+
+    /**
+     * Muestra el formulario para proponer nuevas franjas horarias (E3-13.2 / IC-154, E3-13.5 / IC-157).
+     */
+    public function mostrarProponerFranjas(Peticion $peticion): Respuesta
+    {
+        $organizador = self::organizador($peticion);
+        $id = (string) $peticion->parametro('id');
+        if (!Uuid::esValido($id)) {
+            throw ExcepcionHttp::noEncontrada();
+        }
+
+        $detalle = $this->servicio->detalle($id);
+        $esPropia = $detalle->sala->organizadorId !== null && $detalle->sala->organizadorId === $organizador->id;
+        if (!$esPropia) {
+            throw ExcepcionHttp::noEncontrada();
+        }
+
+        $obraPrincipal = $detalle->obras[0] ?? null;
+        $titulo = $obraPrincipal?->titulo ?? 'Función en acuerdo';
+
+        return $this->vista('proponer_franjas.html.twig', [
+            'funcion' => [
+                'id' => $detalle->id,
+                'titulo' => $titulo,
+                'cupo' => $detalle->cupo,
+                'precio' => $detalle->precioBase,
+                'sala' => ['nombre' => $detalle->sala->nombre, 'localidad' => $detalle->sala->localidad],
+                'obras' => $detalle->obras,
+            ],
+            'accion' => "/organizador/funciones/{$id}/proponer-franjas",
+            'valores' => [
+                'minimo_asistentes' => 10,
+            ],
+            'errores' => [],
+        ]);
     }
 
     /**

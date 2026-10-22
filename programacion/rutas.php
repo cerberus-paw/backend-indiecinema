@@ -62,7 +62,9 @@ return static function (Router $router): void {
     // El organizador cierra el acuerdo sin alcanzar el mínimo de asistentes (E3-13.5 / IC-157).
     $router->post('/organizador/funciones/{id}/cerrar-sin-minimo', [FuncionesDelOrganizador::class, 'cerrarSinMinimo'], Rol::Organizador);
     $router->post('/organizador/funciones/{id}/proponer-franjas', [FuncionesDelOrganizador::class, 'proponerAcuerdo'], Rol::Organizador);
-    $router->get('/organizador/funciones/{id}/proponer-franjas', [FuncionesDelOrganizador::class, 'editar'], Rol::Organizador);
+    $router->get('/organizador/funciones/{id}/proponer-franjas', [FuncionesDelOrganizador::class, 'mostrarProponerFranjas'], Rol::Organizador);
+    $router->get('/organizador/funciones/{id}/franjas', [FuncionesDelOrganizador::class, 'mostrarProponerFranjas'], Rol::Organizador);
+    $router->post('/organizador/funciones/{id}/franjas', [FuncionesDelOrganizador::class, 'proponerAcuerdo'], Rol::Organizador);
     // La bandeja de solicitudes de sala del administrador: aprobar una habilita la sala y le da el
     // rol de organizador a quien la mandó. Desde una aprobada, la sala se retira o se vuelve a
     // publicar.

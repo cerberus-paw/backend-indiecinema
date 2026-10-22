@@ -1079,5 +1079,58 @@ final class CarteleraTest extends TestCase
         self::assertSame(303, $respuesta->estado());
         self::assertStringContainsString('error_voto=', $respuesta->cabecera('Location') ?? '');
     }
+
+    /**
+     * Criterio E3-13.6: La ficha muestra las franjas, los votos y el estado del acuerdo.
+     */
+    public function testFichaDeFuncionEnAcuerdoMuestraFranjasVotosYEstado(): void
+    {
+        $this->cargarDatosDePrueba();
+        $obra = $this->base->fila('SELECT id, titulo FROM obra LIMIT 1') ?? self::fail();
+        $sala = $this->base->fila('SELECT id FROM sala LIMIT 1') ?? self::fail();
+        $funcionId = Uuid::nuevo();
+
+        $this->base->ejecutar(
+            "INSERT INTO funcion (id, sala_id, estado, precio_base, cupo) VALUES (?, ?, 'en_acuerdo_fecha', 2000, 50)",
+            [$funcionId, $sala['id']],
+        );
+        $this->base->ejecutar(
+            "INSERT INTO funcion_obra (funcion_id, obra_id, estado) VALUES (?, ?, 'elegida')",
+            [$funcionId, $obra['id']],
+        );
+
+        // 1. Petición HTML sin usuario
+        $respuestaHtml = $this->pedir("/cartelera/{$funcionId}");
+        self::assertSame(200, $respuestaHtml->estado());
+        $cuerpo = $respuestaHtml->cuerpo();
+        self::assertStringContainsStringIgnoringCase('acuerdo de fecha', $cuerpo);
+        self::assertStringContainsString($obra['titulo'], $cuerpo);
+        self::assertStringContainsString('25 de octubre', $cuerpo);
+
+        // 2. Petición HTML con espectador logueado que tiene voto emitido
+        $espectadorId = Uuid::nuevo();
+        $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion(), new Log('programacion', $this->salidaDelLog));
+        $respuestaUsuario = $aplicacion->atender(new Peticion(
+            'GET',
+            "/cartelera/{$funcionId}",
+            [],
+            [],
+            ['X-Nginx-Secreto' => self::SECRETO, 'X-Usuario-Id' => $espectadorId, 'X-Rol' => 'espectador'],
+        ));
+        self::assertSame(200, $respuestaUsuario->estado());
+        self::assertStringContainsString('Marcaste «Me sirve»', $respuestaUsuario->cuerpo());
+
+        // 3. Petición JSON
+        $respuestaJson = $this->pedir("/cartelera/{$funcionId}", [], ['Accept' => 'application/json']);
+        self::assertSame(200, $respuestaJson->estado());
+        $datos = self::json($respuestaJson);
+        self::assertSame('en_acuerdo_fecha', $datos['funcion']['estado']);
+        self::assertSame(2, $datos['funcion']['minimo_asistentes']);
+        self::assertCount(2, $datos['funcion']['franjas']);
+        self::assertSame('franja-mock-0', $datos['funcion']['franjas'][0]['id']);
+        self::assertSame(2, $datos['funcion']['franjas'][0]['votos']);
+        self::assertSame('franja-mock-1', $datos['funcion']['franjas'][1]['id']);
+        self::assertSame(0, $datos['funcion']['franjas'][1]['votos']);
+    }
 }
 

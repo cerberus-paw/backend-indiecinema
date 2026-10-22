@@ -31,6 +31,7 @@ return static function (Router $router): void {
     // La ficha de una función programada con sus obras y su sala.
     $router->get('/cartelera/{id}', [Cartelera::class, 'detalle']);
     $router->post('/cartelera/{id}/votar', [Cartelera::class, 'votar'], Rol::Espectador);
+    $router->post('/cartelera/{id}/votar-franja', [Cartelera::class, 'votar'], Rol::Espectador);
     $router->post('/cartelera/{id}/acuerdo/votar', [Cartelera::class, 'votar'], Rol::Espectador);
 
     // La solicitud para abrir una sala (E2): la manda el espectador que quiere ser organizador y

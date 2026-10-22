@@ -40,6 +40,7 @@ final class ServicioDeCartelera
         private readonly RepositorioDeGeneros $generos,
         private readonly RepositorioDeVotos $votos,
         Configuracion $configuracion,
+        private readonly ?AcuerdosDeFunciones $acuerdos = null,
     ) {
         $porPagina = $configuracion->obtener('cartelera.por_pagina', self::POR_PAGINA);
         if (!is_int($porPagina) || $porPagina < 1 || $porPagina > self::MAXIMO_POR_PAGINA) {
@@ -167,5 +168,40 @@ final class ServicioDeCartelera
         }
 
         $this->votos->votar($funcionId, $usuarioId, $obraId);
+    }
+
+    /**
+     * Consulta los datos del acuerdo de fecha de una función (E3-13.6).
+     *
+     * @return array<string, mixed>|null
+     */
+    public function acuerdoDeFecha(string $funcionId, ?string $usuarioId = null): ?array
+    {
+        return $this->acuerdos?->obtenerPorFuncion($funcionId, $usuarioId);
+    }
+
+    /**
+     * Registra o cambia el voto del espectador por una franja horaria en una función en acuerdo de fecha (E3-13.3 / IC-155).
+     *
+     * @throws ReglaIncumplida si la función no está en acuerdo de fecha o el acuerdo no está disponible
+     */
+    public function votarFranjaAcuerdo(string $funcionId, string $usuarioId, string $franjaId): void
+    {
+        $detalle = $this->detalle($funcionId);
+
+        if ($detalle->estado !== EstadoFuncion::EnAcuerdoFecha) {
+            throw new ReglaIncumplida('El acuerdo de fecha para esta función no está abierto.');
+        }
+
+        if ($this->acuerdos === null) {
+            throw new \LogicException('No se configuró el cliente de acuerdos de funciones.');
+        }
+
+        $acuerdo = $this->acuerdoDeFecha($funcionId, $usuarioId);
+        if ($acuerdo === null || ($acuerdo['estado'] ?? '') !== 'abierto') {
+            throw new ReglaIncumplida('El acuerdo de fecha no está disponible o ya fue cerrado.');
+        }
+
+        $this->acuerdos->votar((string) $acuerdo['id'], $franjaId, $usuarioId);
     }
 }

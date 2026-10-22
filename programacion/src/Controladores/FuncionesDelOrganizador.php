@@ -326,6 +326,37 @@ final class FuncionesDelOrganizador extends Controlador
     }
 
     /**
+     * El organizador cierra el acuerdo sin alcanzar el mínimo de asistentes (E3-13.5 / IC-157).
+     */
+    public function cerrarSinMinimo(Peticion $peticion): Respuesta
+    {
+        $organizador = self::organizador($peticion);
+        $id = (string) $peticion->parametro('id');
+        if (!Uuid::esValido($id)) {
+            throw ExcepcionHttp::noEncontrada();
+        }
+
+        try {
+            $resultado = $this->servicio->cerrarAcuerdoSinMinimo($organizador, $id);
+        } catch (ReglaIncumplida $regla) {
+            if ($peticion->cabecera('Accept') === 'application/json' || $peticion->cabecera('Content-Type') === 'application/json') {
+                return $this->json(['error' => $regla->getMessage()], 422);
+            }
+
+            return $this->redirigir("/cartelera/{$id}?error_voto=" . rawurlencode($regla->getMessage()));
+        }
+
+        if ($peticion->cabecera('Accept') === 'application/json' || $peticion->cabecera('Content-Type') === 'application/json') {
+            return $this->json([
+                'ok' => true,
+                'estado_acuerdo' => 'sin_minimo',
+            ]);
+        }
+
+        return $this->redirigir("/cartelera/{$id}");
+    }
+
+    /**
      * @param list<Sala>                                                                                        $salas
      * @param list<Obra>                                                                                        $obras
      * @param array{formulario?: FormularioDeFuncion, valores?: array<string, mixed>, error_general?: ?string} $extra

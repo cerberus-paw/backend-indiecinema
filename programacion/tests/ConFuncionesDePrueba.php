@@ -17,6 +17,7 @@ trait ConFuncionesDePrueba
 
     public static function setUpBeforeClassFunciones(): void
     {
+        @unlink(sys_get_temp_dir() . '/acuerdo_estado_global.txt');
         $socket = stream_socket_server('tcp://127.0.0.1:0');
         $puerto = (int) substr((string) strrchr((string) stream_socket_get_name($socket, false), ':'), 1);
         fclose($socket);
@@ -45,6 +46,7 @@ trait ConFuncionesDePrueba
 
     public static function tearDownAfterClassFunciones(): void
     {
+        @unlink(sys_get_temp_dir() . '/acuerdo_estado_global.txt');
         if (self::$servidorFunciones !== null) {
             proc_terminate(self::$servidorFunciones);
             proc_close(self::$servidorFunciones);

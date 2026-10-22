@@ -122,6 +122,7 @@ final class Cartelera extends Controlador
         $conteoVotos = $this->servicio->conteoDeVotos($detalle->id);
 
         $datosFuncion = self::datosDeDetalle($detalle, $editable, $cancelable, $cerrable);
+        $datosFuncion['es_organizador'] = $esPropia;
         $votoFranja = null;
         $conteoVotosFranjas = [];
         $acuerdo = null;
@@ -197,6 +198,7 @@ final class Cartelera extends Controlador
                 'reservable' => Funcion::seReserva($detalle->estado, $detalle->fechaHora),
             ],
             'acuerdo_fecha' => $acuerdo,
+            'es_organizador' => $esPropia,
             'voto_usuario' => $votoActual,
             'voto_franja' => $votoFranja,
             'conteo_votos' => $conteoVotos,

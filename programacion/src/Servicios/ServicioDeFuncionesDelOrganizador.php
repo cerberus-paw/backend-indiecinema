@@ -320,6 +320,34 @@ final class ServicioDeFuncionesDelOrganizador
     }
 
     /**
+     * Cierra el acuerdo de fecha cuando no alcanza el mínimo de asistentes (E3-13.5 / IC-157).
+     * La función NO se programa y permanece disponible para que el organizador decida si propone nuevas franjas o la cancela.
+     *
+     * @return array<string, mixed>
+     *
+     * @throws ExcepcionHttp 404 si la función no es del organizador o no está en acuerdo de fecha
+     * @throws ReglaIncumplida si no hay acuerdo activo
+     */
+    public function cerrarAcuerdoSinMinimo(Usuario $organizador, string $id): array
+    {
+        $funcion = $this->propia($organizador, $id);
+        if ($funcion->estado !== EstadoFuncion::EnAcuerdoFecha) {
+            throw ExcepcionHttp::noEncontrada();
+        }
+
+        if ($this->acuerdos === null) {
+            throw new LogicException('No se configuró el cliente de acuerdos de funciones.');
+        }
+
+        $acuerdo = $this->acuerdos->obtenerPorFuncion($funcion->id);
+        if ($acuerdo === null) {
+            throw new ReglaIncumplida('No hay acuerdo de fecha activo para esta función.');
+        }
+
+        return $this->acuerdos->cerrarSinMinimo((string) $acuerdo['id']);
+    }
+
+    /**
      * La función, si es de una sala del organizador. Si no existe o es de otro, la respuesta es
      * 404: así un organizador no puede averiguar qué ids existen.
      *

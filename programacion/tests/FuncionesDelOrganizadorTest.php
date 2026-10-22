@@ -63,6 +63,7 @@ final class FuncionesDelOrganizadorTest extends TestCase
 
     protected function setUp(): void
     {
+        @unlink(sys_get_temp_dir() . '/acuerdo_estado_global.txt');
         $this->configuracion = new Configuracion([
             'app' => ['subsistema' => 'programacion', 'entorno' => 'desarrollo'],
             'base' => self::baseDePruebas(),
@@ -86,6 +87,11 @@ final class FuncionesDelOrganizadorTest extends TestCase
             $obras->agregar($obra);
             $this->obras[$titulo] = $obra->id;
         }
+    }
+
+    protected function tearDown(): void
+    {
+        @unlink(sys_get_temp_dir() . '/acuerdo_estado_global.txt');
     }
 
     private function pedir(
@@ -1778,6 +1784,61 @@ final class FuncionesDelOrganizadorTest extends TestCase
         $this->enviar("/organizador/funciones/{$funcion->id}/cerrar-votacion", []);
 
         $respuesta = $this->enviar("/organizador/funciones/{$funcion->id}/confirmar-acuerdo", [], usuario: self::OTRO_ORGANIZADOR);
+        self::assertSame(404, $respuesta->estado());
+    }
+
+    /**
+     * Criterio E3-13.5: Si no alcanza el mínimo, la función no se programa y el organizador decide qué hacer.
+     */
+    public function testCerrarAcuerdoSinMinimoNoProgramaLaFuncionYPermiteDecidirAlOrganizador(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $funcion = $this->funcion($sala);
+        $this->enviar("/organizador/funciones/{$funcion->id}/cerrar-votacion", []);
+
+        self::assertSame('en_acuerdo_fecha', $this->base->valor('SELECT estado FROM funcion WHERE id = ?', [$funcion->id]));
+
+        // El organizador cierra el acuerdo sin alcanzar el quórum
+        $cierre = $this->enviar("/organizador/funciones/{$funcion->id}/cerrar-sin-minimo", []);
+        self::assertSame(303, $cierre->estado());
+
+        // La función NO pasa a programada; se mantiene en acuerdo de fecha sin fecha fijada
+        $fila = $this->base->fila('SELECT estado, fecha_hora FROM funcion WHERE id = ?', [$funcion->id]) ?? self::fail();
+        self::assertSame('en_acuerdo_fecha', $fila['estado']);
+        self::assertNull($fila['fecha_hora']);
+
+        // Ficha muestra el estado sin quórum y las opciones de decisión para el organizador
+        $fichaOrganizador = $this->pedir('GET', "/cartelera/{$funcion->id}")->cuerpo();
+        self::assertStringContainsString('No se alcanzó el quórum de asistentes requerido', $fichaOrganizador);
+        self::assertStringContainsString('Proponer nuevas franjas horarias', $fichaOrganizador);
+        self::assertStringContainsString('Cancelar función', $fichaOrganizador);
+
+        // Ficha pública para espectadores explica que no se programó
+        $fichaEspectador = $this->pedir('GET', "/cartelera/{$funcion->id}", usuario: null)->cuerpo();
+        self::assertStringContainsString('La función no se programa por falta de quórum', $fichaEspectador);
+
+        // El organizador decide cancelar la función
+        $cancelacion = $this->enviar("/organizador/funciones/{$funcion->id}/cancelar", []);
+        self::assertSame(303, $cancelacion->estado());
+        self::assertSame('cancelada', $this->base->valor('SELECT estado FROM funcion WHERE id = ?', [$funcion->id]));
+    }
+
+    public function testCerrarAcuerdoSinMinimoRechazaOrganizadorAjeno(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $funcion = $this->funcion($sala);
+        $this->enviar("/organizador/funciones/{$funcion->id}/cerrar-votacion", []);
+
+        $respuesta = $this->enviar("/organizador/funciones/{$funcion->id}/cerrar-sin-minimo", [], usuario: self::OTRO_ORGANIZADOR);
+        self::assertSame(404, $respuesta->estado());
+    }
+
+    public function testCerrarAcuerdoSinMinimoRechazaFuncionEnOtroEstado(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $funcion = $this->funcion($sala); // está en_votacion_titulos
+
+        $respuesta = $this->enviar("/organizador/funciones/{$funcion->id}/cerrar-sin-minimo", []);
         self::assertSame(404, $respuesta->estado());
     }
 }

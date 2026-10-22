@@ -39,6 +39,30 @@ final class TarjetaDeFuncionTest extends TestCase
         ], TarjetaDeFuncion::datos($funcion));
     }
 
+    public function testArmaLaTarjetaParaFuncionEnVotacion(): void
+    {
+        $funcion = new FuncionEnCartelera(
+            'f-votacion',
+            null,
+            2500.0,
+            's',
+            'Cine Club Areco',
+            'San Antonio de Areco',
+            [new ObraEnCartelera('a', 'Viaje a la Luna', null), new ObraEnCartelera('b', 'Metrópolis', 'afiche.jpg')],
+            \IndieCinema\Programacion\Modelo\EstadoFuncion::EnVotacionTitulos,
+        );
+
+        self::assertSame([
+            'id' => 'f-votacion',
+            'titulo' => 'Viaje a la Luna + Metrópolis',
+            'estado' => 'EN_VOTACION_TITULOS',
+            'precio' => '$ 2.500',
+            'sala' => 'Cine Club Areco',
+            'localidad' => 'San Antonio de Areco',
+            'fecha' => null,
+        ], TarjetaDeFuncion::datos($funcion));
+    }
+
     /**
      * @return iterable<string, array{float, string}>
      */

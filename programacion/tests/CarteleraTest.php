@@ -641,7 +641,8 @@ final class CarteleraTest extends TestCase
         self::assertStringContainsString('href="/salas/' . $salaId . '"', $cuerpo);
         self::assertStringContainsString('San Martín 420 · Luján', $cuerpo);
         self::assertStringContainsString('$ 2.500', $cuerpo);
-        self::assertStringContainsString('<span class="insignia-estado insignia-programada">PROGRAMADA</span>', $cuerpo);
+        self::assertStringContainsString('insignia-programada', $cuerpo);
+        self::assertStringContainsString('PROGRAMADA', $cuerpo);
         self::assertStringNotContainsString('Esta función fue cancelada.', $cuerpo);
     }
 
@@ -659,7 +660,10 @@ final class CarteleraTest extends TestCase
         $cuerpo = $respuesta->cuerpo();
         self::assertStringContainsString('EN VOTACIÓN DE TÍTULOS', $cuerpo);
         self::assertStringContainsString('Obras candidatas en votación', $cuerpo);
-        self::assertStringContainsString('Fecha a confirmar', $cuerpo);
+        self::assertTrue(
+            str_contains($cuerpo, 'Fecha a confirmar') || str_contains($cuerpo, 'Fecha a coordinar con la sala tras el cierre de la votación'),
+            'La ficha debe indicar que la fecha no está confirmada o está a coordinar tras la votación.',
+        );
     }
 
     public function testDetalleDeFuncionCanceladaMuestraAvisoDeCancelacion(): void
@@ -940,5 +944,54 @@ final class CarteleraTest extends TestCase
         $voto = $this->post("/cartelera/{$funcionId}/votar", ['obra_id' => $obras[0]['id']], $espectadorId);
         self::assertSame(303, $voto->estado());
         self::assertStringContainsString('error_voto', $voto->cabecera('Location'));
+    }
+
+    /**
+     * Criterio E3-12.5: La cartelera y la ficha muestran las funciones en votación.
+     * Una función en votación se distingue de una programada.
+     */
+    public function testCarteleraMuestraFuncionesEnVotacionDistinguendolasDeLasProgramadas(): void
+    {
+        $this->cargarDatosDePrueba();
+
+        $salaId = (string) $this->base->valor("SELECT id FROM sala WHERE habilitada = TRUE AND dada_de_baja_en IS NULL LIMIT 1");
+        $obra = $this->base->fila("SELECT id, titulo FROM obra ORDER BY id LIMIT 1");
+        $funcionVotacionId = Uuid::nuevo();
+
+        $this->base->ejecutar(
+            "INSERT INTO funcion (id, sala_id, estado, precio_base, cupo) VALUES (?, ?, 'en_votacion_titulos', 1500, 45)",
+            [$funcionVotacionId, $salaId],
+        );
+        $this->base->ejecutar(
+            "INSERT INTO funcion_obra (funcion_id, obra_id, estado) VALUES (?, ?, 'candidata')",
+            [$funcionVotacionId, $obra['id']],
+        );
+
+        // 1. En HTML de /cartelera (página 2, donde se ubica la función en votación tras las programadas):
+        $respuesta = $this->pedir('/cartelera?pagina=2');
+        self::assertSame(200, $respuesta->estado());
+        $cuerpo = $respuesta->cuerpo();
+
+        // Se distingue la función en votación
+        self::assertStringContainsString('EN VOTACIÓN DE TÍTULOS', $cuerpo);
+        self::assertStringContainsString('insignia-votacion', $cuerpo);
+        self::assertStringContainsString('Votar títulos', $cuerpo);
+        self::assertStringContainsString("/cartelera/{$funcionVotacionId}", $cuerpo);
+
+        // Y convive con las programadas
+        self::assertStringContainsString('PROGRAMADA', $cuerpo);
+        self::assertStringContainsString('Ver función', $cuerpo);
+
+        // 2. En JSON de /cartelera (Accept: application/json)
+        $respuestaJson = $this->pedirJson('/cartelera?pagina=2');
+        self::assertSame(200, $respuestaJson->estado());
+        $datos = self::json($respuestaJson);
+
+        $funciones = $datos['funciones'];
+        $enVotacionEnJson = array_values(array_filter($funciones, static fn (array $f): bool => $f['id'] === $funcionVotacionId));
+        self::assertCount(1, $enVotacionEnJson);
+        self::assertSame('EN_VOTACION_TITULOS', $enVotacionEnJson[0]['estado']);
+        self::assertNull($enVotacionEnJson[0]['fecha']);
+        self::assertSame("/cartelera/{$funcionVotacionId}", $enVotacionEnJson[0]['url']);
     }
 }

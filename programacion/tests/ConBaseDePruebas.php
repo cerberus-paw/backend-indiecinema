@@ -41,6 +41,7 @@ trait ConBaseDePruebas
     {
         $base = BaseDeDatos::conectar($configuracion);
         // Al revés de como se crean, para que ninguna quede apuntada por una clave foránea.
+        $base->ejecutar('SET FOREIGN_KEY_CHECKS = 0');
         $base->ejecutar('DROP TABLE IF EXISTS voto');
         $base->ejecutar('DROP TABLE IF EXISTS solicitud_sala');
         $base->ejecutar('DROP TABLE IF EXISTS funcion_obra');
@@ -49,6 +50,7 @@ trait ConBaseDePruebas
         $base->ejecutar('DROP TABLE IF EXISTS genero');
         $base->ejecutar('DROP TABLE IF EXISTS obra');
         $base->ejecutar('DROP TABLE IF EXISTS sala');
+        $base->ejecutar('SET FOREIGN_KEY_CHECKS = 1');
         foreach (glob(dirname(__DIR__) . '/migraciones/*.sql') ?: [] as $migracion) {
             $base->ejecutar((string) file_get_contents($migracion));
         }

@@ -17,12 +17,13 @@ final readonly class FuncionEnCartelera
      */
     public function __construct(
         public string $id,
-        public DateTimeImmutable $fechaHora,
+        public ?DateTimeImmutable $fechaHora,
         public float $precioBase,
         public string $salaId,
         public string $sala,
         public string $localidad,
         public array $obras,
+        public EstadoFuncion $estado = EstadoFuncion::Programada,
     ) {
     }
 }

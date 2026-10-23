@@ -154,12 +154,25 @@ final class Cartelera extends Controlador
         }
 
         $cuerpo = $peticion->cuerpo();
+        $franjaId = (string) ($cuerpo['franja_id'] ?? '');
         $obraId = (string) ($cuerpo['obra_id'] ?? '');
 
         try {
-            $this->servicio->votar($id, $usuario->id, $obraId);
+            if ($franjaId !== '') {
+                $this->servicio->votarFranjaAcuerdo($id, $usuario->id, $franjaId);
+            } else {
+                $this->servicio->votar($id, $usuario->id, $obraId);
+            }
         } catch (ReglaIncumplida $regla) {
+            if ($peticion->cabecera('Accept') === 'application/json' || $peticion->cabecera('Content-Type') === 'application/json') {
+                return $this->json(['error' => $regla->getMessage()], 422);
+            }
+
             return $this->redirigir("/cartelera/{$id}?error_voto=" . rawurlencode($regla->getMessage()));
+        }
+
+        if ($peticion->cabecera('Accept') === 'application/json' || $peticion->cabecera('Content-Type') === 'application/json') {
+            return $this->json(['ok' => true]);
         }
 
         return $this->redirigir("/cartelera/{$id}?votado=1");

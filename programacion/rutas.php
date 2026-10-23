@@ -31,6 +31,8 @@ return static function (Router $router): void {
     // La ficha de una función programada con sus obras y su sala.
     $router->get('/cartelera/{id}', [Cartelera::class, 'detalle']);
     $router->post('/cartelera/{id}/votar', [Cartelera::class, 'votar'], Rol::Espectador);
+    $router->post('/cartelera/{id}/votar-franja', [Cartelera::class, 'votar'], Rol::Espectador);
+    $router->post('/cartelera/{id}/acuerdo/votar', [Cartelera::class, 'votar'], Rol::Espectador);
 
     // La solicitud para abrir una sala (E2): la manda el espectador que quiere ser organizador y
     // el organizador que suma otra sala. Aprobarla habilita la sala y da el rol.
@@ -52,6 +54,9 @@ return static function (Router $router): void {
     $router->get('/organizador/funciones/{id}/cancelar', [FuncionesDelOrganizador::class, 'confirmarCancelacion'], Rol::Organizador);
     $router->post('/organizador/funciones/{id}/cancelar', [FuncionesDelOrganizador::class, 'cancelar'], Rol::Organizador);
     $router->post('/organizador/funciones/{id}/cerrar-votacion', [FuncionesDelOrganizador::class, 'cerrarVotacion'], Rol::Organizador);
+    // El organizador propone franjas y mínimo para el acuerdo de fecha (E3-13.2 / IC-154).
+    $router->post('/organizador/funciones/{id}/acuerdo', [FuncionesDelOrganizador::class, 'proponerAcuerdo'], Rol::Organizador);
+    $router->post('/organizador/funciones/{id}/proponer-acuerdo', [FuncionesDelOrganizador::class, 'proponerAcuerdo'], Rol::Organizador);
     // La bandeja de solicitudes de sala del administrador: aprobar una habilita la sala y le da el
     // rol de organizador a quien la mandó. Desde una aprobada, la sala se retira o se vuelve a
     // publicar.

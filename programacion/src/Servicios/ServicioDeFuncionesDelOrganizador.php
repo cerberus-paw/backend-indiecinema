@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace IndieCinema\Programacion\Servicios;
 
 use DateTimeImmutable;
+use LogicException;
 use IndieCinema\Nucleo\Http\ExcepcionHttp;
 use IndieCinema\Nucleo\Seguridad\Usuario;
 use IndieCinema\Programacion\Modelo\EstadoFuncion;
@@ -32,6 +33,7 @@ final class ServicioDeFuncionesDelOrganizador
         private readonly RepositorioDeSalas $salas,
         private readonly RepositorioDeObras $obras,
         private readonly RepositorioDeVotos $votos,
+        private readonly ?AcuerdosDeFunciones $acuerdos = null,
     ) {
     }
 
@@ -241,6 +243,123 @@ final class ServicioDeFuncionesDelOrganizador
         $this->funciones->guardar($funcion);
 
         return $funcion;
+    }
+
+    /**
+     * Obtiene la función del organizador para proponer o reproponer franjas horarias (E3-13.2 / IC-154, E3-13.5 / IC-157).
+     *
+     * @throws ExcepcionHttp 404 si la función no es del organizador o no está en acuerdo de fecha
+     */
+    public function paraProponerFranjas(Usuario $organizador, string $id): FuncionDelOrganizador
+    {
+        $funcion = $this->funciones->delOrganizadorPorId($organizador->id, $id);
+        if ($funcion === null || $funcion->estado !== EstadoFuncion::EnAcuerdoFecha) {
+            throw ExcepcionHttp::noEncontrada();
+        }
+
+        return $funcion;
+    }
+
+    /**
+     * El organizador propone las franjas horarias y el mínimo de asistentes para el acuerdo de fecha (E3-13.2 / IC-154).
+     *
+     * @param list<array{fecha_hora_inicio: string, fecha_hora_fin?: string|null}> $franjas
+     *
+     * @return array<string, mixed> los datos del acuerdo creado por funciones
+     *
+     * @throws ExcepcionHttp 404 si la función no es del organizador o no está en acuerdo de fecha
+     */
+    public function proponerAcuerdoFecha(Usuario $organizador, string $id, int $minimoAsistentes, array $franjas): array
+    {
+        $funcion = $this->propia($organizador, $id);
+        if ($funcion->estado !== EstadoFuncion::EnAcuerdoFecha) {
+            throw ExcepcionHttp::noEncontrada();
+        }
+
+        if ($this->acuerdos === null) {
+            throw new LogicException('No se configuró el cliente de acuerdos de funciones.');
+        }
+
+        return $this->acuerdos->proponer($funcion->id, $minimoAsistentes, $franjas);
+    }
+
+    /**
+     * Confirma la franja ganadora del acuerdo de fecha si alcanzó el mínimo y programa la función (E3-13.4 / IC-156).
+     *
+     * @return Funcion
+     *
+     * @throws ExcepcionHttp 404 si la función no es del organizador o no está en acuerdo de fecha
+     * @throws ReglaIncumplida si el acuerdo no alcanzó el mínimo o la fecha no es válida
+     */
+    public function confirmarAcuerdo(Usuario $organizador, string $id): Funcion
+    {
+        $funcion = $this->propia($organizador, $id);
+        if ($funcion->estado !== EstadoFuncion::EnAcuerdoFecha) {
+            throw ExcepcionHttp::noEncontrada();
+        }
+
+        if ($this->acuerdos === null) {
+            throw new LogicException('No se configuró el cliente de acuerdos de funciones.');
+        }
+
+        $acuerdo = $this->acuerdos->obtenerPorFuncion($funcion->id);
+        if ($acuerdo === null) {
+            throw new ReglaIncumplida('No hay acuerdo de fecha activo para esta función.');
+        }
+
+        $resultado = $this->acuerdos->confirmar((string) $acuerdo['id']);
+
+        $inicioStr = null;
+        if (!empty($resultado['franja_ganadora']['inicio'])) {
+            $inicioStr = (string) $resultado['franja_ganadora']['inicio'];
+        } else {
+            $franjaId = $resultado['franja_ganadora_id'] ?? null;
+            $franjas = $resultado['franjas'] ?? $acuerdo['franjas'] ?? [];
+            foreach ($franjas as $f) {
+                if (($f['id'] ?? null) === $franjaId) {
+                    $inicioStr = (string) ($f['inicio'] ?? '');
+                    break;
+                }
+            }
+        }
+
+        if ($inicioStr === null || $inicioStr === '') {
+            throw new ReglaIncumplida('No se pudo determinar la fecha y hora de la franja ganadora.');
+        }
+
+        $fechaHora = DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $inicioStr) ?: new DateTimeImmutable($inicioStr);
+        $funcion->fijarFechaHora($fechaHora);
+        $this->funciones->guardar($funcion);
+
+        return $funcion;
+    }
+
+    /**
+     * Cierra el acuerdo de fecha cuando no alcanza el mínimo de asistentes (E3-13.5 / IC-157).
+     * La función NO se programa y permanece disponible para que el organizador decida si propone nuevas franjas o la cancela.
+     *
+     * @return array<string, mixed>
+     *
+     * @throws ExcepcionHttp 404 si la función no es del organizador o no está en acuerdo de fecha
+     * @throws ReglaIncumplida si no hay acuerdo activo
+     */
+    public function cerrarAcuerdoSinMinimo(Usuario $organizador, string $id): array
+    {
+        $funcion = $this->propia($organizador, $id);
+        if ($funcion->estado !== EstadoFuncion::EnAcuerdoFecha) {
+            throw ExcepcionHttp::noEncontrada();
+        }
+
+        if ($this->acuerdos === null) {
+            throw new LogicException('No se configuró el cliente de acuerdos de funciones.');
+        }
+
+        $acuerdo = $this->acuerdos->obtenerPorFuncion($funcion->id);
+        if ($acuerdo === null) {
+            throw new ReglaIncumplida('No hay acuerdo de fecha activo para esta función.');
+        }
+
+        return $this->acuerdos->cerrarSinMinimo((string) $acuerdo['id']);
     }
 
     /**

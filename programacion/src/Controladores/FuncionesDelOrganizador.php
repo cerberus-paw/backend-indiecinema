@@ -238,6 +238,166 @@ final class FuncionesDelOrganizador extends Controlador
     }
 
     /**
+     * El organizador propone las franjas y el mínimo de asistentes (E3-13.2 / IC-154).
+     */
+    public function proponerAcuerdo(Peticion $peticion): Respuesta
+    {
+        $organizador = self::organizador($peticion);
+        $id = (string) $peticion->parametro('id');
+        if (!Uuid::esValido($id)) {
+            throw ExcepcionHttp::noEncontrada();
+        }
+
+        $minimo = (int) $peticion->campo('minimo_asistentes', 0);
+        $franjasEntrada = $peticion->campo('franjas');
+        $franjas = [];
+
+        if (is_array($franjasEntrada)) {
+            foreach ($franjasEntrada as $f) {
+                if (is_array($f)) {
+                    if (!empty($f['fecha_hora_inicio'])) {
+                        $franjas[] = [
+                            'fecha_hora_inicio' => (string) $f['fecha_hora_inicio'],
+                            'fecha_hora_fin' => !empty($f['fecha_hora_fin']) ? (string) $f['fecha_hora_fin'] : null,
+                        ];
+                    } elseif (!empty($f['fecha']) && !empty($f['hora_inicio'])) {
+                        $fechaStr = trim((string) $f['fecha']);
+                        $inicioHora = trim((string) $f['hora_inicio']);
+                        $finHora = !empty($f['hora_fin']) ? trim((string) $f['hora_fin']) : null;
+                        $franjas[] = [
+                            'fecha_hora_inicio' => "{$fechaStr} {$inicioHora}:00",
+                            'fecha_hora_fin' => $finHora !== null ? "{$fechaStr} {$finHora}:00" : null,
+                        ];
+                    }
+                }
+            }
+        }
+
+        if ($franjas === [] && is_array($peticion->campo('franja_inicio'))) {
+            $inicios = (array) $peticion->campo('franja_inicio');
+            $fines = (array) $peticion->campo('franja_fin', []);
+            foreach ($inicios as $idx => $inicio) {
+                if (is_string($inicio) && trim($inicio) !== '') {
+                    $franjas[] = [
+                        'fecha_hora_inicio' => trim($inicio),
+                        'fecha_hora_fin' => !empty($fines[$idx]) ? trim((string) $fines[$idx]) : null,
+                    ];
+                }
+            }
+        }
+
+        try {
+            $acuerdo = $this->servicio->proponerAcuerdoFecha($organizador, $id, $minimo, $franjas);
+        } catch (\InvalidArgumentException $error) {
+            if ($peticion->cabecera('Accept') === 'application/json' || $peticion->cabecera('Content-Type') === 'application/json') {
+                return $this->json(['error' => $error->getMessage()], 422);
+            }
+
+            return $this->redirigir("/cartelera/{$id}?error_acuerdo=" . urlencode($error->getMessage()));
+        }
+
+        if ($peticion->cabecera('Accept') === 'application/json' || $peticion->cabecera('Content-Type') === 'application/json') {
+            return $this->json($acuerdo, 201);
+        }
+
+        return $this->redirigir("/cartelera/{$id}?acuerdo_propuesto=1");
+    }
+
+    /**
+     * Muestra el formulario para proponer nuevas franjas horarias (E3-13.2 / IC-154, E3-13.5 / IC-157).
+     */
+    public function mostrarProponerFranjas(Peticion $peticion): Respuesta
+    {
+        $organizador = self::organizador($peticion);
+        $id = (string) $peticion->parametro('id');
+        if (!Uuid::esValido($id)) {
+            throw ExcepcionHttp::noEncontrada();
+        }
+
+        $funcion = $this->servicio->paraProponerFranjas($organizador, $id);
+        $titulo = $funcion->titulos[0] ?? 'Función en acuerdo';
+
+        return $this->vista('proponer_franjas.html.twig', [
+            'funcion' => [
+                'id' => $funcion->id,
+                'titulo' => $titulo,
+                'cupo' => $funcion->cupo,
+                'precio' => $funcion->precioBase,
+                'sala' => ['nombre' => $funcion->salaNombre],
+                'obras' => array_map(static fn (string $t) => ['titulo' => $t], $funcion->titulos),
+            ],
+            'accion' => "/organizador/funciones/{$id}/proponer-franjas",
+            'valores' => [
+                'minimo_asistentes' => 10,
+            ],
+            'errores' => [],
+        ]);
+    }
+
+    /**
+     * El organizador confirma la franja ganadora cuando alcanza el mínimo de asistentes (E3-13.4 / IC-156).
+     */
+    public function confirmarAcuerdo(Peticion $peticion): Respuesta
+    {
+        $organizador = self::organizador($peticion);
+        $id = (string) $peticion->parametro('id');
+        if (!Uuid::esValido($id)) {
+            throw ExcepcionHttp::noEncontrada();
+        }
+
+        try {
+            $funcion = $this->servicio->confirmarAcuerdo($organizador, $id);
+        } catch (ReglaIncumplida $regla) {
+            if ($peticion->cabecera('Accept') === 'application/json' || $peticion->cabecera('Content-Type') === 'application/json') {
+                return $this->json(['error' => $regla->getMessage()], 422);
+            }
+
+            return $this->redirigir("/cartelera/{$id}?error_voto=" . rawurlencode($regla->getMessage()));
+        }
+
+        if ($peticion->cabecera('Accept') === 'application/json' || $peticion->cabecera('Content-Type') === 'application/json') {
+            return $this->json([
+                'ok' => true,
+                'estado' => $funcion->estado->value,
+                'fecha_hora' => $funcion->fechaHora?->format('Y-m-d H:i:s'),
+            ]);
+        }
+
+        return $this->redirigir("/cartelera/{$id}?guardada=1");
+    }
+
+    /**
+     * El organizador cierra el acuerdo sin alcanzar el mínimo de asistentes (E3-13.5 / IC-157).
+     */
+    public function cerrarSinMinimo(Peticion $peticion): Respuesta
+    {
+        $organizador = self::organizador($peticion);
+        $id = (string) $peticion->parametro('id');
+        if (!Uuid::esValido($id)) {
+            throw ExcepcionHttp::noEncontrada();
+        }
+
+        try {
+            $resultado = $this->servicio->cerrarAcuerdoSinMinimo($organizador, $id);
+        } catch (ReglaIncumplida $regla) {
+            if ($peticion->cabecera('Accept') === 'application/json' || $peticion->cabecera('Content-Type') === 'application/json') {
+                return $this->json(['error' => $regla->getMessage()], 422);
+            }
+
+            return $this->redirigir("/cartelera/{$id}?error_voto=" . rawurlencode($regla->getMessage()));
+        }
+
+        if ($peticion->cabecera('Accept') === 'application/json' || $peticion->cabecera('Content-Type') === 'application/json') {
+            return $this->json([
+                'ok' => true,
+                'estado_acuerdo' => 'sin_minimo',
+            ]);
+        }
+
+        return $this->redirigir("/cartelera/{$id}");
+    }
+
+    /**
      * @param list<Sala>                                                                                        $salas
      * @param list<Obra>                                                                                        $obras
      * @param array{formulario?: FormularioDeFuncion, valores?: array<string, mixed>, error_general?: ?string} $extra

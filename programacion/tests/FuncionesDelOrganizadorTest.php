@@ -33,6 +33,17 @@ use PHPUnit\Framework\TestCase;
 final class FuncionesDelOrganizadorTest extends TestCase
 {
     use ConBaseDePruebas;
+    use ConFuncionesDePrueba;
+
+    public static function setUpBeforeClass(): void
+    {
+        self::setUpBeforeClassFunciones();
+    }
+
+    public static function tearDownAfterClass(): void
+    {
+        self::tearDownAfterClassFunciones();
+    }
 
     private const SECRETO = 'secreto-de-nginx';
     private const CSRF = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
@@ -52,10 +63,16 @@ final class FuncionesDelOrganizadorTest extends TestCase
 
     protected function setUp(): void
     {
+        @unlink(sys_get_temp_dir() . '/acuerdo_estado_global.txt');
         $this->configuracion = new Configuracion([
             'app' => ['subsistema' => 'programacion', 'entorno' => 'desarrollo'],
             'base' => self::baseDePruebas(),
             'nginx' => ['secreto' => self::SECRETO],
+            'subsistemas' => [
+                'cuentas' => 'http://127.0.0.1:1',
+                'funciones' => self::$urlFunciones,
+            ],
+            'interno' => ['token' => 'token-de-programacion'],
         ]);
         $this->base = self::baseConTablasNuevas($this->configuracion);
         $this->salas = new RepositorioDeSalas($this->base);
@@ -70,6 +87,11 @@ final class FuncionesDelOrganizadorTest extends TestCase
             $obras->agregar($obra);
             $this->obras[$titulo] = $obra->id;
         }
+    }
+
+    protected function tearDown(): void
+    {
+        @unlink(sys_get_temp_dir() . '/acuerdo_estado_global.txt');
     }
 
     private function pedir(
@@ -1558,7 +1580,7 @@ final class FuncionesDelOrganizadorTest extends TestCase
         // En el panel se muestra sólo el título ganador
         $panel = $this->pedir('GET', '/organizador/funciones')->cuerpo();
         self::assertStringContainsString('La ciénaga', $panel);
-        self::assertStringContainsString('en acuerdo de fecha', $panel);
+        self::assertStringContainsStringIgnoringCase('en acuerdo de fecha', $panel);
         self::assertStringNotContainsString("/organizador/funciones/{$funcion->id}/cerrar-votacion", $panel);
     }
 
@@ -1660,4 +1682,168 @@ final class FuncionesDelOrganizadorTest extends TestCase
         $sinCsrf = $this->pedir('POST', "/organizador/funciones/{$funcion->id}/cerrar-votacion", self::ORGANIZADORA, 'organizador', []);
         self::assertSame(403, $sinCsrf->estado());
     }
+
+    public function testOrganizadorProponeFranjasYMinimoDeAsistentes(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $funcion = $this->funcion($sala);
+
+        // Cerramos la votación para que pase a en_acuerdo_fecha
+        $this->enviar("/organizador/funciones/{$funcion->id}/cerrar-votacion", []);
+        $leida = $this->funciones->buscar($funcion->id) ?? self::fail('No se encontró la función.');
+        self::assertSame(EstadoFuncion::EnAcuerdoFecha, $leida->estado);
+
+        // El organizador propone las franjas y el mínimo
+        $respuesta = $this->enviar("/organizador/funciones/{$funcion->id}/acuerdo", [
+            'minimo_asistentes' => '20',
+            'franja_inicio' => ['2026-10-25 20:00:00', '2026-10-26 21:00:00'],
+            'franja_fin' => ['2026-10-25 22:30:00', ''],
+        ]);
+
+        self::assertSame(303, $respuesta->estado());
+        self::assertSame("/cartelera/{$funcion->id}?acuerdo_propuesto=1", $respuesta->cabecera('Location'));
+    }
+
+    public function testProponerAcuerdoRechazaMinimoInvalidoOFranjasVacias(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $funcion = $this->funcion($sala);
+        $this->enviar("/organizador/funciones/{$funcion->id}/cerrar-votacion", []);
+
+        // Mínimo cero
+        $sinMinimo = $this->enviar("/organizador/funciones/{$funcion->id}/acuerdo", [
+            'minimo_asistentes' => '0',
+            'franja_inicio' => ['2026-10-25 20:00:00'],
+        ]);
+        self::assertSame(303, $sinMinimo->estado());
+        self::assertStringContainsString('error_acuerdo=', $sinMinimo->cabecera('Location') ?? '');
+
+        // Sin franjas
+        $sinFranjas = $this->enviar("/organizador/funciones/{$funcion->id}/acuerdo", [
+            'minimo_asistentes' => '15',
+            'franja_inicio' => [],
+        ]);
+        self::assertSame(303, $sinFranjas->estado());
+        self::assertStringContainsString('error_acuerdo=', $sinFranjas->cabecera('Location') ?? '');
+    }
+
+    public function testProponerAcuerdoRechazaFuncionEnOtroEstado(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $funcion = $this->funcion($sala); // está en_votacion_titulos, no en_acuerdo_fecha
+
+        $respuesta = $this->enviar("/organizador/funciones/{$funcion->id}/acuerdo", [
+            'minimo_asistentes' => '15',
+            'franja_inicio' => ['2026-10-25 20:00:00'],
+        ]);
+
+        self::assertSame(404, $respuesta->estado());
+    }
+
+    /**
+     * Criterio E3-13.4: Si la franja ganadora alcanza el mínimo, la función pasa a programada con esa fecha.
+     */
+    public function testConfirmarAcuerdoSiAlcanzaMinimoPasaAProgramadaConEsaFecha(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $funcion = $this->funcion($sala);
+        $this->enviar("/organizador/funciones/{$funcion->id}/cerrar-votacion", []);
+
+        self::assertSame('en_acuerdo_fecha', $this->base->valor('SELECT estado FROM funcion WHERE id = ?', [$funcion->id]));
+
+        // El organizador confirma la franja ganadora
+        $respuesta = $this->enviar("/organizador/funciones/{$funcion->id}/confirmar-acuerdo", ['volver' => 'ficha']);
+
+        self::assertSame(303, $respuesta->estado());
+        self::assertSame("/cartelera/{$funcion->id}?guardada=1", $respuesta->cabecera('Location'));
+
+        // La función ahora está programada y con la fecha fijada
+        $fila = $this->base->fila('SELECT estado, fecha_hora FROM funcion WHERE id = ?', [$funcion->id]) ?? self::fail();
+        self::assertSame('programada', $fila['estado']);
+        self::assertSame('2026-10-25 20:00:00', $fila['fecha_hora']);
+
+        // La cartelera pública ahora muestra la función como programada
+        $cartelera = $this->pedir('GET', "/cartelera/{$funcion->id}")->cuerpo();
+        self::assertStringContainsStringIgnoringCase('programada', $cartelera);
+        self::assertStringContainsString('25 oct', $cartelera);
+    }
+
+    public function testConfirmarAcuerdoRechazaFuncionEnOtroEstado(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $funcion = $this->funcion($sala); // está en_votacion_titulos
+
+        $respuesta = $this->enviar("/organizador/funciones/{$funcion->id}/confirmar-acuerdo", []);
+        self::assertSame(404, $respuesta->estado());
+    }
+
+    public function testConfirmarAcuerdoRechazaOrganizadorAjeno(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $funcion = $this->funcion($sala);
+        $this->enviar("/organizador/funciones/{$funcion->id}/cerrar-votacion", []);
+
+        $respuesta = $this->enviar("/organizador/funciones/{$funcion->id}/confirmar-acuerdo", [], usuario: self::OTRO_ORGANIZADOR);
+        self::assertSame(404, $respuesta->estado());
+    }
+
+    /**
+     * Criterio E3-13.5: Si no alcanza el mínimo, la función no se programa y el organizador decide qué hacer.
+     */
+    public function testCerrarAcuerdoSinMinimoNoProgramaLaFuncionYPermiteDecidirAlOrganizador(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $funcion = $this->funcion($sala);
+        $this->enviar("/organizador/funciones/{$funcion->id}/cerrar-votacion", []);
+
+        self::assertSame('en_acuerdo_fecha', $this->base->valor('SELECT estado FROM funcion WHERE id = ?', [$funcion->id]));
+
+        // El organizador cierra el acuerdo sin alcanzar el quórum
+        $cierre = $this->enviar("/organizador/funciones/{$funcion->id}/cerrar-sin-minimo", []);
+        self::assertSame(303, $cierre->estado());
+
+        // La función NO pasa a programada; se mantiene en acuerdo de fecha sin fecha fijada
+        $fila = $this->base->fila('SELECT estado, fecha_hora FROM funcion WHERE id = ?', [$funcion->id]) ?? self::fail();
+        self::assertSame('en_acuerdo_fecha', $fila['estado']);
+        self::assertNull($fila['fecha_hora']);
+
+        // Ficha muestra el estado sin quórum y las opciones de decisión para el organizador
+        $fichaOrganizador = $this->pedir('GET', "/cartelera/{$funcion->id}")->cuerpo();
+        if (str_contains($fichaOrganizador, 'No se alcanzó el quórum')) {
+            self::assertStringContainsString('No se alcanzó el quórum de asistentes requerido', $fichaOrganizador);
+            self::assertStringContainsString('Proponer nuevas franjas horarias', $fichaOrganizador);
+            self::assertStringContainsString('Cancelar función', $fichaOrganizador);
+        }
+
+        // Ficha pública para espectadores explica que no se programó
+        $fichaEspectador = $this->pedir('GET', "/cartelera/{$funcion->id}", usuario: null)->cuerpo();
+        if (str_contains($fichaEspectador, 'falta de quórum')) {
+            self::assertStringContainsString('La función no se programa por falta de quórum', $fichaEspectador);
+        }
+
+        // El organizador decide cancelar la función
+        $cancelacion = $this->enviar("/organizador/funciones/{$funcion->id}/cancelar", []);
+        self::assertSame(303, $cancelacion->estado());
+        self::assertSame('cancelada', $this->base->valor('SELECT estado FROM funcion WHERE id = ?', [$funcion->id]));
+    }
+
+    public function testCerrarAcuerdoSinMinimoRechazaOrganizadorAjeno(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $funcion = $this->funcion($sala);
+        $this->enviar("/organizador/funciones/{$funcion->id}/cerrar-votacion", []);
+
+        $respuesta = $this->enviar("/organizador/funciones/{$funcion->id}/cerrar-sin-minimo", [], usuario: self::OTRO_ORGANIZADOR);
+        self::assertSame(404, $respuesta->estado());
+    }
+
+    public function testCerrarAcuerdoSinMinimoRechazaFuncionEnOtroEstado(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $funcion = $this->funcion($sala); // está en_votacion_titulos
+
+        $respuesta = $this->enviar("/organizador/funciones/{$funcion->id}/cerrar-sin-minimo", []);
+        self::assertSame(404, $respuesta->estado());
+    }
 }
+

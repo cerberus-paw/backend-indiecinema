@@ -8,6 +8,7 @@ use IndieCinema\Nucleo\Controlador;
 use IndieCinema\Nucleo\Http\ExcepcionHttp;
 use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
+use IndieCinema\Programacion\Servicios\OcupacionDeFunciones;
 use IndieCinema\Programacion\Servicios\ServicioDeSalas;
 
 /**
@@ -17,8 +18,10 @@ use IndieCinema\Programacion\Servicios\ServicioDeSalas;
  */
 final class Salas extends Controlador
 {
-    public function __construct(private readonly ServicioDeSalas $servicio)
-    {
+    public function __construct(
+        private readonly ServicioDeSalas $servicio,
+        private readonly OcupacionDeFunciones $ocupacion,
+    ) {
     }
 
     public function listar(Peticion $peticion): Respuesta
@@ -47,7 +50,7 @@ final class Salas extends Controlador
                 'descripcion' => $ficha->sala->datos->descripcion,
                 'direccion' => $ficha->sala->datos->direccion,
             ],
-            'funciones' => array_map(TarjetaDeFuncion::datos(...), $ficha->funciones),
+            'funciones' => TarjetaDeFuncion::todas($ficha->funciones, $this->ocupacion->deVarias(array_column($ficha->funciones, 'id'))),
         ]);
     }
 }

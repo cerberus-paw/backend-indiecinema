@@ -249,7 +249,7 @@ final class RepositorioDeCartelera
     private function funciones(string $resto, array $parametros): array
     {
         return $this->conSusObras($this->base->filas(
-            'SELECT f.id, f.estado, f.fecha_hora, f.precio_base, s.id AS sala_id, s.nombre AS sala, s.localidad '
+            'SELECT f.id, f.estado, f.fecha_hora, f.precio_base, f.cupo, s.id AS sala_id, s.nombre AS sala, s.localidad '
             . self::DESDE . " WHERE {$resto}",
             $parametros,
         ));
@@ -299,6 +299,7 @@ final class RepositorioDeCartelera
             (string) $fila['localidad'],
             $obrasElegidas[$fila['id']] ?? $obrasCandidatas[$fila['id']] ?? [],
             EstadoFuncion::from((string) $fila['estado']),
+            (int) $fila['cupo'],
         ), $filas);
     }
 }

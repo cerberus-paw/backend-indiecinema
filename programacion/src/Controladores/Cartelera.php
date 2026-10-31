@@ -17,6 +17,7 @@ use IndieCinema\Programacion\Modelo\FuncionEnCartelera;
 use IndieCinema\Programacion\Modelo\Genero;
 use IndieCinema\Programacion\Modelo\ObraEnDetalle;
 use IndieCinema\Programacion\Modelo\ReglaIncumplida;
+use IndieCinema\Programacion\Servicios\OcupacionDeFunciones;
 use IndieCinema\Programacion\Servicios\ServicioDeCartelera;
 
 /**
@@ -29,8 +30,10 @@ use IndieCinema\Programacion\Servicios\ServicioDeCartelera;
  */
 final class Cartelera extends Controlador
 {
-    public function __construct(private readonly ServicioDeCartelera $servicio)
-    {
+    public function __construct(
+        private readonly ServicioDeCartelera $servicio,
+        private readonly OcupacionDeFunciones $ocupacion,
+    ) {
     }
 
     /**
@@ -62,8 +65,8 @@ final class Cartelera extends Controlador
             return $this->json([
                 // Con el link a la ficha, que en HTML arma la plantilla de la tarjeta.
                 'funciones' => array_map(
-                    static fn (FuncionEnCartelera $funcion): array => TarjetaDeFuncion::datos($funcion) + ['url' => "/cartelera/{$funcion->id}"],
-                    $pagina->funciones,
+                    static fn (array $tarjeta): array => $tarjeta + ['url' => "/cartelera/{$tarjeta['id']}"],
+                    $this->tarjetas($pagina->funciones),
                 ),
                 // Un objeto aunque no haya filtros: vacío, json_encode() lo escribiría como lista.
                 'filtros' => (object) $parametros->valores,
@@ -74,7 +77,7 @@ final class Cartelera extends Controlador
         }
 
         return $this->vista('cartelera.html.twig', [
-            'funciones' => array_map(TarjetaDeFuncion::datos(...), $pagina->funciones),
+            'funciones' => $this->tarjetas($pagina->funciones),
             'filtros' => $parametros->valores,
             'filtrada' => $parametros->valores !== [],
             'avisos' => $parametros->avisos,
@@ -107,6 +110,11 @@ final class Cartelera extends Controlador
     {
         $id = (string) $peticion->parametro('id');
         $detalle = $this->servicio->detalle($id);
+        // Sólo de una programada se pregunta: en otro estado no hay reservas que contar.
+        $libres = $detalle->estado === EstadoFuncion::Programada
+            ? TarjetaDeFuncion::lugaresLibres($detalle->estado, $detalle->cupo, $this->ocupacion->deUna($detalle->id))
+            : null;
+        $lugares = ['lugares_libres' => $libres, 'agotada' => $libres === 0];
 
         $usuario = $peticion->usuario();
         $esPropia = $usuario !== null
@@ -123,7 +131,9 @@ final class Cartelera extends Controlador
         return $this->vista('ficha_funcion.html.twig', [
             'funcion' => [
                 ...self::datosDeDetalle($detalle, $editable, $cancelable, $cerrable),
-                'reservable' => Funcion::seReserva($detalle->estado, $detalle->fechaHora),
+                ...$lugares,
+                // Agotada no se reserva: el formulario no tendría cómo salir bien.
+                'reservable' => Funcion::seReserva($detalle->estado, $detalle->fechaHora) && !$lugares['agotada'],
             ],
             'voto_usuario' => $votoActual,
             'conteo_votos' => $conteoVotos,
@@ -163,6 +173,19 @@ final class Cartelera extends Controlador
         }
 
         return $this->redirigir("/cartelera/{$id}?votado=1");
+    }
+
+    /**
+     * Las tarjetas con los lugares libres, pedidos a funciones en una sola llamada para toda la
+     * página. Si no responde, van sin ese dato.
+     *
+     * @param list<FuncionEnCartelera> $funciones
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function tarjetas(array $funciones): array
+    {
+        return TarjetaDeFuncion::todas($funciones, $this->ocupacion->deVarias(array_map(static fn (FuncionEnCartelera $funcion): string => $funcion->id, $funciones)));
     }
 
     private function parametros(Peticion $peticion): ParametrosDeCartelera

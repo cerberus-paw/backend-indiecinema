@@ -6,6 +6,7 @@ namespace IndieCinema\Programacion\Pruebas\Controladores;
 
 use DateTimeImmutable;
 use IndieCinema\Programacion\Controladores\TarjetaDeFuncion;
+use IndieCinema\Programacion\Modelo\EstadoFuncion;
 use IndieCinema\Programacion\Modelo\FuncionEnCartelera;
 use IndieCinema\Programacion\Modelo\ObraEnCartelera;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -36,6 +37,8 @@ final class TarjetaDeFuncionTest extends TestCase
             'sala' => 'Cine Club Areco',
             'localidad' => 'San Antonio de Areco',
             'fecha' => 'Sáb 24 oct · 20:30',
+            'lugares_libres' => null,
+            'agotada' => false,
         ], TarjetaDeFuncion::datos($funcion));
     }
 
@@ -60,7 +63,47 @@ final class TarjetaDeFuncionTest extends TestCase
             'sala' => 'Cine Club Areco',
             'localidad' => 'San Antonio de Areco',
             'fecha' => null,
-        ], TarjetaDeFuncion::datos($funcion));
+            'lugares_libres' => null,
+            'agotada' => false,
+        ], TarjetaDeFuncion::datos($funcion, 0));
+    }
+
+    private static function programada(string $id = 'f', int $cupo = 40): FuncionEnCartelera
+    {
+        return new FuncionEnCartelera($id, new DateTimeImmutable('2026-10-24 20:30:00'), 3500.0, 's', 'Cine Club Areco', 'San Antonio de Areco', [new ObraEnCartelera('a', 'Zama', null)], EstadoFuncion::Programada, $cupo);
+    }
+
+    public function testLosLugaresLibresSonElCupoMenosLosOcupados(): void
+    {
+        $tarjeta = TarjetaDeFuncion::datos(self::programada(), 22);
+
+        self::assertSame(18, $tarjeta['lugares_libres']);
+        self::assertFalse($tarjeta['agotada']);
+    }
+
+    public function testSinLugaresEstaAgotadaAunqueHayaMasOcupadosQueCupo(): void
+    {
+        // El organizador bajó el cupo después de que reservaran.
+        self::assertSame(['lugares_libres' => 0, 'agotada' => true], array_intersect_key(
+            TarjetaDeFuncion::datos(self::programada(cupo: 10), 12),
+            ['lugares_libres' => 0, 'agotada' => 0],
+        ));
+    }
+
+    public function testSinElDatoDeFuncionesNoSeMuestranLosLugares(): void
+    {
+        $tarjeta = TarjetaDeFuncion::datos(self::programada());
+
+        self::assertNull($tarjeta['lugares_libres']);
+        self::assertFalse($tarjeta['agotada']);
+    }
+
+    public function testTodasTomaLosOcupadosDeCadaUna(): void
+    {
+        $tarjetas = TarjetaDeFuncion::todas([self::programada('a'), self::programada('b'), self::programada('c')], ['a' => 40, 'b' => 3]);
+
+        self::assertSame([0, 37, null], array_column($tarjetas, 'lugares_libres'));
+        self::assertSame([null, null], array_column(TarjetaDeFuncion::todas([self::programada('a'), self::programada('b')], null), 'lugares_libres'));
     }
 
     /**

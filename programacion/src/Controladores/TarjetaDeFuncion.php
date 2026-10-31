@@ -20,10 +20,28 @@ final class TarjetaDeFuncion
     private const MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
 
     /**
-     * @return array{id: string, titulo: string, estado: string, precio: string, sala: string, localidad: string, fecha: ?string}
+     * Las tarjetas de una página, con los lugares libres de cada una.
+     *
+     * @param list<FuncionEnCartelera>  $funciones
+     * @param ?array<string, int>       $ocupados  funcion_id => lugares ocupados, de funciones; null
+     *                                             si no respondió, y entonces van sin ese dato
+     *
+     * @return list<array<string, mixed>>
      */
-    public static function datos(FuncionEnCartelera $funcion): array
+    public static function todas(array $funciones, ?array $ocupados): array
     {
+        return array_map(static fn (FuncionEnCartelera $funcion): array => self::datos($funcion, $ocupados[$funcion->id] ?? null), $funciones);
+    }
+
+    /**
+     * @param ?int $ocupados los lugares que ya tomaron las reservas, o null si no se saben
+     *
+     * @return array{id: string, titulo: string, estado: string, precio: string, sala: string, localidad: string, fecha: ?string, lugares_libres: ?int, agotada: bool}
+     */
+    public static function datos(FuncionEnCartelera $funcion, ?int $ocupados = null): array
+    {
+        $libres = self::lugaresLibres($funcion->estado, $funcion->cupo, $ocupados);
+
         return [
             'id' => $funcion->id,
             // Una función con varias obras las proyecta todas: el título las nombra a todas.
@@ -33,7 +51,20 @@ final class TarjetaDeFuncion
             'sala' => $funcion->sala,
             'localidad' => $funcion->localidad,
             'fecha' => $funcion->fechaHora !== null ? self::fecha($funcion->fechaHora) : null,
+            'lugares_libres' => $libres,
+            'agotada' => $libres === 0,
         ];
+    }
+
+    /**
+     * Los lugares que quedan, sólo en una función programada: en votación todavía no se reserva.
+     * Nunca menos de cero: si el organizador bajó el cupo después de que reservaron, está agotada.
+     *
+     * @return ?int null si no se reserva o si funciones no dio el dato
+     */
+    public static function lugaresLibres(EstadoFuncion $estado, int $cupo, ?int $ocupados): ?int
+    {
+        return $estado === EstadoFuncion::Programada && $ocupados !== null ? max(0, $cupo - $ocupados) : null;
     }
 
     /**

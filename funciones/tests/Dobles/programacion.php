@@ -16,6 +16,7 @@ const LENTA = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
 const SIN_PUBLICAR = '99999999-9999-4999-8999-999999999999';
 const PROXIMA = '12121212-1212-4212-8212-121212121212';
 const EMPEZADA = '34343434-3434-4434-8434-343434343434';
+const CANCELADA = '56565656-5656-4656-8656-565656565656';
 
 header('Content-Type: application/json');
 $cabeceras = getallheaders();
@@ -46,6 +47,8 @@ match ($id) {
     // una hora.
     PROXIMA => print json_encode($funcion($id, 'programada', date('Y-m-d\\TH:i:s', strtotime('+30 days')), ['Zama'], true)),
     EMPEZADA => print json_encode($funcion($id, 'programada', date('Y-m-d\\TH:i:s', strtotime('-1 hour')), ['Zama'], true)),
+    // El organizador la canceló: el panel de sus reservas no registra asistencia.
+    CANCELADA => print json_encode($funcion($id, 'cancelada', date('Y-m-d\\TH:i:s', strtotime('+30 days')), ['Zama'], true)),
     // Su sala todavía no se aprobó, o se retiró de la cartelera.
     SIN_PUBLICAR => print json_encode($funcion($id, 'programada', '2026-10-24T20:30:00', ['Zama'], true, false)),
     // Un cambio en programación que rompe lo que funciones espera.

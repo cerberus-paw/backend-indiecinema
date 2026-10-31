@@ -200,6 +200,10 @@ todo el sitio se vea igual aunque lo sirvan subsistemas distintos.
   Funciones tiene `GET /interno/funciones/{id}/ocupacion` y `GET /interno/ocupacion?funciones=…`
   (una página de tarjetas en un solo pedido): los lugares ocupados, con los que programación
   muestra los libres. Si funciones no responde, la cartelera y la ficha se muestran sin ese dato.
+  Al cancelar una función programada, programación llama a `POST
+  /interno/funciones/{id}/cancelar-reservas` de funciones, que cancela sus reservas y les avisa por
+  correo a los espectadores (la dirección se la pide a cuentas). Cada cambio de estado de una
+  reserva queda en la tabla `cambio_reserva`, con quién lo hizo.
 - **Pedir ser organizador es pedir una sala**, como el recorrido de la E2 (sección 7): la
   solicitud de sala (`/solicitar-sala`) guarda la sala sin publicar y le avisa al equipo por
   correo; aprobarla la publica y programación le pide a cuentas el rol de organizador. Primero el
@@ -279,7 +283,8 @@ docker run --rm -u "$(id -u):$(id -g)" -v "$PWD/..:/app" -w /app/backend-indieci
 | http://localhost:8080/administracion/solicitudes | la bandeja de solicitudes de sala, para aprobarlas (publica la sala y da el rol de organizador) o rechazarlas con un motivo, y el historial; sólo el administrador |
 | http://localhost:8025 | el buzón de prueba (Mailpit): los correos que mandan los subsistemas, sin que salgan a nadie |
 | http://localhost:8080/cuenta/administracion/usuarios | usuarios y roles, con los números de las cuentas, buscador por nombre o correo, filtros de rol, estado y año de alta, y el rol de cada uno en un desplegable (espectador u organizador), con «Guardar cambios» para toda la tabla; sólo el administrador |
-| http://localhost:8080/funcion/ | funciones: todavía sin pantallas, responde la página de error (404) |
+| http://localhost:8080/funcion/organizador/funciones/{id}/reservas | las reservas de una función para su organizador: lugares reservados y libres, asistencia con el código y descarga en CSV |
+| http://localhost:8080/funcion/administracion/reservas | todas las reservas, con filtro por estado y la anulación; sólo el administrador |
 | http://localhost:8080/estaticos/… | CSS, JavaScript e imágenes del paquete front |
 
 Las rutas `/interno/` dan 404 desde afuera: sólo se llaman entre subsistemas, por la red del

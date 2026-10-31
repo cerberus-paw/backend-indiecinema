@@ -1,0 +1,57 @@
+<?php
+
+declare(strict_types=1);
+
+namespace IndieCinema\Funciones\Controladores;
+
+use IndieCinema\Funciones\Servicios\AvisosDeReservas;
+use IndieCinema\Funciones\Servicios\ServicioDePanelDeReservas;
+use IndieCinema\Nucleo\Controlador;
+use IndieCinema\Nucleo\Http\ExcepcionHttp;
+use IndieCinema\Nucleo\Http\Peticion;
+use IndieCinema\Nucleo\Http\Respuesta;
+use IndieCinema\Nucleo\Uuid;
+
+/**
+ * POST /interno/funciones/{id}/cancelar-reservas: programación avisa que canceló una función, y
+ * funciones cancela sus reservas confirmadas y les avisa por correo a los espectadores (E4-03.4).
+ * Sólo la llama programación, con su token: lo controla la ruta.
+ *
+ * Programación manda el título y la fecha para el correo: así funciones no tiene que volver a
+ * pedirle la función mientras programación espera esta respuesta.
+ */
+final class ReservasInternas extends Controlador
+{
+    public function __construct(
+        private readonly ServicioDePanelDeReservas $servicio,
+        private readonly AvisosDeReservas $avisos,
+    ) {
+    }
+
+    /**
+     * @throws ExcepcionHttp 404 si el id no es un UUID; 400 si falta quién la canceló o el título
+     */
+    public function cancelarDeLaFuncion(Peticion $peticion): Respuesta
+    {
+        $id = (string) $peticion->parametro('id');
+        if (!Uuid::esValido($id)) {
+            throw ExcepcionHttp::noEncontrada();
+        }
+        $organizador = $peticion->campo('organizador_id');
+        $titulo = $peticion->campo('titulo');
+        $fecha = $peticion->campo('fecha');
+        if (!is_string($organizador) || !Uuid::esValido($organizador)) {
+            throw ExcepcionHttp::solicitudInvalida('Falta el id de quién canceló la función, en «organizador_id».');
+        }
+        if (!is_string($titulo) || trim($titulo) === '' || !($fecha === null || is_string($fecha))) {
+            throw ExcepcionHttp::solicitudInvalida('Faltan el título de la función, en «titulo», o la fecha, en «fecha», es inválida.');
+        }
+
+        $canceladas = $this->servicio->cancelarDeLaFuncion($id, $organizador);
+
+        return $this->json([
+            'canceladas' => count($canceladas),
+            'avisadas' => $this->avisos->funcionCancelada($canceladas, $titulo, $fecha),
+        ]);
+    }
+}

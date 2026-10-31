@@ -29,7 +29,8 @@
     },
     "autoload-dev": {
         "psr-4": {
-            "IndieCinema\\Funciones\\Pruebas\\": "tests/"
+            "IndieCinema\\Funciones\\Pruebas\\": "tests/",
+            "IndieCinema\\Nucleo\\Pruebas\\Dobles\\": "../nucleo/tests/Dobles/"
         }
     },
     "scripts": {

@@ -36,8 +36,10 @@ return static function (Router $router): void {
     $router->interna('GET', '/interno/sesion', [SesionInterna::class, 'validar'], ['nginx']);
 
     // Para la bandeja de solicitudes de sala de programación: quién la mandó y, al aprobarla, el
-    // rol de organizador (pedir ser organizador es pedir una sala, como en la E2).
-    $router->interna('GET', '/interno/usuarios/{id}', [UsuariosInternos::class, 'mostrar'], ['programacion']);
+    // rol de organizador (pedir ser organizador es pedir una sala, como en la E2). Funciones lee
+    // el usuario para avisarle por correo que se canceló la función que reservó (E4-03.4), pero
+    // no da roles.
+    $router->interna('GET', '/interno/usuarios/{id}', [UsuariosInternos::class, 'mostrar'], ['programacion', 'funciones']);
     $router->interna('POST', '/interno/usuarios/{id}/roles', [UsuariosInternos::class, 'darRol'], ['programacion']);
 
     // Para comprobar que los otros subsistemas llegan hasta acá con su token.

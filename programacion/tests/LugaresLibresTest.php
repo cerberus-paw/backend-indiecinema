@@ -21,7 +21,7 @@ use PHPUnit\Framework\TestCase;
  * Los lugares libres en la cartelera, la portada, la ficha de la sala y la ficha de la función
  * (E4-02.2), y que todo se siga viendo si funciones no responde (E4-02.3). De punta a punta: la
  * aplicación entera con las plantillas del paquete front, un MySQL de verdad con los datos de
- * demostración y un funciones de mentira (Dobles/funciones.php) atendiendo con `php -S`.
+ * demostración y un funciones de mentira (Dobles/ocupacion.php) atendiendo con `php -S`.
  */
 final class LugaresLibresTest extends TestCase
 {
@@ -46,7 +46,7 @@ final class LugaresLibresTest extends TestCase
         self::$urlFunciones = "http://127.0.0.1:{$puerto}";
 
         $proceso = proc_open(
-            [PHP_BINARY, '-S', "127.0.0.1:{$puerto}", __DIR__ . '/Dobles/funciones.php'],
+            [PHP_BINARY, '-S', "127.0.0.1:{$puerto}", __DIR__ . '/Dobles/ocupacion.php'],
             [['pipe', 'r'], ['file', '/dev/null', 'w'], ['file', '/dev/null', 'w']],
             $tuberias,
             null,

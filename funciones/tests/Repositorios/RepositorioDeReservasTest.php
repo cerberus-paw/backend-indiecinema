@@ -5,12 +5,15 @@ declare(strict_types=1);
 namespace IndieCinema\Funciones\Pruebas\Repositorios;
 
 use DateTimeImmutable;
+use DateTimeZone;
+use IndieCinema\Funciones\Modelo\AutorDelCambio;
 use IndieCinema\Funciones\Modelo\EstadoReserva;
 use IndieCinema\Funciones\Modelo\FuncionDeProgramacion;
 use IndieCinema\Funciones\Modelo\Reserva;
 use IndieCinema\Funciones\Pruebas\ConBaseDePruebas;
 use IndieCinema\Funciones\Repositorios\RepositorioDeReservas;
 use IndieCinema\Nucleo\Configuracion;
+use IndieCinema\Nucleo\Seguridad\Rol;
 use PHPUnit\Framework\TestCase;
 
 final class RepositorioDeReservasTest extends TestCase
@@ -24,13 +27,23 @@ final class RepositorioDeReservasTest extends TestCase
         $this->reservas = new RepositorioDeReservas(self::baseConTablasNuevas(new Configuracion(['base' => self::baseDePruebas()])));
     }
 
-    private function guardada(int $cantidad = 2): Reserva
+    private static function espectador(): AutorDelCambio
+    {
+        return new AutorDelCambio('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', Rol::Espectador);
+    }
+
+    private static function organizador(): AutorDelCambio
+    {
+        return new AutorDelCambio('ffffffff-ffff-4fff-8fff-ffffffffffff', Rol::Organizador);
+    }
+
+    private function guardada(int $cantidad = 2, string $funcionId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', string $creada = '2026-10-20 12:00:00'): Reserva
     {
         $funcion = new FuncionDeProgramacion(
-            'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'programada', new DateTimeImmutable('2026-10-24 20:30:00'), 3500, 40,
+            $funcionId, 'programada', new DateTimeImmutable('2026-10-24 20:30:00'), 3500, 40,
             ['Zama'], true, 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', 'Cine Club El Galpón', 'Luján', true, 'ffffffff-ffff-4fff-8fff-ffffffffffff',
         );
-        $reserva = Reserva::nueva($funcion, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', $cantidad, new DateTimeImmutable('2026-10-20 12:00:00'));
+        $reserva = Reserva::nueva($funcion, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', $cantidad, new DateTimeImmutable($creada));
         self::assertTrue($this->reservas->agregar($reserva));
 
         return $reserva;
@@ -49,7 +62,7 @@ final class RepositorioDeReservasTest extends TestCase
         $reserva = $this->guardada(3);
         self::assertSame(3, $this->reservas->lugaresOcupados($reserva->funcionId));
 
-        self::assertTrue($this->reservas->guardarEstado($reserva->cancelar(), EstadoReserva::Confirmada));
+        self::assertTrue($this->reservas->guardarEstado($reserva->cancelar(), EstadoReserva::Confirmada, self::espectador()));
 
         self::assertSame(EstadoReserva::Cancelada, $this->reservas->buscar($reserva->id)?->estado);
         self::assertSame(0, $this->reservas->lugaresOcupados($reserva->funcionId));
@@ -59,7 +72,7 @@ final class RepositorioDeReservasTest extends TestCase
     {
         $reserva = $this->guardada(3);
 
-        self::assertTrue($this->reservas->guardarEstado($reserva->registrarAsistencia(), EstadoReserva::Confirmada));
+        self::assertTrue($this->reservas->guardarEstado($reserva->registrarAsistencia(), EstadoReserva::Confirmada, self::organizador()));
 
         self::assertSame(3, $this->reservas->lugaresOcupados($reserva->funcionId));
     }
@@ -74,9 +87,64 @@ final class RepositorioDeReservasTest extends TestCase
         $leidaPorElOrganizador = $this->reservas->buscar($leidaPorElEspectador->id);
         self::assertNotNull($leidaPorElOrganizador);
 
-        self::assertTrue($this->reservas->guardarEstado($leidaPorElOrganizador->registrarAsistencia(), EstadoReserva::Confirmada));
-        self::assertFalse($this->reservas->guardarEstado($leidaPorElEspectador->cancelar(), EstadoReserva::Confirmada));
+        self::assertTrue($this->reservas->guardarEstado($leidaPorElOrganizador->registrarAsistencia(), EstadoReserva::Confirmada, self::organizador()));
+        self::assertFalse($this->reservas->guardarEstado($leidaPorElEspectador->cancelar(), EstadoReserva::Confirmada, self::espectador()));
 
         self::assertSame(EstadoReserva::Asistio, $this->reservas->buscar($leidaPorElEspectador->id)?->estado);
+    }
+
+    public function testCadaCambioQuedaEnElHistorialConSuAutor(): void
+    {
+        $reserva = $this->guardada();
+
+        $this->reservas->guardarEstado($reserva->registrarAsistencia(), EstadoReserva::Confirmada, self::organizador(), new DateTimeImmutable('2026-10-24 20:10:00', new DateTimeZone('America/Argentina/Buenos_Aires')));
+
+        self::assertSame([[
+            'estado_anterior' => 'confirmada',
+            'estado_nuevo' => 'asistio',
+            'autor_id' => 'ffffffff-ffff-4fff-8fff-ffffffffffff',
+            'autor_rol' => 'organizador',
+            'motivo' => null,
+            'hecho_en' => '2026-10-24 23:10:00',
+        ]], $this->reservas->historial($reserva->id));
+    }
+
+    public function testUnCambioQueNoSeGuardoNoQuedaEnElHistorial(): void
+    {
+        $reserva = $this->guardada();
+        $this->reservas->guardarEstado($reserva->cancelar(), EstadoReserva::Confirmada, self::espectador());
+
+        self::assertFalse($this->reservas->guardarEstado($reserva->registrarAsistencia(), EstadoReserva::Confirmada, self::organizador()));
+        self::assertCount(1, $this->reservas->historial($reserva->id));
+    }
+
+    public function testLasDeUnaFuncionYPorSuCodigo(): void
+    {
+        $primera = $this->guardada(creada: '2026-10-20 12:00:00');
+        $segunda = $this->guardada(creada: '2026-10-21 12:00:00');
+        $deOtra = $this->guardada(funcionId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc');
+
+        self::assertSame([$primera->id, $segunda->id], array_column($this->reservas->deLaFuncion($primera->funcionId), 'id'));
+        self::assertSame($segunda->id, $this->reservas->porCodigo($primera->funcionId, $segunda->codigo)?->id);
+        // El código de otra función no sirve.
+        self::assertNull($this->reservas->porCodigo($primera->funcionId, $deOtra->codigo));
+    }
+
+    public function testLaPaginaDelAdministradorDeLaMasNuevaALaMasViejaYPorEstado(): void
+    {
+        $vieja = $this->guardada(creada: '2026-10-20 12:00:00');
+        $nueva = $this->guardada(creada: '2026-10-22 12:00:00');
+        $cancelada = $this->guardada(creada: '2026-10-21 12:00:00');
+        $this->reservas->guardarEstado($cancelada->cancelar(), EstadoReserva::Confirmada, self::espectador());
+
+        [$todas, $total] = $this->reservas->pagina(null, 1, 2);
+        self::assertSame([$nueva->id, $cancelada->id], array_column($todas, 'id'));
+        self::assertSame(3, $total);
+        [$segunda] = $this->reservas->pagina(null, 2, 2);
+        self::assertSame([$vieja->id], array_column($segunda, 'id'));
+
+        [$canceladas, $cuantas] = $this->reservas->pagina(EstadoReserva::Cancelada, 1, 10);
+        self::assertSame([$cancelada->id], array_column($canceladas, 'id'));
+        self::assertSame(1, $cuantas);
     }
 }

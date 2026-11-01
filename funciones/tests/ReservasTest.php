@@ -10,17 +10,24 @@ use IndieCinema\Nucleo\Configuracion;
 use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Log;
+use IndieCinema\Nucleo\Pruebas\Dobles\ServidorSmtpDePrueba;
 use IndieCinema\Nucleo\Uuid;
 use PHPUnit\Framework\TestCase;
 
 /**
  * La reserva de punta a punta (E4-01.3): las rutas de funciones con la sesión que manda nginx, el
- * token CSRF, la base de verdad y una programación de mentira que da 40 lugares a 3500.
+ * token CSRF, la base de verdad y una programación de mentira que da 40 lugares a 3500. El correo
+ * de la reserva confirmada (E4-04.3) llega a un servidor de correo de prueba, con la dirección que
+ * da un cuentas de mentira (<id>@ejemplo.test, y nombre Eva).
  */
 final class ReservasTest extends TestCase
 {
     use ConBaseDePruebas;
-    use ConProgramacionDePrueba;
+    use ConCuentasDePrueba;
+    use ConProgramacionDePrueba {
+        setUpBeforeClass as iniciarProgramacion;
+        tearDownAfterClass as detenerProgramacion;
+    }
 
     private const SECRETO = 'secreto-de-nginx';
     private const CSRF = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
@@ -29,19 +36,52 @@ final class ReservasTest extends TestCase
     private const PROXIMA = '12121212-1212-4212-8212-121212121212';
     private const EMPEZADA = '34343434-3434-4434-8434-343434343434';
 
+    private const SITIO = 'https://indiecinema.test';
+
+    private static ServidorSmtpDePrueba $correo;
+
     private Configuracion $configuracion;
     private BaseDeDatos $base;
 
+    /** @var resource lo que escribe el log en la última petición */
+    private $log;
+
+    public static function setUpBeforeClass(): void
+    {
+        self::iniciarProgramacion();
+        self::$correo = ServidorSmtpDePrueba::iniciar();
+        self::iniciarCuentas();
+    }
+
+    public static function tearDownAfterClass(): void
+    {
+        self::detenerProgramacion();
+        self::$correo->detener();
+        self::detenerCuentas();
+    }
+
     protected function setUp(): void
+    {
+        $this->configurar();
+        $this->base = self::baseConTablasNuevas($this->configuracion);
+        self::$correo->vaciar();
+    }
+
+    /**
+     * @param array<string, array<string, mixed>> $cambios secciones que reemplazan a las de siempre
+     */
+    private function configurar(array $cambios = []): void
     {
         $this->configuracion = new Configuracion([
             'app' => ['subsistema' => 'funciones', 'prefijo' => '/funcion', 'entorno' => 'desarrollo'],
             'base' => self::baseDePruebas(),
             'nginx' => ['secreto' => self::SECRETO],
-            'subsistemas' => ['programacion' => self::$url],
+            'subsistemas' => ['programacion' => self::$url, 'cuentas' => self::$urlCuentas],
             'interno' => ['token' => 'token-de-funciones'],
+            'correo' => ['servidor' => self::$correo->url(), 'remitente' => 'no-responder@indiecinema.test', 'nombre' => 'IndieCinema'],
+            'sitio' => ['url' => self::SITIO],
+            ...$cambios,
         ]);
-        $this->base = self::baseConTablasNuevas($this->configuracion);
     }
 
     /**
@@ -50,7 +90,8 @@ final class ReservasTest extends TestCase
     private function pedir(string $metodo, string $ruta, ?string $usuario = self::EVA, array $cuerpo = []): Respuesta
     {
         $cabeceras = $usuario === null ? [] : ['X-Nginx-Secreto' => self::SECRETO, 'X-Usuario-Id' => $usuario, 'X-Rol' => 'espectador'];
-        $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion, new Log('funciones', fopen('php://memory', 'w')));
+        $this->log = fopen('php://memory', 'w+');
+        $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion, new Log('funciones', $this->log));
 
         parse_str((string) parse_url($ruta, PHP_URL_QUERY), $consulta);
 
@@ -292,5 +333,131 @@ final class ReservasTest extends TestCase
         self::assertSame(422, $respuesta->estado());
         self::assertStringContainsString('La función ya empezó: la reserva ya no se puede cancelar.', $respuesta->cuerpo());
         self::assertSame('confirmada', $this->estado($id));
+    }
+
+    // ---- El correo de la reserva confirmada (E4-04.3) ---------------------------------------
+
+    /**
+     * Los correos que llegaron, con el asunto y el texto ya decodificados.
+     *
+     * @return list<array{de: string, para: list<string>, asunto: string, texto: string}>
+     */
+    private function correos(): array
+    {
+        return array_map(static function (array $correo): array {
+            [$cabeceras, $cuerpo] = explode("\r\n\r\n", $correo['mensaje'], 2);
+            preg_match('/^Subject: (.+(?:\r\n .+)*)/m', $cabeceras, $asunto);
+
+            return [
+                'de' => $correo['de'],
+                'para' => $correo['para'],
+                'asunto' => mb_decode_mimeheader(str_replace("\r\n", '', $asunto[1] ?? '')),
+                'texto' => str_replace("\r\n", "\n", (string) base64_decode(str_replace("\r\n", '', $cuerpo), true)),
+            ];
+        }, self::$correo->correos());
+    }
+
+    private function logEscrito(): string
+    {
+        rewind($this->log);
+
+        return (string) stream_get_contents($this->log);
+    }
+
+    public function testAlReservarLlegaElCorreoConElCodigoLaFuncionYElEnlace(): void
+    {
+        $id = $this->reservada('2');
+        $codigo = (string) $this->base->valor('SELECT codigo FROM reserva WHERE id = ?', [$id]);
+
+        $correos = $this->correos();
+        self::assertCount(1, $correos);
+        self::assertSame(['<' . self::EVA . '@ejemplo.test>'], $correos[0]['para']);
+        self::assertSame('<no-responder@indiecinema.test>', $correos[0]['de']);
+        self::assertSame('Reserva confirmada: «Zama»', $correos[0]['asunto']);
+        $texto = $correos[0]['texto'];
+        self::assertStringContainsString('Hola, Eva:', $texto);
+        self::assertStringContainsString(substr($codigo, 0, 4) . '-' . substr($codigo, 4), $texto);
+        self::assertStringContainsString('Zama', $texto);
+        self::assertStringContainsString('Cine Club El Galpón · Luján', $texto);
+        self::assertStringContainsString('2 lugares', $texto);
+        self::assertStringContainsString('$ 7.000', $texto);
+        self::assertStringContainsString(self::SITIO . "/funcion/reservas/{$id}", $texto);
+    }
+
+    /**
+     * Cuentas ya no tiene al usuario (BORRADO en el cuentas de mentira): la reserva queda hecha y
+     * el log lo cuenta sin la dirección ni el nombre.
+     */
+    public function testSinLaDireccionDelEspectadorLaReservaQuedaIgual(): void
+    {
+        $borrado = '00000000-0000-4000-8000-000000000000';
+
+        $respuesta = $this->reservar('1', usuario: $borrado);
+
+        self::assertSame(303, $respuesta->estado());
+        $id = (string) $this->base->valor('SELECT id FROM reserva WHERE usuario_id = ?', [$borrado]);
+        self::assertSame('confirmada', $this->estado($id));
+        self::assertSame([], $this->correos());
+        self::assertStringContainsString("No salió el correo de la reserva confirmada {$id}", $this->logEscrito());
+        self::assertStringNotContainsString('@ejemplo.test', $this->logEscrito());
+    }
+
+    public function testSinServidorDeCorreoLaReservaQuedaIgual(): void
+    {
+        $this->configurar(['correo' => ['servidor' => 'smtp://127.0.0.1:1', 'remitente' => 'no-responder@indiecinema.test']]);
+
+        $respuesta = $this->reservar('1');
+
+        self::assertSame(303, $respuesta->estado());
+        $id = (string) $this->base->valor('SELECT id FROM reserva');
+        self::assertSame('confirmada', $this->estado($id));
+        self::assertStringContainsString("No salió el correo de la reserva confirmada {$id}", $this->logEscrito());
+        self::assertStringNotContainsString(self::EVA . '@ejemplo.test', $this->logEscrito());
+    }
+
+    public function testSinCuentasLaReservaQuedaIgual(): void
+    {
+        $this->configurar(['subsistemas' => ['programacion' => self::$url, 'cuentas' => 'http://127.0.0.1:1']]);
+
+        self::assertSame(303, $this->reservar('1')->estado());
+        self::assertSame(1, $this->reservas());
+        self::assertSame([], $this->correos());
+    }
+
+    /**
+     * Sin la URL del sitio el enlace al comprobante saldría roto: no es un aviso en el log sino un
+     * error, para verlo enseguida.
+     */
+    public function testSinUnaUrlDelSitioValidaEsUnErrorDeConfiguracion(): void
+    {
+        foreach ([[], ['url' => 'ftp://indiecinema.test'], ['url' => 'indiecinema.test']] as $sitio) {
+            $this->configurar(['sitio' => $sitio]);
+
+            self::assertSame(500, $this->reservar('1')->estado());
+            self::assertStringContainsString('sitio.url', $this->logEscrito());
+        }
+        self::assertSame([], $this->correos());
+    }
+
+    public function testUnaUrlDelSitioConBarraFinalNoDuplicaLaBarra(): void
+    {
+        $this->configurar(['sitio' => ['url' => self::SITIO . '/']]);
+
+        $id = $this->reservada();
+
+        self::assertStringContainsString(self::SITIO . "/funcion/reservas/{$id}\n", $this->correos()[0]['texto']);
+    }
+
+    /**
+     * Mientras se votan los títulos la función no tiene fecha, y ya se puede reservar.
+     */
+    public function testSinFechaElCorreoLaDaAConfirmarYNombraLasCandidatas(): void
+    {
+        self::assertSame(303, $this->reservar('1', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb')->estado());
+
+        $correo = $this->correos()[0];
+        self::assertSame('Reserva confirmada: «La ciénaga + Zama»', $correo['asunto']);
+        self::assertStringContainsString("Fecha: a confirmar\n", $correo['texto']);
+        self::assertStringContainsString("Lugares: 1 lugar\n", $correo['texto']);
     }
 }

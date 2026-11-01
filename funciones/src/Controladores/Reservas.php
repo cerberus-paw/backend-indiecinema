@@ -8,6 +8,7 @@ use IndieCinema\Funciones\Modelo\EstadoReserva;
 use IndieCinema\Funciones\Modelo\FuncionDeProgramacion;
 use IndieCinema\Funciones\Modelo\ReglaIncumplida;
 use IndieCinema\Funciones\Modelo\Reserva;
+use IndieCinema\Funciones\Servicios\AvisosDeReservas;
 use IndieCinema\Funciones\Servicios\ServicioDeReservas;
 use IndieCinema\Nucleo\Controlador;
 use IndieCinema\Nucleo\Http\ExcepcionHttp;
@@ -26,8 +27,10 @@ use LogicException;
  */
 final class Reservas extends Controlador
 {
-    public function __construct(private readonly ServicioDeReservas $servicio)
-    {
+    public function __construct(
+        private readonly ServicioDeReservas $servicio,
+        private readonly AvisosDeReservas $avisos,
+    ) {
     }
 
     public function formulario(Peticion $peticion): Respuesta
@@ -54,6 +57,8 @@ final class Reservas extends Controlador
         } catch (ReglaIncumplida $error) {
             return $this->pantalla($funcion, ['cantidad' => $valor], error: $error->getMessage(), estado: 422);
         }
+        // Ya confirmada: si el correo no sale, la reserva queda igual y el aviso queda en el log.
+        $this->avisos->reservaConfirmada($reserva, $funcion);
 
         // 303: recargar la confirmación no vuelve a reservar.
         return $this->redirigir("/reservas/{$reserva->id}");

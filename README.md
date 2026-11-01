@@ -210,8 +210,13 @@ todo el sitio se vea igual aunque lo sirvan subsistemas distintos.
   rol: si cuentas no responde no cambia nada, y nunca queda una sala publicada cuyo dueño no
   puede entrar a «Mis salas». La resuelve el administrador mientras no haya moderación.
 - **Los correos salen por SMTP con el curl de PHP** (`ClienteSmtp` del núcleo), sin librerías.
-  El servidor está en `[correo]` del `config.ini` de programación, que manda el aviso de cada
-  solicitud de sala. Por ahora el correo se simula, también en el VPS: va al buzón de prueba del
+  El servidor y el remitente están en `[correo]` del `config.ini` de cada subsistema que manda
+  correos: programación, el aviso de cada solicitud de sala, y funciones, los de los espectadores
+  (la reserva confirmada, con el código y el enlace al comprobante, y la función cancelada). El
+  enlace sale de `[sitio] url` de funciones, la dirección pública del sitio sin la barra final:
+  si falta o no es http(s), reservar responde 500 y el motivo queda en el log. Si un correo no
+  sale, la reserva queda igual y el log lo cuenta con el id de la reserva, sin la dirección.
+  Por ahora el correo se simula, también en el VPS: va al buzón de prueba del
   compose (`COMPOSE_PROFILES=buzon` en `.env`), que en el VPS sólo escucha en la máquina y se ve
   con `ssh -L 8025:127.0.0.1:8025 …`. Con un proveedor de verdad, un servidor con usuario exige
   `smtps://` o STARTTLS para no mandar la clave sin cifrar.

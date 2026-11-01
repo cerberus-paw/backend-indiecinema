@@ -35,40 +35,68 @@ final class RepositorioDeFunciones
      */
     public function resumen(string $id): ?ResumenDeFuncion
     {
-        $fila = $this->base->fila(
-            'SELECT f.id, f.estado, f.fecha_hora, f.precio_base, f.cupo,
+        return $this->resumenes([$id])[$id] ?? null;
+    }
+
+    /**
+     * Varias de una vez, como resumen(): dos consultas para todas, en lugar de dos por función.
+     * Las que no existen o cuya sala se dio de baja no vienen.
+     *
+     * @param list<string> $ids
+     *
+     * @return array<string, ResumenDeFuncion> con el id como clave
+     */
+    public function resumenes(array $ids): array
+    {
+        if ($ids === []) {
+            return [];
+        }
+        $marcas = implode(', ', array_fill(0, count($ids), '?'));
+        $filas = $this->base->filas(
+            "SELECT f.id, f.estado, f.fecha_hora, f.precio_base, f.cupo,
                     s.id AS sala_id, s.nombre AS sala_nombre, s.localidad AS sala_localidad,
                     s.habilitada AS sala_habilitada, s.organizador_id
              FROM funcion f
              JOIN sala s ON s.id = f.sala_id
-             WHERE f.id = ? AND s.dada_de_baja_en IS NULL',
-            [$id],
+             WHERE f.id IN ({$marcas}) AND s.dada_de_baja_en IS NULL",
+            $ids,
         );
-        if ($fila === null) {
-            return null;
+        if ($filas === []) {
+            return [];
         }
-        $obras = $this->base->filas(
-            'SELECT fo.estado, o.titulo FROM funcion_obra fo JOIN obra o ON o.id = fo.obra_id
-             WHERE fo.funcion_id = ? ORDER BY o.titulo, o.id',
-            [$id],
-        );
-        // Como en buscar(): si ya hay elegidas son ésas; si no, las candidatas.
-        $elegidas = array_filter($obras, static fn (array $obra): bool => $obra['estado'] === 'elegida');
+        $encontradas = array_map(static fn (array $fila): string => (string) $fila['id'], $filas);
+        $obrasPorFuncion = [];
+        foreach ($this->base->filas(
+            'SELECT fo.funcion_id, fo.estado, o.titulo FROM funcion_obra fo JOIN obra o ON o.id = fo.obra_id
+             WHERE fo.funcion_id IN (' . implode(', ', array_fill(0, count($encontradas), '?')) . ')
+             ORDER BY o.titulo, o.id',
+            $encontradas,
+        ) as $obra) {
+            $obrasPorFuncion[(string) $obra['funcion_id']][] = $obra;
+        }
 
-        return new ResumenDeFuncion(
-            (string) $fila['id'],
-            EstadoFuncion::from((string) $fila['estado']),
-            $fila['fecha_hora'] === null ? null : new DateTimeImmutable((string) $fila['fecha_hora']),
-            (float) $fila['precio_base'],
-            (int) $fila['cupo'],
-            array_values(array_map(static fn (array $obra): string => (string) $obra['titulo'], $elegidas ?: $obras)),
-            $elegidas !== [],
-            (string) $fila['sala_id'],
-            (string) $fila['sala_nombre'],
-            (string) $fila['sala_localidad'],
-            (bool) $fila['sala_habilitada'],
-            (string) $fila['organizador_id'],
-        );
+        $resumenes = [];
+        foreach ($filas as $fila) {
+            $obras = $obrasPorFuncion[(string) $fila['id']] ?? [];
+            // Como en buscar(): si ya hay elegidas son ésas; si no, las candidatas.
+            $elegidas = array_filter($obras, static fn (array $obra): bool => $obra['estado'] === 'elegida');
+            $resumenes[(string) $fila['id']] = new ResumenDeFuncion(
+                (string) $fila['id'],
+                EstadoFuncion::from((string) $fila['estado']),
+                $fila['fecha_hora'] === null ? null : new DateTimeImmutable((string) $fila['fecha_hora']),
+                (float) $fila['precio_base'],
+                (int) $fila['cupo'],
+                array_values(array_map(static fn (array $obra): string => (string) $obra['titulo'], $elegidas ?: $obras)),
+                $elegidas !== [],
+                (string) $fila['sala_id'],
+                (string) $fila['sala_nombre'],
+                (string) $fila['sala_localidad'],
+                (bool) $fila['sala_habilitada'],
+                (string) $fila['organizador_id'],
+            );
+        }
+
+        return $resumenes;
     }
 
     public function buscar(string $id): ?Funcion

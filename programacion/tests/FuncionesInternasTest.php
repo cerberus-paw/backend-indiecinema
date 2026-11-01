@@ -24,7 +24,7 @@ use IndieCinema\Programacion\Repositorios\RepositorioDeSalas;
 use PHPUnit\Framework\TestCase;
 
 /**
- * GET /interno/funciones/{id} de punta a punta: la aplicación entera con las rutas de
+ * GET /interno/funciones/{id} y GET /interno/funciones?ids=… de punta a punta: la aplicación entera con las rutas de
  * programación, la autorización por token de la API interna y un MySQL de verdad.
  */
 final class FuncionesInternasTest extends TestCase
@@ -101,6 +101,16 @@ final class FuncionesInternasTest extends TestCase
         ], [], []));
     }
 
+    private function pedirVarias(string $ids, string $llamador = 'funciones', string $token = self::TOKEN_DE_FUNCIONES): Respuesta
+    {
+        $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion, new Log('programacion', fopen('php://memory', 'w')));
+
+        return $aplicacion->atender(new Peticion('GET', '/interno/funciones', ['ids' => $ids], [], [
+            'X-Llamador' => $llamador,
+            'Authorization' => "Bearer {$token}",
+        ], [], []));
+    }
+
     /**
      * @return array<string, mixed>
      */
@@ -170,5 +180,66 @@ final class FuncionesInternasTest extends TestCase
         self::assertSame(403, $this->pedir($id, 'cuentas', self::TOKEN_DE_CUENTAS)->estado());
         self::assertSame(403, $this->pedir($id, 'funciones', self::TOKEN_DE_CUENTAS)->estado());
         self::assertSame(403, $this->pedir($id, 'funciones', '')->estado());
+    }
+
+    /**
+     * «Mis reservas» (E4-04.1) pide las funciones de una página en un solo pedido: cada una con
+     * los mismos campos que la ruta de a una, con su id como clave.
+     */
+    public function testVariasDaCadaUnaConSuIdComoClave(): void
+    {
+        $votacion = $this->funcion();
+        $programada = $this->funcion();
+        $programada->cerrarVotacionTitulos([$this->obras['Zama']]);
+        $programada->fijarFechaHora(new DateTimeImmutable('2026-10-24 20:30:00'), new DateTimeImmutable('2026-10-11 18:00:00'));
+        $this->funciones->guardar($programada);
+
+        $datos = $this->json($this->pedirVarias("{$votacion->id},{$programada->id}"));
+
+        self::assertEqualsCanonicalizing([$votacion->id, $programada->id], array_keys($datos));
+        self::assertSame($this->json($this->pedir($votacion->id)), $datos[$votacion->id]);
+        self::assertSame($this->json($this->pedir($programada->id)), $datos[$programada->id]);
+    }
+
+    public function testVariasNoTraeLasQueNoExistenNiLasDeUnaSalaDadaDeBaja(): void
+    {
+        $funcion = $this->funcion();
+        $otraSala = Sala::nueva(self::ORGANIZADORA, new DatosDeSala('Sala Cerrada', 'Cerró.', 'Calle 1', 'Luján', 30, 2, 120, 15), 'sala.jpg');
+        $this->salas->agregar($otraSala);
+        $this->base->ejecutar('UPDATE sala SET habilitada = TRUE WHERE id = ?', [$otraSala->id]);
+        $deBaja = ($this->salas->buscar($otraSala->id) ?? self::fail('No se guardó la sala.'))->crearFuncion(array_values($this->obras), 20, 0.0);
+        $this->funciones->agregar($deBaja);
+        $this->base->ejecutar('UPDATE sala SET dada_de_baja_en = NOW() WHERE id = ?', [$otraSala->id]);
+
+        $datos = $this->json($this->pedirVarias(implode(',', [$funcion->id, Uuid::nuevo(), $deBaja->id])));
+
+        self::assertSame([$funcion->id], array_keys($datos));
+    }
+
+    public function testVariasSinNingunaQueExistaEsUnObjetoVacio(): void
+    {
+        $respuesta = $this->pedirVarias(Uuid::nuevo());
+
+        self::assertSame(200, $respuesta->estado());
+        self::assertSame('{}', $respuesta->cuerpo());
+    }
+
+    public function testVariasRechazaUnPedidoVacioDemasiadoLargoOConIdsQueNoSonUuid(): void
+    {
+        $veintiuno = implode(',', array_map(static fn (): string => Uuid::nuevo(), range(1, 21)));
+        $veinte = implode(',', array_map(static fn (): string => Uuid::nuevo(), range(1, 20)));
+
+        self::assertSame(400, $this->pedirVarias('')->estado());
+        self::assertSame(400, $this->pedirVarias($veintiuno)->estado());
+        self::assertSame(400, $this->pedirVarias(Uuid::nuevo() . ',no-es-un-id')->estado());
+        self::assertSame(200, $this->pedirVarias($veinte)->estado());
+    }
+
+    public function testVariasSoloLasPideFuncionesConSuToken(): void
+    {
+        $id = $this->funcion()->id;
+
+        self::assertSame(403, $this->pedirVarias($id, 'cuentas', self::TOKEN_DE_CUENTAS)->estado());
+        self::assertSame(403, $this->pedirVarias($id, 'funciones', '')->estado());
     }
 }

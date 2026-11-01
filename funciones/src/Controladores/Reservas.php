@@ -33,6 +33,66 @@ final class Reservas extends Controlador
     ) {
     }
 
+    /**
+     * GET /reservas: «Mis reservas» (E4-04.1), con ?pagina=. Una página que no existe es 404, como
+     * en el panel del administrador. Si programación no responde, la lista sale igual, con los
+     * códigos y sin los datos de las funciones.
+     */
+    public function mias(Peticion $peticion): Respuesta
+    {
+        $espectador = self::usuario($peticion);
+        $numero = filter_var($peticion->consulta('pagina', '1'), FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+        if ($numero === false) {
+            throw ExcepcionHttp::noEncontrada();
+        }
+        [$reservas, $total] = $this->servicio->pagina($espectador, $numero);
+        $paginas = max(1, (int) ceil($total / ServicioDeReservas::POR_PAGINA));
+        if ($numero > $paginas) {
+            throw ExcepcionHttp::noEncontrada();
+        }
+        try {
+            $funciones = $this->servicio->funcionesDe($reservas);
+            $sinProgramacion = false;
+        } catch (ExcepcionHttp) {
+            $funciones = [];
+            $sinProgramacion = true;
+        }
+
+        return $this->vista('mis_reservas.html.twig', [
+            'reservas' => array_map(static function (Reserva $reserva) use ($funciones, $sinProgramacion): array {
+                $funcion = $funciones[$reserva->funcionId] ?? null;
+
+                return [
+                    ...self::datosDeReserva($reserva, $funcion),
+                    'estado_etiqueta' => $reserva->estado->etiqueta(),
+                    // Sin programación no se sabe si empezó: el botón queda en el comprobante.
+                    'cancelable' => !$sinProgramacion && ServicioDeReservas::seCancela($reserva, $funcion),
+                    'funcion' => $funcion === null ? null : self::datosDeFuncion($funcion),
+                ];
+            }, $reservas),
+            'sin_programacion' => $sinProgramacion,
+            'paginado' => [
+                'numero' => $numero,
+                'total_paginas' => $paginas,
+                'total' => $total,
+                'anterior' => $numero > 1 ? self::urlDePagina($numero - 1) : null,
+                'siguiente' => $numero < $paginas ? self::urlDePagina($numero + 1) : null,
+                'paginas' => array_map(
+                    static fn (int $n): array => ['numero' => $n, 'url' => self::urlDePagina($n), 'actual' => $n === $numero],
+                    range(1, $paginas),
+                ),
+            ],
+        ]);
+    }
+
+    /**
+     * Relativa a la página: así no depende del prefijo de funciones, que pone nginx.
+     */
+    private static function urlDePagina(int $numero): string
+    {
+        return $numero > 1 ? "?pagina={$numero}" : '?';
+    }
+
     public function formulario(Peticion $peticion): Respuesta
     {
         $funcion = $this->servicio->funcion((string) $peticion->parametro('id'));

@@ -460,4 +460,135 @@ final class ReservasTest extends TestCase
         self::assertStringContainsString("Fecha: a confirmar\n", $correo['texto']);
         self::assertStringContainsString("Lugares: 1 lugar\n", $correo['texto']);
     }
+
+    // ---- «Mis reservas» (E4-04.1) -----------------------------------------------------------
+
+    /**
+     * Una reserva hecha en otro momento, sin pasar por la página.
+     *
+     * @return string su código
+     */
+    private function hecha(string $funcion, string $creada, string $estado = 'confirmada', string $usuario = self::EVA, int $cantidad = 1): string
+    {
+        $codigo = strtoupper(substr(bin2hex(random_bytes(4)), 0, 8));
+        $this->base->ejecutar(
+            'INSERT INTO reserva (id, funcion_id, usuario_id, codigo, cantidad, total, estado, creada_en) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            [Uuid::nuevo(), $funcion, $usuario, $codigo, $cantidad, '3500.00', $estado, $creada],
+        );
+
+        return $codigo;
+    }
+
+    private static function partido(string $codigo): string
+    {
+        return substr($codigo, 0, 4) . '-' . substr($codigo, 4);
+    }
+
+    public function testMisReservasListaTodasLasMiasDeLaMasNuevaALaMasVieja(): void
+    {
+        $vieja = $this->hecha(self::PROXIMA, '2026-10-01 10:00:00', 'asistio');
+        $cancelada = $this->hecha(self::PROXIMA, '2026-10-05 10:00:00', 'cancelada');
+        $nueva = $this->hecha('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', '2026-10-10 10:00:00', cantidad: 3);
+
+        $respuesta = $this->pedir('GET', '/reservas');
+
+        self::assertSame(200, $respuesta->estado());
+        $cuerpo = $respuesta->cuerpo();
+        self::assertStringContainsString('Mis reservas', $cuerpo);
+        $posiciones = array_map(static fn (string $codigo): int|false => strpos($cuerpo, self::partido($codigo)), [$nueva, $cancelada, $vieja]);
+        self::assertNotContains(false, $posiciones);
+        self::assertSame($posiciones, array_values(array_unique($posiciones)));
+        self::assertTrue($posiciones[0] < $posiciones[1] && $posiciones[1] < $posiciones[2], 'De la más nueva a la más vieja.');
+        // La función, la sala, la fecha o «A confirmar», los lugares y el estado.
+        self::assertStringContainsString('La ciénaga + Zama', $cuerpo);
+        self::assertStringContainsString('Cine Club El Galpón', $cuerpo);
+        self::assertStringContainsString('A confirmar', $cuerpo);
+        self::assertStringContainsString('con asistencia', $cuerpo);
+        self::assertStringContainsString('cancelada', $cuerpo);
+        self::assertMatchesRegularExpression('#<td[^>]*>\s*3\s*</td>#', $cuerpo);
+        $id = (string) $this->base->valor('SELECT id FROM reserva WHERE codigo = ?', [$nueva]);
+        self::assertStringContainsString("href=\"/funcion/reservas/{$id}\"", $cuerpo);
+    }
+
+    public function testMisReservasSinNingunaLlevaALaCartelera(): void
+    {
+        $respuesta = $this->pedir('GET', '/reservas');
+
+        self::assertSame(200, $respuesta->estado());
+        self::assertStringContainsString('Todavía no reservaste lugares', $respuesta->cuerpo());
+        self::assertStringContainsString('href="/cartelera"', $respuesta->cuerpo());
+        self::assertStringNotContainsString('<table', $respuesta->cuerpo());
+    }
+
+    public function testMisReservasPideSesion(): void
+    {
+        self::assertSame(401, $this->pedir('GET', '/reservas', null)->estado());
+    }
+
+    public function testMisReservasPaginaDeAVeinte(): void
+    {
+        $codigos = [];
+        for ($i = 1; $i <= 21; ++$i) {
+            $codigos[$i] = $this->hecha(self::PROXIMA, sprintf('2026-10-%02d 10:00:00', $i));
+        }
+
+        $primera = $this->pedir('GET', '/reservas')->cuerpo();
+        $segunda = $this->pedir('GET', '/reservas?pagina=2');
+
+        self::assertSame(20, substr_count($primera, 'data-reserva='));
+        self::assertStringContainsString(self::partido($codigos[21]), $primera);
+        self::assertStringNotContainsString(self::partido($codigos[1]), $primera);
+        self::assertStringContainsString('href="?pagina=2"', $primera);
+        self::assertSame(200, $segunda->estado());
+        self::assertSame(1, substr_count($segunda->cuerpo(), 'data-reserva='));
+        self::assertStringContainsString(self::partido($codigos[1]), $segunda->cuerpo());
+        self::assertSame(404, $this->pedir('GET', '/reservas?pagina=3')->estado());
+        self::assertSame(404, $this->pedir('GET', '/reservas?pagina=0')->estado());
+        self::assertSame(404, $this->pedir('GET', '/reservas?pagina=dos')->estado());
+    }
+
+    /**
+     * Si programación no responde, las reservas y sus códigos se ven igual, con un aviso.
+     */
+    public function testMisReservasSinProgramacionMuestraLosCodigosYUnAviso(): void
+    {
+        $codigo = $this->hecha(self::PROXIMA, '2026-10-01 10:00:00');
+        $this->configurar(['subsistemas' => ['programacion' => 'http://127.0.0.1:1', 'cuentas' => self::$urlCuentas]]);
+
+        $respuesta = $this->pedir('GET', '/reservas');
+
+        self::assertSame(200, $respuesta->estado());
+        $cuerpo = $respuesta->cuerpo();
+        self::assertStringContainsString(self::partido($codigo), $cuerpo);
+        self::assertStringContainsString('no podemos mostrar los datos de las funciones', $cuerpo);
+        self::assertStringNotContainsString('Zama', $cuerpo);
+        self::assertStringNotContainsString('Ya no está en la cartelera', $cuerpo);
+        // Sin saber si empezó, el botón para cancelar queda en el comprobante.
+        self::assertStringNotContainsString('/cancelar"', $cuerpo);
+    }
+
+    public function testMisReservasConUnaFuncionQueYaNoEstaLoDice(): void
+    {
+        $codigo = $this->hecha('eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', '2026-10-01 10:00:00');
+
+        $cuerpo = $this->pedir('GET', '/reservas')->cuerpo();
+
+        self::assertStringContainsString(self::partido($codigo), $cuerpo);
+        self::assertStringContainsString('Ya no está en la cartelera', $cuerpo);
+    }
+
+    /**
+     * Cancelar aparece sólo donde todavía se puede: confirmada y antes de que empiece.
+     */
+    public function testMisReservasOfreceCancelarSoloLasQueSePueden(): void
+    {
+        $this->hecha(self::PROXIMA, '2026-10-03 10:00:00');
+        $this->hecha(self::EMPEZADA, '2026-10-02 10:00:00');
+        $this->hecha(self::PROXIMA, '2026-10-01 10:00:00', 'cancelada');
+
+        $cuerpo = $this->pedir('GET', '/reservas')->cuerpo();
+
+        self::assertSame(1, substr_count($cuerpo, '/cancelar"'));
+        self::assertSame(3, substr_count($cuerpo, 'Ver comprobante'));
+    }
 }

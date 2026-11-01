@@ -489,6 +489,17 @@ compose, y los archivos van al volumen de programación.
 
 ## Pruebas
 
+```
+herramientas/pruebas.sh funciones                    # nucleo, cuentas, programacion o funciones
+herramientas/pruebas.sh funciones --filter Reservas  # lo que sigue va a PHPUnit
+herramientas/pruebas.sh                              # los cuatro
+```
+
+No necesita PHP ni Composer: corre PHPUnit con la imagen de los subsistemas, instala las
+dependencias con la de Composer si faltan y levanta un MySQL descartable (`mysql-pruebas`) que
+queda andando para la próxima, también en `127.0.0.1:3307` (se apaga con
+`docker stop mysql-pruebas`). Más abajo, cómo correrlas con el PHP de la máquina.
+
 El núcleo y los tres subsistemas tienen las suyas (las de los subsistemas necesitan el
 `composer install` de arriba, que trae PHPUnit). Funciones, por ahora, prueba que arranca y que
 lee una función de programación por la API interna:
@@ -523,8 +534,8 @@ mismo con las del organizador y fija cuáles son públicas), y las restricciones
 usuario y rol (correo único, y roles sin repetir y sólo de un usuario que existe); en funciones, las
 restricciones de la tabla reserva (código único, cantidad positiva y total no negativo) y el cupo de
 la reserva, con varios procesos a la vez por el último lugar, sus cambios de estado, y la reserva de punta a punta (sesión,
-token CSRF, cantidad inválida, sin lugares, la reserva de otro y la cancelación). Para correrlas,
-uno descartable:
+token CSRF, cantidad inválida, sin lugares, la reserva de otro y la cancelación). Para correrlas
+con el PHP de la máquina (8.4 o superior, con `pdo_mysql`), contra un MySQL descartable:
 
 ```
 docker run -d --rm --name mysql-pruebas -e MYSQL_ROOT_PASSWORD=pruebas -e MYSQL_DATABASE=pruebas -p 127.0.0.1:3307:3306 mysql:8.4

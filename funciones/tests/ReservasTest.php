@@ -591,4 +591,32 @@ final class ReservasTest extends TestCase
         self::assertSame(1, substr_count($cuerpo, '/cancelar"'));
         self::assertSame(3, substr_count($cuerpo, 'Ver comprobante'));
     }
+
+    /**
+     * Cada espectador ve sólo las suyas, aunque haya reservado la misma función que otro (E4-04.4).
+     */
+    public function testMisReservasNoMuestraLasDeOtro(): void
+    {
+        $deEva = $this->hecha(self::PROXIMA, '2026-10-01 10:00:00');
+        $deElias = [];
+        for ($i = 1; $i <= 20; ++$i) {
+            $deElias[] = $this->hecha($i % 2 === 0 ? self::PROXIMA : self::EMPEZADA, sprintf('2026-10-%02d 12:00:00', $i), usuario: self::ELIAS);
+        }
+
+        $deEvaVista = $this->pedir('GET', '/reservas')->cuerpo();
+        $deEliasVista = $this->pedir('GET', '/reservas', self::ELIAS)->cuerpo();
+
+        self::assertSame(1, substr_count($deEvaVista, 'data-reserva='));
+        self::assertStringContainsString(self::partido($deEva), $deEvaVista);
+        foreach ($deElias as $codigo) {
+            self::assertStringNotContainsString(self::partido($codigo), $deEvaVista);
+            self::assertStringNotContainsString($codigo, $deEvaVista);
+        }
+        // El total del paginado cuenta sólo las suyas: con 21 en la tabla, Eva tendría dos páginas.
+        self::assertStringNotContainsString('?pagina=2', $deEvaVista);
+        self::assertStringContainsString('<p class="sr-only" role="status">1 reserva</p>', $deEvaVista);
+
+        self::assertSame(20, substr_count($deEliasVista, 'data-reserva='));
+        self::assertStringNotContainsString(self::partido($deEva), $deEliasVista);
+    }
 }

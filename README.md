@@ -301,6 +301,12 @@ docker compose down                       # apagar todo (los datos de MySQL qued
 El código PHP se monta en los contenedores, así que un cambio se ve al recargar la página, sin
 reiniciar nada. Un cambio en `composer.json` necesita otro `composer install` del subsistema.
 
+Después de cada `git pull`, `php herramientas/comprobar-config.php` dice qué secciones y claves de
+los `config.ejemplo.ini` y del `.env.ejemplo` le faltan a la configuración local (sólo los nombres,
+nunca los valores), y sale con 1 si falta algo. Un cambio que suma una clave a un ejemplo deja
+atrás los `config.ini` de los demás, que no se versionan, y sin esto el síntoma aparece recién al
+usar esa parte (un correo que no sale, un 500 al reservar).
+
 ### La base de datos
 
 La primera vez que arranca MySQL, con el volumen vacío, corre `mysql/init/`: crea los esquemas

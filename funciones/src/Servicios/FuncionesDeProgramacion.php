@@ -13,8 +13,9 @@ use RuntimeException;
 
 /**
  * Las funciones de programación, pedidas por la API interna con el token de funciones
- * (GET /interno/funciones/{id}, o GET /interno/funciones?ids=… para varias). Es lo único que funciones sabe de una función: la votación de
- * horario y las reservas la piden acá.
+ * (GET /interno/funciones/{id}, o GET /interno/funciones?ids=… para varias). Es lo único que
+ * funciones sabe de una función: la votación de horario, las reservas y «Mis reservas» la piden
+ * acá.
  */
 final class FuncionesDeProgramacion
 {

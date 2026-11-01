@@ -426,9 +426,10 @@ final class ReservasTest extends TestCase
 
     /**
      * Sin la URL del sitio el enlace al comprobante saldría roto: no es un aviso en el log sino un
-     * error, para verlo enseguida.
+     * error, para verlo enseguida. Y antes de reservar: si no, el espectador vería un error con la
+     * reserva ya hecha, y reservaría de nuevo.
      */
-    public function testSinUnaUrlDelSitioValidaEsUnErrorDeConfiguracion(): void
+    public function testSinUnaUrlDelSitioValidaEsUnErrorDeConfiguracionYNoReserva(): void
     {
         foreach ([[], ['url' => 'ftp://indiecinema.test'], ['url' => 'indiecinema.test']] as $sitio) {
             $this->configurar(['sitio' => $sitio]);
@@ -436,6 +437,7 @@ final class ReservasTest extends TestCase
             self::assertSame(500, $this->reservar('1')->estado());
             self::assertStringContainsString('sitio.url', $this->logEscrito());
         }
+        self::assertSame(0, $this->reservas());
         self::assertSame([], $this->correos());
     }
 

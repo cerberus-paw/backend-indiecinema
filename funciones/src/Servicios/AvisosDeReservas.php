@@ -35,6 +35,17 @@ final class AvisosDeReservas
     }
 
     /**
+     * Que se va a poder armar el enlace del correo de la reserva confirmada. Se llama antes de
+     * reservar: si falla después, el espectador vería un error con la reserva ya hecha.
+     *
+     * @throws RuntimeException si falta [sitio] url o no es http(s)
+     */
+    public function comprobarConfiguracion(): void
+    {
+        $this->urlDelSitio();
+    }
+
+    /**
      * El correo con el comprobante, apenas se confirma la reserva. Hoy es al reservar; con el pago
      * (X-01) será cuando llegue el aviso del pago verificado.
      *

@@ -112,6 +112,8 @@ final class Reservas extends Controlador
             return $this->pantalla($funcion, ['cantidad' => $valor], ['cantidad' => "Ingresá entre 1 y {$funcion->cupo} lugares."], estado: 422);
         }
 
+        // Un error de configuración, antes de guardar nada.
+        $this->avisos->comprobarConfiguracion();
         try {
             $reserva = $this->servicio->reservar(self::usuario($peticion), $funcion->id, $cantidad);
         } catch (ReglaIncumplida $error) {

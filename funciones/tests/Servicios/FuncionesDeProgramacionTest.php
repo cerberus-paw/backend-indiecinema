@@ -93,4 +93,41 @@ final class FuncionesDeProgramacionTest extends TestCase
             }
         }
     }
+
+    /**
+     * Las de una página de «Mis reservas» (E4-04.1), en un solo pedido: las que programación no
+     * conoce no vienen, y un id mal formado ni se pide.
+     */
+    public function testVariasTraeLasQueExistenConSuIdComoClave(): void
+    {
+        $funciones = $this->funciones()->buscarVarias([self::PROGRAMADA, self::EN_VOTACION, 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', '../estado']);
+
+        self::assertEqualsCanonicalizing([self::PROGRAMADA, self::EN_VOTACION], array_keys($funciones));
+        self::assertSame(['Zama'], $funciones[self::PROGRAMADA]->titulos);
+        self::assertNull($funciones[self::EN_VOTACION]->fechaHora);
+    }
+
+    public function testVariasSinIdsNoPideNada(): void
+    {
+        self::assertSame([], $this->funciones(url: 'http://127.0.0.1:1')->buscarVarias([]));
+    }
+
+    public function testVariasSiProgramacionCambiaLoQueMandaEsUnErrorClaro(): void
+    {
+        $this->expectException(RuntimeException::class);
+
+        $this->funciones()->buscarVarias([self::PROGRAMADA, self::ROTA]);
+    }
+
+    public function testVariasSiProgramacionNoRespondeATiempoEsUn503(): void
+    {
+        foreach ([[self::LENTA, ''], [self::PROGRAMADA, 'http://127.0.0.1:1']] as [$id, $url]) {
+            try {
+                $this->funciones(url: $url)->buscarVarias([$id]);
+                self::fail('Tenía que cortar con un 503.');
+            } catch (ExcepcionHttp $error) {
+                self::assertSame(503, $error->estado);
+            }
+        }
+    }
 }

@@ -13,7 +13,7 @@ use RuntimeException;
 
 /**
  * Las funciones de programación, pedidas por la API interna con el token de funciones
- * (GET /interno/funciones/{id}). Es lo único que funciones sabe de una función: la votación de
+ * (GET /interno/funciones/{id}, o GET /interno/funciones?ids=… para varias). Es lo único que funciones sabe de una función: la votación de
  * horario y las reservas la piden acá.
  */
 final class FuncionesDeProgramacion
@@ -37,6 +37,40 @@ final class FuncionesDeProgramacion
         $datos = $this->cliente->get('programacion', "/interno/funciones/{$id}");
 
         return $datos === null ? null : self::funcion($datos);
+    }
+
+    /**
+     * Las de una página de «Mis reservas» (E4-04.1) en un solo pedido. Las que no existen o cuya
+     * sala se dio de baja no vienen; los ids que no tienen forma de id ni se piden.
+     *
+     * @param list<string> $ids hasta 20: los que entran en una página
+     *
+     * @return array<string, FuncionDeProgramacion> con el id como clave
+     *
+     * @throws ExcepcionHttp    503 si programación no responde a tiempo
+     * @throws RuntimeException si responde algo que no son funciones: el contrato se rompió
+     */
+    public function buscarVarias(array $ids): array
+    {
+        $ids = array_values(array_unique(array_filter($ids, Uuid::esValido(...))));
+        if ($ids === []) {
+            return [];
+        }
+        $datos = $this->cliente->get('programacion', '/interno/funciones', ['ids' => implode(',', $ids)]);
+        if (!is_array($datos)) {
+            throw new RuntimeException('programacion no respondió las funciones a GET /interno/funciones.');
+        }
+
+        $funciones = [];
+        foreach ($datos as $id => $funcion) {
+            $funcion = self::funcion($funcion);
+            if ($funcion->id !== $id) {
+                throw new RuntimeException('programacion respondió una función con otro id a GET /interno/funciones.');
+            }
+            $funciones[$funcion->id] = $funcion;
+        }
+
+        return $funciones;
     }
 
     /**

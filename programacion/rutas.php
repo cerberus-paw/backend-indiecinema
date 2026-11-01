@@ -68,6 +68,8 @@ return static function (Router $router): void {
 
     // Una función para el subsistema funciones (acuerdo de fecha y reservas): sólo la pide él.
     $router->interna('GET', '/interno/funciones/{id}', [FuncionesInternas::class, 'mostrar'], ['funciones']);
+    // Las de una página de «Mis reservas» en un solo pedido (E4-04.1).
+    $router->interna('GET', '/interno/funciones', [FuncionesInternas::class, 'varias'], ['funciones']);
 
     // Para comprobar que los otros subsistemas llegan hasta acá con su token.
     $router->interna('GET', '/interno/estado', [EstadoInterno::class, 'mostrar'], ['cuentas', 'funciones']);

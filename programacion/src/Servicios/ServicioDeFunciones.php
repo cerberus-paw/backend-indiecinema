@@ -26,4 +26,17 @@ final class ServicioDeFunciones
     {
         return (Uuid::esValido($id) ? $this->funciones->resumen($id) : null) ?? throw ExcepcionHttp::noEncontrada();
     }
+
+    /**
+     * Varias de una vez, para una página de «Mis reservas» de funciones. Las que no existen o
+     * cuya sala se dio de baja no vienen: quien pide decide qué mostrar en su lugar.
+     *
+     * @param list<string> $ids UUID válidos, sin repetir: los controla el controlador
+     *
+     * @return array<string, ResumenDeFuncion> con el id como clave
+     */
+    public function resumenes(array $ids): array
+    {
+        return $this->funciones->resumenes($ids);
+    }
 }

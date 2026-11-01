@@ -571,8 +571,9 @@ En cada PR y en cada push a `main`, GitHub Actions (`.github/workflows/ci.yml`) 
 
 - **gitleaks** sobre todo el historial, con las reglas que trae más las de `.gitleaks.toml` (el
   access token de Mercado Pago, que gitleaks no conoce). Si encuentra algo, el log no lo muestra.
-- **Las pruebas** del núcleo, cuentas y programación contra un MySQL 8.4, con el front de `main`
-  al lado: un PR que necesita un cambio del front pasa después de mergear el del front.
+- **Las pruebas** del núcleo, cuentas y programación contra un MySQL 8.4, con el front al lado: el
+  de la rama del mismo nombre si existe en el front, y si no el de `main`. Un cambio que toca los
+  dos repositorios va en ramas que se llaman igual, y sus dos PR pasan sin esperar al otro.
 - **`composer audit`** sobre el `composer.lock` de cada subsistema y del núcleo.
 - **La configuración**: que el compose sea válido y que nginx acepte las plantillas (`nginx -t`).
 

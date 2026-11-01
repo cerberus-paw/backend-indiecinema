@@ -1,6 +1,6 @@
 #!/bin/bash
-# Corre las pruebas de un subsistema (o de todos) sin PHP ni Composer en la máquina: con la misma
-# imagen de los subsistemas y contra un MySQL descartable, como el CI.
+# Corre el análisis estático y las pruebas de un subsistema (o de todos) sin PHP ni Composer en la
+# máquina: con la misma imagen de los subsistemas y contra un MySQL descartable, como el CI.
 #
 #   herramientas/pruebas.sh funciones                  # un subsistema: nucleo, cuentas, programacion o funciones
 #   herramientas/pruebas.sh funciones --filter Reserva # lo que sigue va a PHPUnit
@@ -37,16 +37,16 @@ main() {
 	preparar_mysql
 	# La imagen de los subsistemas (php/Dockerfile), con su PHP y pdo_mysql; se reconstruye sola si
 	# cambia el Dockerfile.
-	docker build --quiet --tag "$IMAGEN" php >/dev/null
+	# Callada si sale bien; si falla, otra vez con toda la salida para ver por qué.
+	docker build --quiet --tag "$IMAGEN" php >/dev/null 2>&1 || docker build --tag "$IMAGEN" php
 
 	local fallaron=()
 	for paquete in "${paquetes[@]}"; do
 		echo "== $paquete"
 		instalar "$raiz" "$paquete"
-		if ! docker run --rm --network "$RED" --user "$(id -u):$(id -g)" \
-			--env PRUEBAS_MYSQL_HOST="$MYSQL" --env PRUEBAS_MYSQL_PUERTO=3306 --env PRUEBAS_MYSQL_CLAVE=pruebas \
-			--volume "$raiz:/src" --workdir "/src/backend-indiecinema/$paquete" \
-			--entrypoint php "$IMAGEN" vendor/bin/phpunit "$@"; then
+		# PHPStan antes, como el CI: tarda menos y con su caché, casi nada.
+		if ! en_la_imagen "$raiz" "$paquete" vendor/bin/phpstan analyse --memory-limit=1G --no-progress \
+			|| ! en_la_imagen "$raiz" "$paquete" vendor/bin/phpunit "$@"; then
 			fallaron+=("$paquete")
 		fi
 	done
@@ -80,10 +80,20 @@ preparar_mysql() {
 	exit 1
 }
 
-# Las dependencias de desarrollo (PHPUnit) con el Composer de Docker, sólo si faltan.
+# Un comando de PHP en la imagen de los subsistemas, en la carpeta del paquete y con el MySQL.
+en_la_imagen() {
+	local raiz=$1 paquete=$2
+	shift 2
+	docker run --rm --network "$RED" --user "$(id -u):$(id -g)" \
+		--env PRUEBAS_MYSQL_HOST="$MYSQL" --env PRUEBAS_MYSQL_PUERTO=3306 --env PRUEBAS_MYSQL_CLAVE=pruebas \
+		--volume "$raiz:/src" --workdir "/src/backend-indiecinema/$paquete" \
+		--entrypoint php "$IMAGEN" "$@"
+}
+
+# Las dependencias de desarrollo (PHPUnit y PHPStan) con el Composer de Docker, sólo si faltan.
 instalar() {
 	local raiz=$1 paquete=$2
-	if [[ ! -x $paquete/vendor/bin/phpunit ]]; then
+	if [[ ! -x $paquete/vendor/bin/phpunit || ! -x $paquete/vendor/bin/phpstan ]]; then
 		docker run --rm --user "$(id -u):$(id -g)" --volume "$raiz:/app" \
 			--workdir "/app/backend-indiecinema/$paquete" composer:2 install --quiet --no-interaction
 	fi

@@ -33,7 +33,7 @@ jobs:
         run: docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.30.1 git /repo --no-banner --redact --verbose
 
   pruebas:
-    name: Pruebas de ${{ matrix.paquete }}
+    name: Análisis y pruebas de ${{ matrix.paquete }}
     runs-on: ubuntu-latest
     strategy:
       # Que falle uno no corta los otros: se ve de una vez todo lo que está roto.
@@ -90,6 +90,11 @@ jobs:
       - name: Instalar dependencias
         working-directory: backend-indiecinema/${{ matrix.paquete }}
         run: composer install --no-interaction --no-progress
+      # PHPStan (phpstan.neon de cada paquete): lo que ya estaba queda en su baseline, y marca lo
+      # nuevo, como una llamada a un método que no existe. Antes de las pruebas, que tardan más.
+      - name: Análisis estático
+        working-directory: backend-indiecinema/${{ matrix.paquete }}
+        run: composer analisis
       - name: Correr las pruebas
         working-directory: backend-indiecinema/${{ matrix.paquete }}
         run: composer pruebas

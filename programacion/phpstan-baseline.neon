@@ -1,0 +1,91 @@
+parameters:
+	ignoreErrors:
+		-
+			message: '#^Using nullsafe property access "\?\-\>errores" on left side of \?\? is unnecessary\. Use \-\> instead\.$#'
+			identifier: nullsafe.neverNull
+			count: 1
+			path: src/Controladores/FuncionesDelOrganizador.php
+
+		-
+			message: '#^Using nullsafe property access "\?\-\>valores" on left side of \?\? is unnecessary\. Use \-\> instead\.$#'
+			identifier: nullsafe.neverNull
+			count: 1
+			path: src/Controladores/FuncionesDelOrganizador.php
+
+		-
+			message: '#^Using nullsafe property access "\?\-\>errores" on left side of \?\? is unnecessary\. Use \-\> instead\.$#'
+			identifier: nullsafe.neverNull
+			count: 1
+			path: src/Controladores/SalasDelOrganizador.php
+
+		-
+			message: '#^Using nullsafe property access "\?\-\>valores" on left side of \?\? is unnecessary\. Use \-\> instead\.$#'
+			identifier: nullsafe.neverNull
+			count: 1
+			path: src/Controladores/SalasDelOrganizador.php
+
+		-
+			message: '#^Using nullsafe property access "\?\-\>errores" on left side of \?\? is unnecessary\. Use \-\> instead\.$#'
+			identifier: nullsafe.neverNull
+			count: 1
+			path: src/Controladores/SolicitudDeSala.php
+
+		-
+			message: '#^Using nullsafe property access "\?\-\>valores" on left side of \?\? is unnecessary\. Use \-\> instead\.$#'
+			identifier: nullsafe.neverNull
+			count: 1
+			path: src/Controladores/SolicitudDeSala.php
+
+		-
+			message: '#^Parameter \#1 \$array \(list\<string\>\) of array_values is already a list, call has no effect\.$#'
+			identifier: arrayValues.list
+			count: 1
+			path: src/Modelo/Funcion.php
+
+		-
+			message: '#^Parameter \#1 \$array \(non\-empty\-list\<string\>\) of array_values is already a list, call has no effect\.$#'
+			identifier: arrayValues.list
+			count: 1
+			path: src/Modelo/Funcion.php
+
+		-
+			message: '#^Offset ''Aventura''\|''Ciencia ficción''\|''Comedia''\|''Documental''\|''Drama''\|''Fantasía''\|''Suspenso''\|''Terror'' on array\{Drama\: ''00000004\-0000\-4000…'', Terror\: ''00000004\-0000\-4000…'', ''Ciencia ficción''\: ''00000004\-0000\-4000…'', Comedia\: ''00000004\-0000\-4000…'', Aventura\: ''00000004\-0000\-4000…'', Fantasía\: ''00000004\-0000\-4000…'', Suspenso\: ''00000004\-0000\-4000…'', Documental\: ''00000004\-0000\-4000…''\} on left side of \?\? always exists and is not nullable\.$#'
+			identifier: nullCoalesce.offset
+			count: 1
+			path: src/Servicios/DatosDePrueba.php
+
+		-
+			message: '#^Call to static method PHPUnit\\Framework\\Assert\:\:assertContainsOnlyInstancesOf\(\) with ''IndieCinema\\\\Programacion\\\\Modelo\\\\Funcion'' and list\<IndieCinema\\Programacion\\Modelo\\Funcion\> will always evaluate to true\.$#'
+			identifier: staticMethod.alreadyNarrowedType
+			count: 1
+			path: tests/DatosDePruebaTest.php
+
+		-
+			message: '#^Call to static method PHPUnit\\Framework\\Assert\:\:assertContainsOnlyInstancesOf\(\) with ''IndieCinema\\\\Programacion\\\\Modelo\\\\Obra'' and list\<IndieCinema\\Programacion\\Modelo\\Obra\> will always evaluate to true\.$#'
+			identifier: staticMethod.alreadyNarrowedType
+			count: 1
+			path: tests/DatosDePruebaTest.php
+
+		-
+			message: '#^Call to static method PHPUnit\\Framework\\Assert\:\:assertContainsOnlyInstancesOf\(\) with ''IndieCinema\\\\Programacion\\\\Modelo\\\\Sala'' and list\<IndieCinema\\Programacion\\Modelo\\Sala\> will always evaluate to true\.$#'
+			identifier: staticMethod.alreadyNarrowedType
+			count: 1
+			path: tests/DatosDePruebaTest.php
+
+		-
+			message: '#^Call to static method PHPUnit\\Framework\\Assert\:\:assertTrue\(\) with true and ''Cine Club Areco…''\|''Cine Club El…''\|''Cine Teatro Eureka…''\|''Espacio Cultural La…'' will always evaluate to true\.$#'
+			identifier: staticMethod.alreadyNarrowedType
+			count: 1
+			path: tests/DatosDePruebaTest.php
+
+		-
+			message: '#^Call to static method PHPUnit\\Framework\\Assert\:\:assertSame\(\) with 303 and 303 will always evaluate to true\.$#'
+			identifier: staticMethod.alreadyNarrowedType
+			count: 1
+			path: tests/FuncionesDelOrganizadorTest.php
+
+		-
+			message: '#^Expression on left side of \?\? is not nullable\.$#'
+			identifier: nullCoalesce.expr
+			count: 1
+			path: tests/FuncionesDelOrganizadorTest.php

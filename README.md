@@ -501,10 +501,10 @@ herramientas/pruebas.sh funciones --filter Reservas  # lo que sigue va a PHPUnit
 herramientas/pruebas.sh                              # los cuatro
 ```
 
-No necesita PHP ni Composer: corre PHPUnit con la imagen de los subsistemas, instala las
-dependencias con la de Composer si faltan y levanta un MySQL descartable (`mysql-pruebas`) que
-queda andando para la próxima, también en `127.0.0.1:3307` (se apaga con
-`docker stop mysql-pruebas`). Más abajo, cómo correrlas con el PHP de la máquina.
+No necesita PHP ni Composer: corre el análisis estático (PHPStan, como el CI) y PHPUnit con la
+imagen de los subsistemas, instala las dependencias con la de Composer si faltan y levanta un MySQL
+descartable (`mysql-pruebas`) que queda andando para la próxima, también en `127.0.0.1:3307` (se
+apaga con `docker stop mysql-pruebas`). Más abajo, cómo correrlas con el PHP de la máquina.
 
 El núcleo y los tres subsistemas tienen las suyas (las de los subsistemas necesitan el
 `composer install` de arriba, que trae PHPUnit). Funciones, por ahora, prueba que arranca y que
@@ -571,6 +571,9 @@ En cada PR y en cada push a `main`, GitHub Actions (`.github/workflows/ci.yml`) 
 
 - **gitleaks** sobre todo el historial, con las reglas que trae más las de `.gitleaks.toml` (el
   access token de Mercado Pago, que gitleaks no conoce). Si encuentra algo, el log no lo muestra.
+- **El análisis estático** de cada paquete con PHPStan (`composer analisis`, nivel 5): lo que ya
+  estaba antes de sumarlo queda en su `phpstan-baseline.neon`, y marca sólo lo nuevo. Al arreglar
+  algo de la lista, se regenera con `composer analisis -- --generate-baseline`.
 - **Las pruebas** del núcleo, cuentas y programación contra un MySQL 8.4, con el front al lado: el
   de la rama del mismo nombre si existe en el front, y si no el de `main`. Un cambio que toca los
   dos repositorios va en ramas que se llaman igual, y sus dos PR pasan sin esperar al otro.

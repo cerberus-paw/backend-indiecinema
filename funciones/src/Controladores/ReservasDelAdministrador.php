@@ -16,6 +16,8 @@ use IndieCinema\Nucleo\Http\ExcepcionHttp;
 use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
 use LogicException;
+use Psr\Log\LoggerInterface;
+use RuntimeException;
 
 /**
  * Todas las reservas para el administrador (E4-03.3), con el armado de «Usuarios y roles»: la
@@ -26,12 +28,10 @@ final class ReservasDelAdministrador extends Controlador
 {
     private const ZONA = 'America/Argentina/Buenos_Aires';
 
-    /** @var array<string, ?FuncionDeProgramacion> las ya pedidas en esta página */
-    private array $funcionesPedidas = [];
-
     public function __construct(
         private readonly ServicioDePanelDeReservas $servicio,
         private readonly FuncionesDeProgramacion $funciones,
+        private readonly LoggerInterface $log,
     ) {
     }
 
@@ -73,8 +73,9 @@ final class ReservasDelAdministrador extends Controlador
             throw ExcepcionHttp::noEncontrada();
         }
 
+        $funciones = $this->funcionesDe($reservas);
         $datos = [
-            'reservas' => array_map(fn (Reserva $reserva): array => $this->fila($reserva), $reservas),
+            'reservas' => array_map(static fn (Reserva $reserva): array => self::fila($reserva, $funciones[$reserva->funcionId] ?? null), $reservas),
             'estados' => array_map(static fn (EstadoReserva $estado): array => ['valor' => $estado->value, 'etiqueta' => $estado->etiqueta()], EstadoReserva::cases()),
             'filtro' => $filtro?->value,
             'paginado' => [
@@ -108,10 +109,8 @@ final class ReservasDelAdministrador extends Controlador
     /**
      * @return array{id: string, codigo: string, cantidad: int, total: string, estado: string, estado_etiqueta: string, creada: string, anulable: bool, funcion: ?array{titulo: string, url: string, fecha: ?string}}
      */
-    private function fila(Reserva $reserva): array
+    private static function fila(Reserva $reserva, ?FuncionDeProgramacion $funcion): array
     {
-        $funcion = $this->funcion($reserva->funcionId);
-
         return [
             'id' => $reserva->id,
             'codigo' => $reserva->codigo,
@@ -130,20 +129,26 @@ final class ReservasDelAdministrador extends Controlador
     }
 
     /**
-     * La función de una reserva, para mostrar su título: una vez por función aunque tenga varias
-     * reservas en la página. Si programación no responde, la fila va sin el título y la página
-     * sigue: el administrador igual puede anular.
+     * Las funciones de las reservas de la página, para mostrar su título: todas en un pedido a
+     * programación, y no uno por fila (hasta 20 seguidos, de 2 s cada uno si no respondía). Si
+     * programación no responde, las filas van sin el título y la página sigue: el administrador
+     * igual puede anular.
+     *
+     * @param list<Reserva> $reservas
+     *
+     * @return array<string, FuncionDeProgramacion> con el id como clave
      */
-    private function funcion(string $id): ?FuncionDeProgramacion
+    private function funcionesDe(array $reservas): array
     {
-        if (!array_key_exists($id, $this->funcionesPedidas)) {
-            try {
-                $this->funcionesPedidas[$id] = $this->funciones->buscar($id);
-            } catch (ExcepcionHttp) {
-                $this->funcionesPedidas[$id] = null;
-            }
-        }
+        try {
+            return $this->funciones->buscarVarias(array_map(static fn (Reserva $reserva): string => $reserva->funcionId, $reservas));
+        } catch (ExcepcionHttp) {
+            // ClienteInterno ya dejó en el log que programación no respondió.
+            return [];
+        } catch (RuntimeException $error) {
+            $this->log->error('Las reservas sin el título de su función: {mensaje}', ['mensaje' => $error->getMessage()]);
 
-        return $this->funcionesPedidas[$id];
+            return [];
+        }
     }
 }

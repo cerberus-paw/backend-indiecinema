@@ -157,16 +157,15 @@ final class Cartelera extends Controlador
                 $franjasDelUsuario = is_array($acuerdo['franjas_del_usuario'] ?? null) ? $acuerdo['franjas_del_usuario'] : [];
                 $datosFuncion['franjas_del_usuario'] = $franjasDelUsuario;
 
-                $duracionMinutos = !empty($detalle->obras)
-                    ? array_sum(array_map(static fn (ObraEnDetalle $o): int => $o->duracionMinutos, $detalle->obras))
-                    : 120;
+                // Una función tiene siempre alguna obra (DetalleDeFuncion), así que hay duración.
+                $duracionMinutos = array_sum(array_map(static fn (ObraEnDetalle $o): int => $o->duracionMinutos, $detalle->obras));
 
                 $franjas = [];
                 $maxVotosFranja = -1;
                 $franjaLider = null;
                 foreach ($acuerdo['franjas'] ?? [] as $f) {
                     $inicioStr = (string) ($f['inicio'] ?? '');
-                    $finStr = isset($f['fin']) && $f['fin'] !== null ? (string) $f['fin'] : null;
+                    $finStr = isset($f['fin']) ? (string) $f['fin'] : null;
                     $inicioDt = DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $inicioStr) ?: new DateTimeImmutable($inicioStr);
                     $finDt = $finStr !== null
                         ? (DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $finStr) ?: new DateTimeImmutable($finStr))
@@ -336,7 +335,7 @@ final class Cartelera extends Controlador
      *     cancelable: bool,
      *     cerrable: bool,
      *     sala: array{url: string, nombre: string, descripcion: string, direccion: string, localidad: string, capacidad: int, imagen: ?string},
-     *     obras: list<array{titulo: string, sinopsis: string, anio: int, director: string, duracion: int, generos: list<string>}>
+     *     obras: list<array{id: string, titulo: string, sinopsis: string, anio: int, director: string, duracion: int, generos: list<string>, afiche: ?string}>
      * }
      */
     private static function datosDeDetalle(

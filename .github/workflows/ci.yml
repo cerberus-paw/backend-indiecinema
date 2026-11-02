@@ -33,7 +33,7 @@ jobs:
         run: docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.30.1 git /repo --no-banner --redact --verbose
 
   pruebas:
-    name: Pruebas de ${{ matrix.paquete }}
+    name: Análisis y pruebas de ${{ matrix.paquete }}
     runs-on: ubuntu-latest
     strategy:
       # Que falle uno no corta los otros: se ve de una vez todo lo que está roto.
@@ -57,15 +57,28 @@ jobs:
       PRUEBAS_MYSQL_CLAVE: pruebas
     steps:
       # Los dos repositorios uno al lado del otro, como en la máquina de cada uno: los subsistemas
-      # instalan el front desde ../../frontend-indiecinema. El front es siempre el de main, así que
-      # un PR que necesita un cambio del front pasa después de mergear el del front.
+      # instalan el front desde ../../frontend-indiecinema.
+      # La rama del front con el mismo nombre que ésta, si existe; si no, main. Así un cambio
+      # que toca los dos repositorios (las ramas IC-… se llaman igual en los dos) se prueba entero
+      # antes de mergear ninguno. La rama va por env y no en el script, por si trae algo raro.
+      - name: Elegir la rama del front
+        id: front
+        env:
+          RAMA: ${{ github.head_ref || github.ref_name }}
+        run: |
+          if git ls-remote --exit-code --heads https://github.com/cerberus-paw/frontend-indiecinema.git "refs/heads/$RAMA" >/dev/null; then
+            echo "ref=$RAMA" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=main" >> "$GITHUB_OUTPUT"
+          fi
+          grep ref= "$GITHUB_OUTPUT"
       - uses: actions/checkout@v7
         with:
           path: backend-indiecinema
       - uses: actions/checkout@v7
         with:
           repository: cerberus-paw/frontend-indiecinema
-          ref: main
+          ref: ${{ steps.front.outputs.ref }}
           path: frontend-indiecinema
       # La misma versión menor que la imagen de los subsistemas (php/Dockerfile).
       - uses: shivammathur/setup-php@v2
@@ -77,6 +90,11 @@ jobs:
       - name: Instalar dependencias
         working-directory: backend-indiecinema/${{ matrix.paquete }}
         run: composer install --no-interaction --no-progress
+      # PHPStan (phpstan.neon de cada paquete): lo que ya estaba queda en su baseline, y marca lo
+      # nuevo, como una llamada a un método que no existe. Antes de las pruebas, que tardan más.
+      - name: Análisis estático
+        working-directory: backend-indiecinema/${{ matrix.paquete }}
+        run: composer analisis
       - name: Correr las pruebas
         working-directory: backend-indiecinema/${{ matrix.paquete }}
         run: composer pruebas

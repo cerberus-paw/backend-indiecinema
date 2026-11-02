@@ -9,6 +9,7 @@ use IndieCinema\Nucleo\Http\ExcepcionHttp;
 use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Programacion\Servicios\OcupacionDeFunciones;
+use IndieCinema\Programacion\Servicios\ServicioDeCartelera;
 use IndieCinema\Programacion\Servicios\ServicioDeSalas;
 
 /**
@@ -21,6 +22,8 @@ final class Salas extends Controlador
     public function __construct(
         private readonly ServicioDeSalas $servicio,
         private readonly OcupacionDeFunciones $ocupacion,
+        // Para el estado del acuerdo de las funciones de la sala, que vive en funciones (E3-13.F9).
+        private readonly ServicioDeCartelera $cartelera,
     ) {
     }
 
@@ -50,7 +53,11 @@ final class Salas extends Controlador
                 'descripcion' => $ficha->sala->datos->descripcion,
                 'direccion' => $ficha->sala->datos->direccion,
             ],
-            'funciones' => TarjetaDeFuncion::todas($ficha->funciones, $this->ocupacion->deVarias(array_column($ficha->funciones, 'id'))),
+            'funciones' => TarjetaDeFuncion::todas(
+                $ficha->funciones,
+                $this->cartelera->acuerdosDe($ficha->funciones),
+                $this->ocupacion->deVarias(array_column($ficha->funciones, 'id')),
+            ),
         ]);
     }
 }

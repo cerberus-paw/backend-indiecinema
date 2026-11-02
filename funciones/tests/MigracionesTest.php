@@ -204,7 +204,7 @@ final class MigracionesTest extends TestCase
         self::assertSame(2, $this->base->valor('SELECT COUNT(*) FROM acuerdo_franja WHERE acuerdo_id = ?', [$acuerdoId]));
     }
 
-    public function testUnUsuarioTieneComoMaximoUnVotoPorFuncion(): void
+    public function testUnUsuarioMarcaVariasFranjasPeroCadaUnaUnaSolaVez(): void
     {
         $acuerdoId = Uuid::nuevo();
         $funcionId = Uuid::nuevo();
@@ -225,27 +225,21 @@ final class MigracionesTest extends TestCase
         );
 
         $usuarioId = Uuid::nuevo();
-        // Primer voto: éxito
-        $this->base->ejecutar(
+        $marcar = fn (string $franjaId) => $this->base->ejecutar(
             'INSERT INTO voto_acuerdo (id, acuerdo_id, funcion_id, franja_id, usuario_id, creado_en) VALUES (?, ?, ?, ?, ?, ?)',
-            [Uuid::nuevo(), $acuerdoId, $funcionId, $franja1Id, $usuarioId, '2026-10-22 10:05:00'],
+            [Uuid::nuevo(), $acuerdoId, $funcionId, $franjaId, $usuarioId, '2026-10-22 10:05:00'],
         );
 
-        // Segundo voto del mismo usuario para la misma función: la base lo rechaza por clave única
-        $this->assertRechaza(self::REPETIDO, fn () => $this->base->ejecutar(
-            'INSERT INTO voto_acuerdo (id, acuerdo_id, funcion_id, franja_id, usuario_id, creado_en) VALUES (?, ?, ?, ?, ?, ?)',
-            [Uuid::nuevo(), $acuerdoId, $funcionId, $franja2Id, $usuarioId, '2026-10-22 10:10:00'],
-        ));
-
-        // Pero sí puede cambiar su voto actualizando la franja:
-        $this->base->ejecutar(
-            'UPDATE voto_acuerdo SET franja_id = ? WHERE acuerdo_id = ? AND usuario_id = ?',
-            [$franja2Id, $acuerdoId, $usuarioId],
-        );
-        self::assertSame($franja2Id, $this->base->valor(
-            'SELECT franja_id FROM voto_acuerdo WHERE acuerdo_id = ? AND usuario_id = ?',
+        // «Podés marcar más de una» (E3-13.F7): las dos franjas de la misma función.
+        $marcar($franja1Id);
+        $marcar($franja2Id);
+        self::assertSame(2, $this->base->valor(
+            'SELECT COUNT(*) FROM voto_acuerdo WHERE acuerdo_id = ? AND usuario_id = ?',
             [$acuerdoId, $usuarioId],
         ));
+
+        // Pero la misma franja, una sola vez: la base lo rechaza por clave única.
+        $this->assertRechaza(self::REPETIDO, fn () => $marcar($franja1Id));
     }
 
     public function testLaBaseRechazaUnMinimoDeAsistentesCero(): void

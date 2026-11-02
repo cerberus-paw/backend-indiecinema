@@ -20,40 +20,52 @@ final class TarjetaDeFuncion
     private const MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
 
     /**
-     * Las tarjetas de una página, con los lugares libres de cada una.
+     * Las tarjetas de una lista, cada una con su acuerdo de fecha si tiene (E3-13.F9) y con sus
+     * lugares libres (E4-02).
      *
-     * @param list<FuncionEnCartelera>  $funciones
-     * @param ?array<string, int>       $ocupados  funcion_id => lugares ocupados, de funciones; null
-     *                                             si no respondió, y entonces van sin ese dato
+     * @param list<FuncionEnCartelera>                   $funciones
+     * @param array<string, array<string, mixed>|null> $acuerdos  los de ServicioDeCartelera::acuerdosDe()
+     * @param ?array<string, int>                      $ocupados  funcion_id => lugares ocupados, de
+     *                                                            funciones; null si no respondió, y
+     *                                                            entonces van sin ese dato
      *
      * @return list<array<string, mixed>>
      */
-    public static function todas(array $funciones, ?array $ocupados): array
+    public static function todas(array $funciones, array $acuerdos, ?array $ocupados = null): array
     {
-        return array_map(static fn (FuncionEnCartelera $funcion): array => self::datos($funcion, $ocupados[$funcion->id] ?? null), $funciones);
+        return array_map(
+            static fn (FuncionEnCartelera $funcion): array => self::datos($funcion, $acuerdos[$funcion->id] ?? null, $ocupados[$funcion->id] ?? null),
+            $funciones,
+        );
     }
 
     /**
-     * @param ?int $ocupados los lugares que ya tomaron las reservas, o null si no se saben
+     * @param array<string, mixed>|null $acuerdo  el de funciones, si la función está en acuerdo de fecha
+     * @param ?int                      $ocupados los lugares que ya tomaron las reservas, o null si no se saben
      *
-     * @return array{id: string, titulo: string, estado: string, precio: string, sala: string, localidad: string, fecha: ?string, lugares_libres: ?int, agotada: bool}
+     * @return array<string, mixed> id, titulo, estado, precio, sala, localidad, fecha, lugares_libres y
+     *                              agotada; con el acuerdo abierto, también franjas_propuestas
      */
-    public static function datos(FuncionEnCartelera $funcion, ?int $ocupados = null): array
+    public static function datos(FuncionEnCartelera $funcion, ?array $acuerdo = null, ?int $ocupados = null): array
     {
         $libres = self::lugaresLibres($funcion->estado, $funcion->cupo, $ocupados);
 
-        return [
+        return self::conAcuerdo([
             'id' => $funcion->id,
             // Una función con varias obras las proyecta todas: el título las nombra a todas.
             'titulo' => implode(' + ', array_map(static fn (ObraEnCartelera $obra): string => $obra->titulo, $funcion->obras)),
-            'estado' => $funcion->estado === EstadoFuncion::EnVotacionTitulos ? 'EN_VOTACION_TITULOS' : 'PROGRAMADA',
+            'estado' => match ($funcion->estado) {
+                EstadoFuncion::EnVotacionTitulos => 'EN_VOTACION_TITULOS',
+                EstadoFuncion::EnAcuerdoFecha => 'EN_ACUERDO_FECHA',
+                default => 'PROGRAMADA',
+            },
             'precio' => self::precio($funcion->precioBase),
             'sala' => $funcion->sala,
             'localidad' => $funcion->localidad,
             'fecha' => $funcion->fechaHora !== null ? self::fecha($funcion->fechaHora) : null,
             'lugares_libres' => $libres,
             'agotada' => $libres === 0,
-        ];
+        ], $acuerdo);
     }
 
     /**
@@ -68,6 +80,28 @@ final class TarjetaDeFuncion
     }
 
     /**
+     * Una función en acuerdo cuyo acuerdo cerró sin quórum ya no se vota: la tarjeta lo dice. Con
+     * el acuerdo abierto, dice cuántas franjas hay, como el wireframe de la cartelera.
+     *
+     * @param array<string, mixed>      $datos
+     * @param array<string, mixed>|null $acuerdo
+     *
+     * @return array<string, mixed>
+     */
+    private static function conAcuerdo(array $datos, ?array $acuerdo): array
+    {
+        if ($datos['estado'] !== 'EN_ACUERDO_FECHA' || $acuerdo === null) {
+            return $datos;
+        }
+        if (($acuerdo['estado'] ?? null) === 'sin_minimo') {
+            return ['estado' => 'ACUERDO_SIN_MINIMO'] + $datos;
+        }
+        $franjas = is_array($acuerdo['franjas'] ?? null) ? count($acuerdo['franjas']) : 0;
+
+        return $datos + ['franjas_propuestas' => $franjas === 1 ? '1 franja propuesta' : "{$franjas} franjas propuestas"];
+    }
+
+    /**
      * «Sáb 19 sep · 20:30»
      */
     public static function fecha(DateTimeImmutable $fecha): string
@@ -79,6 +113,22 @@ final class TarjetaDeFuncion
             self::MESES[(int) $fecha->format('n') - 1],
             $fecha->format('H:i'),
         );
+    }
+
+    /**
+     * «Sáb 19», como la franja más votada en el wireframe del acuerdo.
+     */
+    public static function diaCorto(DateTimeImmutable $fecha): string
+    {
+        return sprintf('%s %d', self::DIAS[(int) $fecha->format('w')], (int) $fecha->format('j'));
+    }
+
+    /**
+     * «17 sep 23:59», como la fecha límite del acuerdo en el wireframe.
+     */
+    public static function diaMesYHora(DateTimeImmutable $fecha): string
+    {
+        return sprintf('%d %s %s', (int) $fecha->format('j'), self::MESES[(int) $fecha->format('n') - 1], $fecha->format('H:i'));
     }
 
     /**

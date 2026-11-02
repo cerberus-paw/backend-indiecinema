@@ -41,6 +41,10 @@ final class BaseDeDatos
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
             // Una consulta es una sola sentencia: aunque algo se colara, no se le puede encadenar otra.
             Mysql::ATTR_MULTI_STATEMENTS => false,
+            // MySQL con la misma hora que PHP (date.timezone, en php/php.ini): los CURRENT_TIMESTAMP
+            // de las tablas y las fechas que guarda la aplicación quedan en la misma zona. Con el
+            // desfasaje y no con el nombre, que pide las tablas de zonas cargadas en MySQL.
+            Mysql::ATTR_INIT_COMMAND => "SET time_zone = '" . date('P') . "'",
         ]));
     }
 

@@ -14,3 +14,6 @@
 
 # Contexto de trabajo local (no versionado).
 .contexto-local/
+
+# La caché del análisis estático (phpstan.neon).
+.phpstan/

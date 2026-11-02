@@ -65,7 +65,7 @@ final class TarjetaDeFuncionTest extends TestCase
             'fecha' => null,
             'lugares_libres' => null,
             'agotada' => false,
-        ], TarjetaDeFuncion::datos($funcion, 0));
+        ], TarjetaDeFuncion::datos($funcion, null, 0));
     }
 
     private static function programada(string $id = 'f', int $cupo = 40): FuncionEnCartelera
@@ -75,7 +75,7 @@ final class TarjetaDeFuncionTest extends TestCase
 
     public function testLosLugaresLibresSonElCupoMenosLosOcupados(): void
     {
-        $tarjeta = TarjetaDeFuncion::datos(self::programada(), 22);
+        $tarjeta = TarjetaDeFuncion::datos(self::programada(), null, 22);
 
         self::assertSame(18, $tarjeta['lugares_libres']);
         self::assertFalse($tarjeta['agotada']);
@@ -85,7 +85,7 @@ final class TarjetaDeFuncionTest extends TestCase
     {
         // El organizador bajó el cupo después de que reservaran.
         self::assertSame(['lugares_libres' => 0, 'agotada' => true], array_intersect_key(
-            TarjetaDeFuncion::datos(self::programada(cupo: 10), 12),
+            TarjetaDeFuncion::datos(self::programada(cupo: 10), null, 12),
             ['lugares_libres' => 0, 'agotada' => 0],
         ));
     }
@@ -100,10 +100,10 @@ final class TarjetaDeFuncionTest extends TestCase
 
     public function testTodasTomaLosOcupadosDeCadaUna(): void
     {
-        $tarjetas = TarjetaDeFuncion::todas([self::programada('a'), self::programada('b'), self::programada('c')], ['a' => 40, 'b' => 3]);
+        $tarjetas = TarjetaDeFuncion::todas([self::programada('a'), self::programada('b'), self::programada('c')], [], ['a' => 40, 'b' => 3]);
 
         self::assertSame([0, 37, null], array_column($tarjetas, 'lugares_libres'));
-        self::assertSame([null, null], array_column(TarjetaDeFuncion::todas([self::programada('a'), self::programada('b')], null), 'lugares_libres'));
+        self::assertSame([null, null], array_column(TarjetaDeFuncion::todas([self::programada('a'), self::programada('b')], [], null), 'lugares_libres'));
     }
 
     /**

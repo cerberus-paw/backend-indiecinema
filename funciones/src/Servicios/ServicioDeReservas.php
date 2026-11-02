@@ -16,6 +16,7 @@ use IndieCinema\Nucleo\Seguridad\Rol;
 use IndieCinema\Nucleo\Seguridad\Usuario;
 use IndieCinema\Nucleo\Uuid;
 use LogicException;
+use RuntimeException;
 
 /**
  * Las reservas de los espectadores (E4-01): que nunca se confirmen más lugares que el cupo,
@@ -92,7 +93,8 @@ final class ServicioDeReservas
      * @return array<string, FuncionDeProgramacion> con el id como clave; las que programación ya
      *                                              no muestra no están
      *
-     * @throws ExcepcionHttp 503 si programación no responde
+     * @throws ExcepcionHttp    503 si programación no responde
+     * @throws RuntimeException si responde algo que no son funciones
      */
     public function funcionesDe(array $reservas): array
     {

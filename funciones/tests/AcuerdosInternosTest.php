@@ -76,11 +76,11 @@ final class AcuerdosInternosTest extends TestCase
             'minimo_asistentes' => 20,
             'franjas' => [
                 [
-                    'fecha_hora_inicio' => '2026-10-25 20:00:00',
-                    'fecha_hora_fin' => '2026-10-25 22:30:00',
+                    'fecha_hora_inicio' => self::dentroDe(10, '20:00:00'),
+                    'fecha_hora_fin' => self::dentroDe(10, '22:30:00'),
                 ],
                 [
-                    'fecha_hora_inicio' => '2026-10-26 21:00:00',
+                    'fecha_hora_inicio' => self::dentroDe(11, '21:00:00'),
                     'fecha_hora_fin' => null,
                 ],
             ],
@@ -105,7 +105,7 @@ final class AcuerdosInternosTest extends TestCase
             'funcion_id' => self::FUNCION_ID,
             'minimo_asistentes' => 0,
             'franjas' => [
-                ['fecha_hora_inicio' => '2026-10-25 20:00:00'],
+                ['fecha_hora_inicio' => self::dentroDe(10, '20:00:00')],
             ],
         ]);
 
@@ -129,8 +129,8 @@ final class AcuerdosInternosTest extends TestCase
             'funcion_id' => self::FUNCION_ID,
             'minimo_asistentes' => 2,
             'franjas' => [
-                ['fecha_hora_inicio' => '2026-10-25 20:00:00'],
-                ['fecha_hora_inicio' => '2026-10-26 20:00:00'],
+                ['fecha_hora_inicio' => self::dentroDe(10, '20:00:00')],
+                ['fecha_hora_inicio' => self::dentroDe(11, '20:00:00')],
             ],
         ]);
         $acuerdo = json_decode($crear->cuerpo(), true);
@@ -171,7 +171,7 @@ final class AcuerdosInternosTest extends TestCase
             'funcion_id' => self::FUNCION_ID,
             'minimo_asistentes' => 2,
             'franjas' => [
-                ['fecha_hora_inicio' => '2026-10-25 20:00:00'],
+                ['fecha_hora_inicio' => self::dentroDe(10, '20:00:00')],
             ],
         ]);
         $acuerdo = json_decode($crear->cuerpo(), true);
@@ -206,7 +206,7 @@ final class AcuerdosInternosTest extends TestCase
             'funcion_id' => self::FUNCION_ID,
             'minimo_asistentes' => 20,
             'franjas' => [
-                ['fecha_hora_inicio' => '2026-10-25 20:00:00'],
+                ['fecha_hora_inicio' => self::dentroDe(10, '20:00:00')],
             ],
         ]);
         $acuerdo = json_decode($crear->cuerpo(), true);
@@ -216,5 +216,44 @@ final class AcuerdosInternosTest extends TestCase
         self::assertSame(200, $cierre->estado());
         $datosCierre = json_decode($cierre->cuerpo(), true);
         self::assertSame('sin_minimo', $datosCierre['estado']);
+    }
+
+    /**
+     * «2026-11-12 20:00:00»: a tantos días de hoy. Con fechas fijas, las pruebas empezaron a
+     * fallar cuando esas fechas pasaron, y ahora una franja pasada se rechaza (E3-13.F2).
+     */
+    private static function dentroDe(int $dias, string $hora): string
+    {
+        return (new \DateTimeImmutable("+{$dias} days"))->format('Y-m-d') . " {$hora}";
+    }
+
+    public function testRechazaUnaFranjaQueYaPaso(): void
+    {
+        $respuesta = $this->pedirInterno('POST', '/interno/acuerdos', [
+            'funcion_id' => self::FUNCION_ID,
+            'minimo_asistentes' => 2,
+            'franjas' => [
+                ['fecha_hora_inicio' => self::dentroDe(10, '20:00:00')],
+                ['fecha_hora_inicio' => (new \DateTimeImmutable('-1 day'))->format('Y-m-d') . ' 20:00:00'],
+            ],
+        ]);
+
+        self::assertSame(422, $respuesta->estado());
+        self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM acuerdo_fecha WHERE funcion_id = ?', [self::FUNCION_ID]));
+    }
+
+    public function testRechazaUnSegundoAcuerdoAbiertoPeroNoDespuesDeCerrarSinMinimo(): void
+    {
+        $propuesta = [
+            'funcion_id' => self::FUNCION_ID,
+            'minimo_asistentes' => 2,
+            'franjas' => [['fecha_hora_inicio' => self::dentroDe(10, '20:00:00')]],
+        ];
+        $primero = json_decode($this->pedirInterno('POST', '/interno/acuerdos', $propuesta)->cuerpo(), true);
+
+        self::assertSame(422, $this->pedirInterno('POST', '/interno/acuerdos', $propuesta)->estado());
+
+        $this->pedirInterno('POST', "/interno/acuerdos/{$primero['id']}/cerrar-sin-minimo");
+        self::assertSame(201, $this->pedirInterno('POST', '/interno/acuerdos', $propuesta)->estado());
     }
 }

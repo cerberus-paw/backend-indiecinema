@@ -308,6 +308,11 @@ final class ServicioDeFuncionesDelOrganizador
         if ($this->acuerdos === null) {
             throw new LogicException('No se configuró el cliente de acuerdos de funciones.');
         }
+        // Uno abierto a la vez: si no, la ficha mostraría sólo el último y los votos del otro
+        // quedarían colgados (E3-13.F2). Después de cerrarlo sin mínimo, sí se proponen otras.
+        if (($this->acuerdos->obtenerPorFuncion($funcion->id)['estado'] ?? null) === 'abierto') {
+            throw new ReglaIncumplida('Esta función ya tiene un acuerdo de fecha abierto. Para proponer otras franjas, primero cerralo sin mínimo desde la ficha.');
+        }
 
         return $this->acuerdos->proponer($funcion->id, $minimoAsistentes, $franjas);
     }

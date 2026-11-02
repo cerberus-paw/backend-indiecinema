@@ -45,8 +45,14 @@ class ServicioDeAcuerdos
             throw new InvalidArgumentException('Debe proponer al menos una franja horaria.');
         }
 
+        // Uno abierto por función: programación ya lo controla, pero la regla es de acá (E3-13.F2).
+        if ($this->repositorio->buscarPorFuncion($funcionId)?->estaAbierto()) {
+            throw new InvalidArgumentException('La función ya tiene un acuerdo de fecha abierto.');
+        }
+
         $acuerdoId = Uuid::nuevo();
         $franjas = [];
+        $ahora = new DateTimeImmutable();
 
         foreach ($franjasDatos as $dato) {
             $inicioStr = $dato['fecha_hora_inicio'] ?? '';
@@ -59,6 +65,9 @@ class ServicioDeAcuerdos
 
             if ($fin !== null && $fin <= $inicio) {
                 throw new InvalidArgumentException('La hora de finalización debe ser posterior a la de inicio.');
+            }
+            if ($inicio <= $ahora) {
+                throw new InvalidArgumentException('Cada franja tiene que empezar en el futuro.');
             }
 
             $franjas[] = new FranjaHoraria(

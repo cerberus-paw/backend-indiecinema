@@ -1717,7 +1717,8 @@ final class FuncionesDelOrganizadorTest extends TestCase
         $leida = $this->funciones->buscar($funcion->id) ?? self::fail('No se encontró la función.');
         self::assertSame(EstadoFuncion::EnAcuerdoFecha, $leida->estado);
 
-        // El organizador propone las franjas y el mínimo
+        // El organizador propone las franjas y el mínimo (todavía no tiene acuerdo)
+        self::acuerdoEnFunciones('ninguno');
         $respuesta = $this->enviar("/organizador/funciones/{$funcion->id}/acuerdo", [
             'minimo_asistentes' => '20',
             'franja_inicio' => [self::dentroDe(10, '20:00:00'), self::dentroDe(11, '21:00:00')],
@@ -1734,21 +1735,91 @@ final class FuncionesDelOrganizadorTest extends TestCase
         $funcion = $this->funcion($sala);
         $this->enviar("/organizador/funciones/{$funcion->id}/cerrar-votacion", []);
 
-        // Mínimo cero
+        // Mínimo cero: vuelve el formulario con el motivo (E3-13.F2), no una redirección
         $sinMinimo = $this->enviar("/organizador/funciones/{$funcion->id}/acuerdo", [
             'minimo_asistentes' => '0',
-            'franja_inicio' => [self::dentroDe(10, '20:00:00')],
+            'franja_inicio' => [self::dentroDe(10, '20:00:00'), self::dentroDe(11, '20:00:00')],
         ]);
-        self::assertSame(303, $sinMinimo->estado());
-        self::assertStringContainsString('error_acuerdo=', $sinMinimo->cabecera('Location') ?? '');
+        self::assertSame(422, $sinMinimo->estado());
+        self::assertStringContainsString('El mínimo de asistentes tiene que ser un número entre 1 y 40', $sinMinimo->cuerpo());
 
         // Sin franjas
         $sinFranjas = $this->enviar("/organizador/funciones/{$funcion->id}/acuerdo", [
             'minimo_asistentes' => '15',
             'franja_inicio' => [],
         ]);
-        self::assertSame(303, $sinFranjas->estado());
-        self::assertStringContainsString('error_acuerdo=', $sinFranjas->cabecera('Location') ?? '');
+        self::assertSame(422, $sinFranjas->estado());
+        self::assertStringContainsString('Proponé al menos 2 franjas', $sinFranjas->cuerpo());
+    }
+
+    /**
+     * E3-13.F2: con los campos del formulario, lo que está mal vuelve con el motivo y lo cargado,
+     * y no llega a funciones. Antes, una franja pasada se guardaba y una que terminaba antes de
+     * empezar daba una página 500.
+     */
+    public function testProponerFranjasValidaLasFranjasYMuestraLosErroresEnElFormulario(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $funcion = $this->funcion($sala);
+        $this->enviar("/organizador/funciones/{$funcion->id}/cerrar-votacion", []);
+        self::acuerdoEnFunciones('ninguno');
+        $manana = (new DateTimeImmutable('+1 day'))->format('Y-m-d');
+        $ayer = (new DateTimeImmutable('-1 day'))->format('Y-m-d');
+        $ruta = "/organizador/funciones/{$funcion->id}/proponer-franjas";
+
+        $casos = [
+            'termina antes de empezar' => [[$manana, '22:00', '20:00'], [$manana, '18:00', '19:00'], 'La opción 1 tiene que terminar después de empezar.'],
+            'una que ya pasó' => [[$manana, '20:00', '22:00'], [$ayer, '20:00', '22:00'], 'La opción 2 ya pasó'],
+            'dos iguales' => [[$manana, '20:00', '22:00'], [$manana, '20:00', '23:00'], 'Las opciones 1 y 2 empiezan el mismo día a la misma hora.'],
+        ];
+        foreach ($casos as $caso => [$primera, $segunda, $motivo]) {
+            $respuesta = $this->enviar($ruta, [
+                'minimo_asistentes' => '5',
+                'franjas' => [
+                    ['fecha' => $primera[0], 'hora_inicio' => $primera[1], 'hora_fin' => $primera[2]],
+                    ['fecha' => $segunda[0], 'hora_inicio' => $segunda[1], 'hora_fin' => $segunda[2]],
+                ],
+            ]);
+            self::assertSame(422, $respuesta->estado(), $caso);
+            self::assertStringContainsString($motivo, $respuesta->cuerpo(), $caso);
+            // Lo que cargó vuelve en el formulario.
+            self::assertStringContainsString("value=\"{$segunda[0]}\"", $respuesta->cuerpo(), $caso);
+        }
+
+        // Una sola franja: el formulario pide al menos dos.
+        $una = $this->enviar($ruta, [
+            'minimo_asistentes' => '5',
+            'franjas' => [['fecha' => $manana, 'hora_inicio' => '20:00', 'hora_fin' => '22:00']],
+        ]);
+        self::assertSame(422, $una->estado());
+        self::assertStringContainsString('Proponé al menos 2 franjas', $una->cuerpo());
+
+        // Bien cargadas, se proponen.
+        $bien = $this->enviar($ruta, [
+            'minimo_asistentes' => '5',
+            'franjas' => [
+                ['fecha' => $manana, 'hora_inicio' => '20:00', 'hora_fin' => '22:00'],
+                ['fecha' => $manana, 'hora_inicio' => '18:00', 'hora_fin' => ''],
+            ],
+        ]);
+        self::assertSame(303, $bien->estado());
+        self::assertSame("/cartelera/{$funcion->id}?acuerdo_propuesto=1", $bien->cabecera('Location'));
+    }
+
+    public function testProponerFranjasConUnAcuerdoYaAbiertoMuestraElMotivo(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $funcion = $this->funcion($sala);
+        $this->enviar("/organizador/funciones/{$funcion->id}/cerrar-votacion", []);
+        self::acuerdoEnFunciones('abierto');
+
+        $respuesta = $this->enviar("/organizador/funciones/{$funcion->id}/proponer-franjas", [
+            'minimo_asistentes' => '5',
+            'franja_inicio' => [self::dentroDe(10, '20:00:00'), self::dentroDe(11, '20:00:00')],
+        ]);
+
+        self::assertSame(422, $respuesta->estado());
+        self::assertStringContainsString('ya tiene un acuerdo de fecha abierto', $respuesta->cuerpo());
     }
 
     public function testProponerAcuerdoRechazaFuncionEnOtroEstado(): void

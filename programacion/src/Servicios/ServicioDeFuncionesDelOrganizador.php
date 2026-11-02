@@ -246,6 +246,21 @@ final class ServicioDeFuncionesDelOrganizador
     }
 
     /**
+     * Obtiene la función del organizador para proponer o reproponer franjas horarias (E3-13.2 / IC-154, E3-13.5 / IC-157).
+     *
+     * @throws ExcepcionHttp 404 si la función no es del organizador o no está en acuerdo de fecha
+     */
+    public function paraProponerFranjas(Usuario $organizador, string $id): FuncionDelOrganizador
+    {
+        $funcion = $this->funciones->delOrganizadorPorId($organizador->id, $id);
+        if ($funcion === null || $funcion->estado !== EstadoFuncion::EnAcuerdoFecha) {
+            throw ExcepcionHttp::noEncontrada();
+        }
+
+        return $funcion;
+    }
+
+    /**
      * El organizador propone las franjas horarias y el mínimo de asistentes para el acuerdo de fecha (E3-13.2 / IC-154).
      *
      * @param list<array{fecha_hora_inicio: string, fecha_hora_fin?: string|null}> $franjas
@@ -317,6 +332,34 @@ final class ServicioDeFuncionesDelOrganizador
         $this->funciones->guardar($funcion);
 
         return $funcion;
+    }
+
+    /**
+     * Cierra el acuerdo de fecha cuando no alcanza el mínimo de asistentes (E3-13.5 / IC-157).
+     * La función NO se programa y permanece disponible para que el organizador decida si propone nuevas franjas o la cancela.
+     *
+     * @return array<string, mixed>
+     *
+     * @throws ExcepcionHttp 404 si la función no es del organizador o no está en acuerdo de fecha
+     * @throws ReglaIncumplida si no hay acuerdo activo
+     */
+    public function cerrarAcuerdoSinMinimo(Usuario $organizador, string $id): array
+    {
+        $funcion = $this->propia($organizador, $id);
+        if ($funcion->estado !== EstadoFuncion::EnAcuerdoFecha) {
+            throw ExcepcionHttp::noEncontrada();
+        }
+
+        if ($this->acuerdos === null) {
+            throw new LogicException('No se configuró el cliente de acuerdos de funciones.');
+        }
+
+        $acuerdo = $this->acuerdos->obtenerPorFuncion($funcion->id);
+        if ($acuerdo === null) {
+            throw new ReglaIncumplida('No hay acuerdo de fecha activo para esta función.');
+        }
+
+        return $this->acuerdos->cerrarSinMinimo((string) $acuerdo['id']);
     }
 
     /**

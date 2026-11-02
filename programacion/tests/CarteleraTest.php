@@ -54,6 +54,7 @@ final class CarteleraTest extends TestCase
 
     protected function setUp(): void
     {
+        @unlink(sys_get_temp_dir() . '/acuerdo_estado_global.txt');
         // Antes de saltearla: tearDown() corre igual y la usa.
         $this->carpeta = sys_get_temp_dir() . '/archivos-' . bin2hex(random_bytes(4));
         $this->base = self::baseConTablasNuevas($this->configuracion());
@@ -62,6 +63,7 @@ final class CarteleraTest extends TestCase
 
     protected function tearDown(): void
     {
+        @unlink(sys_get_temp_dir() . '/acuerdo_estado_global.txt');
         foreach (['salas', 'afiches'] as $subcarpeta) {
             array_map('unlink', glob("{$this->carpeta}/{$subcarpeta}/*") ?: []);
             @rmdir("{$this->carpeta}/{$subcarpeta}");

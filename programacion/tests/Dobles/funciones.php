@@ -28,6 +28,7 @@ if ($metodo === 'POST' && $ruta === '/interno/acuerdos') {
     }
 
     http_response_code(201);
+    @unlink(sys_get_temp_dir() . '/acuerdo_estado_global.txt');
     echo json_encode([
         'id' => 'acuerdo-mock-1',
         'funcion_id' => $cuerpo['funcion_id'],
@@ -51,17 +52,19 @@ if ($metodo === 'POST' && $ruta === '/interno/acuerdos') {
 
 if ($metodo === 'GET' && str_starts_with($ruta, '/interno/acuerdos/por-funcion/')) {
     $funcionId = (string) substr($ruta, strlen('/interno/acuerdos/por-funcion/'));
+    $archivoGlobal = sys_get_temp_dir() . '/acuerdo_estado_global.txt';
+    $estado = file_exists($archivoGlobal) ? trim((string) file_get_contents($archivoGlobal)) : 'abierto';
     echo json_encode([
         'id' => 'acuerdo-mock-1',
         'funcion_id' => $funcionId,
         'minimo_asistentes' => 2,
-        'estado' => 'abierto',
-        'estado_etiqueta' => 'abierto',
+        'estado' => $estado,
+        'estado_etiqueta' => $estado,
         'franja_ganadora_id' => null,
         'alcanzo_minimo' => false,
         'voto_usuario_franja_id' => 'franja-mock-0',
         'franjas' => [
-            ['id' => 'franja-mock-0', 'inicio' => '2026-10-25 20:00:00', 'fin' => '2026-10-25 22:30:00', 'votos' => 2],
+            ['id' => 'franja-mock-0', 'inicio' => '2026-10-25 20:00:00', 'fin' => '2026-10-25 22:30:00', 'votos' => ($estado === 'sin_minimo' ? 1 : 2)],
             ['id' => 'franja-mock-1', 'inicio' => '2026-10-26 21:00:00', 'fin' => null, 'votos' => 0],
         ],
     ]);
@@ -92,6 +95,7 @@ if ($metodo === 'POST' && preg_match('#^/interno/acuerdos/([^/]+)/confirmar$#', 
 }
 
 if ($metodo === 'POST' && preg_match('#^/interno/acuerdos/([^/]+)/cerrar-sin-minimo$#', $ruta, $matches)) {
+    file_put_contents(sys_get_temp_dir() . '/acuerdo_estado_global.txt', 'sin_minimo');
     echo json_encode([
         'id' => $matches[1],
         'estado' => 'sin_minimo',

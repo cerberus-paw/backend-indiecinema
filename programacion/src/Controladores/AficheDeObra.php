@@ -33,17 +33,19 @@ final class AficheDeObra extends Controlador
         $afiche = (Uuid::esValido($id) ? $this->obras->buscar($id) : null)->afiche
             ?? throw ExcepcionHttp::noEncontrada();
 
-        // Como la foto de la sala: el nombre del archivo sirve de ETag.
-        $etiqueta = '"' . $afiche . '"';
-        if ($peticion->cabecera('If-None-Match') === $etiqueta) {
-            return (new Respuesta('', 304))->conCabecera('ETag', $etiqueta)->conCabecera('Cache-Control', 'no-cache');
-        }
-
         $contenido = $this->afiches->contenido($afiche);
         if ($contenido === null) {
             $this->log->error('La obra {obra} apunta al afiche {afiche}, que no está en el volumen.', ['obra' => $id, 'afiche' => $afiche]);
 
             throw ExcepcionHttp::noEncontrada();
+        }
+
+        // El ETag sale del contenido y no del nombre, como en la foto de la sala: los afiches de los
+        // datos de prueba se cambian pisando el archivo con el mismo nombre, y con el nombre de ETag
+        // el navegador seguía mostrando el viejo. Leerlo para cada pedido es barato: pesan poco.
+        $etiqueta = '"' . hash('xxh128', $contenido) . '"';
+        if ($peticion->cabecera('If-None-Match') === $etiqueta) {
+            return (new Respuesta('', 304))->conCabecera('ETag', $etiqueta)->conCabecera('Cache-Control', 'no-cache');
         }
 
         return (new Respuesta($contenido))

@@ -16,6 +16,9 @@ final class Respuesta
     /** @var list<array{nombre: string, valor: string, opciones: array<string, mixed>}> */
     private array $cookies = [];
 
+    /** @var list<callable(): mixed> */
+    private array $alTerminar = [];
+
     public function __construct(
         private readonly string $cuerpo = '',
         private readonly int $estado = 200,
@@ -62,6 +65,32 @@ final class Respuesta
         return $copia;
     }
 
+    /**
+     * Algo para hacer después de mandar la respuesta, sin que quien pidió lo espere: un correo,
+     * que pasa por cuentas y por el SMTP y puede tardar segundos. Cuando corre ya no hay a quién
+     * responderle, así que la tarea maneja sus errores y deja lo suyo en el log.
+     *
+     * @param callable(): mixed $tarea
+     */
+    public function alTerminar(callable $tarea): self
+    {
+        $copia = clone $this;
+        $copia->alTerminar[] = $tarea;
+
+        return $copia;
+    }
+
+    /**
+     * Corre las tareas de alTerminar(). enviar() la llama recién después de soltar la respuesta;
+     * las pruebas, que no la envían, la llaman a mano.
+     */
+    public function terminar(): void
+    {
+        foreach ($this->alTerminar as $tarea) {
+            $tarea();
+        }
+    }
+
     public function estado(): int
     {
         return $this->estado;
@@ -93,13 +122,46 @@ final class Respuesta
 
     public function enviar(): void
     {
+        $conTareas = $this->alTerminar !== [];
         http_response_code($this->estado);
         foreach ($this->cabeceras as $nombre => $valor) {
             header("{$nombre}: {$valor}");
+        }
+        if ($conTareas) {
+            // Con el largo, quien pidió sabe dónde termina la respuesta y no espera a que se cierre
+            // la conexión, que sigue abierta mientras corren las tareas. Sin comprimir: mod_deflate
+            // cambia el largo por partes y se guarda el final hasta que termina PHP.
+            header('Content-Length: ' . strlen($this->cuerpo));
+            header('Connection: close');
+            if (function_exists('apache_setenv')) {
+                apache_setenv('no-gzip', '1');
+            }
         }
         foreach ($this->cookies as $cookie) {
             setcookie($cookie['nombre'], $cookie['valor'], $cookie['opciones']);
         }
         echo $this->cuerpo;
+        if ($conTareas) {
+            self::soltar();
+            $this->terminar();
+        }
+    }
+
+    /**
+     * Manda ya lo que quedó en los búferes de PHP y de Apache. Las tareas siguen aunque quien pidió
+     * corte, y con su propio tiempo: el max_execution_time de php.ini es para la página.
+     */
+    private static function soltar(): void
+    {
+        ignore_user_abort(true);
+        set_time_limit(120);
+        while (ob_get_level() > 0) {
+            ob_end_flush();
+        }
+        flush();
+        // Con PHP-FPM, cierra la conexión del todo; la imagen usa mod_php, donde no existe.
+        if (function_exists('fastcgi_finish_request')) {
+            fastcgi_finish_request();
+        }
     }
 }

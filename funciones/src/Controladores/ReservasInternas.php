@@ -17,8 +17,10 @@ use IndieCinema\Nucleo\Uuid;
  * funciones cancela sus reservas confirmadas y les avisa por correo a los espectadores (E4-03.4).
  * Sólo la llama programación, con su token: lo controla la ruta.
  *
- * Programación manda el título y la fecha para el correo: así funciones no tiene que volver a
- * pedirle la función mientras programación espera esta respuesta.
+ * Programación espera la respuesta 2 s (ClienteInterno), y cada aviso pide la dirección a cuentas
+ * y pasa por el SMTP: con unas pocas reservas ya no llegaba. Por eso responde apenas cancela, y
+ * los correos salen después (Respuesta::alTerminar). Programación manda el título y la fecha
+ * para el correo, así funciones no tiene que volver a pedirle la función.
  */
 final class ReservasInternas extends Controlador
 {
@@ -49,9 +51,7 @@ final class ReservasInternas extends Controlador
 
         $canceladas = $this->servicio->cancelarDeLaFuncion($id, $organizador);
 
-        return $this->json([
-            'canceladas' => count($canceladas),
-            'avisadas' => $this->avisos->funcionCancelada($canceladas, $titulo, $fecha),
-        ]);
+        return $this->json(['canceladas' => count($canceladas)])
+            ->alTerminar(fn (): int => $this->avisos->funcionCancelada($canceladas, $titulo, $fecha));
     }
 }

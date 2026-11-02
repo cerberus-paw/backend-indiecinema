@@ -179,6 +179,11 @@ class ServicioDeAcuerdos
         if ($ganadora === null || $ganadora->votos < $acuerdo->minimoAsistentes) {
             throw new ReglaIncumplida("La franja con más votos no alcanza el mínimo requerido de {$acuerdo->minimoAsistentes} asistentes.");
         }
+        // Programación no puede fijar una fecha pasada: si se confirmara igual, el acuerdo quedaría
+        // cerrado y la función sin programar (E3-13.F4).
+        if ($ganadora->inicio <= new DateTimeImmutable()) {
+            throw new ReglaIncumplida('La franja ganadora ya empezó.');
+        }
 
         $this->repositorio->actualizarEstado($acuerdoId, EstadoAcuerdo::Confirmado, $ganadora->id);
 

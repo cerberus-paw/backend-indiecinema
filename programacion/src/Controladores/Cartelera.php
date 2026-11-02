@@ -213,6 +213,8 @@ final class Cartelera extends Controlador
             'franja_votada' => $peticion->consulta('votado') === '1',
             'error_voto' => $peticion->consulta('error_voto'),
             'error_franja' => $peticion->consulta('error_voto'),
+            // Lo que no salió al confirmar o cerrar el acuerdo: sólo se le muestra al organizador.
+            'error_acuerdo' => $esPropia ? $peticion->consulta('error_acuerdo') : null,
             'votacion_cerrada' => $esPropia && $peticion->consulta('votacion_cerrada') === '1',
             // El aviso de que se acaba de guardar: sólo para el organizador que la editó. La ficha
             // es pública, y si no, lo vería cualquiera que abra el enlace con el parámetro puesto.

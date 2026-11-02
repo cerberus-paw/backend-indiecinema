@@ -344,7 +344,8 @@ final class FuncionesDelOrganizador extends Controlador
                 return $this->json(['error' => $regla->getMessage()], 422);
             }
 
-            return $this->redirigir("/cartelera/{$id}?error_voto=" . rawurlencode($regla->getMessage()));
+            // Un aviso propio: el de error_voto habla del voto del espectador (E3-13.F4).
+            return $this->redirigir("/cartelera/{$id}?error_acuerdo=" . rawurlencode($regla->getMessage()));
         }
 
         if ($peticion->cabecera('Accept') === 'application/json' || $peticion->cabecera('Content-Type') === 'application/json') {
@@ -376,7 +377,8 @@ final class FuncionesDelOrganizador extends Controlador
                 return $this->json(['error' => $regla->getMessage()], 422);
             }
 
-            return $this->redirigir("/cartelera/{$id}?error_voto=" . rawurlencode($regla->getMessage()));
+            // Un aviso propio: el de error_voto habla del voto del espectador (E3-13.F4).
+            return $this->redirigir("/cartelera/{$id}?error_acuerdo=" . rawurlencode($regla->getMessage()));
         }
 
         if ($peticion->cabecera('Accept') === 'application/json' || $peticion->cabecera('Content-Type') === 'application/json') {

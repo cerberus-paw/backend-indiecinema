@@ -256,4 +256,25 @@ final class AcuerdosInternosTest extends TestCase
         $this->pedirInterno('POST', "/interno/acuerdos/{$primero['id']}/cerrar-sin-minimo");
         self::assertSame(201, $this->pedirInterno('POST', '/interno/acuerdos', $propuesta)->estado());
     }
+
+    /**
+     * E3-13.F4: con la franja ganadora ya empezada no se confirma, y el acuerdo sigue abierto.
+     */
+    public function testNoConfirmaUnaFranjaGanadoraQueYaEmpezo(): void
+    {
+        $acuerdo = json_decode($this->pedirInterno('POST', '/interno/acuerdos', [
+            'funcion_id' => self::FUNCION_ID,
+            'minimo_asistentes' => 1,
+            'franjas' => [['fecha_hora_inicio' => self::dentroDe(10, '20:00:00')]],
+        ])->cuerpo(), true);
+        $franjaId = $acuerdo['franjas'][0]['id'];
+        $this->pedirInterno('POST', "/interno/acuerdos/{$acuerdo['id']}/votar", ['franja_id' => $franjaId, 'usuario_id' => self::USUARIO_EVA]);
+        // Pasan los días: la franja ya empezó.
+        $this->base->ejecutar('UPDATE acuerdo_franja SET fecha_hora_inicio = ? WHERE id = ?', [(new \DateTimeImmutable('-1 hour'))->format('Y-m-d H:i:s'), $franjaId]);
+
+        $respuesta = $this->pedirInterno('POST', "/interno/acuerdos/{$acuerdo['id']}/confirmar");
+
+        self::assertSame(422, $respuesta->estado());
+        self::assertSame('abierto', $this->base->valor('SELECT estado FROM acuerdo_fecha WHERE id = ?', [$acuerdo['id']]));
+    }
 }

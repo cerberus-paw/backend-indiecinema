@@ -1866,6 +1866,52 @@ final class FuncionesDelOrganizadorTest extends TestCase
         self::assertStringContainsString($diaYMes, $cartelera);
     }
 
+    /**
+     * E3-13.F4: con la franja que lidera ya empezada, confirmar muestra el motivo y la función
+     * sigue en acuerdo. Antes, funciones cerraba el acuerdo y la función quedaba trabada.
+     */
+    public function testConfirmarAcuerdoConLaGanadoraYaEmpezadaMuestraElMotivoYNoTraba(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $funcion = $this->funcion($sala);
+        $this->enviar("/organizador/funciones/{$funcion->id}/cerrar-votacion", []);
+        self::acuerdoEnFunciones('pasada');
+
+        $respuesta = $this->enviar("/organizador/funciones/{$funcion->id}/confirmar-acuerdo", ['volver' => 'ficha']);
+
+        self::assertSame(303, $respuesta->estado());
+        self::assertStringContainsString('error_acuerdo=' . rawurlencode('La franja ganadora ya empezó'), $respuesta->cabecera('Location') ?? '');
+
+        // La ficha se lo muestra al organizador.
+        $ficha = $this->pedir('GET', (string) $respuesta->cabecera('Location'))->cuerpo();
+        self::assertStringContainsString('No se pudo actualizar el acuerdo', $ficha);
+        self::assertStringContainsString('La franja ganadora ya empezó', $ficha);
+        self::assertSame('en_acuerdo_fecha', $this->base->valor('SELECT estado FROM funcion WHERE id = ?', [$funcion->id]));
+    }
+
+    /**
+     * E3-13.F4: confirmar o cerrar un acuerdo que ya se cerró (dos clics, dos pestañas) muestra el
+     * motivo. Antes era el 422 de funciones, que llegaba como una página 500.
+     */
+    public function testConfirmarOCerrarUnAcuerdoYaCerradoMuestraElMotivo(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $funcion = $this->funcion($sala);
+        $this->enviar("/organizador/funciones/{$funcion->id}/cerrar-votacion", []);
+        self::acuerdoEnFunciones('sin_minimo');
+
+        foreach (['confirmar-acuerdo', 'cerrar-sin-minimo'] as $accion) {
+            $respuesta = $this->enviar("/organizador/funciones/{$funcion->id}/{$accion}", []);
+            self::assertSame(303, $respuesta->estado(), $accion);
+            self::assertStringContainsString(rawurlencode('El acuerdo de fecha ya está cerrado.'), $respuesta->cabecera('Location') ?? '', $accion);
+        }
+
+        // Sin franjas propuestas, tampoco.
+        self::acuerdoEnFunciones('ninguno');
+        $sinFranjas = $this->enviar("/organizador/funciones/{$funcion->id}/confirmar-acuerdo", []);
+        self::assertStringContainsString(rawurlencode('Esta función todavía no tiene franjas propuestas.'), $sinFranjas->cabecera('Location') ?? '');
+    }
+
     public function testConfirmarAcuerdoRechazaFuncionEnOtroEstado(): void
     {
         $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');

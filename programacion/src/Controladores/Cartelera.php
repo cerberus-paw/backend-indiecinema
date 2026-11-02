@@ -14,7 +14,6 @@ use IndieCinema\Nucleo\Uuid;
 use IndieCinema\Programacion\Modelo\DetalleDeFuncion;
 use IndieCinema\Programacion\Modelo\EstadoFuncion;
 use IndieCinema\Programacion\Modelo\Funcion;
-use IndieCinema\Programacion\Modelo\FuncionEnCartelera;
 use IndieCinema\Programacion\Modelo\Genero;
 use IndieCinema\Programacion\Modelo\ObraEnDetalle;
 use IndieCinema\Programacion\Modelo\ReglaIncumplida;
@@ -59,12 +58,14 @@ final class Cartelera extends Controlador
             'siguiente' => $pagina->numero < $total ? $parametros->urlDePagina($pagina->numero + 1) : null,
         ];
 
+        $tarjetas = TarjetaDeFuncion::todas($pagina->funciones, $this->servicio->acuerdosDe($pagina->funciones));
+
         if ($peticion->aceptaJson()) {
             return $this->json([
                 // Con el link a la ficha, que en HTML arma la plantilla de la tarjeta.
                 'funciones' => array_map(
-                    static fn (FuncionEnCartelera $funcion): array => TarjetaDeFuncion::datos($funcion) + ['url' => "/cartelera/{$funcion->id}"],
-                    $pagina->funciones,
+                    static fn (array $tarjeta): array => $tarjeta + ['url' => "/cartelera/{$tarjeta['id']}"],
+                    $tarjetas,
                 ),
                 // Un objeto aunque no haya filtros: vacío, json_encode() lo escribiría como lista.
                 'filtros' => (object) $parametros->valores,
@@ -75,7 +76,7 @@ final class Cartelera extends Controlador
         }
 
         return $this->vista('cartelera.html.twig', [
-            'funciones' => array_map(TarjetaDeFuncion::datos(...), $pagina->funciones),
+            'funciones' => $tarjetas,
             'filtros' => $parametros->valores,
             'filtrada' => $parametros->valores !== [],
             'avisos' => $parametros->avisos,
@@ -165,6 +166,7 @@ final class Cartelera extends Controlador
                     $franjaItem = [
                         'id' => $f['id'],
                         'fecha' => self::formatearFechaLarga($inicioDt),
+                        'fecha_corta' => TarjetaDeFuncion::diaCorto($inicioDt),
                         'hora_inicio' => $inicioDt->format('H:i'),
                         'hora_fin' => $finDt->format('H:i'),
                         'desde' => $inicioDt->format('H:i'),
@@ -186,6 +188,8 @@ final class Cartelera extends Controlador
                 // Los votos que la eligió en la votación de títulos: la plantilla mostraba un número
                 // fijo (E3-13.F3).
                 $datosFuncion['votos_obra_ganadora'] = $conteoVotos[$datosFuncion['obra_ganadora']['id'] ?? ''] ?? 0;
+                // «Ganaron la votación con 112 y 92 votos sobre 295 emitidos», como el wireframe.
+                $datosFuncion['votos_emitidos'] = array_sum($conteoVotos);
             }
         }
 

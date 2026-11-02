@@ -662,8 +662,8 @@ final class CarteleraTest extends TestCase
         self::assertStringContainsString('href="/salas/' . $salaId . '"', $cuerpo);
         self::assertStringContainsString('San Martín 420 · Luján', $cuerpo);
         self::assertStringContainsString('$ 2.500', $cuerpo);
-        self::assertStringContainsString('insignia-programada', $cuerpo);
-        self::assertStringContainsString('PROGRAMADA', $cuerpo);
+        // La línea de estados del wireframe marca «PROGRAMADA» como el estado actual (E3-13.F10).
+        self::assertMatchesRegularExpression('/aria-current="step">\s*<span>PROGRAMADA<\/span>/', $cuerpo);
         self::assertStringNotContainsString('Esta función fue cancelada.', $cuerpo);
     }
 
@@ -1198,6 +1198,41 @@ final class CarteleraTest extends TestCase
         $cuerpo = $this->pedir('/cartelera?pagina=2')->cuerpo();
         self::assertStringContainsString('EN ACUERDO DE FECHA', $cuerpo);
         self::assertStringContainsString("/cartelera/{$funcionId}", $cuerpo);
+        // E3-13.F9: con el acuerdo abierto, la tarjeta dice cuántas franjas hay, como el wireframe.
+        self::assertSame('2 franjas propuestas', $enAcuerdo[0]['franjas_propuestas']);
+        self::assertStringContainsString('2 franjas propuestas', $cuerpo);
+    }
+
+    /**
+     * E3-13.F9: si el acuerdo cerró sin quórum, la tarjeta lo dice y no ofrece «Votar fecha». El
+     * estado del acuerdo vive en funciones: antes la cartelera no le preguntaba.
+     */
+    public function testLaTarjetaDeUnaFuncionCuyoAcuerdoCerroSinQuorumLoDice(): void
+    {
+        [$funcionId] = $this->funcionEnAcuerdo();
+        file_put_contents(sys_get_temp_dir() . '/acuerdo_estado_global.txt', 'sin_minimo');
+
+        $datos = self::json($this->pedirJson('/cartelera?pagina=2'));
+        $tarjeta = array_values(array_filter($datos['funciones'], static fn (array $f): bool => $f['id'] === $funcionId));
+        self::assertSame('ACUERDO_SIN_MINIMO', $tarjeta[0]['estado']);
+
+        $cuerpo = $this->pedir('/cartelera?pagina=2')->cuerpo();
+        self::assertStringContainsString('ACUERDO SIN MÍNIMO', $cuerpo);
+        self::assertStringNotContainsString('Votar fecha', $cuerpo);
+    }
+
+    /**
+     * E3-13.F9: si funciones no responde, la cartelera sale igual, con la tarjeta como antes.
+     */
+    public function testSinFuncionesLaCarteleraSaleIgual(): void
+    {
+        [$funcionId] = $this->funcionEnAcuerdo();
+        file_put_contents(sys_get_temp_dir() . '/acuerdo_estado_global.txt', 'caido');
+
+        $respuesta = $this->pedir('/cartelera?pagina=2');
+
+        self::assertSame(200, $respuesta->estado());
+        self::assertStringContainsString("/cartelera/{$funcionId}", $respuesta->cuerpo());
     }
 
     /**
@@ -1236,7 +1271,8 @@ final class CarteleraTest extends TestCase
 
         $cuerpo = $this->pedir("/cartelera/{$funcionId}")->cuerpo();
 
-        self::assertMatchesRegularExpression('/Ganadora con <strong>2 votos<\/strong>/', $cuerpo);
+        // Como el wireframe (E3-13.F10): «Ganó la votación con 2 votos sobre 2 emitidos».
+        self::assertStringContainsString('Ganó la votación con 2 votos sobre 2 emitidos.', $cuerpo);
         self::assertStringNotContainsString('34 votos', $cuerpo);
     }
 

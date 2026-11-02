@@ -178,6 +178,9 @@ final class Cartelera extends Controlador
                 $datosFuncion['confirmable'] = $esPropia && ($maxVotosFranja >= $minimoAsistentes);
                 $datosFuncion['franja_ganadora'] = $franjaLider;
                 $datosFuncion['obra_ganadora'] = $datosFuncion['obras'][0] ?? null;
+                // Los votos que la eligió en la votación de títulos: la plantilla mostraba un número
+                // fijo (E3-13.F3).
+                $datosFuncion['votos_obra_ganadora'] = $conteoVotos[$datosFuncion['obra_ganadora']['id'] ?? ''] ?? 0;
             }
         }
 

@@ -1146,6 +1146,24 @@ final class CarteleraTest extends TestCase
     }
 
     /**
+     * E3-13.F3: la obra ganadora muestra los votos que recibió en la votación de títulos, no un
+     * número fijo de la plantilla.
+     */
+    public function testFichaEnAcuerdoMuestraLosVotosRealesDeLaObraGanadora(): void
+    {
+        [$funcionId] = $this->funcionEnAcuerdo();
+        $obraId = (string) $this->base->valor("SELECT obra_id FROM funcion_obra WHERE funcion_id = ?", [$funcionId]);
+        foreach ([Uuid::nuevo(), Uuid::nuevo()] as $votante) {
+            $this->base->ejecutar('INSERT INTO voto (funcion_id, usuario_id, obra_id) VALUES (?, ?, ?)', [$funcionId, $votante, $obraId]);
+        }
+
+        $cuerpo = $this->pedir("/cartelera/{$funcionId}")->cuerpo();
+
+        self::assertMatchesRegularExpression('/Ganadora con <strong>2 votos<\/strong>/', $cuerpo);
+        self::assertStringNotContainsString('34 votos', $cuerpo);
+    }
+
+    /**
      * Criterio E3-13.6: La ficha muestra las franjas, los votos y el estado del acuerdo.
      */
     public function testFichaDeFuncionEnAcuerdoMuestraFranjasVotosYEstado(): void

@@ -26,6 +26,7 @@ use PHPUnit\Framework\TestCase;
 final class PanelDeReservasTest extends TestCase
 {
     use ConBaseDePruebas;
+    use ConCuentasDePrueba;
     use ConProgramacionDePrueba {
         setUpBeforeClass as iniciarProgramacion;
         tearDownAfterClass as detenerProgramacion;
@@ -43,10 +44,6 @@ final class PanelDeReservasTest extends TestCase
     private const CANCELADA = '56565656-5656-4656-8656-565656565656';
     private const TOKEN_DE_PROGRAMACION = 'token-de-programacion';
 
-    /** @var resource|null */
-    private static $cuentas = null;
-
-    private static string $urlCuentas;
     private static ServidorSmtpDePrueba $correo;
 
     private Configuracion $configuracion;
@@ -56,37 +53,14 @@ final class PanelDeReservasTest extends TestCase
     {
         self::iniciarProgramacion();
         self::$correo = ServidorSmtpDePrueba::iniciar();
-
-        $socket = stream_socket_server('tcp://127.0.0.1:0');
-        $puerto = (int) substr((string) strrchr((string) stream_socket_get_name($socket, false), ':'), 1);
-        fclose($socket);
-        self::$urlCuentas = "http://127.0.0.1:{$puerto}";
-        $proceso = proc_open(
-            [PHP_BINARY, '-S', "127.0.0.1:{$puerto}", __DIR__ . '/Dobles/cuentas.php'],
-            [['pipe', 'r'], ['file', '/dev/null', 'w'], ['file', '/dev/null', 'w']],
-            $tuberias,
-        );
-        self::$cuentas = $proceso === false ? null : $proceso;
-        for ($intento = 0; $intento < 100; ++$intento) {
-            $conexion = @fsockopen('127.0.0.1', $puerto, $codigo, $mensaje, 0.05);
-            if ($conexion !== false) {
-                fclose($conexion);
-
-                return;
-            }
-            usleep(20_000);
-        }
-        self::fail('No arrancó el cuentas de prueba.');
+        self::iniciarCuentas();
     }
 
     public static function tearDownAfterClass(): void
     {
         self::detenerProgramacion();
         self::$correo->detener();
-        if (self::$cuentas !== null) {
-            proc_terminate(self::$cuentas);
-            proc_close(self::$cuentas);
-        }
+        self::detenerCuentas();
     }
 
     protected function setUp(): void
@@ -99,6 +73,7 @@ final class PanelDeReservasTest extends TestCase
             'interno' => ['token' => 'token-de-funciones'],
             'llamadores' => ['programacion' => hash('sha256', self::TOKEN_DE_PROGRAMACION)],
             'correo' => ['servidor' => self::$correo->url(), 'remitente' => 'no-responder@indiecinema.test'],
+            'sitio' => ['url' => 'http://localhost:8080'],
         ]);
         $this->base = self::baseConTablasNuevas($this->configuracion);
         self::$correo->vaciar();

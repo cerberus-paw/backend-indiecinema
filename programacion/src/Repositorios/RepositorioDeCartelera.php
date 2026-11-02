@@ -30,7 +30,9 @@ final class RepositorioDeCartelera
 {
     private const DESDE = 'FROM funcion f JOIN sala s ON s.id = f.sala_id';
     /** La sala y el id desempatan, así una función no cambia de página entre una consulta y otra. */
-    private const ORDEN = 'ORDER BY (f.estado = \'en_votacion_titulos\'), f.fecha_hora, s.nombre, f.id';
+    // Las que no tienen fecha van al final; entre ellas, primero las que ya están acordando la
+    // fecha y después las que todavía votan los títulos (E3-13.F1).
+    private const ORDEN = 'ORDER BY (f.fecha_hora IS NULL), f.fecha_hora, (f.estado = \'en_votacion_titulos\'), s.nombre, f.id';
 
     public function __construct(private readonly BaseDeDatos $base)
     {
@@ -195,11 +197,13 @@ final class RepositorioDeCartelera
     private static function condiciones(FiltrosDeCartelera $filtros, DateTimeImmutable $ahora): array
     {
         $condiciones = [
-            '((f.estado = ? AND f.fecha_hora > ?) OR f.estado = ?)',
+            // Las que todavía no tienen fecha también: en votación de títulos o en acuerdo de fecha,
+            // para que el público las encuentre y vote (E3-12 y E3-13).
+            '((f.estado = ? AND f.fecha_hora > ?) OR f.estado IN (?, ?))',
             's.habilitada = TRUE',
             's.dada_de_baja_en IS NULL',
         ];
-        $parametros = [EstadoFuncion::Programada, $ahora, EstadoFuncion::EnVotacionTitulos];
+        $parametros = [EstadoFuncion::Programada, $ahora, EstadoFuncion::EnVotacionTitulos, EstadoFuncion::EnAcuerdoFecha];
 
         if ($filtros->texto !== null) {
             // Las obras elegidas o, si está en votación, las candidatas; las perdedoras no.

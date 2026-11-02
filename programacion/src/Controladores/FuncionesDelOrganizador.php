@@ -16,6 +16,7 @@ use IndieCinema\Programacion\Modelo\FuncionDelOrganizador;
 use IndieCinema\Programacion\Modelo\Obra;
 use IndieCinema\Programacion\Modelo\ReglaIncumplida;
 use IndieCinema\Programacion\Modelo\Sala;
+use IndieCinema\Programacion\Servicios\AcuerdosDeFunciones;
 use IndieCinema\Programacion\Servicios\ServicioDeFuncionesDelOrganizador;
 use LogicException;
 
@@ -34,9 +35,16 @@ final class FuncionesDelOrganizador extends Controlador
     public function listar(Peticion $peticion): Respuesta
     {
         $funciones = $this->servicio->listar(self::organizador($peticion));
+        $acuerdos = $this->servicio->acuerdosDe($funciones);
 
         return $this->vista('mis_funciones.html.twig', [
-            'funciones' => array_map(self::datos(...), $funciones),
+            'funciones' => array_map(
+                static fn (FuncionDelOrganizador $funcion): array => [
+                    ...self::datos($funcion),
+                    ...self::datosDelAcuerdo($funcion, $acuerdos),
+                ],
+                $funciones,
+            ),
             // El aviso de que se acaba de programar una: sólo si lo que llega tiene forma de id.
             'programada' => is_string($programada = $peticion->consulta('programada')) && Uuid::esValido($programada),
             'cancelada' => $peticion->consulta('cancelada') === '1',
@@ -230,11 +238,9 @@ final class FuncionesDelOrganizador extends Controlador
 
         $this->servicio->cerrarVotacion($organizador, $id);
 
-        if (($peticion->cuerpo()['volver'] ?? null) === 'ficha') {
-            return $this->redirigir("/cartelera/{$id}?votacion_cerrada=1");
-        }
-
-        return $this->redirigir('/organizador/funciones?votacion_cerrada=1');
+        // Lo que sigue es proponer las franjas (E3-13.2): sin esto, el organizador no tenía cómo
+        // llegar al formulario. Da igual desde dónde la cerró.
+        return $this->redirigir("/organizador/funciones/{$id}/proponer-franjas?votacion_cerrada=1");
     }
 
     /**
@@ -331,6 +337,8 @@ final class FuncionesDelOrganizador extends Controlador
                 'minimo_asistentes' => 10,
             ],
             'errores' => [],
+            // Al llegar recién cerrada la votación de títulos: el aviso de que ahora van las franjas.
+            'votacion_cerrada' => $peticion->consulta('votacion_cerrada') === '1',
         ]);
     }
 
@@ -485,6 +493,33 @@ final class FuncionesDelOrganizador extends Controlador
             'fecha' => $funcion->fechaHora === null ? null : TarjetaDeFuncion::fecha($funcion->fechaHora),
             'precio' => TarjetaDeFuncion::precio($funcion->precioBase),
             'cupo' => $funcion->cupo,
+        ];
+    }
+
+    /**
+     * Lo que «Mis funciones» necesita del acuerdo de fecha para ofrecer el paso que sigue:
+     * proponer las franjas, confirmar la fecha o, si cerró sin mínimo, proponer otras.
+     *
+     * @param array<string, array<string, mixed>|false|null> $acuerdos los de acuerdosDe()
+     *
+     * @return array{acuerdo?: string, confirmable?: bool, acuerdo_sin_minimo?: bool}
+     */
+    private static function datosDelAcuerdo(FuncionDelOrganizador $funcion, array $acuerdos): array
+    {
+        if (!array_key_exists($funcion->id, $acuerdos)) {
+            return [];
+        }
+        $acuerdo = $acuerdos[$funcion->id];
+        $estado = match (true) {
+            $acuerdo === false => 'sin_dato',
+            $acuerdo === null => 'sin_franjas',
+            default => (string) ($acuerdo['estado'] ?? 'sin_dato'),
+        };
+
+        return [
+            'acuerdo' => $estado,
+            'confirmable' => is_array($acuerdo) && AcuerdosDeFunciones::alcanzoElMinimo($acuerdo),
+            'acuerdo_sin_minimo' => $estado === 'sin_minimo',
         ];
     }
 

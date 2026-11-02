@@ -28,7 +28,11 @@ final class TarjetaDeFuncion
             'id' => $funcion->id,
             // Una función con varias obras las proyecta todas: el título las nombra a todas.
             'titulo' => implode(' + ', array_map(static fn (ObraEnCartelera $obra): string => $obra->titulo, $funcion->obras)),
-            'estado' => $funcion->estado === EstadoFuncion::EnVotacionTitulos ? 'EN_VOTACION_TITULOS' : 'PROGRAMADA',
+            'estado' => match ($funcion->estado) {
+                EstadoFuncion::EnVotacionTitulos => 'EN_VOTACION_TITULOS',
+                EstadoFuncion::EnAcuerdoFecha => 'EN_ACUERDO_FECHA',
+                default => 'PROGRAMADA',
+            },
             'precio' => self::precio($funcion->precioBase),
             'sala' => $funcion->sala,
             'localidad' => $funcion->localidad,

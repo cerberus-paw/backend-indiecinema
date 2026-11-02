@@ -6,6 +6,7 @@ namespace IndieCinema\Programacion\Servicios;
 
 use DateTimeImmutable;
 use LogicException;
+use RuntimeException;
 use IndieCinema\Nucleo\Http\ExcepcionHttp;
 use IndieCinema\Nucleo\Seguridad\Usuario;
 use IndieCinema\Programacion\Modelo\EstadoFuncion;
@@ -46,6 +47,34 @@ final class ServicioDeFuncionesDelOrganizador
     public function listar(Usuario $organizador): array
     {
         return $this->funciones->delOrganizador($organizador->id);
+    }
+
+    /**
+     * El acuerdo de fecha de cada función que está en acuerdo, para que «Mis funciones» muestre
+     * el paso que sigue (E3-13). Un pedido por función: son pocas a la vez, y funciones no tiene
+     * una consulta de varias. Si funciones no responde, la lista sale igual, sin ese dato.
+     *
+     * @param list<FuncionDelOrganizador> $funciones
+     *
+     * @return array<string, array<string, mixed>|false|null> por id: el acuerdo, null si todavía
+     *                                                         no tiene, false si no se supo
+     */
+    public function acuerdosDe(array $funciones): array
+    {
+        $acuerdos = [];
+        foreach ($funciones as $funcion) {
+            if ($funcion->estado !== EstadoFuncion::EnAcuerdoFecha) {
+                continue;
+            }
+            try {
+                // null es que no tiene acuerdo: no confundirlo con no haber podido preguntar.
+                $acuerdos[$funcion->id] = $this->acuerdos === null ? false : $this->acuerdos->obtenerPorFuncion($funcion->id);
+            } catch (ExcepcionHttp | RuntimeException) {
+                $acuerdos[$funcion->id] = false;
+            }
+        }
+
+        return $acuerdos;
     }
 
     /**

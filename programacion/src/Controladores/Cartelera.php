@@ -129,6 +129,9 @@ final class Cartelera extends Controlador
 
         if ($detalle->estado === EstadoFuncion::EnAcuerdoFecha) {
             $acuerdo = $this->servicio->acuerdoDeFecha($id, $usuario?->id);
+            // Recién cerrada la votación, todavía no hay franjas: la ficha lo dice y le ofrece al
+            // organizador proponerlas, en vez de mostrar franjas de ejemplo.
+            $datosFuncion['sin_franjas'] = $acuerdo === null;
             if ($acuerdo !== null) {
                 $minimoAsistentes = (int) ($acuerdo['minimo_asistentes'] ?? 20);
                 $datosFuncion['minimo_asistentes'] = $minimoAsistentes;

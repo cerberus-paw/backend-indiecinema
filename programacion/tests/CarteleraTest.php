@@ -12,6 +12,7 @@ use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Log;
 use IndieCinema\Nucleo\Uuid;
+use IndieCinema\Programacion\Controladores\Cartelera;
 use IndieCinema\Programacion\Repositorios\RepositorioDeFunciones;
 use IndieCinema\Programacion\Repositorios\RepositorioDeGeneros;
 use IndieCinema\Programacion\Repositorios\RepositorioDeObras;
@@ -1083,6 +1084,68 @@ final class CarteleraTest extends TestCase
     }
 
     /**
+     * Una función en acuerdo de fecha, con su obra elegida, en una sala de los datos de prueba.
+     *
+     * @return array{0: string, 1: string} el id de la función y el de su organizador
+     */
+    private function funcionEnAcuerdo(): array
+    {
+        $this->cargarDatosDePrueba();
+        $obra = $this->base->fila('SELECT id FROM obra ORDER BY id LIMIT 1') ?? self::fail();
+        $sala = $this->base->fila('SELECT id, organizador_id FROM sala WHERE habilitada = TRUE AND dada_de_baja_en IS NULL LIMIT 1') ?? self::fail();
+        $funcionId = Uuid::nuevo();
+        $this->base->ejecutar(
+            "INSERT INTO funcion (id, sala_id, estado, precio_base, cupo) VALUES (?, ?, 'en_acuerdo_fecha', 2000, 50)",
+            [$funcionId, $sala['id']],
+        );
+        $this->base->ejecutar("INSERT INTO funcion_obra (funcion_id, obra_id, estado) VALUES (?, ?, 'elegida')", [$funcionId, $obra['id']]);
+
+        return [$funcionId, (string) $sala['organizador_id']];
+    }
+
+    /**
+     * E3-13.F1: la función en acuerdo de fecha sale en la cartelera, para que el público la
+     * encuentre y vote, como las que están en votación de títulos.
+     */
+    public function testCarteleraMuestraLasFuncionesEnAcuerdoDeFecha(): void
+    {
+        [$funcionId] = $this->funcionEnAcuerdo();
+
+        // Sin fecha, va después de las programadas: en la última página.
+        $datos = self::json($this->pedirJson('/cartelera?pagina=2'));
+        $enAcuerdo = array_values(array_filter($datos['funciones'], static fn (array $f): bool => $f['id'] === $funcionId));
+        self::assertCount(1, $enAcuerdo);
+        self::assertSame('EN_ACUERDO_FECHA', $enAcuerdo[0]['estado']);
+        self::assertNull($enAcuerdo[0]['fecha']);
+
+        $cuerpo = $this->pedir('/cartelera?pagina=2')->cuerpo();
+        self::assertStringContainsString('EN ACUERDO DE FECHA', $cuerpo);
+        self::assertStringContainsString("/cartelera/{$funcionId}", $cuerpo);
+    }
+
+    /**
+     * E3-13.F1: recién cerrada la votación, sin franjas propuestas, la ficha lo dice (sin franjas
+     * de ejemplo) y le ofrece al organizador proponerlas.
+     */
+    public function testFichaSinFranjasPropuestasLoDiceYLeOfreceAlOrganizadorProponerlas(): void
+    {
+        [$funcionId, $organizadorId] = $this->funcionEnAcuerdo();
+        file_put_contents(sys_get_temp_dir() . '/acuerdo_estado_global.txt', 'ninguno');
+
+        $publica = $this->pedir("/cartelera/{$funcionId}")->cuerpo();
+        self::assertStringContainsString('todavía no propuso las franjas', $publica);
+        self::assertStringNotContainsString('septiembre', $publica);
+        self::assertStringNotContainsString('name="franja_id"', $publica);
+        self::assertStringNotContainsString('proponer-franjas', $publica);
+
+        $delOrganizador = $this->pedir("/cartelera/{$funcionId}", [], [
+            'X-Nginx-Secreto' => self::SECRETO, 'X-Usuario-Id' => $organizadorId, 'X-Rol' => 'organizador',
+        ])->cuerpo();
+        self::assertStringContainsString("/organizador/funciones/{$funcionId}/proponer-franjas", $delOrganizador);
+        self::assertStringContainsString('Proponer franjas', $delOrganizador);
+    }
+
+    /**
      * Criterio E3-13.6: La ficha muestra las franjas, los votos y el estado del acuerdo.
      */
     public function testFichaDeFuncionEnAcuerdoMuestraFranjasVotosYEstado(): void
@@ -1107,9 +1170,8 @@ final class CarteleraTest extends TestCase
         $cuerpo = $respuestaHtml->cuerpo();
         self::assertStringContainsStringIgnoringCase('acuerdo de fecha', $cuerpo);
         self::assertStringContainsString($obra['titulo'], $cuerpo);
-        if (str_contains($cuerpo, '25 de octubre')) {
-            self::assertStringContainsString('25 de octubre', $cuerpo);
-        }
+        // La primera franja del doble de funciones, a diez días de hoy.
+        self::assertStringContainsString(Cartelera::formatearFechaLarga(new DateTimeImmutable('+10 days')), $cuerpo);
 
         // 2. Petición HTML con espectador logueado que tiene voto emitido
         $espectadorId = Uuid::nuevo();

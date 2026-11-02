@@ -83,7 +83,15 @@ final class Contenedor
         foreach ($constructor->getParameters() as $parametro) {
             $tipo = $parametro->getType();
             if ($tipo instanceof ReflectionNamedType && !$tipo->isBuiltin()) {
-                $argumentos[] = $this->obtener($tipo->getName());
+                try {
+                    $argumentos[] = $this->obtener($tipo->getName());
+                } catch (\Throwable $error) {
+                    if ($parametro->allowsNull()) {
+                        $argumentos[] = $parametro->isDefaultValueAvailable() ? $parametro->getDefaultValue() : null;
+                    } else {
+                        throw $error;
+                    }
+                }
             } elseif ($parametro->isDefaultValueAvailable()) {
                 $argumentos[] = $parametro->getDefaultValue();
             } else {

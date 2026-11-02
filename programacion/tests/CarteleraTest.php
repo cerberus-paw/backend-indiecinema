@@ -31,6 +31,17 @@ use PHPUnit\Framework\TestCase;
 final class CarteleraTest extends TestCase
 {
     use ConBaseDePruebas;
+    use ConFuncionesDePrueba;
+
+    public static function setUpBeforeClass(): void
+    {
+        self::setUpBeforeClassFunciones();
+    }
+
+    public static function tearDownAfterClass(): void
+    {
+        self::tearDownAfterClassFunciones();
+    }
 
     private const SECRETO = 'secreto-de-nginx';
     private const CSRF = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
@@ -69,6 +80,11 @@ final class CarteleraTest extends TestCase
             'base' => self::baseDePruebas(),
             'cartelera' => $cartelera,
             'nginx' => ['secreto' => self::SECRETO],
+            'subsistemas' => [
+                'cuentas' => 'http://127.0.0.1:1',
+                'funciones' => self::$urlFunciones,
+            ],
+            'interno' => ['token' => 'token-de-programacion'],
         ]);
     }
 
@@ -103,10 +119,11 @@ final class CarteleraTest extends TestCase
         array $cuerpo = [],
         ?string $usuario = null,
         string $rol = 'espectador',
+        array $cabecerasExtra = [],
     ): Respuesta {
-        $cabeceras = $usuario === null
+        $cabeceras = ($usuario === null
             ? []
-            : ['X-Nginx-Secreto' => self::SECRETO, 'X-Usuario-Id' => $usuario, 'X-Rol' => $rol];
+            : ['X-Nginx-Secreto' => self::SECRETO, 'X-Usuario-Id' => $usuario, 'X-Rol' => $rol]) + $cabecerasExtra;
         parse_str((string) parse_url($ruta, PHP_URL_QUERY), $consulta);
         $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion(), new Log('programacion', $this->salidaDelLog));
 
@@ -994,4 +1011,73 @@ final class CarteleraTest extends TestCase
         self::assertNull($enVotacionEnJson[0]['fecha']);
         self::assertSame("/cartelera/{$funcionVotacionId}", $enVotacionEnJson[0]['url']);
     }
+
+    public function testVotarFranjaAcuerdoEnCarteleraYCambiarElVoto(): void
+    {
+        $this->cargarDatosDePrueba();
+        $obra = $this->base->fila('SELECT id FROM obra LIMIT 1') ?? self::fail();
+        $sala = $this->base->fila('SELECT id FROM sala LIMIT 1') ?? self::fail();
+        $funcionAcuerdoId = Uuid::nuevo();
+
+        $this->base->ejecutar(
+            "INSERT INTO funcion (id, sala_id, estado, precio_base, cupo) VALUES (?, ?, 'en_acuerdo_fecha', 2000, 50)",
+            [$funcionAcuerdoId, $sala['id']],
+        );
+        $this->base->ejecutar(
+            "INSERT INTO funcion_obra (funcion_id, obra_id, estado) VALUES (?, ?, 'elegida')",
+            [$funcionAcuerdoId, $obra['id']],
+        );
+
+        $usuarioId = Uuid::nuevo();
+
+        // 1. Emitir voto a la franja
+        $respuesta = $this->post(
+            "/cartelera/{$funcionAcuerdoId}/votar",
+            ['franja_id' => 'franja-mock-0'],
+            $usuarioId,
+            'espectador',
+        );
+
+        self::assertSame(303, $respuesta->estado());
+        self::assertSame("/cartelera/{$funcionAcuerdoId}?votado=1", $respuesta->cabecera('Location'));
+
+        // 2. Cambiar voto a otra franja
+        $respuestaCambio = $this->post(
+            "/cartelera/{$funcionAcuerdoId}/votar",
+            ['franja_id' => 'franja-mock-1'],
+            $usuarioId,
+            'espectador',
+        );
+
+        self::assertSame(303, $respuestaCambio->estado());
+        self::assertSame("/cartelera/{$funcionAcuerdoId}?votado=1", $respuestaCambio->cabecera('Location'));
+
+        // 3. Vía JSON
+        $respuestaJson = $this->post(
+            "/cartelera/{$funcionAcuerdoId}/acuerdo/votar",
+            ['franja_id' => 'franja-mock-0'],
+            $usuarioId,
+            'espectador',
+            ['Accept' => 'application/json'],
+        );
+
+        self::assertSame(200, $respuestaJson->estado());
+    }
+
+    public function testVotarFranjaEnFuncionQueNoEstaEnAcuerdoRechaza(): void
+    {
+        $this->cargarDatosDePrueba();
+        $funcion = $this->base->fila("SELECT id FROM funcion WHERE estado = 'programada' LIMIT 1") ?? self::fail();
+
+        $respuesta = $this->post(
+            "/cartelera/{$funcion['id']}/votar",
+            ['franja_id' => 'franja-mock-0'],
+            Uuid::nuevo(),
+            'espectador',
+        );
+
+        self::assertSame(303, $respuesta->estado());
+        self::assertStringContainsString('error_voto=', $respuesta->cabecera('Location') ?? '');
+    }
 }
+

@@ -14,7 +14,6 @@ use IndieCinema\Nucleo\Uuid;
 use IndieCinema\Programacion\Modelo\DetalleDeFuncion;
 use IndieCinema\Programacion\Modelo\EstadoFuncion;
 use IndieCinema\Programacion\Modelo\Funcion;
-use IndieCinema\Programacion\Modelo\FuncionEnCartelera;
 use IndieCinema\Programacion\Modelo\Genero;
 use IndieCinema\Programacion\Modelo\ObraEnDetalle;
 use IndieCinema\Programacion\Modelo\ReglaIncumplida;
@@ -59,12 +58,14 @@ final class Cartelera extends Controlador
             'siguiente' => $pagina->numero < $total ? $parametros->urlDePagina($pagina->numero + 1) : null,
         ];
 
+        $tarjetas = TarjetaDeFuncion::todas($pagina->funciones, $this->servicio->acuerdosDe($pagina->funciones));
+
         if ($peticion->aceptaJson()) {
             return $this->json([
                 // Con el link a la ficha, que en HTML arma la plantilla de la tarjeta.
                 'funciones' => array_map(
-                    static fn (FuncionEnCartelera $funcion): array => TarjetaDeFuncion::datos($funcion) + ['url' => "/cartelera/{$funcion->id}"],
-                    $pagina->funciones,
+                    static fn (array $tarjeta): array => $tarjeta + ['url' => "/cartelera/{$tarjeta['id']}"],
+                    $tarjetas,
                 ),
                 // Un objeto aunque no haya filtros: vacío, json_encode() lo escribiría como lista.
                 'filtros' => (object) $parametros->valores,
@@ -75,7 +76,7 @@ final class Cartelera extends Controlador
         }
 
         return $this->vista('cartelera.html.twig', [
-            'funciones' => array_map(TarjetaDeFuncion::datos(...), $pagina->funciones),
+            'funciones' => $tarjetas,
             'filtros' => $parametros->valores,
             'filtrada' => $parametros->valores !== [],
             'avisos' => $parametros->avisos,

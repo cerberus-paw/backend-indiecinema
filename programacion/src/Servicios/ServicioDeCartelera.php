@@ -171,6 +171,34 @@ final class ServicioDeCartelera
     }
 
     /**
+     * El acuerdo de cada función de la lista que está en acuerdo de fecha, para que su tarjeta diga
+     * en qué está (E3-13.F9): el estado del acuerdo vive en funciones, y sin preguntarle, una que
+     * cerró sin quórum seguía ofreciendo «Votar fecha». Si funciones no responde, la tarjeta queda
+     * como antes y la página sale igual.
+     *
+     * @param list<FuncionEnCartelera> $funciones
+     *
+     * @return array<string, array<string, mixed>|null> por id de función; null si no tiene acuerdo
+     *                                                  o no se pudo preguntar
+     */
+    public function acuerdosDe(array $funciones): array
+    {
+        $acuerdos = [];
+        foreach ($funciones as $funcion) {
+            if ($funcion->estado !== EstadoFuncion::EnAcuerdoFecha || $this->acuerdos === null) {
+                continue;
+            }
+            try {
+                $acuerdos[$funcion->id] = $this->acuerdos->obtenerPorFuncion($funcion->id);
+            } catch (ExcepcionHttp | RuntimeException) {
+                $acuerdos[$funcion->id] = null;
+            }
+        }
+
+        return $acuerdos;
+    }
+
+    /**
      * Consulta los datos del acuerdo de fecha de una función (E3-13.6).
      *
      * @return array<string, mixed>|null

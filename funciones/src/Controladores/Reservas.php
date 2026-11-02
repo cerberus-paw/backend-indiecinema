@@ -16,6 +16,8 @@ use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Seguridad\Usuario;
 use LogicException;
+use Psr\Log\LoggerInterface;
+use RuntimeException;
 
 /**
  * La reserva de una función, como el wireframe de la E2 (reserva-pago-comprobante) sin el paso del
@@ -30,13 +32,14 @@ final class Reservas extends Controlador
     public function __construct(
         private readonly ServicioDeReservas $servicio,
         private readonly AvisosDeReservas $avisos,
+        private readonly LoggerInterface $log,
     ) {
     }
 
     /**
      * GET /reservas: «Mis reservas» (E4-04.1), con ?pagina=. Una página que no existe es 404, como
-     * en el panel del administrador. Si programación no responde, la lista sale igual, con los
-     * códigos y sin los datos de las funciones.
+     * en el panel del administrador. Si programación no responde, o responde algo que no son
+     * funciones, la lista sale igual, con los códigos y sin los datos de las funciones.
      */
     public function mias(Peticion $peticion): Respuesta
     {
@@ -54,6 +57,11 @@ final class Reservas extends Controlador
             $funciones = $this->servicio->funcionesDe($reservas);
             $sinProgramacion = false;
         } catch (ExcepcionHttp) {
+            // ClienteInterno ya dejó en el log que programación no respondió.
+            $funciones = [];
+            $sinProgramacion = true;
+        } catch (RuntimeException $error) {
+            $this->log->error('Sin las funciones de «Mis reservas»: {mensaje}', ['mensaje' => $error->getMessage()]);
             $funciones = [];
             $sinProgramacion = true;
         }

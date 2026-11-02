@@ -35,6 +35,7 @@ final class ReservasTest extends TestCase
     private const ELIAS = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
     private const PROXIMA = '12121212-1212-4212-8212-121212121212';
     private const EMPEZADA = '34343434-3434-4434-8434-343434343434';
+    private const ROTA = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 
     private const SITIO = 'https://indiecinema.test';
 
@@ -567,6 +568,22 @@ final class ReservasTest extends TestCase
         self::assertStringNotContainsString('Ya no está en la cartelera', $cuerpo);
         // Sin saber si empezó, el botón para cancelar queda en el comprobante.
         self::assertStringNotContainsString('/cancelar"', $cuerpo);
+    }
+
+    /**
+     * Si programación responde algo que no son funciones, la lista sale igual que si no
+     * respondiera, y el log lo cuenta: el contrato se rompió.
+     */
+    public function testMisReservasConUnaRespuestaRotaDeProgramacionMuestraLosCodigosYUnAviso(): void
+    {
+        $codigo = $this->hecha(self::ROTA, '2026-10-01 10:00:00');
+
+        $respuesta = $this->pedir('GET', '/reservas');
+
+        self::assertSame(200, $respuesta->estado());
+        self::assertStringContainsString(self::partido($codigo), $respuesta->cuerpo());
+        self::assertStringContainsString('no podemos mostrar los datos de las funciones', $respuesta->cuerpo());
+        self::assertStringContainsString('Sin las funciones de «Mis reservas»', $this->logEscrito());
     }
 
     public function testMisReservasConUnaFuncionQueYaNoEstaLoDice(): void

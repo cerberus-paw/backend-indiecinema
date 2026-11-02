@@ -30,6 +30,8 @@ return static function (Router $router): void {
     $router->get('/cartelera.csv', [Cartelera::class, 'descargar']);
     // La ficha de una función programada con sus obras y su sala.
     $router->get('/cartelera/{id}', [Cartelera::class, 'detalle']);
+    // Sólo los lugares libres, en JSON: la ficha los consulta cada pocos segundos (E4-05.1).
+    $router->get('/cartelera/{id}/lugares', [Cartelera::class, 'lugares']);
     $router->post('/cartelera/{id}/votar', [Cartelera::class, 'votar'], Rol::Espectador);
     $router->post('/cartelera/{id}/votar-franja', [Cartelera::class, 'votar'], Rol::Espectador);
     $router->post('/cartelera/{id}/acuerdo/votar', [Cartelera::class, 'votar'], Rol::Espectador);

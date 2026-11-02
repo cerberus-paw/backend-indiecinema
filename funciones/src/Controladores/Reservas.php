@@ -40,19 +40,36 @@ final class Reservas extends Controlador
     public function reservar(Peticion $peticion): Respuesta
     {
         $funcion = $this->servicio->funcion((string) $peticion->parametro('id'));
+        $enJson = $peticion->aceptaJson();
         $valor = $peticion->campo('cantidad');
         $valor = is_string($valor) ? trim($valor) : '';
 
         // Entero y dentro del cupo, como el min y el max del campo: el navegador controla lo mismo.
         $cantidad = filter_var($valor, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1, 'max_range' => $funcion->cupo]]);
         if ($cantidad === false) {
-            return $this->pantalla($funcion, ['cantidad' => $valor], ['cantidad' => "Ingresá entre 1 y {$funcion->cupo} lugares."], estado: 422);
+            $mensaje = "Ingresá entre 1 y {$funcion->cupo} lugares.";
+
+            return $enJson
+                ? $this->json(['errores' => ['cantidad' => $mensaje], ...$this->lugaresDe($funcion)], 422)
+                : $this->pantalla($funcion, ['cantidad' => $valor], ['cantidad' => $mensaje], estado: 422);
         }
 
         try {
             $reserva = $this->servicio->reservar(self::usuario($peticion), $funcion->id, $cantidad);
         } catch (ReglaIncumplida $error) {
-            return $this->pantalla($funcion, ['cantidad' => $valor], error: $error->getMessage(), estado: 422);
+            // El mensaje de la regla es para el espectador («Quedan 2 lugares.»), no interno.
+            return $enJson
+                ? $this->json(['error' => $error->getMessage(), ...$this->lugaresDe($funcion)], 422)
+                : $this->pantalla($funcion, ['cantidad' => $valor], error: $error->getMessage(), estado: 422);
+        }
+
+        // 201 con el link al comprobante: lo mismo que la redirección, sin recargar (E4-05.1).
+        if ($enJson) {
+            return $this->json([
+                'reserva' => self::datosDeReserva($reserva, $funcion),
+                'url' => $this->ruta("/reservas/{$reserva->id}"),
+                ...$this->lugaresDe($funcion),
+            ], 201);
         }
 
         // 303: recargar la confirmación no vuelve a reservar.
@@ -90,17 +107,40 @@ final class Reservas extends Controlador
     {
         $usuario = self::usuario($peticion);
         $id = (string) $peticion->parametro('id');
+        $enJson = $peticion->aceptaJson();
         try {
             $reserva = $this->servicio->cancelar($usuario, $id);
         } catch (ReglaIncumplida $error) {
             // Por ejemplo, empezó la función o registraron la asistencia con la pantalla abierta.
             [$reserva, $funcion] = $this->servicio->delEspectador($usuario, $id);
 
-            return $this->pantallaDeCancelacion($reserva, $funcion, $error->getMessage(), 422);
+            return $enJson
+                ? $this->json(['error' => $error->getMessage(), 'reserva' => self::datosDeReserva($reserva, $funcion)], 422)
+                : $this->pantallaDeCancelacion($reserva, $funcion, $error->getMessage(), 422);
+        }
+
+        // Sin los lugares libres: después de cancelar se va al comprobante, que no los muestra, y
+        // traerlos costaría otro pedido interno a programación para un dato que nadie mira.
+        if ($enJson) {
+            return $this->json([
+                'reserva' => ['id' => $reserva->id, 'estado' => $reserva->estado->value, 'cancelable' => false],
+                'url' => $this->ruta("/reservas/{$reserva->id}?cancelada=1"),
+            ]);
         }
 
         // 303: recargar no la vuelve a mandar.
         return $this->redirigir("/reservas/{$reserva->id}?cancelada=1");
+    }
+
+    /**
+     * Los lugares que quedan después de reservar, para que la ficha actualice el número sin
+     * volver a preguntar (E4-05.1).
+     *
+     * @return array{lugares_libres: int}
+     */
+    private function lugaresDe(FuncionDeProgramacion $funcion): array
+    {
+        return ['lugares_libres' => $this->servicio->lugaresLibres($funcion)];
     }
 
     private function pantallaDeCancelacion(Reserva $reserva, ?FuncionDeProgramacion $funcion, ?string $error = null, int $estado = 200): Respuesta

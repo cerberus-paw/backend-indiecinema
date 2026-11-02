@@ -113,14 +113,8 @@ final class Cartelera extends Controlador
     {
         $id = (string) $peticion->parametro('id');
         $detalle = $this->servicio->detalle($id);
-        // Sólo de una programada por darse se pregunta: en otro estado no hay reservas que contar, y
-        // una que ya pasó no está «agotada» aunque se hayan tomado todos los lugares.
-        $libres = TarjetaDeFuncion::muestraLugares($detalle->estado, $detalle->fechaHora)
-            ? TarjetaDeFuncion::lugaresLibres($detalle->estado, $detalle->fechaHora, $detalle->cupo, $this->ocupacion->deUna($detalle->id))
-            : null;
-        $lugares = ['lugares_libres' => $libres, 'agotada' => $libres === 0];
-        // Agotada no se reserva: el formulario no tendría cómo salir bien.
-        $reservable = Funcion::seReserva($detalle->estado, $detalle->fechaHora) && !$lugares['agotada'];
+        $lugares = $this->lugaresDe($detalle);
+        $reservable = self::seReservaConLugares($detalle, $lugares['agotada']);
 
         $usuario = $peticion->usuario();
         $esPropia = $usuario !== null
@@ -204,7 +198,7 @@ final class Cartelera extends Controlador
             }
         }
 
-        if ($peticion->cabecera('Accept') === 'application/json') {
+        if ($peticion->aceptaJson()) {
             return $this->json([
                 'funcion' => [
                     ...$datosFuncion,
@@ -215,7 +209,7 @@ final class Cartelera extends Controlador
                 'franjas_del_usuario' => $franjasDelUsuario,
                 'conteo_votos' => $conteoVotos,
                 'conteo_votos_franjas' => $conteoVotosFranjas,
-            ]);
+            ])->conCabecera('Vary', 'Accept');
         }
 
         return $this->vista('ficha_funcion.html.twig', [
@@ -241,7 +235,52 @@ final class Cartelera extends Controlador
             // es pública, y si no, lo vería cualquiera que abra el enlace con el parámetro puesto.
             'guardada' => $esPropia && $peticion->consulta('guardada') === '1',
             'accion_votar_franja' => "/cartelera/{$id}/votar",
+        ])->conCabecera('Vary', 'Accept');
+    }
+
+    /**
+     * GET /cartelera/{id}/lugares: sólo los lugares libres de la función, en JSON, para que la
+     * ficha los actualice sola sin recargar (E4-05.1). Es aparte de la ficha en JSON porque se
+     * pide cada pocos segundos: así no se vuelven a buscar las obras, el acuerdo ni los votos.
+     *
+     * Es pública, como la ficha, y no dice nada que la ficha no muestre.
+     *
+     * @throws ExcepcionHttp 404 si la función no existe, su sala no está publicada o el id no es un UUID
+     */
+    public function lugares(Peticion $peticion): Respuesta
+    {
+        $detalle = $this->servicio->detalle((string) $peticion->parametro('id'));
+        $lugares = $this->lugaresDe($detalle);
+
+        return $this->json([
+            ...$lugares,
+            'cupo' => $detalle->cupo,
+            'reservable' => self::seReservaConLugares($detalle, $lugares['agotada']),
         ]);
+    }
+
+    /**
+     * Los lugares libres de una función y si está agotada. Sólo de una programada por darse se
+     * pregunta: en otro estado no hay reservas que contar, y una que ya pasó no está «agotada»
+     * aunque se hayan tomado todos los lugares. Sin el dato de funciones, null.
+     *
+     * @return array{lugares_libres: ?int, agotada: bool}
+     */
+    private function lugaresDe(DetalleDeFuncion $detalle): array
+    {
+        $libres = TarjetaDeFuncion::muestraLugares($detalle->estado, $detalle->fechaHora)
+            ? TarjetaDeFuncion::lugaresLibres($detalle->estado, $detalle->fechaHora, $detalle->cupo, $this->ocupacion->deUna($detalle->id))
+            : null;
+
+        return ['lugares_libres' => $libres, 'agotada' => $libres === 0];
+    }
+
+    /**
+     * Agotada no se reserva: el formulario no tendría cómo salir bien.
+     */
+    private static function seReservaConLugares(DetalleDeFuncion $detalle, bool $agotada): bool
+    {
+        return Funcion::seReserva($detalle->estado, $detalle->fechaHora) && !$agotada;
     }
 
     /**

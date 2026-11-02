@@ -122,6 +122,19 @@ final class LugaresLibresTest extends TestCase
     }
 
     /**
+     * Lo mismo, pidiendo JSON. El Accept es el que manda un fetch del navegador cuando se le pone
+     * la cabecera: el tipo que se quiere primero y después lo que sea.
+     *
+     * @param string $acepta el Accept del pedido
+     */
+    private function pedirJson(string $ruta, ?string $funciones = null, string $acepta = 'application/json, text/plain, */*'): Respuesta
+    {
+        $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion($funciones), new Log('programacion', fopen('php://memory', 'w')));
+
+        return $aplicacion->atender(new Peticion('GET', $ruta, [], [], ['Accept' => $acepta], [], []));
+    }
+
+    /**
      * Las dos primeras funciones programadas de la cartelera, con su cupo: a la primera se la deja
      * agotada y a la segunda con 5 lugares.
      *
@@ -239,5 +252,81 @@ final class LugaresLibresTest extends TestCase
         self::assertStringNotContainsString('ficha-reserva-barra', $ficha->cuerpo());
         // Sin el dato se puede reservar igual: el cupo lo controla funciones al reservar.
         self::assertStringContainsString('Reservá tus lugares', $ficha->cuerpo());
+    }
+
+    public function testLosLugaresEnJsonTraenSoloLaOcupacion(): void
+    {
+        [, $conLugar] = $this->ocuparDosFunciones();
+
+        $respuesta = $this->pedirJson("/cartelera/{$conLugar['id']}/lugares");
+        $json = json_decode($respuesta->cuerpo(), true);
+
+        self::assertSame(200, $respuesta->estado());
+        self::assertSame(5, $json['lugares_libres']);
+        self::assertFalse($json['agotada']);
+        self::assertSame($conLugar['cupo'], $json['cupo']);
+        self::assertTrue($json['reservable']);
+        // Es para consultar cada pocos segundos: no trae la ficha entera.
+        self::assertSame(['lugares_libres', 'agotada', 'cupo', 'reservable'], array_keys($json));
+    }
+
+    public function testLosLugaresEnJsonDicenAgotadaYQueNoSeReserva(): void
+    {
+        [$agotada] = $this->ocuparDosFunciones();
+
+        $json = json_decode($this->pedirJson("/cartelera/{$agotada['id']}/lugares")->cuerpo(), true);
+
+        self::assertSame(0, $json['lugares_libres']);
+        self::assertTrue($json['agotada']);
+        self::assertFalse($json['reservable']);
+    }
+
+    public function testLosLugaresDeUnaFuncionQueNoExisteSon404(): void
+    {
+        $respuesta = $this->pedirJson('/cartelera/' . Uuid::nuevo() . '/lugares');
+
+        self::assertSame(404, $respuesta->estado());
+        // El error va en JSON y sin detalles internos, como el resto.
+        self::assertArrayHasKey('error', (array) json_decode($respuesta->cuerpo(), true));
+        self::assertStringNotContainsString('Exception', $respuesta->cuerpo());
+    }
+
+    public function testSinFuncionesLosLugaresEnJsonVanEnNull(): void
+    {
+        [, $conLugar] = $this->ocuparDosFunciones();
+
+        $respuesta = $this->pedirJson("/cartelera/{$conLugar['id']}/lugares", 'http://127.0.0.1:9');
+        $json = json_decode($respuesta->cuerpo(), true);
+
+        // Funciones caído no es un error de la ficha: responde 200 sin el número.
+        self::assertSame(200, $respuesta->estado());
+        self::assertNull($json['lugares_libres']);
+        self::assertFalse($json['agotada']);
+        // Sin el dato se puede reservar igual: el cupo lo controla funciones al reservar.
+        self::assertTrue($json['reservable']);
+    }
+
+    public function testLaFichaEnJsonSaleAunqueElAcceptTraigaVariosTipos(): void
+    {
+        [, $conLugar] = $this->ocuparDosFunciones();
+
+        $respuesta = $this->pedirJson("/cartelera/{$conLugar['id']}");
+        $json = json_decode($respuesta->cuerpo(), true);
+
+        self::assertSame(200, $respuesta->estado());
+        self::assertSame(5, $json['funcion']['lugares_libres']);
+        // La misma URL tiene dos representaciones: una caché no las tiene que mezclar.
+        self::assertSame('Accept', $respuesta->cabecera('Vary'));
+    }
+
+    public function testLaFichaEnHtmlSigueSaliendoConElAcceptDeUnNavegador(): void
+    {
+        [, $conLugar] = $this->ocuparDosFunciones();
+
+        $respuesta = $this->pedirJson("/cartelera/{$conLugar['id']}", acepta: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8');
+
+        self::assertSame(200, $respuesta->estado());
+        self::assertStringContainsString('ficha-funcion-contenido', $respuesta->cuerpo());
+        self::assertSame('Accept', $respuesta->cabecera('Vary'));
     }
 }

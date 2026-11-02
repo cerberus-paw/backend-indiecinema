@@ -39,6 +39,8 @@ final class PanelDelOrganizadorTest extends TestCase
         'GET /cartelera',
         'GET /cartelera.csv',
         'GET /cartelera/{id}',
+        // Los lugares libres de la ficha, que también es pública, y no dicen nada que ella no muestre.
+        'GET /cartelera/{id}/lugares',
         'GET /salas',
         'GET /salas/{id}',
         'GET /salas/{id}/imagen',

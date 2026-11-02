@@ -108,6 +108,18 @@ final class ServicioDeReservas
     }
 
     /**
+     * Los lugares que quedan libres: el cupo que dio programación menos lo que ocupan las reservas
+     * de acá. Nunca menos de cero, por si el organizador bajó el cupo después de que reservaron.
+     *
+     * Es lo que funciones sabe de la función; si está «agotada» para mostrar lo decide
+     * programación, que es la que conoce el estado y la fecha.
+     */
+    public function lugaresLibres(FuncionDeProgramacion $funcion): int
+    {
+        return max(0, $funcion->cupo - $this->reservas->lugaresOcupados($funcion->id));
+    }
+
+    /**
      * Reserva $cantidad lugares de la función para el espectador.
      *
      * El cupo se pide a programación antes de bloquear: así la espera por la API interna no
@@ -128,7 +140,7 @@ final class ServicioDeReservas
         $reserva = Reserva::nueva($funcion, $espectador->id, $cantidad, $ahora);
 
         return $this->reservas->conLaFuncionBloqueada($funcion->id, function () use ($funcion, $reserva): Reserva {
-            $libres = max(0, $funcion->cupo - $this->reservas->lugaresOcupados($funcion->id));
+            $libres = $this->lugaresLibres($funcion);
             if ($reserva->cantidad > $libres) {
                 throw new ReglaIncumplida(match ($libres) {
                     0 => 'La función está agotada.',

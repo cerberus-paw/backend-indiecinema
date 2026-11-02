@@ -107,33 +107,44 @@ class RepositorioDeAcuerdos
     }
 
     /**
-     * Emite o cambia el voto de un usuario por una franja horaria.
-     * Si ya votó en este acuerdo o función, se actualiza la franja elegida. También el acuerdo: la
-     * clave única es por función, así que el voto de un acuerdo anterior (cerrado sin mínimo) es la
-     * misma fila, y si quedaba con el acuerdo viejo la ficha no encontraba el voto nuevo (E3-13.F5).
+     * Marca «Me sirve» en una franja. Marcarla dos veces no suma: la clave única es por franja y
+     * usuario, y el segundo pedido (un doble clic) deja el voto como estaba (E3-13.F7).
      */
-    public function votarOActualizar(string $acuerdoId, string $funcionId, string $franjaId, string $usuarioId): void
+    public function marcar(string $acuerdoId, string $funcionId, string $franjaId, string $usuarioId): void
     {
-        $ahora = (new DateTimeImmutable())->format('Y-m-d H:i:s');
         $this->base->ejecutar(
             'INSERT INTO voto_acuerdo (id, acuerdo_id, funcion_id, franja_id, usuario_id, creado_en)
              VALUES (?, ?, ?, ?, ?, ?)
-             ON DUPLICATE KEY UPDATE acuerdo_id = VALUES(acuerdo_id), franja_id = VALUES(franja_id), creado_en = VALUES(creado_en)',
-            [Uuid::nuevo(), $acuerdoId, $funcionId, $franjaId, $usuarioId, $ahora],
+             ON DUPLICATE KEY UPDATE creado_en = creado_en',
+            [Uuid::nuevo(), $acuerdoId, $funcionId, $franjaId, $usuarioId, (new DateTimeImmutable())->format('Y-m-d H:i:s')],
         );
     }
 
     /**
-     * Devuelve el id de la franja votada por el usuario en este acuerdo, o null si no votó.
+     * Quita el «Me sirve» de una franja; si no estaba marcada, no hace nada.
      */
-    public function votoDeUsuario(string $acuerdoId, string $usuarioId): ?string
+    public function desmarcar(string $franjaId, string $usuarioId): void
     {
-        $franjaId = $this->base->valor(
-            'SELECT franja_id FROM voto_acuerdo WHERE acuerdo_id = ? AND usuario_id = ?',
+        $this->base->ejecutar('DELETE FROM voto_acuerdo WHERE franja_id = ? AND usuario_id = ?', [$franjaId, $usuarioId]);
+    }
+
+    /**
+     * Las franjas del acuerdo que marcó el usuario, en el orden en que empiezan.
+     *
+     * @return list<string>
+     */
+    public function franjasDeUsuario(string $acuerdoId, string $usuarioId): array
+    {
+        $filas = $this->base->filas(
+            'SELECT v.franja_id
+             FROM voto_acuerdo v
+             JOIN acuerdo_franja f ON f.id = v.franja_id
+             WHERE v.acuerdo_id = ? AND v.usuario_id = ?
+             ORDER BY f.fecha_hora_inicio',
             [$acuerdoId, $usuarioId],
         );
 
-        return is_string($franjaId) ? $franjaId : null;
+        return array_map(static fn (array $fila): string => (string) $fila['franja_id'], $filas);
     }
 
     /**

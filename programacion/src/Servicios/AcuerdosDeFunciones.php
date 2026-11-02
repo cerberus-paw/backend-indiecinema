@@ -114,13 +114,28 @@ class AcuerdosDeFunciones
     }
 
     /**
-     * Emite o cambia el voto por una franja (E3-13.3 / IC-155).
+     * Marca «Me sirve» en una franja (E3-13.3 / IC-155); se pueden marcar varias (E3-13.F7).
      *
      * @return array<string, mixed>
      */
     public function votar(string $acuerdoId, string $franjaId, string $usuarioId): array
     {
         $respuesta = $this->cliente->post('funciones', "/interno/acuerdos/{$acuerdoId}/votar", [
+            'franja_id' => $franjaId,
+            'usuario_id' => $usuarioId,
+        ]);
+
+        return is_array($respuesta) ? $respuesta : [];
+    }
+
+    /**
+     * Quita el «Me sirve» de una franja (E3-13.F7).
+     *
+     * @return array<string, mixed>
+     */
+    public function quitarVoto(string $acuerdoId, string $franjaId, string $usuarioId): array
+    {
+        $respuesta = $this->cliente->post('funciones', "/interno/acuerdos/{$acuerdoId}/quitar-voto", [
             'franja_id' => $franjaId,
             'usuario_id' => $usuarioId,
         ]);

@@ -123,7 +123,7 @@ final class Cartelera extends Controlador
 
         $datosFuncion = self::datosDeDetalle($detalle, $editable, $cancelable, $cerrable);
         $datosFuncion['es_organizador'] = $esPropia;
-        $votoFranja = null;
+        $franjasDelUsuario = [];
         $conteoVotosFranjas = [];
         $acuerdo = null;
 
@@ -136,8 +136,9 @@ final class Cartelera extends Controlador
                 $minimoAsistentes = (int) ($acuerdo['minimo_asistentes'] ?? 20);
                 $datosFuncion['minimo_asistentes'] = $minimoAsistentes;
                 $datosFuncion['acuerdo_sin_minimo'] = ($acuerdo['estado'] ?? '') === 'sin_minimo';
-                $votoFranja = $acuerdo['voto_usuario_franja_id'] ?? null;
-                $datosFuncion['voto_franja'] = $votoFranja;
+                // Las que marcó quien mira: pueden ser varias (E3-13.F7).
+                $franjasDelUsuario = is_array($acuerdo['franjas_del_usuario'] ?? null) ? $acuerdo['franjas_del_usuario'] : [];
+                $datosFuncion['franjas_del_usuario'] = $franjasDelUsuario;
 
                 $duracionMinutos = !empty($detalle->obras)
                     ? array_sum(array_map(static fn (ObraEnDetalle $o): int => $o->duracionMinutos, $detalle->obras))
@@ -192,7 +193,7 @@ final class Cartelera extends Controlador
                 ],
                 'acuerdo_fecha' => $acuerdo,
                 'voto_usuario' => $votoActual,
-                'voto_franja' => $votoFranja,
+                'franjas_del_usuario' => $franjasDelUsuario,
                 'conteo_votos' => $conteoVotos,
                 'conteo_votos_franjas' => $conteoVotosFranjas,
             ]);
@@ -206,11 +207,12 @@ final class Cartelera extends Controlador
             'acuerdo_fecha' => $acuerdo,
             'es_organizador' => $esPropia,
             'voto_usuario' => $votoActual,
-            'voto_franja' => $votoFranja,
+            'franjas_del_usuario' => $franjasDelUsuario,
             'conteo_votos' => $conteoVotos,
             'conteo_votos_franjas' => $conteoVotosFranjas,
             'votado' => $peticion->consulta('votado') === '1',
             'franja_votada' => $peticion->consulta('votado') === '1',
+            'franja_quitada' => $peticion->consulta('quitado') === '1',
             'error_voto' => $peticion->consulta('error_voto'),
             'error_franja' => $peticion->consulta('error_voto'),
             // Lo que no salió al confirmar o cerrar el acuerdo: sólo se le muestra al organizador.
@@ -246,7 +248,8 @@ final class Cartelera extends Controlador
 
         try {
             if ($franjaId !== '') {
-                $this->servicio->votarFranjaAcuerdo($id, $usuario->id, $franjaId);
+                // «✓ Me sirve» en una franja ya marcada la quita (E3-13.F7).
+                $this->servicio->votarFranjaAcuerdo($id, $usuario->id, $franjaId, ($cuerpo['quitar'] ?? null) !== '1');
             } else {
                 $this->servicio->votar($id, $usuario->id, $obraId);
             }
@@ -262,7 +265,9 @@ final class Cartelera extends Controlador
             return $this->json(['ok' => true]);
         }
 
-        return $this->redirigir("/cartelera/{$id}?votado=1");
+        $quitado = $franjaId !== '' && ($cuerpo['quitar'] ?? null) === '1';
+
+        return $this->redirigir("/cartelera/{$id}?" . ($quitado ? 'quitado=1' : 'votado=1'));
     }
 
     private function parametros(Peticion $peticion): ParametrosDeCartelera

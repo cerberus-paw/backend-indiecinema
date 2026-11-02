@@ -1084,6 +1084,51 @@ final class CarteleraTest extends TestCase
     }
 
     /**
+     * E3-13.F7: «✓ Me sirve» en una franja ya marcada la quita, y vuelve a la ficha avisándolo.
+     */
+    public function testQuitarElMeSirveDeUnaFranja(): void
+    {
+        [$funcionId] = $this->funcionEnAcuerdo();
+
+        $respuesta = $this->post("/cartelera/{$funcionId}/votar", ['franja_id' => 'franja-mock-0', 'quitar' => '1'], Uuid::nuevo(), 'espectador');
+
+        self::assertSame(303, $respuesta->estado());
+        self::assertSame("/cartelera/{$funcionId}?quitado=1", $respuesta->cabecera('Location'));
+    }
+
+    /**
+     * E3-13.F7: el organizador no marca las franjas de su propia función (se acercaría solo al
+     * mínimo), ni la ficha le ofrece hacerlo. El voto vuelve con el motivo, no con una página 500.
+     */
+    public function testElOrganizadorNoMarcaLasFranjasDeSuFuncion(): void
+    {
+        [$funcionId, $organizadorId] = $this->funcionEnAcuerdo();
+
+        $respuesta = $this->post("/cartelera/{$funcionId}/votar", ['franja_id' => 'franja-mock-0'], $organizadorId, 'organizador');
+
+        self::assertSame(303, $respuesta->estado());
+        self::assertStringContainsString('error_voto=', $respuesta->cabecera('Location') ?? '');
+        self::assertStringContainsString(rawurlencode('Sos el organizador de esta función'), $respuesta->cabecera('Location') ?? '');
+
+        $ficha = $this->pedir("/cartelera/{$funcionId}", [], ['X-Nginx-Secreto' => self::SECRETO, 'X-Usuario-Id' => $organizadorId, 'X-Rol' => 'organizador']);
+        self::assertStringNotContainsString('data-formulario-votar-franja', $ficha->cuerpo());
+    }
+
+    /**
+     * E3-13.F7: una franja que no es del acuerdo se rechaza en programación, con el motivo: el 422
+     * de funciones habría llegado como una página 500.
+     */
+    public function testVotarUnaFranjaQueNoEsDelAcuerdoRechazaConElMotivo(): void
+    {
+        [$funcionId] = $this->funcionEnAcuerdo();
+
+        $respuesta = $this->post("/cartelera/{$funcionId}/votar", ['franja_id' => 'franja-de-otro-acuerdo'], Uuid::nuevo(), 'espectador');
+
+        self::assertSame(303, $respuesta->estado());
+        self::assertStringContainsString(rawurlencode('no es de este acuerdo'), $respuesta->cabecera('Location') ?? '');
+    }
+
+    /**
      * Una función en acuerdo de fecha, con su obra elegida, en una sala de los datos de prueba.
      *
      * @return array{0: string, 1: string} el id de la función y el de su organizador

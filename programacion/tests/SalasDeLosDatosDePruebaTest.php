@@ -106,6 +106,33 @@ final class SalasDeLosDatosDePruebaTest extends TestCase
         }
     }
 
+    public function testLasTarjetasDeLaCarteleraMuestranElAficheDeSuObra(): void
+    {
+        $this->cargarLosDatos();
+        $cuerpo = $this->pedir('/cartelera')->cuerpo();
+
+        foreach (DatosDePrueba::OBRAS as $obra) {
+            if (!str_contains($cuerpo, "/obras/{$obra['id']}/afiche")) {
+                continue;
+            }
+            // El que enlaza la tarjeta se ve sin sesión, desde el volumen adonde lo copió la carga.
+            $afiche = $this->pedir("/obras/{$obra['id']}/afiche");
+            self::assertSame(200, $afiche->estado());
+            self::assertSame('image/jpeg', $afiche->cabecera('Content-Type'));
+            self::assertStringEqualsFile(DatosDePrueba::rutaAfiche($obra['afiche']), $afiche->cuerpo());
+        }
+        self::assertStringContainsString('src="/obras/', $cuerpo);
+        self::assertStringNotContainsString('afiche-placeholder', $cuerpo);
+    }
+
+    public function testElAficheDeUnaObraQueNoExisteNoSeEncuentra(): void
+    {
+        $this->cargarLosDatos();
+
+        self::assertSame(404, $this->pedir('/obras/cccccccc-cccc-4ccc-8ccc-cccccccccccc/afiche')->estado());
+        self::assertSame(404, $this->pedir('/obras/cualquier-cosa/afiche')->estado());
+    }
+
     public function testElOrganizadorDePruebaVeSusSalasPublicadas(): void
     {
         $this->cargarLosDatos();

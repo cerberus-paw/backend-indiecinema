@@ -93,6 +93,14 @@ final class TarjetaDeFuncion
     }
 
     /**
+     * «Sáb 19», como la franja más votada en el wireframe del acuerdo.
+     */
+    public static function diaCorto(DateTimeImmutable $fecha): string
+    {
+        return sprintf('%s %d', self::DIAS[(int) $fecha->format('w')], (int) $fecha->format('j'));
+    }
+
+    /**
      * «17 sep 23:59», como la fecha límite del acuerdo en el wireframe.
      */
     public static function diaMesYHora(DateTimeImmutable $fecha): string

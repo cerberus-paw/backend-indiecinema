@@ -166,6 +166,7 @@ final class Cartelera extends Controlador
                     $franjaItem = [
                         'id' => $f['id'],
                         'fecha' => self::formatearFechaLarga($inicioDt),
+                        'fecha_corta' => TarjetaDeFuncion::diaCorto($inicioDt),
                         'hora_inicio' => $inicioDt->format('H:i'),
                         'hora_fin' => $finDt->format('H:i'),
                         'desde' => $inicioDt->format('H:i'),
@@ -187,6 +188,8 @@ final class Cartelera extends Controlador
                 // Los votos que la eligió en la votación de títulos: la plantilla mostraba un número
                 // fijo (E3-13.F3).
                 $datosFuncion['votos_obra_ganadora'] = $conteoVotos[$datosFuncion['obra_ganadora']['id'] ?? ''] ?? 0;
+                // «Ganaron la votación con 112 y 92 votos sobre 295 emitidos», como el wireframe.
+                $datosFuncion['votos_emitidos'] = array_sum($conteoVotos);
             }
         }
 

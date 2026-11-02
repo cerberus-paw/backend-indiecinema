@@ -662,8 +662,8 @@ final class CarteleraTest extends TestCase
         self::assertStringContainsString('href="/salas/' . $salaId . '"', $cuerpo);
         self::assertStringContainsString('San Martín 420 · Luján', $cuerpo);
         self::assertStringContainsString('$ 2.500', $cuerpo);
-        self::assertStringContainsString('insignia-programada', $cuerpo);
-        self::assertStringContainsString('PROGRAMADA', $cuerpo);
+        // La línea de estados del wireframe marca «PROGRAMADA» como el estado actual (E3-13.F10).
+        self::assertMatchesRegularExpression('/aria-current="step">\s*<span>PROGRAMADA<\/span>/', $cuerpo);
         self::assertStringNotContainsString('Esta función fue cancelada.', $cuerpo);
     }
 
@@ -1271,7 +1271,8 @@ final class CarteleraTest extends TestCase
 
         $cuerpo = $this->pedir("/cartelera/{$funcionId}")->cuerpo();
 
-        self::assertMatchesRegularExpression('/Ganadora con <strong>2 votos<\/strong>/', $cuerpo);
+        // Como el wireframe (E3-13.F10): «Ganó la votación con 2 votos sobre 2 emitidos».
+        self::assertStringContainsString('Ganó la votación con 2 votos sobre 2 emitidos.', $cuerpo);
         self::assertStringNotContainsString('34 votos', $cuerpo);
     }
 

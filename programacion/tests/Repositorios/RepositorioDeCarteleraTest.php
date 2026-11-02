@@ -111,6 +111,8 @@ final class RepositorioDeCarteleraTest extends TestCase
         $enAcuerdo->cerrarVotacionTitulos([$this->obras['Zama']]);
         $this->funciones->guardar($enAcuerdo);
         $this->enAcuerdoId = $enAcuerdo->id;
+        // En acuerdo de fecha también entra (E3-13.F1), antes de las que están en votación.
+        $this->enCartelera['acuerdo'] = $enAcuerdo->id;
         // Cancelada después de programarla.
         $cancelada = $this->programada($galpon, ['La ciénaga'], '2026-10-14 20:00:00');
         $cancelada->cancelar();
@@ -194,8 +196,8 @@ final class RepositorioDeCarteleraTest extends TestCase
     {
         $pagina = $this->pagina();
 
-        self::assertSame(['cienaga', 'carroza', 'zama', 'cien', 'votacion'], $this->nombres($pagina));
-        self::assertSame(5, $pagina->total);
+        self::assertSame(['cienaga', 'carroza', 'zama', 'cien', 'acuerdo', 'votacion'], $this->nombres($pagina));
+        self::assertSame(6, $pagina->total);
     }
 
     public function testCadaFuncionTraeSusObrasLaSalaLaLocalidadLaFechaYElPrecio(): void
@@ -226,9 +228,9 @@ final class RepositorioDeCarteleraTest extends TestCase
         yield 'el título' => ['ciénaga', ['cienaga', 'votacion']];
         yield 'sin mayúsculas ni tildes' => ['CIENAGA', ['cienaga', 'votacion']];
         yield 'una parte del título de una de sus obras' => ['salvaj', ['carroza']];
-        yield 'el director' => ['martel', ['cienaga', 'zama', 'votacion']];
+        yield 'el director' => ['martel', ['cienaga', 'zama', 'acuerdo', 'votacion']];
         yield 'el nombre de la sala' => ['teatro italiano', ['carroza', 'cien']];
-        yield 'con espacios alrededor' => ['  Zama ', ['zama']];
+        yield 'con espacios alrededor' => ['  Zama ', ['zama', 'acuerdo']];
         yield 'una candidata que perdió la votación' => ['Historias extraordinarias', []];
         yield 'una obra que no está' => ['Nueve reinas', []];
     }
@@ -248,7 +250,7 @@ final class RepositorioDeCarteleraTest extends TestCase
     public static function localidades(): iterable
     {
         yield 'una localidad' => ['Mercedes', ['carroza', 'cien']];
-        yield 'sin mayúsculas ni tildes' => ['lujan', ['cienaga', 'zama', 'votacion']];
+        yield 'sin mayúsculas ni tildes' => ['lujan', ['cienaga', 'zama', 'acuerdo', 'votacion']];
         yield 'una parte no alcanza' => ['Lu', []];
         yield 'la de una sala deshabilitada' => ['San Andrés de Giles', []];
         yield 'la de una sala dada de baja' => ['Chivilcoy', []];
@@ -287,7 +289,7 @@ final class RepositorioDeCarteleraTest extends TestCase
     public function testFiltraPorGenero(): void
     {
         self::assertSame(['carroza', 'cien'], $this->nombres($this->pagina(new FiltrosDeCartelera(generoId: $this->generos['Comedia']))));
-        self::assertSame(['cienaga', 'zama', 'votacion'], $this->nombres($this->pagina(new FiltrosDeCartelera(generoId: $this->generos['Drama']))));
+        self::assertSame(['cienaga', 'zama', 'acuerdo', 'votacion'], $this->nombres($this->pagina(new FiltrosDeCartelera(generoId: $this->generos['Drama']))));
         self::assertSame([], $this->nombres($this->pagina(new FiltrosDeCartelera(generoId: Uuid::nuevo()))));
     }
 
@@ -302,7 +304,7 @@ final class RepositorioDeCarteleraTest extends TestCase
 
     public function testFiltraPorSala(): void
     {
-        self::assertSame(['cienaga', 'zama', 'votacion'], $this->nombres($this->todas(new FiltrosDeCartelera(salaId: $this->salaIds['Cine Club El Galpón']))));
+        self::assertSame(['cienaga', 'zama', 'acuerdo', 'votacion'], $this->nombres($this->todas(new FiltrosDeCartelera(salaId: $this->salaIds['Cine Club El Galpón']))));
         self::assertSame(['carroza', 'cien'], $this->nombres($this->todas(new FiltrosDeCartelera(salaId: $this->salaIds['Cine Teatro Italiano']))));
         // Las que no están en la cartelera tampoco están en la ficha de la sala.
         self::assertSame([], $this->todas(new FiltrosDeCartelera(salaId: $this->salaIds['Sala Deshabilitada'])));
@@ -327,8 +329,8 @@ final class RepositorioDeCarteleraTest extends TestCase
         $segunda = $this->pagina(numero: 2, tamano: 3);
 
         self::assertSame(['cienaga', 'carroza', 'zama'], $this->nombres($primera));
-        self::assertSame(['cien', 'votacion'], $this->nombres($segunda));
-        self::assertSame([5, 2, true], [$segunda->total, $segunda->totalDePaginas(), $segunda->existe()]);
+        self::assertSame(['cien', 'acuerdo', 'votacion'], $this->nombres($segunda));
+        self::assertSame([6, 2, true], [$segunda->total, $segunda->totalDePaginas(), $segunda->existe()]);
         self::assertSame(['carroza'], $this->nombres($this->pagina(numero: 2, tamano: 1)));
     }
 
@@ -347,7 +349,7 @@ final class RepositorioDeCarteleraTest extends TestCase
 
             self::assertFalse($pagina->existe());
             self::assertSame([], $pagina->funciones);
-            self::assertSame(5, $pagina->total);
+            self::assertSame(6, $pagina->total);
         }
     }
 
@@ -431,14 +433,14 @@ final class RepositorioDeCarteleraTest extends TestCase
         // Las tablas siguen como estaban, y la cartelera sin filtros también.
         self::assertSame(10, $this->base->valor('SELECT COUNT(*) FROM funcion'));
         self::assertSame(4, $this->base->valor('SELECT COUNT(*) FROM sala'));
-        self::assertSame(['cienaga', 'carroza', 'zama', 'cien', 'votacion'], $this->nombres($this->pagina()));
+        self::assertSame(['cienaga', 'carroza', 'zama', 'cien', 'acuerdo', 'votacion'], $this->nombres($this->pagina()));
     }
 
     public function testTodasTraeLasMismasQueLasPaginasJuntas(): void
     {
         $todas = $this->todas();
 
-        self::assertSame(['cienaga', 'carroza', 'zama', 'cien', 'votacion'], $this->nombres($todas));
+        self::assertSame(['cienaga', 'carroza', 'zama', 'cien', 'acuerdo', 'votacion'], $this->nombres($todas));
         self::assertEquals([...$this->pagina(tamano: 3)->funciones, ...$this->pagina(numero: 2, tamano: 3)->funciones], $todas);
     }
 
@@ -447,7 +449,7 @@ final class RepositorioDeCarteleraTest extends TestCase
         $comedia = $this->generos['Comedia'];
 
         self::assertSame(['carroza', 'cien'], $this->nombres($this->todas(new FiltrosDeCartelera(localidad: 'Mercedes'))));
-        self::assertSame(['cienaga', 'zama', 'votacion'], $this->nombres($this->todas(new FiltrosDeCartelera(texto: 'martel'))));
+        self::assertSame(['cienaga', 'zama', 'acuerdo', 'votacion'], $this->nombres($this->todas(new FiltrosDeCartelera(texto: 'martel'))));
         self::assertSame(['cienaga', 'carroza'], $this->nombres($this->todas(new FiltrosDeCartelera(fecha: new DateTimeImmutable('2026-10-12')))));
         self::assertSame(['carroza', 'cien'], $this->nombres($this->todas(new FiltrosDeCartelera(generoId: $comedia))));
         self::assertSame(['cien'], $this->nombres($this->todas(new FiltrosDeCartelera('100', 'Mercedes', new DateTimeImmutable('2026-10-20'), $comedia))));
@@ -462,11 +464,11 @@ final class RepositorioDeCarteleraTest extends TestCase
     public function testLasLocalidadesDelFiltroSonLasQueTienenFuncionesEnCartelera(): void
     {
         self::assertSame(['Luján', 'Mercedes'], $this->cartelera->localidades(new DateTimeImmutable(self::AHORA)));
-        // Mientras haya una función en votación, su localidad sigue en el filtro.
+        // Mientras haya una función en votación o en acuerdo, su localidad sigue en el filtro.
         self::assertSame(['Luján'], $this->cartelera->localidades(new DateTimeImmutable('2026-10-20 21:00:00')));
 
-        // Al cancelarla, después de la última función programada no queda ninguna localidad.
-        $this->base->ejecutar("UPDATE funcion SET estado = 'cancelada' WHERE id = ?", [$this->enVotacionId]);
+        // Al cancelarlas, después de la última función programada no queda ninguna localidad.
+        $this->base->ejecutar("UPDATE funcion SET estado = 'cancelada' WHERE id IN (?, ?)", [$this->enVotacionId, $this->enAcuerdoId]);
         self::assertSame([], $this->cartelera->localidades(new DateTimeImmutable('2026-10-20 21:00:00')));
     }
 

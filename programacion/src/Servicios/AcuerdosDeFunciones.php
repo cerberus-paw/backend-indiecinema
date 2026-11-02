@@ -74,6 +74,46 @@ class AcuerdosDeFunciones
     }
 
     /**
+     * La franja con más votos del acuerdo; con empate, la que empieza antes, como la elige
+     * funciones al confirmar. null si no tiene franjas.
+     *
+     * @param array<string, mixed> $acuerdo el de obtenerPorFuncion()
+     *
+     * @return array<string, mixed>|null
+     */
+    public static function franjaQueLidera(array $acuerdo): ?array
+    {
+        $lider = null;
+        foreach (is_array($acuerdo['franjas'] ?? null) ? $acuerdo['franjas'] : [] as $franja) {
+            if (!is_array($franja)) {
+                continue;
+            }
+            $votos = (int) ($franja['votos'] ?? 0);
+            $liderVotos = $lider === null ? -1 : (int) ($lider['votos'] ?? 0);
+            if ($votos > $liderVotos || ($votos === $liderVotos && (string) ($franja['inicio'] ?? '') < (string) ($lider['inicio'] ?? ''))) {
+                $lider = $franja;
+            }
+        }
+
+        return $lider;
+    }
+
+    /**
+     * Si el acuerdo sigue abierto y la franja que lidera llegó al mínimo: el organizador ya
+     * puede confirmar la fecha (E3-13.4).
+     *
+     * @param array<string, mixed> $acuerdo el de obtenerPorFuncion()
+     */
+    public static function alcanzoElMinimo(array $acuerdo): bool
+    {
+        $lider = self::franjaQueLidera($acuerdo);
+
+        return ($acuerdo['estado'] ?? null) === 'abierto'
+            && $lider !== null
+            && (int) ($lider['votos'] ?? 0) >= (int) ($acuerdo['minimo_asistentes'] ?? PHP_INT_MAX);
+    }
+
+    /**
      * Emite o cambia el voto por una franja (E3-13.3 / IC-155).
      *
      * @return array<string, mixed>

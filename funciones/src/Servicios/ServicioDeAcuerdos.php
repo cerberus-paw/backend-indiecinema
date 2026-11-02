@@ -45,8 +45,14 @@ class ServicioDeAcuerdos
             throw new InvalidArgumentException('Debe proponer al menos una franja horaria.');
         }
 
+        // Uno abierto por función: programación ya lo controla, pero la regla es de acá (E3-13.F2).
+        if ($this->repositorio->buscarPorFuncion($funcionId)?->estaAbierto()) {
+            throw new InvalidArgumentException('La función ya tiene un acuerdo de fecha abierto.');
+        }
+
         $acuerdoId = Uuid::nuevo();
         $franjas = [];
+        $ahora = new DateTimeImmutable();
 
         foreach ($franjasDatos as $dato) {
             $inicioStr = $dato['fecha_hora_inicio'] ?? '';
@@ -59,6 +65,9 @@ class ServicioDeAcuerdos
 
             if ($fin !== null && $fin <= $inicio) {
                 throw new InvalidArgumentException('La hora de finalización debe ser posterior a la de inicio.');
+            }
+            if ($inicio <= $ahora) {
+                throw new InvalidArgumentException('Cada franja tiene que empezar en el futuro.');
             }
 
             $franjas[] = new FranjaHoraria(
@@ -169,6 +178,11 @@ class ServicioDeAcuerdos
         $ganadora = $acuerdo->franjaMasVotada();
         if ($ganadora === null || $ganadora->votos < $acuerdo->minimoAsistentes) {
             throw new ReglaIncumplida("La franja con más votos no alcanza el mínimo requerido de {$acuerdo->minimoAsistentes} asistentes.");
+        }
+        // Programación no puede fijar una fecha pasada: si se confirmara igual, el acuerdo quedaría
+        // cerrado y la función sin programar (E3-13.F4).
+        if ($ganadora->inicio <= new DateTimeImmutable()) {
+            throw new ReglaIncumplida('La franja ganadora ya empezó.');
         }
 
         $this->repositorio->actualizarEstado($acuerdoId, EstadoAcuerdo::Confirmado, $ganadora->id);

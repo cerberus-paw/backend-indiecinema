@@ -108,7 +108,9 @@ class RepositorioDeAcuerdos
 
     /**
      * Emite o cambia el voto de un usuario por una franja horaria.
-     * Si ya votó en este acuerdo o función, se actualiza la franja elegida.
+     * Si ya votó en este acuerdo o función, se actualiza la franja elegida. También el acuerdo: la
+     * clave única es por función, así que el voto de un acuerdo anterior (cerrado sin mínimo) es la
+     * misma fila, y si quedaba con el acuerdo viejo la ficha no encontraba el voto nuevo (E3-13.F5).
      */
     public function votarOActualizar(string $acuerdoId, string $funcionId, string $franjaId, string $usuarioId): void
     {
@@ -116,7 +118,7 @@ class RepositorioDeAcuerdos
         $this->base->ejecutar(
             'INSERT INTO voto_acuerdo (id, acuerdo_id, funcion_id, franja_id, usuario_id, creado_en)
              VALUES (?, ?, ?, ?, ?, ?)
-             ON DUPLICATE KEY UPDATE franja_id = VALUES(franja_id), creado_en = VALUES(creado_en)',
+             ON DUPLICATE KEY UPDATE acuerdo_id = VALUES(acuerdo_id), franja_id = VALUES(franja_id), creado_en = VALUES(creado_en)',
             [Uuid::nuevo(), $acuerdoId, $funcionId, $franjaId, $usuarioId, $ahora],
         );
     }

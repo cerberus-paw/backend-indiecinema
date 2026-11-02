@@ -16,6 +16,11 @@ if (($cabeceras['x-llamador'] ?? null) !== 'programacion' || ($cabeceras['author
 }
 
 $ruta = (string) parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
+
+// Las franjas, a diez y once días de hoy: con fechas fijas, la prueba de confirmar empezó a
+// fallar cuando esas fechas pasaron. FuncionesDelOrganizadorTest calcula las mismas.
+$franja0 = (new DateTimeImmutable('+10 days'))->format('Y-m-d');
+$franja1 = (new DateTimeImmutable('+11 days'))->format('Y-m-d');
 $metodo = strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? 'GET'));
 
 if ($metodo === 'POST' && $ruta === '/interno/acuerdos') {
@@ -54,6 +59,24 @@ if ($metodo === 'GET' && str_starts_with($ruta, '/interno/acuerdos/por-funcion/'
     $funcionId = (string) substr($ruta, strlen('/interno/acuerdos/por-funcion/'));
     $archivoGlobal = sys_get_temp_dir() . '/acuerdo_estado_global.txt';
     $estado = file_exists($archivoGlobal) ? trim((string) file_get_contents($archivoGlobal)) : 'abierto';
+    // Otros casos que las pruebas eligen escribiendo el archivo: sin acuerdo todavía, funciones
+    // caído, o la franja que lidera ya empezó.
+    if ($estado === 'ninguno') {
+        http_response_code(404);
+        echo '{"error":"No hay acuerdo de fecha para esta función."}';
+
+        return;
+    }
+    if ($estado === 'caido') {
+        http_response_code(500);
+        echo '{"error":"Error interno."}';
+
+        return;
+    }
+    if ($estado === 'pasada') {
+        $franja0 = (new DateTimeImmutable('-1 day'))->format('Y-m-d');
+        $estado = 'abierto';
+    }
     echo json_encode([
         'id' => 'acuerdo-mock-1',
         'funcion_id' => $funcionId,
@@ -64,8 +87,8 @@ if ($metodo === 'GET' && str_starts_with($ruta, '/interno/acuerdos/por-funcion/'
         'alcanzo_minimo' => false,
         'voto_usuario_franja_id' => 'franja-mock-0',
         'franjas' => [
-            ['id' => 'franja-mock-0', 'inicio' => '2026-10-25 20:00:00', 'fin' => '2026-10-25 22:30:00', 'votos' => ($estado === 'sin_minimo' ? 1 : 2)],
-            ['id' => 'franja-mock-1', 'inicio' => '2026-10-26 21:00:00', 'fin' => null, 'votos' => 0],
+            ['id' => 'franja-mock-0', 'inicio' => "{$franja0} 20:00:00", 'fin' => "{$franja0} 22:30:00", 'votos' => ($estado === 'sin_minimo' ? 1 : 2)],
+            ['id' => 'franja-mock-1', 'inicio' => "{$franja1} 21:00:00", 'fin' => null, 'votos' => 0],
         ],
     ]);
 
@@ -85,8 +108,8 @@ if ($metodo === 'POST' && preg_match('#^/interno/acuerdos/([^/]+)/confirmar$#', 
         'franja_ganadora_id' => 'franja-mock-0',
         'franja_ganadora' => [
             'id' => 'franja-mock-0',
-            'inicio' => '2026-10-25 20:00:00',
-            'fin' => '2026-10-25 22:30:00',
+            'inicio' => "{$franja0} 20:00:00",
+            'fin' => "{$franja0} 22:30:00",
             'votos' => 2,
         ],
     ]);

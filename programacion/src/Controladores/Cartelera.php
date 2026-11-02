@@ -129,6 +129,9 @@ final class Cartelera extends Controlador
 
         if ($detalle->estado === EstadoFuncion::EnAcuerdoFecha) {
             $acuerdo = $this->servicio->acuerdoDeFecha($id, $usuario?->id);
+            // Recién cerrada la votación, todavía no hay franjas: la ficha lo dice y le ofrece al
+            // organizador proponerlas, en vez de mostrar franjas de ejemplo.
+            $datosFuncion['sin_franjas'] = $acuerdo === null;
             if ($acuerdo !== null) {
                 $minimoAsistentes = (int) ($acuerdo['minimo_asistentes'] ?? 20);
                 $datosFuncion['minimo_asistentes'] = $minimoAsistentes;
@@ -175,6 +178,9 @@ final class Cartelera extends Controlador
                 $datosFuncion['confirmable'] = $esPropia && ($maxVotosFranja >= $minimoAsistentes);
                 $datosFuncion['franja_ganadora'] = $franjaLider;
                 $datosFuncion['obra_ganadora'] = $datosFuncion['obras'][0] ?? null;
+                // Los votos que la eligió en la votación de títulos: la plantilla mostraba un número
+                // fijo (E3-13.F3).
+                $datosFuncion['votos_obra_ganadora'] = $conteoVotos[$datosFuncion['obra_ganadora']['id'] ?? ''] ?? 0;
             }
         }
 
@@ -207,6 +213,8 @@ final class Cartelera extends Controlador
             'franja_votada' => $peticion->consulta('votado') === '1',
             'error_voto' => $peticion->consulta('error_voto'),
             'error_franja' => $peticion->consulta('error_voto'),
+            // Lo que no salió al confirmar o cerrar el acuerdo: sólo se le muestra al organizador.
+            'error_acuerdo' => $esPropia ? $peticion->consulta('error_acuerdo') : null,
             'votacion_cerrada' => $esPropia && $peticion->consulta('votacion_cerrada') === '1',
             // El aviso de que se acaba de guardar: sólo para el organizador que la editó. La ficha
             // es pública, y si no, lo vería cualquiera que abra el enlace con el parámetro puesto.

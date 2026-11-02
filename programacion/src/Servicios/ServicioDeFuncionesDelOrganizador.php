@@ -6,6 +6,7 @@ namespace IndieCinema\Programacion\Servicios;
 
 use DateTimeImmutable;
 use LogicException;
+use RuntimeException;
 use IndieCinema\Nucleo\Http\ExcepcionHttp;
 use IndieCinema\Nucleo\Seguridad\Usuario;
 use IndieCinema\Programacion\Modelo\EstadoFuncion;
@@ -46,6 +47,34 @@ final class ServicioDeFuncionesDelOrganizador
     public function listar(Usuario $organizador): array
     {
         return $this->funciones->delOrganizador($organizador->id);
+    }
+
+    /**
+     * El acuerdo de fecha de cada función que está en acuerdo, para que «Mis funciones» muestre
+     * el paso que sigue (E3-13). Un pedido por función: son pocas a la vez, y funciones no tiene
+     * una consulta de varias. Si funciones no responde, la lista sale igual, sin ese dato.
+     *
+     * @param list<FuncionDelOrganizador> $funciones
+     *
+     * @return array<string, array<string, mixed>|false|null> por id: el acuerdo, null si todavía
+     *                                                         no tiene, false si no se supo
+     */
+    public function acuerdosDe(array $funciones): array
+    {
+        $acuerdos = [];
+        foreach ($funciones as $funcion) {
+            if ($funcion->estado !== EstadoFuncion::EnAcuerdoFecha) {
+                continue;
+            }
+            try {
+                // null es que no tiene acuerdo: no confundirlo con no haber podido preguntar.
+                $acuerdos[$funcion->id] = $this->acuerdos === null ? false : $this->acuerdos->obtenerPorFuncion($funcion->id);
+            } catch (ExcepcionHttp | RuntimeException) {
+                $acuerdos[$funcion->id] = false;
+            }
+        }
+
+        return $acuerdos;
     }
 
     /**
@@ -279,6 +308,11 @@ final class ServicioDeFuncionesDelOrganizador
         if ($this->acuerdos === null) {
             throw new LogicException('No se configuró el cliente de acuerdos de funciones.');
         }
+        // Uno abierto a la vez: si no, la ficha mostraría sólo el último y los votos del otro
+        // quedarían colgados (E3-13.F2). Después de cerrarlo sin mínimo, sí se proponen otras.
+        if (($this->acuerdos->obtenerPorFuncion($funcion->id)['estado'] ?? null) === 'abierto') {
+            throw new ReglaIncumplida('Esta función ya tiene un acuerdo de fecha abierto. Para proponer otras franjas, primero cerralo sin mínimo desde la ficha.');
+        }
 
         return $this->acuerdos->proponer($funcion->id, $minimoAsistentes, $franjas);
     }
@@ -302,32 +336,20 @@ final class ServicioDeFuncionesDelOrganizador
             throw new LogicException('No se configuró el cliente de acuerdos de funciones.');
         }
 
-        $acuerdo = $this->acuerdos->obtenerPorFuncion($funcion->id);
-        if ($acuerdo === null) {
-            throw new ReglaIncumplida('No hay acuerdo de fecha activo para esta función.');
+        $acuerdo = $this->acuerdoAbierto($funcion->id);
+        $lider = AcuerdosDeFunciones::franjaQueLidera($acuerdo);
+        if ($lider === null || !AcuerdosDeFunciones::alcanzoElMinimo($acuerdo)) {
+            throw new ReglaIncumplida("La franja con más compromisos todavía no llega al mínimo de {$acuerdo['minimo_asistentes']}.");
+        }
+        // Todo lo que puede fallar se controla antes de pedirle a funciones que lo cierre: si no,
+        // el acuerdo quedaba confirmado allá y la función sin programar acá, sin forma de
+        // reintentar (E3-13.F4).
+        $fechaHora = self::fechaHora((string) ($lider['inicio'] ?? ''));
+        if ($fechaHora <= new DateTimeImmutable()) {
+            throw new ReglaIncumplida('La franja ganadora ya empezó: la función no se puede programar en esa fecha. Cerrá el acuerdo sin mínimo y proponé franjas nuevas.');
         }
 
-        $resultado = $this->acuerdos->confirmar((string) $acuerdo['id']);
-
-        $inicioStr = null;
-        if (!empty($resultado['franja_ganadora']['inicio'])) {
-            $inicioStr = (string) $resultado['franja_ganadora']['inicio'];
-        } else {
-            $franjaId = $resultado['franja_ganadora_id'] ?? null;
-            $franjas = $resultado['franjas'] ?? $acuerdo['franjas'] ?? [];
-            foreach ($franjas as $f) {
-                if (($f['id'] ?? null) === $franjaId) {
-                    $inicioStr = (string) ($f['inicio'] ?? '');
-                    break;
-                }
-            }
-        }
-
-        if ($inicioStr === null || $inicioStr === '') {
-            throw new ReglaIncumplida('No se pudo determinar la fecha y hora de la franja ganadora.');
-        }
-
-        $fechaHora = DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $inicioStr) ?: new DateTimeImmutable($inicioStr);
+        $this->acuerdos->confirmar((string) $acuerdo['id']);
         $funcion->fijarFechaHora($fechaHora);
         $this->funciones->guardar($funcion);
 
@@ -354,12 +376,43 @@ final class ServicioDeFuncionesDelOrganizador
             throw new LogicException('No se configuró el cliente de acuerdos de funciones.');
         }
 
-        $acuerdo = $this->acuerdos->obtenerPorFuncion($funcion->id);
-        if ($acuerdo === null) {
-            throw new ReglaIncumplida('No hay acuerdo de fecha activo para esta función.');
-        }
+        $acuerdo = $this->acuerdoAbierto($funcion->id);
 
         return $this->acuerdos->cerrarSinMinimo((string) $acuerdo['id']);
+    }
+
+    /**
+     * El acuerdo de la función, si está abierto. Confirmar o cerrar uno que ya se cerró (dos
+     * clics, o dos pestañas) era un 422 de funciones, que llegaba como una página 500.
+     *
+     * @return array<string, mixed>
+     *
+     * @throws ReglaIncumplida si no tiene o ya se cerró
+     */
+    private function acuerdoAbierto(string $funcionId): array
+    {
+        if ($this->acuerdos === null) {
+            throw new LogicException('No se configuró el cliente de acuerdos de funciones.');
+        }
+        $acuerdo = $this->acuerdos->obtenerPorFuncion($funcionId);
+        if ($acuerdo === null) {
+            throw new ReglaIncumplida('Esta función todavía no tiene franjas propuestas.');
+        }
+        if (($acuerdo['estado'] ?? null) !== 'abierto') {
+            throw new ReglaIncumplida('El acuerdo de fecha ya está cerrado.');
+        }
+
+        return $acuerdo;
+    }
+
+    private static function fechaHora(string $texto): DateTimeImmutable
+    {
+        $fechaHora = DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $texto);
+        if ($fechaHora === false) {
+            throw new RuntimeException("funciones mandó una franja con una fecha que no se entiende: «{$texto}».");
+        }
+
+        return $fechaHora;
     }
 
     /**

@@ -68,9 +68,10 @@ final class TarjetaDeFuncionTest extends TestCase
         ], TarjetaDeFuncion::datos($funcion, null, 0));
     }
 
-    private static function programada(string $id = 'f', int $cupo = 40): FuncionEnCartelera
+    /** Por darse: los lugares libres sólo se muestran de una función que todavía no pasó. */
+    private static function programada(string $id = 'f', int $cupo = 40, string $fecha = '+10 days 20:30'): FuncionEnCartelera
     {
-        return new FuncionEnCartelera($id, new DateTimeImmutable('2026-10-24 20:30:00'), 3500.0, 's', 'Cine Club Areco', 'San Antonio de Areco', [new ObraEnCartelera('a', 'Zama', null)], EstadoFuncion::Programada, $cupo);
+        return new FuncionEnCartelera($id, new DateTimeImmutable($fecha), 3500.0, 's', 'Cine Club Areco', 'San Antonio de Areco', [new ObraEnCartelera('a', 'Zama', null)], EstadoFuncion::Programada, $cupo);
     }
 
     public function testLosLugaresLibresSonElCupoMenosLosOcupados(): void
@@ -88,6 +89,16 @@ final class TarjetaDeFuncionTest extends TestCase
             TarjetaDeFuncion::datos(self::programada(cupo: 10), null, 12),
             ['lugares_libres' => 0, 'agotada' => 0],
         ));
+    }
+
+    public function testUnaFuncionQueYaPasoNoEstaAgotadaNiMuestraLugares(): void
+    {
+        // Con todos los lugares tomados: ya se dio, así que la ficha no dice «Función agotada».
+        $tarjeta = TarjetaDeFuncion::datos(self::programada(cupo: 10, fecha: '-1 day'), null, 10);
+
+        self::assertNull($tarjeta['lugares_libres']);
+        self::assertFalse($tarjeta['agotada']);
+        self::assertSame([], TarjetaDeFuncion::conLugares([self::programada('a', fecha: '-1 day')]));
     }
 
     public function testSinElDatoDeFuncionesNoSeMuestranLosLugares(): void

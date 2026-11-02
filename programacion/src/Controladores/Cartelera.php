@@ -113,9 +113,10 @@ final class Cartelera extends Controlador
     {
         $id = (string) $peticion->parametro('id');
         $detalle = $this->servicio->detalle($id);
-        // Sólo de una programada se pregunta: en otro estado no hay reservas que contar.
-        $libres = $detalle->estado === EstadoFuncion::Programada
-            ? TarjetaDeFuncion::lugaresLibres($detalle->estado, $detalle->cupo, $this->ocupacion->deUna($detalle->id))
+        // Sólo de una programada por darse se pregunta: en otro estado no hay reservas que contar, y
+        // una que ya pasó no está «agotada» aunque se hayan tomado todos los lugares.
+        $libres = TarjetaDeFuncion::muestraLugares($detalle->estado, $detalle->fechaHora)
+            ? TarjetaDeFuncion::lugaresLibres($detalle->estado, $detalle->fechaHora, $detalle->cupo, $this->ocupacion->deUna($detalle->id))
             : null;
         $lugares = ['lugares_libres' => $libres, 'agotada' => $libres === 0];
         // Agotada no se reserva: el formulario no tendría cómo salir bien.
@@ -302,7 +303,7 @@ final class Cartelera extends Controlador
         return TarjetaDeFuncion::todas(
             $funciones,
             $this->servicio->acuerdosDe($funciones),
-            $this->ocupacion->deVarias(array_map(static fn (FuncionEnCartelera $funcion): string => $funcion->id, $funciones)),
+            $this->ocupacion->deVarias(TarjetaDeFuncion::conLugares($funciones)),
         );
     }
 

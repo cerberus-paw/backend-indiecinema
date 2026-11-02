@@ -14,7 +14,9 @@ use IndieCinema\Programacion\Repositorios\RepositorioDeFunciones;
 use IndieCinema\Programacion\Repositorios\RepositorioDeGeneros;
 use IndieCinema\Programacion\Repositorios\RepositorioDeObras;
 use IndieCinema\Programacion\Repositorios\RepositorioDeSalas;
+use IndieCinema\Nucleo\Uuid;
 use IndieCinema\Programacion\Servicios\DatosDePrueba;
+use IndieCinema\Programacion\Servicios\OcupacionDeFunciones;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -185,6 +187,31 @@ final class LugaresLibresTest extends TestCase
         self::assertStringContainsString('Función agotada', $cuerpo);
         self::assertStringNotContainsString('Reservá tus lugares', $cuerpo);
         self::assertStringNotContainsString('/funcion/reservar/', $cuerpo);
+    }
+
+    public function testUnaFuncionQueYaPasoNoDiceAgotada(): void
+    {
+        // Se tomaron todos los lugares, pero ya se dio: la ficha no ofrece esperar una cancelación.
+        [$agotada] = $this->ocuparDosFunciones();
+        $this->base->ejecutar('UPDATE funcion SET fecha_hora = NOW() - INTERVAL 1 DAY WHERE id = ?', [$agotada['id']]);
+
+        $cuerpo = $this->pedir("/cartelera/{$agotada['id']}")->cuerpo();
+
+        self::assertStringNotContainsString('Función agotada', $cuerpo);
+        self::assertStringNotContainsString('lugares libres', $cuerpo);
+    }
+
+    public function testMasDeCienFuncionesSePidenDeACien(): void
+    {
+        // Como la ficha de una sala con muchas funciones: funciones no acepta más de 100 por pedido.
+        $ids = array_map(static fn (): string => Uuid::nuevo(), range(1, 150));
+        file_put_contents(self::$ocupacion, json_encode([$ids[0] => 3, $ids[149] => 7]));
+
+        $ocupados = (new OcupacionDeFunciones($this->configuracion(), new Log('programacion', fopen('php://memory', 'w'))))->deVarias($ids);
+
+        self::assertIsArray($ocupados);
+        self::assertCount(150, $ocupados);
+        self::assertSame([3, 7], [$ocupados[$ids[0]], $ocupados[$ids[149]]]);
     }
 
     public function testLaPortadaYLaFichaDeLaSalaTambienLosMuestran(): void

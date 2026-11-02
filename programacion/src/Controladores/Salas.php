@@ -56,7 +56,7 @@ final class Salas extends Controlador
             'funciones' => TarjetaDeFuncion::todas(
                 $ficha->funciones,
                 $this->cartelera->acuerdosDe($ficha->funciones),
-                $this->ocupacion->deVarias(array_column($ficha->funciones, 'id')),
+                $this->ocupacion->deVarias(TarjetaDeFuncion::conLugares($ficha->funciones)),
             ),
         ]);
     }

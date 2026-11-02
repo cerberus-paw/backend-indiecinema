@@ -25,7 +25,8 @@ use IndieCinema\Nucleo\Seguridad\Usuario;
 
 require dirname(__DIR__, 2) . '/vendor/autoload.php';
 
-[, $url, $funcionId, $espectadorId, $arranque] = $argv;
+// Corre desde la línea de comandos; $_SERVER['argv'] y no $argv, que PHPStan no ve definida acá.
+[, $url, $funcionId, $espectadorId, $arranque] = $_SERVER['argv'];
 
 $base = BaseDeDatos::conectar(new Configuracion(['base' => [
     'host' => getenv('PRUEBAS_MYSQL_HOST'),

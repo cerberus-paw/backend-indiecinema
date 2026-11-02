@@ -46,7 +46,7 @@ final class CancelacionConReservasTest extends TestCase
     private RepositorioDeFunciones $funciones;
     private Sala $sala;
 
-    /** @var list<string> */
+    /** @var array<string, string> título => id */
     private array $obras = [];
 
     public static function setUpBeforeClass(): void

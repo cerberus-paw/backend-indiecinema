@@ -26,4 +26,4 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST' || preg_match('#^/interno/funciones/([
 }
 $cuerpo = json_decode((string) file_get_contents('php://input'), true);
 file_put_contents((string) getenv('CANCELACIONES'), json_encode(['funcion' => $partes[1], ...$cuerpo]) . "\n", FILE_APPEND);
-echo '{"canceladas":2,"avisadas":2}';
+echo '{"canceladas":2}';

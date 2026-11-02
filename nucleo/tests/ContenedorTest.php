@@ -52,4 +52,19 @@ final class ContenedorTest extends TestCase
         // Configuracion recibe un arreglo: hay que registrarla, no se puede construir sola.
         (new Contenedor())->obtener(Configuracion::class);
     }
+
+    public function testUsaNullOValorPorDefectoSiFallaConstruirDependenciaOpcional(): void
+    {
+        $contenedor = new Contenedor();
+        $objeto = $contenedor->obtener(ClaseConOpcional::class);
+        self::assertNull($objeto->config);
+    }
 }
+
+final class ClaseConOpcional
+{
+    public function __construct(public readonly ?Configuracion $config = null)
+    {
+    }
+}
+

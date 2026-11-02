@@ -317,6 +317,12 @@ docker compose down                       # apagar todo (los datos de MySQL qued
 El código PHP se monta en los contenedores, así que un cambio se ve al recargar la página, sin
 reiniciar nada. Un cambio en `composer.json` necesita otro `composer install` del subsistema.
 
+Después de cada `git pull`, `php herramientas/comprobar-config.php` dice qué secciones y claves de
+los `config.ejemplo.ini` y del `.env.ejemplo` le faltan a la configuración local (sólo los nombres,
+nunca los valores), y sale con 1 si falta algo. Un cambio que suma una clave a un ejemplo deja
+atrás los `config.ini` de los demás, que no se versionan, y sin esto el síntoma aparece recién al
+usar esa parte (un correo que no sale, un 500 al reservar).
+
 ### La base de datos
 
 La primera vez que arranca MySQL, con el volumen vacío, corre `mysql/init/`: crea los esquemas
@@ -505,6 +511,17 @@ compose, y los archivos van al volumen de programación.
 
 ## Pruebas
 
+```
+herramientas/pruebas.sh funciones                    # nucleo, cuentas, programacion o funciones
+herramientas/pruebas.sh funciones --filter Reservas  # lo que sigue va a PHPUnit
+herramientas/pruebas.sh                              # los cuatro
+```
+
+No necesita PHP ni Composer: corre el análisis estático (PHPStan, como el CI) y PHPUnit con la
+imagen de los subsistemas, instala las dependencias con la de Composer si faltan y levanta un MySQL
+descartable (`mysql-pruebas`) que queda andando para la próxima, también en `127.0.0.1:3307` (se
+apaga con `docker stop mysql-pruebas`). Más abajo, cómo correrlas con el PHP de la máquina.
+
 El núcleo y los tres subsistemas tienen las suyas (las de los subsistemas necesitan el
 `composer install` de arriba, que trae PHPUnit). Funciones, por ahora, prueba que arranca y que
 lee una función de programación por la API interna:
@@ -541,8 +558,8 @@ restricciones de la tabla reserva (código único, cantidad positiva y total no 
 la reserva, con varios procesos a la vez por el último lugar, sus cambios de estado, y la reserva de punta a punta (sesión,
 token CSRF, cantidad inválida, sin lugares, la reserva de otro y la cancelación), el correo de la
 reserva confirmada (también sin cuentas, sin servidor de correo o sin `[sitio] url`) y «Mis
-reservas» (el orden, el paginado, sólo las propias y programación caída). Para correrlas,
-uno descartable:
+reservas» (el orden, el paginado, sólo las propias y programación caída). Para correrlas con el PHP
+de la máquina (8.4 o superior, con `pdo_mysql`), contra un MySQL descartable:
 
 ```
 docker run -d --rm --name mysql-pruebas -e MYSQL_ROOT_PASSWORD=pruebas -e MYSQL_DATABASE=pruebas -p 127.0.0.1:3307:3306 mysql:8.4
@@ -572,8 +589,12 @@ En cada PR y en cada push a `main`, GitHub Actions (`.github/workflows/ci.yml`) 
 
 - **gitleaks** sobre todo el historial, con las reglas que trae más las de `.gitleaks.toml` (el
   access token de Mercado Pago, que gitleaks no conoce). Si encuentra algo, el log no lo muestra.
-- **Las pruebas** del núcleo, cuentas y programación contra un MySQL 8.4, con el front de `main`
-  al lado: un PR que necesita un cambio del front pasa después de mergear el del front.
+- **El análisis estático** de cada paquete con PHPStan (`composer analisis`, nivel 5): lo que ya
+  estaba antes de sumarlo queda en su `phpstan-baseline.neon`, y marca sólo lo nuevo. Al arreglar
+  algo de la lista, se regenera con `composer analisis -- --generate-baseline`.
+- **Las pruebas** del núcleo, cuentas y programación contra un MySQL 8.4, con el front al lado: el
+  de la rama del mismo nombre si existe en el front, y si no el de `main`. Un cambio que toca los
+  dos repositorios va en ramas que se llaman igual, y sus dos PR pasan sin esperar al otro.
 - **`composer audit`** sobre el `composer.lock` de cada subsistema y del núcleo.
 - **La configuración**: que el compose sea válido y que nginx acepte las plantillas (`nginx -t`).
 

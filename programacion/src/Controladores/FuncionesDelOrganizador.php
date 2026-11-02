@@ -16,6 +16,7 @@ use IndieCinema\Programacion\Modelo\FuncionDelOrganizador;
 use IndieCinema\Programacion\Modelo\Obra;
 use IndieCinema\Programacion\Modelo\ReglaIncumplida;
 use IndieCinema\Programacion\Modelo\Sala;
+use IndieCinema\Programacion\Servicios\AcuerdosDeFunciones;
 use IndieCinema\Programacion\Servicios\ReservasDeFunciones;
 use IndieCinema\Programacion\Servicios\ServicioDeFuncionesDelOrganizador;
 use LogicException;
@@ -37,9 +38,16 @@ final class FuncionesDelOrganizador extends Controlador
     public function listar(Peticion $peticion): Respuesta
     {
         $funciones = $this->servicio->listar(self::organizador($peticion));
+        $acuerdos = $this->servicio->acuerdosDe($funciones);
 
         return $this->vista('mis_funciones.html.twig', [
-            'funciones' => array_map(self::datos(...), $funciones),
+            'funciones' => array_map(
+                static fn (FuncionDelOrganizador $funcion): array => [
+                    ...self::datos($funcion),
+                    ...self::datosDelAcuerdo($funcion, $acuerdos),
+                ],
+                $funciones,
+            ),
             // El aviso de que se acaba de programar una: sólo si lo que llega tiene forma de id.
             'programada' => is_string($programada = $peticion->consulta('programada')) && Uuid::esValido($programada),
             'cancelada' => $peticion->consulta('cancelada') === '1',
@@ -247,11 +255,157 @@ final class FuncionesDelOrganizador extends Controlador
 
         $this->servicio->cerrarVotacion($organizador, $id);
 
-        if (($peticion->cuerpo()['volver'] ?? null) === 'ficha') {
-            return $this->redirigir("/cartelera/{$id}?votacion_cerrada=1");
+        // Lo que sigue es proponer las franjas (E3-13.2): sin esto, el organizador no tenía cómo
+        // llegar al formulario. Da igual desde dónde la cerró.
+        return $this->redirigir("/organizador/funciones/{$id}/proponer-franjas?votacion_cerrada=1");
+    }
+
+    /**
+     * El organizador propone las franjas y el mínimo de asistentes (E3-13.2). Si algo no está
+     * bien, vuelve el formulario con lo que cargó y el motivo, en vez de redirigir (E3-13.F2).
+     */
+    public function proponerAcuerdo(Peticion $peticion): Respuesta
+    {
+        $organizador = self::organizador($peticion);
+        $id = (string) $peticion->parametro('id');
+        if (!Uuid::esValido($id)) {
+            throw ExcepcionHttp::noEncontrada();
+        }
+        $funcion = $this->servicio->paraProponerFranjas($organizador, $id);
+        $json = $peticion->cabecera('Accept') === 'application/json' || $peticion->cabecera('Content-Type') === 'application/json';
+
+        $propuesta = PropuestaDeFranjas::desdeCampos($peticion->cuerpo(), $funcion->cupo);
+        $error = null;
+        if ($propuesta->esValida()) {
+            try {
+                $acuerdo = $this->servicio->proponerAcuerdoFecha($organizador, $id, $propuesta->minimo, $propuesta->franjas);
+
+                return $json ? $this->json($acuerdo, 201) : $this->redirigir("/cartelera/{$id}?acuerdo_propuesto=1");
+            } catch (ReglaIncumplida | \InvalidArgumentException $regla) {
+                $error = $regla->getMessage();
+            }
         }
 
-        return $this->redirigir('/organizador/funciones?votacion_cerrada=1');
+        if ($json) {
+            return $this->json(['error' => $error ?? implode(' ', $propuesta->errores), 'errores' => $propuesta->errores], 422);
+        }
+
+        return $this->formularioDeFranjas($funcion, $propuesta->valores, $propuesta->errores, $error, 422);
+    }
+
+    public function mostrarProponerFranjas(Peticion $peticion): Respuesta
+    {
+        $organizador = self::organizador($peticion);
+        $id = (string) $peticion->parametro('id');
+        if (!Uuid::esValido($id)) {
+            throw ExcepcionHttp::noEncontrada();
+        }
+
+        return $this->formularioDeFranjas(
+            $this->servicio->paraProponerFranjas($organizador, $id),
+            ['minimo_asistentes' => 10],
+            votacionCerrada: $peticion->consulta('votacion_cerrada') === '1',
+        );
+    }
+
+    /**
+     * @param array<string, mixed>  $valores lo que cargó, para volver a mostrarlo
+     * @param array<string, string> $errores campo => motivo
+     */
+    private function formularioDeFranjas(
+        FuncionDelOrganizador $funcion,
+        array $valores,
+        array $errores = [],
+        ?string $errorGeneral = null,
+        int $estado = 200,
+        bool $votacionCerrada = false,
+    ): Respuesta {
+        $datos = [
+            'funcion' => [
+                'id' => $funcion->id,
+                'titulo' => implode(' + ', $funcion->titulos),
+                'cupo' => $funcion->cupo,
+                'precio' => $funcion->precioBase,
+                'sala' => ['nombre' => $funcion->salaNombre],
+                'obras' => array_map(static fn (string $t) => ['titulo' => $t], $funcion->titulos),
+            ],
+            'accion' => "/organizador/funciones/{$funcion->id}/proponer-franjas",
+            'valores' => $valores,
+            'errores' => $errores,
+            // Al llegar recién cerrada la votación de títulos: el aviso de que ahora van las franjas.
+            'votacion_cerrada' => $votacionCerrada,
+        ];
+        // La plantilla lo muestra si la variable existe: sólo se pasa cuando hay algo que decir.
+        if ($errorGeneral !== null) {
+            $datos['error_general'] = $errorGeneral;
+        }
+
+        return $this->vista('proponer_franjas.html.twig', $datos, $estado);
+    }
+
+    /**
+     * El organizador confirma la franja ganadora cuando alcanza el mínimo de asistentes (E3-13.4 / IC-156).
+     */
+    public function confirmarAcuerdo(Peticion $peticion): Respuesta
+    {
+        $organizador = self::organizador($peticion);
+        $id = (string) $peticion->parametro('id');
+        if (!Uuid::esValido($id)) {
+            throw ExcepcionHttp::noEncontrada();
+        }
+
+        try {
+            $funcion = $this->servicio->confirmarAcuerdo($organizador, $id);
+        } catch (ReglaIncumplida $regla) {
+            if ($peticion->cabecera('Accept') === 'application/json' || $peticion->cabecera('Content-Type') === 'application/json') {
+                return $this->json(['error' => $regla->getMessage()], 422);
+            }
+
+            // Un aviso propio: el de error_voto habla del voto del espectador (E3-13.F4).
+            return $this->redirigir("/cartelera/{$id}?error_acuerdo=" . rawurlencode($regla->getMessage()));
+        }
+
+        if ($peticion->cabecera('Accept') === 'application/json' || $peticion->cabecera('Content-Type') === 'application/json') {
+            return $this->json([
+                'ok' => true,
+                'estado' => $funcion->estado->value,
+                'fecha_hora' => $funcion->fechaHora?->format('Y-m-d H:i:s'),
+            ]);
+        }
+
+        return $this->redirigir("/cartelera/{$id}?guardada=1");
+    }
+
+    /**
+     * El organizador cierra el acuerdo sin alcanzar el mínimo de asistentes (E3-13.5 / IC-157).
+     */
+    public function cerrarSinMinimo(Peticion $peticion): Respuesta
+    {
+        $organizador = self::organizador($peticion);
+        $id = (string) $peticion->parametro('id');
+        if (!Uuid::esValido($id)) {
+            throw ExcepcionHttp::noEncontrada();
+        }
+
+        try {
+            $resultado = $this->servicio->cerrarAcuerdoSinMinimo($organizador, $id);
+        } catch (ReglaIncumplida $regla) {
+            if ($peticion->cabecera('Accept') === 'application/json' || $peticion->cabecera('Content-Type') === 'application/json') {
+                return $this->json(['error' => $regla->getMessage()], 422);
+            }
+
+            // Un aviso propio: el de error_voto habla del voto del espectador (E3-13.F4).
+            return $this->redirigir("/cartelera/{$id}?error_acuerdo=" . rawurlencode($regla->getMessage()));
+        }
+
+        if ($peticion->cabecera('Accept') === 'application/json' || $peticion->cabecera('Content-Type') === 'application/json') {
+            return $this->json([
+                'ok' => true,
+                'estado_acuerdo' => 'sin_minimo',
+            ]);
+        }
+
+        return $this->redirigir("/cartelera/{$id}");
     }
 
     /**
@@ -342,6 +496,33 @@ final class FuncionesDelOrganizador extends Controlador
             'fecha' => $funcion->fechaHora === null ? null : TarjetaDeFuncion::fecha($funcion->fechaHora),
             'precio' => TarjetaDeFuncion::precio($funcion->precioBase),
             'cupo' => $funcion->cupo,
+        ];
+    }
+
+    /**
+     * Lo que «Mis funciones» necesita del acuerdo de fecha para ofrecer el paso que sigue:
+     * proponer las franjas, confirmar la fecha o, si cerró sin mínimo, proponer otras.
+     *
+     * @param array<string, array<string, mixed>|false|null> $acuerdos los de acuerdosDe()
+     *
+     * @return array{acuerdo?: string, confirmable?: bool, acuerdo_sin_minimo?: bool}
+     */
+    private static function datosDelAcuerdo(FuncionDelOrganizador $funcion, array $acuerdos): array
+    {
+        if (!array_key_exists($funcion->id, $acuerdos)) {
+            return [];
+        }
+        $acuerdo = $acuerdos[$funcion->id];
+        $estado = match (true) {
+            $acuerdo === false => 'sin_dato',
+            $acuerdo === null => 'sin_franjas',
+            default => (string) ($acuerdo['estado'] ?? 'sin_dato'),
+        };
+
+        return [
+            'acuerdo' => $estado,
+            'confirmable' => is_array($acuerdo) && AcuerdosDeFunciones::alcanzoElMinimo($acuerdo),
+            'acuerdo_sin_minimo' => $estado === 'sin_minimo',
         ];
     }
 

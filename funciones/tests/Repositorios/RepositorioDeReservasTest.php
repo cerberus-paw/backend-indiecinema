@@ -12,6 +12,7 @@ use IndieCinema\Funciones\Modelo\FuncionDeProgramacion;
 use IndieCinema\Funciones\Modelo\Reserva;
 use IndieCinema\Funciones\Pruebas\ConBaseDePruebas;
 use IndieCinema\Funciones\Repositorios\RepositorioDeReservas;
+use IndieCinema\Nucleo\BaseDeDatos;
 use IndieCinema\Nucleo\Configuracion;
 use IndieCinema\Nucleo\Seguridad\Rol;
 use PHPUnit\Framework\TestCase;
@@ -20,11 +21,27 @@ final class RepositorioDeReservasTest extends TestCase
 {
     use ConBaseDePruebas;
 
+    private BaseDeDatos $base;
     private RepositorioDeReservas $reservas;
 
     protected function setUp(): void
     {
-        $this->reservas = new RepositorioDeReservas(self::baseConTablasNuevas(new Configuracion(['base' => self::baseDePruebas()])));
+        $this->base = self::baseConTablasNuevas(new Configuracion(['base' => self::baseDePruebas()]));
+        $this->reservas = new RepositorioDeReservas($this->base);
+    }
+
+    /**
+     * Lo que quedó en cambio_reserva, en orden. Ninguna pantalla lo muestra (E4-03 pide que el
+     * cambio quede registrado), así que lo lee la prueba y no el repositorio.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function historial(string $reservaId): array
+    {
+        return $this->base->filas(
+            'SELECT estado_anterior, estado_nuevo, autor_id, autor_rol, motivo, hecho_en FROM cambio_reserva WHERE reserva_id = ? ORDER BY hecho_en, id',
+            [$reservaId],
+        );
     }
 
     private static function espectador(): AutorDelCambio
@@ -106,7 +123,7 @@ final class RepositorioDeReservasTest extends TestCase
             'autor_rol' => 'organizador',
             'motivo' => null,
             'hecho_en' => '2026-10-24 23:10:00',
-        ]], $this->reservas->historial($reserva->id));
+        ]], $this->historial($reserva->id));
     }
 
     public function testUnCambioQueNoSeGuardoNoQuedaEnElHistorial(): void
@@ -115,7 +132,7 @@ final class RepositorioDeReservasTest extends TestCase
         $this->reservas->guardarEstado($reserva->cancelar(), EstadoReserva::Confirmada, self::espectador());
 
         self::assertFalse($this->reservas->guardarEstado($reserva->registrarAsistencia(), EstadoReserva::Confirmada, self::organizador()));
-        self::assertCount(1, $this->reservas->historial($reserva->id));
+        self::assertCount(1, $this->historial($reserva->id));
     }
 
     public function testLasDeUnaFuncionYPorSuCodigo(): void

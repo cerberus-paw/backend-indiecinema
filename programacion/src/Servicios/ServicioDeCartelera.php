@@ -40,6 +40,7 @@ final class ServicioDeCartelera
         private readonly RepositorioDeGeneros $generos,
         private readonly RepositorioDeVotos $votos,
         Configuracion $configuracion,
+        private readonly ?AcuerdosDeFunciones $acuerdos = null,
     ) {
         $porPagina = $configuracion->obtener('cartelera.por_pagina', self::POR_PAGINA);
         if (!is_int($porPagina) || $porPagina < 1 || $porPagina > self::MAXIMO_POR_PAGINA) {
@@ -167,5 +168,91 @@ final class ServicioDeCartelera
         }
 
         $this->votos->votar($funcionId, $usuarioId, $obraId);
+    }
+
+    /**
+     * El acuerdo de cada función de la lista que está en acuerdo de fecha, para que su tarjeta diga
+     * en qué está (E3-13.F9): el estado del acuerdo vive en funciones, y sin preguntarle, una que
+     * cerró sin quórum seguía ofreciendo «Votar fecha». Si funciones no responde, la tarjeta queda
+     * como antes y la página sale igual.
+     *
+     * @param list<FuncionEnCartelera> $funciones
+     *
+     * @return array<string, array<string, mixed>|null> por id de función; null si no tiene acuerdo
+     *                                                  o no se pudo preguntar
+     */
+    public function acuerdosDe(array $funciones): array
+    {
+        $acuerdos = [];
+        foreach ($funciones as $funcion) {
+            if ($funcion->estado !== EstadoFuncion::EnAcuerdoFecha || $this->acuerdos === null) {
+                continue;
+            }
+            try {
+                $acuerdos[$funcion->id] = $this->acuerdos->obtenerPorFuncion($funcion->id);
+            } catch (ExcepcionHttp | RuntimeException) {
+                $acuerdos[$funcion->id] = null;
+            }
+        }
+
+        return $acuerdos;
+    }
+
+    /**
+     * Consulta los datos del acuerdo de fecha de una función (E3-13.6).
+     *
+     * @return array<string, mixed>|null
+     */
+    public function acuerdoDeFecha(string $funcionId, ?string $usuarioId = null): ?array
+    {
+        return $this->acuerdos?->obtenerPorFuncion($funcionId, $usuarioId);
+    }
+
+    /**
+     * Marca o quita el «Me sirve» de un espectador en una franja de una función en acuerdo de
+     * fecha (E3-13.3 / IC-155). Se pueden marcar varias franjas (E3-13.F7).
+     *
+     * Se controla acá lo que funciones también rechaza: su 422 llegaría como un error del cliente
+     * interno, y el espectador vería una página 500 en vez del motivo.
+     *
+     * @throws ReglaIncumplida si la función no está en acuerdo, el acuerdo no está abierto, la
+     *                         franja no es suya o quien vota es el organizador de la función
+     */
+    public function votarFranjaAcuerdo(string $funcionId, string $usuarioId, string $franjaId, bool $marcar = true): void
+    {
+        $detalle = $this->detalle($funcionId);
+
+        if ($detalle->estado !== EstadoFuncion::EnAcuerdoFecha) {
+            throw new ReglaIncumplida('El acuerdo de fecha para esta función no está abierto.');
+        }
+        // El mínimo lo tiene que juntar el público: si el organizador marcara sus propias franjas,
+        // se acercaría solo al quórum (E3-13.F7). Los demás organizadores y la administración sí
+        // votan, porque los roles se acumulan y también son espectadores.
+        if ($detalle->sala->organizadorId !== null && $detalle->sala->organizadorId === $usuarioId) {
+            throw new ReglaIncumplida('Sos el organizador de esta función: las franjas las marca el público, y el mínimo lo tiene que juntar él.');
+        }
+
+        if ($this->acuerdos === null) {
+            throw new \LogicException('No se configuró el cliente de acuerdos de funciones.');
+        }
+
+        $acuerdo = $this->acuerdoDeFecha($funcionId, $usuarioId);
+        if ($acuerdo === null || ($acuerdo['estado'] ?? '') !== 'abierto') {
+            throw new ReglaIncumplida('El acuerdo de fecha no está disponible o ya fue cerrado.');
+        }
+        if (($acuerdo['votacion_abierta'] ?? true) === false) {
+            throw new ReglaIncumplida('Ya pasó la fecha límite para marcar «Me sirve».');
+        }
+        $franjas = is_array($acuerdo['franjas'] ?? null) ? $acuerdo['franjas'] : [];
+        $ids = array_map(static fn (mixed $franja): string => is_array($franja) ? (string) ($franja['id'] ?? '') : '', $franjas);
+        if (!in_array($franjaId, $ids, true)) {
+            throw new ReglaIncumplida('La franja seleccionada no es de este acuerdo de fecha.');
+        }
+
+        if ($marcar) {
+            $this->acuerdos->votar((string) $acuerdo['id'], $franjaId, $usuarioId);
+        } else {
+            $this->acuerdos->quitarVoto((string) $acuerdo['id'], $franjaId, $usuarioId);
+        }
     }
 }

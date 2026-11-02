@@ -41,7 +41,7 @@ final class FuncionesInternasTest extends TestCase
     private RepositorioDeFunciones $funciones;
     private Sala $sala;
 
-    /** @var list<string> las dos obras del catálogo */
+    /** @var array<string, string> las dos obras del catálogo: el id de cada una, por su título */
     private array $obras = [];
 
     protected function setUp(): void

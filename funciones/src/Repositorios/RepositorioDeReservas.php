@@ -214,20 +214,6 @@ final class RepositorioDeReservas
     }
 
     /**
-     * El historial de una reserva, en orden.
-     *
-     * @return list<array{estado_anterior: string, estado_nuevo: string, autor_id: string, autor_rol: string, motivo: ?string, hecho_en: string}>
-     */
-    public function historial(string $reservaId): array
-    {
-        /** @var list<array{estado_anterior: string, estado_nuevo: string, autor_id: string, autor_rol: string, motivo: ?string, hecho_en: string}> */
-        return $this->base->filas(
-            'SELECT estado_anterior, estado_nuevo, autor_id, autor_rol, motivo, hecho_en FROM cambio_reserva WHERE reserva_id = ? ORDER BY hecho_en, id',
-            [$reservaId],
-        );
-    }
-
-    /**
      * @return bool false si el código ya es de otra reserva, y entonces no guardó nada
      */
     public function agregar(Reserva $reserva): bool

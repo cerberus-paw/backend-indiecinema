@@ -65,17 +65,18 @@ final class TarjetaDeFuncionTest extends TestCase
             'fecha' => null,
             'lugares_libres' => null,
             'agotada' => false,
-        ], TarjetaDeFuncion::datos($funcion, 0));
+        ], TarjetaDeFuncion::datos($funcion, null, 0));
     }
 
-    private static function programada(string $id = 'f', int $cupo = 40): FuncionEnCartelera
+    /** Por darse: los lugares libres sólo se muestran de una función que todavía no pasó. */
+    private static function programada(string $id = 'f', int $cupo = 40, string $fecha = '+10 days 20:30'): FuncionEnCartelera
     {
-        return new FuncionEnCartelera($id, new DateTimeImmutable('2026-10-24 20:30:00'), 3500.0, 's', 'Cine Club Areco', 'San Antonio de Areco', [new ObraEnCartelera('a', 'Zama', null)], EstadoFuncion::Programada, $cupo);
+        return new FuncionEnCartelera($id, new DateTimeImmutable($fecha), 3500.0, 's', 'Cine Club Areco', 'San Antonio de Areco', [new ObraEnCartelera('a', 'Zama', null)], EstadoFuncion::Programada, $cupo);
     }
 
     public function testLosLugaresLibresSonElCupoMenosLosOcupados(): void
     {
-        $tarjeta = TarjetaDeFuncion::datos(self::programada(), 22);
+        $tarjeta = TarjetaDeFuncion::datos(self::programada(), null, 22);
 
         self::assertSame(18, $tarjeta['lugares_libres']);
         self::assertFalse($tarjeta['agotada']);
@@ -85,9 +86,19 @@ final class TarjetaDeFuncionTest extends TestCase
     {
         // El organizador bajó el cupo después de que reservaran.
         self::assertSame(['lugares_libres' => 0, 'agotada' => true], array_intersect_key(
-            TarjetaDeFuncion::datos(self::programada(cupo: 10), 12),
+            TarjetaDeFuncion::datos(self::programada(cupo: 10), null, 12),
             ['lugares_libres' => 0, 'agotada' => 0],
         ));
+    }
+
+    public function testUnaFuncionQueYaPasoNoEstaAgotadaNiMuestraLugares(): void
+    {
+        // Con todos los lugares tomados: ya se dio, así que la ficha no dice «Función agotada».
+        $tarjeta = TarjetaDeFuncion::datos(self::programada(cupo: 10, fecha: '-1 day'), null, 10);
+
+        self::assertNull($tarjeta['lugares_libres']);
+        self::assertFalse($tarjeta['agotada']);
+        self::assertSame([], TarjetaDeFuncion::conLugares([self::programada('a', fecha: '-1 day')]));
     }
 
     public function testSinElDatoDeFuncionesNoSeMuestranLosLugares(): void
@@ -100,10 +111,10 @@ final class TarjetaDeFuncionTest extends TestCase
 
     public function testTodasTomaLosOcupadosDeCadaUna(): void
     {
-        $tarjetas = TarjetaDeFuncion::todas([self::programada('a'), self::programada('b'), self::programada('c')], ['a' => 40, 'b' => 3]);
+        $tarjetas = TarjetaDeFuncion::todas([self::programada('a'), self::programada('b'), self::programada('c')], [], ['a' => 40, 'b' => 3]);
 
         self::assertSame([0, 37, null], array_column($tarjetas, 'lugares_libres'));
-        self::assertSame([null, null], array_column(TarjetaDeFuncion::todas([self::programada('a'), self::programada('b')], null), 'lugares_libres'));
+        self::assertSame([null, null], array_column(TarjetaDeFuncion::todas([self::programada('a'), self::programada('b')], [], null), 'lugares_libres'));
     }
 
     /**

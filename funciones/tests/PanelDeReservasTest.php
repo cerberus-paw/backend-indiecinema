@@ -270,17 +270,20 @@ final class PanelDeReservasTest extends TestCase
         $respuesta = $this->deProgramacion(self::PROXIMA, ['organizador_id' => self::ORGANIZADORA, 'titulo' => 'Zama', 'fecha' => 'Sáb 21 nov · 20:30']);
 
         self::assertSame(200, $respuesta->estado(), $respuesta->cuerpo());
-        self::assertSame(['canceladas' => 2, 'avisadas' => 2], json_decode($respuesta->cuerpo(), true));
+        self::assertSame(['canceladas' => 2], json_decode($respuesta->cuerpo(), true));
         self::assertSame(['cancelada', 'cancelada', 'asistio', 'confirmada'], array_map($this->estadoDe(...), [$deEva, $deElias, $conAsistencia, $deOtraFuncion]));
         self::assertSame('Se canceló la función.', $this->historialDe($deEva)[0]['motivo']);
         self::assertSame(self::ORGANIZADORA, $this->historialDe($deEva)[0]['autor_id']);
 
+        // Los avisos salen después de responder, para que programación no los espere.
+        self::assertCount(0, self::$correo->correos());
+        $respuesta->terminar();
         $correos = self::$correo->correos();
         self::assertCount(2, $correos);
         self::assertEqualsCanonicalizing(['<' . self::EVA . '@ejemplo.test>', '<' . self::ELIAS . '@ejemplo.test>'], array_merge(...array_column($correos, 'para')));
 
         // La segunda vez no queda ninguna confirmada.
-        self::assertSame(['canceladas' => 0, 'avisadas' => 0], json_decode($this->deProgramacion(self::PROXIMA, ['organizador_id' => self::ORGANIZADORA, 'titulo' => 'Zama', 'fecha' => null])->cuerpo(), true));
+        self::assertSame(['canceladas' => 0], json_decode($this->deProgramacion(self::PROXIMA, ['organizador_id' => self::ORGANIZADORA, 'titulo' => 'Zama', 'fecha' => null])->cuerpo(), true));
     }
 
     public function testSiNoSeEncuentraAlEspectadorLaReservaSeCancelaIgual(): void
@@ -289,8 +292,10 @@ final class PanelDeReservasTest extends TestCase
 
         $respuesta = $this->deProgramacion(self::PROXIMA, ['organizador_id' => self::ORGANIZADORA, 'titulo' => 'Zama', 'fecha' => null]);
 
-        self::assertSame(['canceladas' => 1, 'avisadas' => 0], json_decode($respuesta->cuerpo(), true));
+        self::assertSame(['canceladas' => 1], json_decode($respuesta->cuerpo(), true));
         self::assertSame('cancelada', $this->estadoDe($codigo));
+        $respuesta->terminar();
+        self::assertCount(0, self::$correo->correos());
     }
 
     public function testLaCancelacionPideQuienYElTituloYSoloLaLlamaProgramacion(): void

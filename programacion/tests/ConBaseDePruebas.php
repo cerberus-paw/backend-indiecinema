@@ -6,6 +6,8 @@ namespace IndieCinema\Programacion\Pruebas;
 
 use IndieCinema\Nucleo\BaseDeDatos;
 use IndieCinema\Nucleo\Configuracion;
+use PHPUnit\Framework\Attributes\After;
+use ReflectionObject;
 
 /**
  * Para las pruebas que usan un MySQL de verdad: sin las variables PRUEBAS_MYSQL_* se saltean; el
@@ -13,6 +15,28 @@ use IndieCinema\Nucleo\Configuracion;
  */
 trait ConBaseDePruebas
 {
+    /**
+     * Suelta los objetos que la prueba guardó en sus propiedades: la base y los repositorios que
+     * la usan. PHPUnit conserva cada prueba hasta el final de la corrida, y con ella su conexión
+     * abierta; con la suite completa se pasaba el máximo de conexiones de MySQL (151 por omisión,
+     * también en el CI) y una prueba cualquiera daba «Too many connections» (E3-13.F10).
+     */
+    #[After]
+    protected function soltarLaBase(): void
+    {
+        foreach ((new ReflectionObject($this))->getProperties() as $propiedad) {
+            if ($propiedad->isStatic() || $propiedad->getDeclaringClass()->getName() !== static::class || !$propiedad->isInitialized($this)) {
+                continue;
+            }
+            if (is_object($propiedad->getValue($this))) {
+                unset($this->{$propiedad->getName()});
+            }
+        }
+        // Cada pedido arma su Aplicacion, cuyo contenedor guarda funciones que la apuntan: es un
+        // ciclo, y PHP lo libera (y cierra la conexión) recién cuando junta los ciclos.
+        gc_collect_cycles();
+    }
+
     /**
      * La sección [base] de la configuración, o saltea la prueba si no hay MySQL.
      *

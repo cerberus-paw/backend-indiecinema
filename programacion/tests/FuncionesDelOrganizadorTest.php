@@ -2042,6 +2042,26 @@ final class FuncionesDelOrganizadorTest extends TestCase
         self::assertStringNotContainsString('Abrir acuerdo de fecha', $formulario);
     }
 
+    /**
+     * E3-13.F5: «Cancelar función» en la ficha sin quórum lleva a la página de confirmación de
+     * siempre, en vez de un confirm() del navegador.
+     */
+    public function testCancelarSinQuorumPasaPorLaPaginaDeConfirmacion(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $funcion = $this->funcion($sala);
+        $this->enviar("/organizador/funciones/{$funcion->id}/cerrar-votacion", []);
+        self::acuerdoEnFunciones('sin_minimo');
+
+        $ficha = $this->pedir('GET', "/cartelera/{$funcion->id}")->cuerpo();
+        self::assertStringContainsString("href=\"/organizador/funciones/{$funcion->id}/cancelar\"", $ficha);
+        self::assertStringNotContainsString('onsubmit', $ficha);
+
+        $confirmacion = $this->pedir('GET', "/organizador/funciones/{$funcion->id}/cancelar");
+        self::assertSame(200, $confirmacion->estado());
+        self::assertStringContainsString('Confirmar cancelación', $confirmacion->cuerpo());
+    }
+
     public function testCerrarAcuerdoSinMinimoRechazaOrganizadorAjeno(): void
     {
         $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');

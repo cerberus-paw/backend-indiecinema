@@ -277,4 +277,30 @@ final class AcuerdosInternosTest extends TestCase
         self::assertSame(422, $respuesta->estado());
         self::assertSame('abierto', $this->base->valor('SELECT estado FROM acuerdo_fecha WHERE id = ?', [$acuerdo['id']]));
     }
+
+    /**
+     * E3-13.F5: después de cerrar sin mínimo y proponer franjas nuevas, el voto del espectador en
+     * el acuerdo nuevo es el que la ficha le marca. Antes la fila quedaba con el acuerdo viejo.
+     */
+    public function testElVotoEnUnAcuerdoNuevoQuedaComoElVotoDelUsuario(): void
+    {
+        $propuesta = [
+            'funcion_id' => self::FUNCION_ID,
+            'minimo_asistentes' => 3,
+            'franjas' => [['fecha_hora_inicio' => self::dentroDe(10, '20:00:00')], ['fecha_hora_inicio' => self::dentroDe(11, '20:00:00')]],
+        ];
+        $primero = json_decode($this->pedirInterno('POST', '/interno/acuerdos', $propuesta)->cuerpo(), true);
+        $this->pedirInterno('POST', "/interno/acuerdos/{$primero['id']}/votar", ['franja_id' => $primero['franjas'][0]['id'], 'usuario_id' => self::USUARIO_EVA]);
+        $this->pedirInterno('POST', "/interno/acuerdos/{$primero['id']}/cerrar-sin-minimo");
+
+        $segundo = json_decode($this->pedirInterno('POST', '/interno/acuerdos', $propuesta)->cuerpo(), true);
+        $nueva = $segundo['franjas'][1]['id'];
+        $voto = $this->pedirInterno('POST', "/interno/acuerdos/{$segundo['id']}/votar", ['franja_id' => $nueva, 'usuario_id' => self::USUARIO_EVA]);
+        self::assertSame(200, $voto->estado());
+
+        $acuerdo = json_decode($this->pedirInterno('GET', '/interno/acuerdos/por-funcion/' . self::FUNCION_ID . '?usuario_id=' . self::USUARIO_EVA)->cuerpo(), true);
+        self::assertSame($segundo['id'], $acuerdo['id']);
+        self::assertSame($nueva, $acuerdo['voto_usuario_franja_id']);
+        self::assertSame(1, $acuerdo['franjas'][1]['votos']);
+    }
 }

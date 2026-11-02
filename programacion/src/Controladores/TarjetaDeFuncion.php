@@ -6,6 +6,7 @@ namespace IndieCinema\Programacion\Controladores;
 
 use DateTimeImmutable;
 use IndieCinema\Programacion\Modelo\EstadoFuncion;
+use IndieCinema\Programacion\Modelo\Funcion;
 use IndieCinema\Programacion\Modelo\FuncionEnCartelera;
 use IndieCinema\Programacion\Modelo\ObraEnCartelera;
 
@@ -20,26 +21,52 @@ final class TarjetaDeFuncion
     private const MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
 
     /**
-     * Las tarjetas de una lista, cada una con su acuerdo de fecha si tiene (E3-13.F9).
+     * Las tarjetas de una lista, cada una con su acuerdo de fecha si tiene (E3-13.F9) y con sus
+     * lugares libres (E4-02).
      *
      * @param list<FuncionEnCartelera>                   $funciones
      * @param array<string, array<string, mixed>|null> $acuerdos  los de ServicioDeCartelera::acuerdosDe()
+     * @param ?array<string, int>                      $ocupados  funcion_id => lugares ocupados, de
+     *                                                            funciones; null si no respondió, y
+     *                                                            entonces van sin ese dato
      *
      * @return list<array<string, mixed>>
      */
-    public static function todas(array $funciones, array $acuerdos): array
+    public static function todas(array $funciones, array $acuerdos, ?array $ocupados = null): array
     {
-        return array_map(static fn (FuncionEnCartelera $funcion): array => self::datos($funcion, $acuerdos[$funcion->id] ?? null), $funciones);
+        return array_map(
+            static fn (FuncionEnCartelera $funcion): array => self::datos($funcion, $acuerdos[$funcion->id] ?? null, $ocupados[$funcion->id] ?? null),
+            $funciones,
+        );
     }
 
     /**
-     * @param array<string, mixed>|null $acuerdo el de funciones, si la función está en acuerdo de fecha
+     * Las funciones de la lista a las que hay que pedirles los lugares ocupados: las demás no los
+     * muestran (ver lugaresLibres()), así que no tiene sentido preguntar por ellas.
      *
-     * @return array<string, mixed> id, titulo, estado, precio, sala, localidad y fecha; con el acuerdo
-     *                              abierto, también franjas_propuestas
+     * @param list<FuncionEnCartelera> $funciones
+     *
+     * @return list<string>
      */
-    public static function datos(FuncionEnCartelera $funcion, ?array $acuerdo = null): array
+    public static function conLugares(array $funciones): array
     {
+        return array_values(array_map(
+            static fn (FuncionEnCartelera $funcion): string => $funcion->id,
+            array_filter($funciones, static fn (FuncionEnCartelera $funcion): bool => self::muestraLugares($funcion->estado, $funcion->fechaHora)),
+        ));
+    }
+
+    /**
+     * @param array<string, mixed>|null $acuerdo  el de funciones, si la función está en acuerdo de fecha
+     * @param ?int                      $ocupados los lugares que ya tomaron las reservas, o null si no se saben
+     *
+     * @return array<string, mixed> id, titulo, estado, precio, sala, localidad, fecha, lugares_libres y
+     *                              agotada; con el acuerdo abierto, también franjas_propuestas
+     */
+    public static function datos(FuncionEnCartelera $funcion, ?array $acuerdo = null, ?int $ocupados = null): array
+    {
+        $libres = self::lugaresLibres($funcion->estado, $funcion->fechaHora, $funcion->cupo, $ocupados);
+
         return self::conAcuerdo([
             'id' => $funcion->id,
             // Una función con varias obras las proyecta todas: el título las nombra a todas.
@@ -53,7 +80,30 @@ final class TarjetaDeFuncion
             'sala' => $funcion->sala,
             'localidad' => $funcion->localidad,
             'fecha' => $funcion->fechaHora !== null ? self::fecha($funcion->fechaHora) : null,
+            'lugares_libres' => $libres,
+            'agotada' => $libres === 0,
         ], $acuerdo);
+    }
+
+    /**
+     * Los lugares que quedan, sólo en una función programada que todavía no se dio: en votación
+     * todavía no se reserva, y de una que ya pasó no hay lugares que ofrecer ni está «agotada».
+     * Nunca menos de cero: si el organizador bajó el cupo después de que reservaron, está agotada.
+     *
+     * @return ?int null si no se muestran o si funciones no dio el dato
+     */
+    public static function lugaresLibres(EstadoFuncion $estado, ?DateTimeImmutable $fechaHora, int $cupo, ?int $ocupados): ?int
+    {
+        return self::muestraLugares($estado, $fechaHora) && $ocupados !== null ? max(0, $cupo - $ocupados) : null;
+    }
+
+    /**
+     * Si la función muestra sus lugares libres: programada y todavía por darse, con la misma regla
+     * de fecha que Funcion::seReserva().
+     */
+    public static function muestraLugares(EstadoFuncion $estado, ?DateTimeImmutable $fechaHora): bool
+    {
+        return $estado === EstadoFuncion::Programada && Funcion::seReserva($estado, $fechaHora);
     }
 
     /**

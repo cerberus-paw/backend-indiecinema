@@ -197,6 +197,9 @@ todo el sitio se vea igual aunque lo sirvan subsistemas distintos.
   estado, la fecha, el precio, el cupo, los títulos, la sala y el organizador de una función.
   Cuentas tiene `GET /interno/usuarios/{id}` y `POST /interno/usuarios/{id}/roles`, que llama
   programación desde la bandeja de solicitudes de sala.
+  Funciones tiene `GET /interno/funciones/{id}/ocupacion` y `GET /interno/ocupacion?funciones=…`
+  (una página de tarjetas en un solo pedido): los lugares ocupados, con los que programación
+  muestra los libres. Si funciones no responde, la cartelera y la ficha se muestran sin ese dato.
 - **Pedir ser organizador es pedir una sala**, como el recorrido de la E2 (sección 7): la
   solicitud de sala (`/solicitar-sala`) guarda la sala sin publicar y le avisa al equipo por
   correo; aprobarla la publica y programación le pide a cuentas el rol de organizador. Primero el

@@ -73,6 +73,33 @@ final class RepositorioDeReservas
         );
     }
 
+    /**
+     * Lo mismo que lugaresOcupados(), para varias funciones en una sola consulta: la cartelera
+     * muestra una página de tarjetas y no hace un pedido por cada una.
+     *
+     * @param list<string> $funcionesIds
+     *
+     * @return array<string, int> funcion_id => lugares ocupados, también las que no tienen reservas (0)
+     */
+    public function lugaresOcupadosDe(array $funcionesIds): array
+    {
+        if ($funcionesIds === []) {
+            return [];
+        }
+        $ocupan = array_values(array_filter(EstadoReserva::cases(), static fn (EstadoReserva $estado): bool => $estado->ocupaLugares()));
+        $ocupados = array_fill_keys($funcionesIds, 0);
+        foreach ($this->base->filas(
+            'SELECT funcion_id, SUM(cantidad) AS ocupados FROM reserva WHERE funcion_id IN ('
+            . implode(', ', array_fill(0, count($funcionesIds), '?')) . ') AND estado IN ('
+            . implode(', ', array_fill(0, count($ocupan), '?')) . ') GROUP BY funcion_id',
+            [...$funcionesIds, ...$ocupan],
+        ) as $fila) {
+            $ocupados[$fila['funcion_id']] = (int) $fila['ocupados'];
+        }
+
+        return $ocupados;
+    }
+
     public function buscar(string $id): ?Reserva
     {
         $fila = $this->base->fila('SELECT * FROM reserva WHERE id = ?', [$id]);

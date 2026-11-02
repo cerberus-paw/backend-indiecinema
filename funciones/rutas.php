@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use IndieCinema\Funciones\Controladores\AcuerdosInternos;
+use IndieCinema\Funciones\Controladores\OcupacionInterna;
 use IndieCinema\Funciones\Controladores\Reservas;
 use IndieCinema\Nucleo\Http\EstadoInterno;
 use IndieCinema\Nucleo\Ruteo\Router;
@@ -24,6 +25,11 @@ return static function (Router $router): void {
     // La cancelación del espectador, con una pantalla que la confirma antes (E4-01.5).
     $router->get('/reservas/{id}/cancelar', [Reservas::class, 'confirmarCancelacion'], Rol::Espectador);
     $router->post('/reservas/{id}/cancelar', [Reservas::class, 'cancelar'], Rol::Espectador);
+
+    // Los lugares ocupados, para que programación muestre los libres (E4-02): de una función en
+    // su ficha, y de una página entera de tarjetas en un solo pedido.
+    $router->interna('GET', '/interno/funciones/{id}/ocupacion', [OcupacionInterna::class, 'deUna'], ['programacion']);
+    $router->interna('GET', '/interno/ocupacion', [OcupacionInterna::class, 'deVarias'], ['programacion']);
 
     // Para comprobar que los otros subsistemas llegan hasta acá con su token.
     $router->interna('GET', '/interno/estado', [EstadoInterno::class, 'mostrar'], ['cuentas', 'programacion']);

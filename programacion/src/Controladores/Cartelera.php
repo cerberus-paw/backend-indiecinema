@@ -14,9 +14,11 @@ use IndieCinema\Nucleo\Uuid;
 use IndieCinema\Programacion\Modelo\DetalleDeFuncion;
 use IndieCinema\Programacion\Modelo\EstadoFuncion;
 use IndieCinema\Programacion\Modelo\Funcion;
+use IndieCinema\Programacion\Modelo\FuncionEnCartelera;
 use IndieCinema\Programacion\Modelo\Genero;
 use IndieCinema\Programacion\Modelo\ObraEnDetalle;
 use IndieCinema\Programacion\Modelo\ReglaIncumplida;
+use IndieCinema\Programacion\Servicios\OcupacionDeFunciones;
 use IndieCinema\Programacion\Servicios\ServicioDeCartelera;
 
 /**
@@ -29,8 +31,10 @@ use IndieCinema\Programacion\Servicios\ServicioDeCartelera;
  */
 final class Cartelera extends Controlador
 {
-    public function __construct(private readonly ServicioDeCartelera $servicio)
-    {
+    public function __construct(
+        private readonly ServicioDeCartelera $servicio,
+        private readonly OcupacionDeFunciones $ocupacion,
+    ) {
     }
 
     /**
@@ -58,7 +62,7 @@ final class Cartelera extends Controlador
             'siguiente' => $pagina->numero < $total ? $parametros->urlDePagina($pagina->numero + 1) : null,
         ];
 
-        $tarjetas = TarjetaDeFuncion::todas($pagina->funciones, $this->servicio->acuerdosDe($pagina->funciones));
+        $tarjetas = $this->tarjetas($pagina->funciones);
 
         if ($peticion->aceptaJson()) {
             return $this->json([
@@ -109,6 +113,14 @@ final class Cartelera extends Controlador
     {
         $id = (string) $peticion->parametro('id');
         $detalle = $this->servicio->detalle($id);
+        // Sólo de una programada por darse se pregunta: en otro estado no hay reservas que contar, y
+        // una que ya pasó no está «agotada» aunque se hayan tomado todos los lugares.
+        $libres = TarjetaDeFuncion::muestraLugares($detalle->estado, $detalle->fechaHora)
+            ? TarjetaDeFuncion::lugaresLibres($detalle->estado, $detalle->fechaHora, $detalle->cupo, $this->ocupacion->deUna($detalle->id))
+            : null;
+        $lugares = ['lugares_libres' => $libres, 'agotada' => $libres === 0];
+        // Agotada no se reserva: el formulario no tendría cómo salir bien.
+        $reservable = Funcion::seReserva($detalle->estado, $detalle->fechaHora) && !$lugares['agotada'];
 
         $usuario = $peticion->usuario();
         $esPropia = $usuario !== null
@@ -122,7 +134,7 @@ final class Cartelera extends Controlador
         $votoActual = $usuario !== null ? $this->servicio->votoDe($detalle->id, $usuario->id) : null;
         $conteoVotos = $this->servicio->conteoDeVotos($detalle->id);
 
-        $datosFuncion = self::datosDeDetalle($detalle, $editable, $cancelable, $cerrable);
+        $datosFuncion = [...self::datosDeDetalle($detalle, $editable, $cancelable, $cerrable), ...$lugares];
         $datosFuncion['es_organizador'] = $esPropia;
         $franjasDelUsuario = [];
         $conteoVotosFranjas = [];
@@ -145,16 +157,15 @@ final class Cartelera extends Controlador
                 $franjasDelUsuario = is_array($acuerdo['franjas_del_usuario'] ?? null) ? $acuerdo['franjas_del_usuario'] : [];
                 $datosFuncion['franjas_del_usuario'] = $franjasDelUsuario;
 
-                $duracionMinutos = !empty($detalle->obras)
-                    ? array_sum(array_map(static fn (ObraEnDetalle $o): int => $o->duracionMinutos, $detalle->obras))
-                    : 120;
+                // Una función tiene siempre alguna obra (DetalleDeFuncion), así que hay duración.
+                $duracionMinutos = array_sum(array_map(static fn (ObraEnDetalle $o): int => $o->duracionMinutos, $detalle->obras));
 
                 $franjas = [];
                 $maxVotosFranja = -1;
                 $franjaLider = null;
                 foreach ($acuerdo['franjas'] ?? [] as $f) {
                     $inicioStr = (string) ($f['inicio'] ?? '');
-                    $finStr = isset($f['fin']) && $f['fin'] !== null ? (string) $f['fin'] : null;
+                    $finStr = isset($f['fin']) ? (string) $f['fin'] : null;
                     $inicioDt = DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $inicioStr) ?: new DateTimeImmutable($inicioStr);
                     $finDt = $finStr !== null
                         ? (DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $finStr) ?: new DateTimeImmutable($finStr))
@@ -197,7 +208,7 @@ final class Cartelera extends Controlador
             return $this->json([
                 'funcion' => [
                     ...$datosFuncion,
-                    'reservable' => Funcion::seReserva($detalle->estado, $detalle->fechaHora),
+                    'reservable' => $reservable,
                 ],
                 'acuerdo_fecha' => $acuerdo,
                 'voto_usuario' => $votoActual,
@@ -210,7 +221,7 @@ final class Cartelera extends Controlador
         return $this->vista('ficha_funcion.html.twig', [
             'funcion' => [
                 ...$datosFuncion,
-                'reservable' => Funcion::seReserva($detalle->estado, $detalle->fechaHora),
+                'reservable' => $reservable,
             ],
             'acuerdo_fecha' => $acuerdo,
             'es_organizador' => $esPropia,
@@ -278,6 +289,23 @@ final class Cartelera extends Controlador
         return $this->redirigir("/cartelera/{$id}?" . ($quitado ? 'quitado=1' : 'votado=1'));
     }
 
+    /**
+     * Las tarjetas con los lugares libres, pedidos a funciones en una sola llamada para toda la
+     * página. Si no responde, van sin ese dato.
+     *
+     * @param list<FuncionEnCartelera> $funciones
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function tarjetas(array $funciones): array
+    {
+        return TarjetaDeFuncion::todas(
+            $funciones,
+            $this->servicio->acuerdosDe($funciones),
+            $this->ocupacion->deVarias(TarjetaDeFuncion::conLugares($funciones)),
+        );
+    }
+
     private function parametros(Peticion $peticion): ParametrosDeCartelera
     {
         return ParametrosDeCartelera::desdeConsulta([
@@ -307,7 +335,7 @@ final class Cartelera extends Controlador
      *     cancelable: bool,
      *     cerrable: bool,
      *     sala: array{url: string, nombre: string, descripcion: string, direccion: string, localidad: string, capacidad: int, imagen: ?string},
-     *     obras: list<array{titulo: string, sinopsis: string, anio: int, director: string, duracion: int, generos: list<string>}>
+     *     obras: list<array{id: string, titulo: string, sinopsis: string, anio: int, director: string, duracion: int, generos: list<string>, afiche: ?string}>
      * }
      */
     private static function datosDeDetalle(

@@ -8,6 +8,7 @@ use IndieCinema\Nucleo\Controlador;
 use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Seguridad\Rol;
+use IndieCinema\Programacion\Servicios\OcupacionDeFunciones;
 use IndieCinema\Programacion\Servicios\ServicioDeCartelera;
 use IndieCinema\Programacion\Servicios\ServicioDeSalas;
 
@@ -27,6 +28,7 @@ final class Inicio extends Controlador
     public function __construct(
         private readonly ServicioDeCartelera $cartelera,
         private readonly ServicioDeSalas $salas,
+        private readonly OcupacionDeFunciones $ocupacion,
     ) {
     }
 
@@ -40,7 +42,11 @@ final class Inicio extends Controlador
         $salas = $this->salas->publicadas();
 
         return $this->vista('inicio.html.twig', [
-            'funciones' => TarjetaDeFuncion::todas($proximas->funciones, $this->cartelera->acuerdosDe($proximas->funciones)),
+            'funciones' => TarjetaDeFuncion::todas(
+                $proximas->funciones,
+                $this->cartelera->acuerdosDe($proximas->funciones),
+                $this->ocupacion->deVarias(TarjetaDeFuncion::conLugares($proximas->funciones)),
+            ),
             'total_funciones' => $proximas->total,
             'salas' => array_map(TarjetaDeSala::datos(...), array_slice($salas, 0, self::SALAS)),
             'total_salas' => count($salas),

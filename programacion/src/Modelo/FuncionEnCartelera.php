@@ -24,6 +24,8 @@ final readonly class FuncionEnCartelera
         public string $localidad,
         public array $obras,
         public EstadoFuncion $estado = EstadoFuncion::Programada,
+        // Cuántos espectadores entran: con los ocupados que da funciones, los lugares libres.
+        public int $cupo = 0,
     ) {
     }
 }

@@ -215,6 +215,8 @@ final class RepositorioDeCarteleraTest extends TestCase
                 new ObraEnCartelera($this->obras['Esperando la carroza'], 'Esperando la carroza', null),
                 new ObraEnCartelera($this->obras['Relatos salvajes'], 'Relatos salvajes', null),
             ],
+            EstadoFuncion::Programada,
+            40,
         ), $carroza);
         self::assertEquals([new ObraEnCartelera($this->obras['La ciénaga'], 'La ciénaga', 'af1c0001000000000000000000000001.jpg')], $cienaga->obras);
         self::assertSame('Cine Club El Galpón', $cienaga->sala);

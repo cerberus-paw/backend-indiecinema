@@ -20,14 +20,15 @@ class ServicioDeAcuerdos
 {
     public function __construct(
         private readonly RepositorioDeAcuerdos $repositorio,
-        private readonly FuncionesDeProgramacion $funciones,
     ) {
     }
 
     /**
      * El organizador propone las franjas horarias y el mínimo de asistentes (E3-13.2 / IC-154).
      *
-     * @param list<array{fecha_hora_inicio: string, fecha_hora_fin?: string|null}> $franjasDatos
+     * @param list<array{fecha_hora_inicio?: string, fecha_hora_fin?: string|null}> $franjasDatos las del
+     *                                                                              JSON de programación:
+     *                                                                              puede faltar el inicio
      *
      * @throws InvalidArgumentException si los datos no cumplen las validaciones básicas
      */

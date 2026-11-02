@@ -1765,12 +1765,15 @@ final class FuncionesDelOrganizadorTest extends TestCase
         self::acuerdoEnFunciones('ninguno');
         $manana = (new DateTimeImmutable('+1 day'))->format('Y-m-d');
         $ayer = (new DateTimeImmutable('-1 day'))->format('Y-m-d');
+        $hoy = (new DateTimeImmutable())->format('Y-m-d');
         $ruta = "/organizador/funciones/{$funcion->id}/proponer-franjas";
 
         $casos = [
             'termina antes de empezar' => [[$manana, '22:00', '20:00'], [$manana, '18:00', '19:00'], 'La opción 1 tiene que terminar después de empezar.'],
             'una que ya pasó' => [[$manana, '20:00', '22:00'], [$ayer, '20:00', '22:00'], 'La opción 2 ya pasó'],
             'dos iguales' => [[$manana, '20:00', '22:00'], [$manana, '20:00', '23:00'], 'Las opciones 1 y 2 empiezan el mismo día a la misma hora.'],
+            // E3-13.F8: «Me sirve» se marca hasta el día anterior a la primera franja.
+            'una de hoy' => [[$manana, '20:00', '22:00'], [$hoy, '23:58', '23:59'], 'La opción 2 es de hoy'],
         ];
         foreach ($casos as $caso => [$primera, $segunda, $motivo]) {
             $respuesta = $this->enviar($ruta, [

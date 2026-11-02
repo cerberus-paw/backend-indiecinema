@@ -73,7 +73,7 @@ final class AcuerdosDeFuncionesTest extends TestCase
 
         self::assertNotNull($resultado);
         self::assertSame('acuerdo-mock-1', $resultado['id']);
-        self::assertSame('franja-mock-0', $resultado['voto_usuario_franja_id']);
+        self::assertSame(['franja-mock-0'], $resultado['franjas_del_usuario']);
         self::assertCount(2, $resultado['franjas']);
     }
 }

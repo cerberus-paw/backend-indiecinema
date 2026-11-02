@@ -13,6 +13,7 @@ use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Log;
 use IndieCinema\Nucleo\Uuid;
 use IndieCinema\Programacion\Controladores\Cartelera;
+use IndieCinema\Programacion\Controladores\TarjetaDeFuncion;
 use IndieCinema\Programacion\Repositorios\RepositorioDeFunciones;
 use IndieCinema\Programacion\Repositorios\RepositorioDeGeneros;
 use IndieCinema\Programacion\Repositorios\RepositorioDeObras;
@@ -1081,6 +1082,82 @@ final class CarteleraTest extends TestCase
 
         self::assertSame(303, $respuesta->estado());
         self::assertStringContainsString('error_voto=', $respuesta->cabecera('Location') ?? '');
+    }
+
+    /**
+     * E3-13.F7: «✓ Me sirve» en una franja ya marcada la quita, y vuelve a la ficha avisándolo.
+     */
+    public function testQuitarElMeSirveDeUnaFranja(): void
+    {
+        [$funcionId] = $this->funcionEnAcuerdo();
+
+        $respuesta = $this->post("/cartelera/{$funcionId}/votar", ['franja_id' => 'franja-mock-0', 'quitar' => '1'], Uuid::nuevo(), 'espectador');
+
+        self::assertSame(303, $respuesta->estado());
+        self::assertSame("/cartelera/{$funcionId}?quitado=1", $respuesta->cabecera('Location'));
+    }
+
+    /**
+     * E3-13.F7: el organizador no marca las franjas de su propia función (se acercaría solo al
+     * mínimo), ni la ficha le ofrece hacerlo. El voto vuelve con el motivo, no con una página 500.
+     */
+    public function testElOrganizadorNoMarcaLasFranjasDeSuFuncion(): void
+    {
+        [$funcionId, $organizadorId] = $this->funcionEnAcuerdo();
+
+        $respuesta = $this->post("/cartelera/{$funcionId}/votar", ['franja_id' => 'franja-mock-0'], $organizadorId, 'organizador');
+
+        self::assertSame(303, $respuesta->estado());
+        self::assertStringContainsString('error_voto=', $respuesta->cabecera('Location') ?? '');
+        self::assertStringContainsString(rawurlencode('Sos el organizador de esta función'), $respuesta->cabecera('Location') ?? '');
+
+        $ficha = $this->pedir("/cartelera/{$funcionId}", [], ['X-Nginx-Secreto' => self::SECRETO, 'X-Usuario-Id' => $organizadorId, 'X-Rol' => 'organizador']);
+        self::assertStringNotContainsString('data-formulario-votar-franja', $ficha->cuerpo());
+    }
+
+    /**
+     * E3-13.F7: una franja que no es del acuerdo se rechaza en programación, con el motivo: el 422
+     * de funciones habría llegado como una página 500.
+     */
+    public function testVotarUnaFranjaQueNoEsDelAcuerdoRechazaConElMotivo(): void
+    {
+        [$funcionId] = $this->funcionEnAcuerdo();
+
+        $respuesta = $this->post("/cartelera/{$funcionId}/votar", ['franja_id' => 'franja-de-otro-acuerdo'], Uuid::nuevo(), 'espectador');
+
+        self::assertSame(303, $respuesta->estado());
+        self::assertStringContainsString(rawurlencode('no es de este acuerdo'), $respuesta->cabecera('Location') ?? '');
+    }
+
+    /**
+     * E3-13.F8: la ficha dice hasta cuándo se marca «Me sirve»: las 23:59 del día anterior a la
+     * primera franja, que en el doble de funciones es a diez días.
+     */
+    public function testLaFichaDiceLaFechaLimiteDelAcuerdo(): void
+    {
+        [$funcionId] = $this->funcionEnAcuerdo();
+
+        $cuerpo = $this->pedir("/cartelera/{$funcionId}")->cuerpo();
+
+        self::assertStringContainsString(TarjetaDeFuncion::diaMesYHora(new DateTimeImmutable('+9 days 23:59')), $cuerpo);
+    }
+
+    /**
+     * E3-13.F8: pasada la fecha límite no se marca más «Me sirve», aunque el acuerdo siga abierto
+     * porque una franja llegó al mínimo. El voto vuelve con el motivo y la ficha no ofrece marcar.
+     */
+    public function testPasadaLaFechaLimiteNoSeMarcaMeSirve(): void
+    {
+        [$funcionId] = $this->funcionEnAcuerdo();
+        file_put_contents(sys_get_temp_dir() . '/acuerdo_estado_global.txt', 'vencido');
+        $espectador = Uuid::nuevo();
+
+        $respuesta = $this->post("/cartelera/{$funcionId}/votar", ['franja_id' => 'franja-mock-1'], $espectador, 'espectador');
+
+        self::assertSame(303, $respuesta->estado());
+        self::assertStringContainsString(rawurlencode('Ya pasó la fecha límite'), $respuesta->cabecera('Location') ?? '');
+        $ficha = $this->pedir("/cartelera/{$funcionId}", [], ['X-Nginx-Secreto' => self::SECRETO, 'X-Usuario-Id' => $espectador, 'X-Rol' => 'espectador']);
+        self::assertStringNotContainsString('data-formulario-votar-franja', $ficha->cuerpo());
     }
 
     /**

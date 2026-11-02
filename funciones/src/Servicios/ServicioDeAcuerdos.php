@@ -53,6 +53,7 @@ class ServicioDeAcuerdos
         $acuerdoId = Uuid::nuevo();
         $franjas = [];
         $ahora = new DateTimeImmutable();
+        $manana = new DateTimeImmutable('tomorrow');
 
         foreach ($franjasDatos as $dato) {
             $inicioStr = $dato['fecha_hora_inicio'] ?? '';
@@ -68,6 +69,11 @@ class ServicioDeAcuerdos
             }
             if ($inicio <= $ahora) {
                 throw new InvalidArgumentException('Cada franja tiene que empezar en el futuro.');
+            }
+            // «Me sirve» se marca hasta las 23:59 del día anterior a la primera franja (E3-13.F8):
+            // una de hoy dejaría la fecha límite ya pasada.
+            if ($inicio < $manana) {
+                throw new InvalidArgumentException('Las franjas tienen que ser de mañana en adelante.');
             }
 
             $franjas[] = new FranjaHoraria(
@@ -105,7 +111,7 @@ class ServicioDeAcuerdos
             return null;
         }
 
-        return $this->repositorio->buscarPorFuncion($funcionId);
+        return $this->cerrarSiVencio($this->repositorio->buscarPorFuncion($funcionId));
     }
 
     /**
@@ -117,46 +123,55 @@ class ServicioDeAcuerdos
             return null;
         }
 
-        return $this->repositorio->buscarPorId($id);
+        return $this->cerrarSiVencio($this->repositorio->buscarPorId($id));
     }
 
     /**
-     * Vota o cambia el voto por una franja horaria (E3-13.3 / IC-155).
+     * Si pasó la fecha límite y ninguna franja llegó al mínimo, el acuerdo se cierra sin mínimo
+     * y el organizador decide si propone otras franjas o cancela (E3-13.F8). Se cierra al
+     * leerlo, que es cuando alguien lo mira: no hay una tarea programada que lo haga a la hora.
+     */
+    private function cerrarSiVencio(?AcuerdoFecha $acuerdo): ?AcuerdoFecha
+    {
+        if ($acuerdo === null || !$acuerdo->vencioSinMinimo(new DateTimeImmutable())) {
+            return $acuerdo;
+        }
+        $this->repositorio->actualizarEstado($acuerdo->id, EstadoAcuerdo::SinMinimo, null);
+
+        return $this->repositorio->buscarPorId($acuerdo->id) ?? $acuerdo;
+    }
+
+    /**
+     * Marca «Me sirve» en una franja (E3-13.3 / IC-155). Se pueden marcar varias del mismo
+     * acuerdo, como dice el wireframe: cada franja cuenta a los que la marcaron (E3-13.F7).
      *
-     * @throws ReglaIncumplida si el acuerdo no está abierto o la franja no existe
+     * @throws ReglaIncumplida si el acuerdo no está abierto o la franja no es de este acuerdo
      */
-    public function votarFranja(string $acuerdoId, string $franjaId, string $usuarioId): void
+    public function marcarFranja(string $acuerdoId, string $franjaId, string $usuarioId): void
     {
-        $acuerdo = $this->acuerdoPorId($acuerdoId);
-        if ($acuerdo === null) {
-            throw new ReglaIncumplida('El acuerdo de fecha no existe.');
-        }
-
-        if (!$acuerdo->estaAbierto()) {
-            throw new ReglaIncumplida('El acuerdo de fecha ya no se encuentra abierto para votación.');
-        }
-
-        $existeFranja = false;
-        foreach ($acuerdo->franjas as $f) {
-            if ($f->id === $franjaId) {
-                $existeFranja = true;
-                break;
-            }
-        }
-
-        if (!$existeFranja) {
-            throw new ReglaIncumplida('La franja seleccionada no pertenece a este acuerdo.');
-        }
-
-        $this->repositorio->votarOActualizar($acuerdoId, $acuerdo->funcionId, $franjaId, $usuarioId);
+        $acuerdo = $this->acuerdoParaVotar($acuerdoId, $franjaId);
+        $this->repositorio->marcar($acuerdoId, $acuerdo->funcionId, $franjaId, $usuarioId);
     }
 
     /**
-     * Devuelve la franja votada por el usuario en este acuerdo (si votó).
+     * Quita el «Me sirve» de una franja, mientras el acuerdo esté abierto (E3-13.F7).
+     *
+     * @throws ReglaIncumplida si el acuerdo no está abierto o la franja no es de este acuerdo
      */
-    public function franjaVotadaPorUsuario(string $acuerdoId, string $usuarioId): ?string
+    public function desmarcarFranja(string $acuerdoId, string $franjaId, string $usuarioId): void
     {
-        return $this->repositorio->votoDeUsuario($acuerdoId, $usuarioId);
+        $this->acuerdoParaVotar($acuerdoId, $franjaId);
+        $this->repositorio->desmarcar($franjaId, $usuarioId);
+    }
+
+    /**
+     * Las franjas del acuerdo que marcó el usuario.
+     *
+     * @return list<string>
+     */
+    public function franjasMarcadasPor(string $acuerdoId, string $usuarioId): array
+    {
+        return $this->repositorio->franjasDeUsuario($acuerdoId, $usuarioId);
     }
 
     /**
@@ -209,5 +224,33 @@ class ServicioDeAcuerdos
         $this->repositorio->actualizarEstado($acuerdoId, EstadoAcuerdo::SinMinimo, null);
 
         return $this->acuerdoPorId($acuerdoId) ?? $acuerdo;
+    }
+
+    /**
+     * El acuerdo, si está abierto y la franja es suya: lo que hace falta para marcarla o desmarcarla.
+     *
+     * @throws ReglaIncumplida si no
+     */
+    private function acuerdoParaVotar(string $acuerdoId, string $franjaId): AcuerdoFecha
+    {
+        $acuerdo = $this->acuerdoPorId($acuerdoId);
+        if ($acuerdo === null) {
+            throw new ReglaIncumplida('El acuerdo de fecha no existe.');
+        }
+
+        if (!$acuerdo->estaAbierto()) {
+            throw new ReglaIncumplida('El acuerdo de fecha ya no se encuentra abierto para votación.');
+        }
+        if (!$acuerdo->votacionAbierta(new DateTimeImmutable())) {
+            throw new ReglaIncumplida('Ya pasó la fecha límite para marcar «Me sirve».');
+        }
+
+        foreach ($acuerdo->franjas as $franja) {
+            if ($franja->id === $franjaId) {
+                return $acuerdo;
+            }
+        }
+
+        throw new ReglaIncumplida('La franja seleccionada no pertenece a este acuerdo.');
     }
 }

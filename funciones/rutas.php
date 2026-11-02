@@ -32,6 +32,7 @@ return static function (Router $router): void {
     $router->interna('POST', '/interno/acuerdos', [AcuerdosInternos::class, 'proponer'], ['programacion']);
     $router->interna('GET', '/interno/acuerdos/por-funcion/{id}', [AcuerdosInternos::class, 'mostrarPorFuncion'], ['programacion']);
     $router->interna('POST', '/interno/acuerdos/{id}/votar', [AcuerdosInternos::class, 'votar'], ['programacion']);
+    $router->interna('POST', '/interno/acuerdos/{id}/quitar-voto', [AcuerdosInternos::class, 'quitarVoto'], ['programacion']);
     $router->interna('POST', '/interno/acuerdos/{id}/confirmar', [AcuerdosInternos::class, 'confirmar'], ['programacion']);
     $router->interna('POST', '/interno/acuerdos/{id}/cerrar-sin-minimo', [AcuerdosInternos::class, 'cerrarSinMinimo'], ['programacion']);
 };

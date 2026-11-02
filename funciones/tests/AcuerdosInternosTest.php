@@ -144,25 +144,78 @@ final class AcuerdosInternosTest extends TestCase
             'usuario_id' => self::USUARIO_EVA,
         ]);
 
-        // Consulta pasando usuario_id de Eva: debe decir que votó franja 1
+        // Consulta pasando usuario_id de Eva: debe decir que marcó la franja 1
         $consultaEva = $this->pedirInterno('GET', '/interno/acuerdos/por-funcion/' . self::FUNCION_ID . '?usuario_id=' . self::USUARIO_EVA);
         self::assertSame(200, $consultaEva->estado());
         $datosEva = json_decode($consultaEva->cuerpo(), true);
-        self::assertSame($franja1Id, $datosEva['voto_usuario_franja_id']);
+        self::assertSame([$franja1Id], $datosEva['franjas_del_usuario']);
         self::assertSame(1, $datosEva['franjas'][0]['votos']);
         self::assertSame(0, $datosEva['franjas'][1]['votos']);
 
-        // Eva cambia su voto a franja 2
+        // Eva marca también la franja 2: «Podés marcar más de una» (E3-13.F7)
         $this->pedirInterno('POST', "/interno/acuerdos/{$acuerdoId}/votar", [
             'franja_id' => $franja2Id,
             'usuario_id' => self::USUARIO_EVA,
         ]);
 
-        $consultaEvaCambio = $this->pedirInterno('GET', '/interno/acuerdos/por-funcion/' . self::FUNCION_ID . '?usuario_id=' . self::USUARIO_EVA);
-        $datosCambio = json_decode($consultaEvaCambio->cuerpo(), true);
-        self::assertSame($franja2Id, $datosCambio['voto_usuario_franja_id']);
-        self::assertSame(0, $datosCambio['franjas'][0]['votos']);
-        self::assertSame(1, $datosCambio['franjas'][1]['votos']);
+        $datosDos = json_decode($this->pedirInterno('GET', '/interno/acuerdos/por-funcion/' . self::FUNCION_ID . '?usuario_id=' . self::USUARIO_EVA)->cuerpo(), true);
+        self::assertSame([$franja1Id, $franja2Id], $datosDos['franjas_del_usuario']);
+        self::assertSame(1, $datosDos['franjas'][0]['votos']);
+        self::assertSame(1, $datosDos['franjas'][1]['votos']);
+
+        // Y quita la 1: queda sólo la 2
+        $quitar = $this->pedirInterno('POST', "/interno/acuerdos/{$acuerdoId}/quitar-voto", [
+            'franja_id' => $franja1Id,
+            'usuario_id' => self::USUARIO_EVA,
+        ]);
+        self::assertSame(200, $quitar->estado());
+
+        $datosQuitado = json_decode($this->pedirInterno('GET', '/interno/acuerdos/por-funcion/' . self::FUNCION_ID . '?usuario_id=' . self::USUARIO_EVA)->cuerpo(), true);
+        self::assertSame([$franja2Id], $datosQuitado['franjas_del_usuario']);
+        self::assertSame(0, $datosQuitado['franjas'][0]['votos']);
+        self::assertSame(1, $datosQuitado['franjas'][1]['votos']);
+    }
+
+    /**
+     * E3-13.F7: marcar dos veces la misma franja (un doble clic) cuenta una sola vez.
+     */
+    public function testMarcarDosVecesLaMismaFranjaCuentaUnaSola(): void
+    {
+        $acuerdo = json_decode($this->pedirInterno('POST', '/interno/acuerdos', [
+            'funcion_id' => self::FUNCION_ID,
+            'minimo_asistentes' => 2,
+            'franjas' => [['fecha_hora_inicio' => self::dentroDe(10, '20:00:00')], ['fecha_hora_inicio' => self::dentroDe(11, '20:00:00')]],
+        ])->cuerpo(), true);
+        $franjaId = $acuerdo['franjas'][0]['id'];
+
+        foreach ([1, 2] as $vez) {
+            $voto = $this->pedirInterno('POST', "/interno/acuerdos/{$acuerdo['id']}/votar", ['franja_id' => $franjaId, 'usuario_id' => self::USUARIO_EVA]);
+            self::assertSame(200, $voto->estado(), "Marcar por {$vez}.ª vez");
+        }
+
+        self::assertSame(1, $this->base->valor('SELECT COUNT(*) FROM voto_acuerdo WHERE franja_id = ?', [$franjaId]));
+    }
+
+    /**
+     * E3-13.F7: no se quita una marca de una franja de otro acuerdo, ni con el acuerdo cerrado.
+     */
+    public function testQuitarElVotoPideLaFranjaDelAcuerdoYElAcuerdoAbierto(): void
+    {
+        $acuerdo = json_decode($this->pedirInterno('POST', '/interno/acuerdos', [
+            'funcion_id' => self::FUNCION_ID,
+            'minimo_asistentes' => 2,
+            'franjas' => [['fecha_hora_inicio' => self::dentroDe(10, '20:00:00')], ['fecha_hora_inicio' => self::dentroDe(11, '20:00:00')]],
+        ])->cuerpo(), true);
+        $franjaId = $acuerdo['franjas'][0]['id'];
+        $this->pedirInterno('POST', "/interno/acuerdos/{$acuerdo['id']}/votar", ['franja_id' => $franjaId, 'usuario_id' => self::USUARIO_EVA]);
+
+        $ajena = $this->pedirInterno('POST', "/interno/acuerdos/{$acuerdo['id']}/quitar-voto", ['franja_id' => Uuid::nuevo(), 'usuario_id' => self::USUARIO_EVA]);
+        self::assertSame(422, $ajena->estado());
+
+        $this->pedirInterno('POST', "/interno/acuerdos/{$acuerdo['id']}/cerrar-sin-minimo");
+        $cerrado = $this->pedirInterno('POST', "/interno/acuerdos/{$acuerdo['id']}/quitar-voto", ['franja_id' => $franjaId, 'usuario_id' => self::USUARIO_EVA]);
+        self::assertSame(422, $cerrado->estado());
+        self::assertSame(1, $this->base->valor('SELECT COUNT(*) FROM voto_acuerdo WHERE franja_id = ?', [$franjaId]));
     }
 
     public function testConfirmarFranjaGanadoraCuandoAlcanzaElMinimo(): void
@@ -300,7 +353,95 @@ final class AcuerdosInternosTest extends TestCase
 
         $acuerdo = json_decode($this->pedirInterno('GET', '/interno/acuerdos/por-funcion/' . self::FUNCION_ID . '?usuario_id=' . self::USUARIO_EVA)->cuerpo(), true);
         self::assertSame($segundo['id'], $acuerdo['id']);
-        self::assertSame($nueva, $acuerdo['voto_usuario_franja_id']);
+        self::assertSame([$nueva], $acuerdo['franjas_del_usuario']);
         self::assertSame(1, $acuerdo['franjas'][1]['votos']);
+    }
+
+    /**
+     * E3-13.F8: «Me sirve» se marca hasta las 23:59 del día anterior a la primera franja, así que
+     * una franja de hoy no se acepta.
+     */
+    public function testNoAceptaUnaFranjaDeHoy(): void
+    {
+        $respuesta = $this->pedirInterno('POST', '/interno/acuerdos', [
+            'funcion_id' => self::FUNCION_ID,
+            'minimo_asistentes' => 2,
+            'franjas' => [
+                ['fecha_hora_inicio' => (new \DateTimeImmutable('today'))->format('Y-m-d') . ' 23:59:00'],
+                ['fecha_hora_inicio' => self::dentroDe(11, '20:00:00')],
+            ],
+        ]);
+
+        self::assertSame(422, $respuesta->estado());
+    }
+
+    /**
+     * E3-13.F8: la fecha límite sale de la primera franja, como en el wireframe.
+     */
+    public function testElAcuerdoDiceSuFechaLimite(): void
+    {
+        $this->pedirInterno('POST', '/interno/acuerdos', [
+            'funcion_id' => self::FUNCION_ID,
+            'minimo_asistentes' => 2,
+            'franjas' => [['fecha_hora_inicio' => self::dentroDe(11, '20:00:00')], ['fecha_hora_inicio' => self::dentroDe(10, '21:00:00')]],
+        ]);
+
+        $acuerdo = json_decode($this->pedirInterno('GET', '/interno/acuerdos/por-funcion/' . self::FUNCION_ID)->cuerpo(), true);
+
+        self::assertSame(self::dentroDe(9, '23:59:59'), $acuerdo['fecha_limite']);
+        self::assertTrue($acuerdo['votacion_abierta']);
+    }
+
+    /**
+     * E3-13.F8: pasada la fecha límite no se marca más, y si ninguna franja llegó al mínimo el
+     * acuerdo se cierra sin mínimo para que el organizador decida.
+     */
+    public function testPasadaLaFechaLimiteSinMinimoElAcuerdoSeCierra(): void
+    {
+        $acuerdo = $this->acuerdoConLaPrimeraFranjaYaEmpezada(minimo: 2, votoDeEva: false);
+
+        $voto = $this->pedirInterno('POST', "/interno/acuerdos/{$acuerdo['id']}/votar", ['franja_id' => $acuerdo['franjas'][1]['id'], 'usuario_id' => self::USUARIO_EVA]);
+        self::assertSame(422, $voto->estado());
+
+        $leido = json_decode($this->pedirInterno('GET', '/interno/acuerdos/por-funcion/' . self::FUNCION_ID)->cuerpo(), true);
+        self::assertSame('sin_minimo', $leido['estado']);
+        self::assertFalse($leido['votacion_abierta']);
+    }
+
+    /**
+     * E3-13.F8: con el mínimo alcanzado, el acuerdo sigue abierto después de la fecha límite: el
+     * organizador todavía tiene que confirmar la franja.
+     */
+    public function testPasadaLaFechaLimiteConElMinimoSigueAbierto(): void
+    {
+        $this->acuerdoConLaPrimeraFranjaYaEmpezada(minimo: 1, votoDeEva: true);
+
+        $leido = json_decode($this->pedirInterno('GET', '/interno/acuerdos/por-funcion/' . self::FUNCION_ID)->cuerpo(), true);
+
+        self::assertSame('abierto', $leido['estado']);
+        self::assertFalse($leido['votacion_abierta']);
+    }
+
+    /**
+     * Un acuerdo con dos franjas cuya primera se corre a una hora atrás: su fecha límite ya pasó.
+     *
+     * @return array<string, mixed> el acuerdo como lo devolvió el alta
+     */
+    private function acuerdoConLaPrimeraFranjaYaEmpezada(int $minimo, bool $votoDeEva): array
+    {
+        $acuerdo = json_decode($this->pedirInterno('POST', '/interno/acuerdos', [
+            'funcion_id' => self::FUNCION_ID,
+            'minimo_asistentes' => $minimo,
+            'franjas' => [['fecha_hora_inicio' => self::dentroDe(10, '20:00:00')], ['fecha_hora_inicio' => self::dentroDe(11, '20:00:00')]],
+        ])->cuerpo(), true);
+        if ($votoDeEva) {
+            $this->pedirInterno('POST', "/interno/acuerdos/{$acuerdo['id']}/votar", ['franja_id' => $acuerdo['franjas'][0]['id'], 'usuario_id' => self::USUARIO_EVA]);
+        }
+        $this->base->ejecutar(
+            'UPDATE acuerdo_franja SET fecha_hora_inicio = ? WHERE id = ?',
+            [(new \DateTimeImmutable('-1 hour'))->format('Y-m-d H:i:s'), $acuerdo['franjas'][0]['id']],
+        );
+
+        return $acuerdo;
     }
 }

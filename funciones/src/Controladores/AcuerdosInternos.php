@@ -56,37 +56,29 @@ final class AcuerdosInternos extends Controlador
 
         $datos = $acuerdo->paraJson();
 
+        // Las franjas que marcó quien mira la ficha: pueden ser varias (E3-13.F7).
         $usuarioId = $peticion->consulta('usuario_id');
-        if (is_string($usuarioId) && $usuarioId !== '') {
-            $datos['voto_usuario_franja_id'] = $this->servicio->franjaVotadaPorUsuario($acuerdo->id, $usuarioId);
-        } else {
-            $datos['voto_usuario_franja_id'] = null;
-        }
+        $datos['franjas_del_usuario'] = is_string($usuarioId) && $usuarioId !== ''
+            ? $this->servicio->franjasMarcadasPor($acuerdo->id, $usuarioId)
+            : [];
 
         return $this->json($datos);
     }
 
     /**
-     * Emite o cambia el voto por una franja (POST /interno/acuerdos/{id}/votar).
+     * Marca «Me sirve» en una franja (POST /interno/acuerdos/{id}/votar).
      */
     public function votar(Peticion $peticion): Respuesta
     {
-        $acuerdoId = (string) $peticion->parametro('id');
-        $cuerpo = $peticion->cuerpo();
-        $franjaId = (string) ($cuerpo['franja_id'] ?? '');
-        $usuarioId = (string) ($cuerpo['usuario_id'] ?? '');
+        return $this->cambiarMarca($peticion, true);
+    }
 
-        if ($franjaId === '' || $usuarioId === '') {
-            return $this->json(['error' => 'Faltan parámetros requeridos: franja_id y usuario_id.'], 422);
-        }
-
-        try {
-            $this->servicio->votarFranja($acuerdoId, $franjaId, $usuarioId);
-        } catch (ReglaIncumplida $error) {
-            return $this->json(['error' => $error->getMessage()], 422);
-        }
-
-        return $this->json(['ok' => true, 'franja_id' => $franjaId]);
+    /**
+     * Quita el «Me sirve» de una franja (POST /interno/acuerdos/{id}/quitar-voto, E3-13.F7).
+     */
+    public function quitarVoto(Peticion $peticion): Respuesta
+    {
+        return $this->cambiarMarca($peticion, false);
     }
 
     /**
@@ -119,5 +111,29 @@ final class AcuerdosInternos extends Controlador
         }
 
         return $this->json($acuerdo->paraJson());
+    }
+
+    private function cambiarMarca(Peticion $peticion, bool $marcar): Respuesta
+    {
+        $acuerdoId = (string) $peticion->parametro('id');
+        $cuerpo = $peticion->cuerpo();
+        $franjaId = (string) ($cuerpo['franja_id'] ?? '');
+        $usuarioId = (string) ($cuerpo['usuario_id'] ?? '');
+
+        if ($franjaId === '' || $usuarioId === '') {
+            return $this->json(['error' => 'Faltan parámetros requeridos: franja_id y usuario_id.'], 422);
+        }
+
+        try {
+            if ($marcar) {
+                $this->servicio->marcarFranja($acuerdoId, $franjaId, $usuarioId);
+            } else {
+                $this->servicio->desmarcarFranja($acuerdoId, $franjaId, $usuarioId);
+            }
+        } catch (ReglaIncumplida $error) {
+            return $this->json(['error' => $error->getMessage()], 422);
+        }
+
+        return $this->json(['ok' => true, 'franja_id' => $franjaId, 'marcada' => $marcar]);
     }
 }

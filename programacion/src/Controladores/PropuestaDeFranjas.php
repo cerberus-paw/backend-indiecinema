@@ -106,6 +106,13 @@ final class PropuestaDeFranjas
 
                 continue;
             }
+            // «Me sirve» se marca hasta las 23:59 del día anterior a la primera franja (E3-13.F8):
+            // con una de hoy, la fecha límite ya habría pasado.
+            if ($inicio < $ahora->modify('tomorrow')) {
+                $problemas[] = "La opción {$opcion} es de hoy: las franjas tienen que ser de mañana en adelante, porque «Me sirve» se marca hasta el día anterior a la primera.";
+
+                continue;
+            }
             // La franja es de un solo día: una que pasa la medianoche termina, a lo sumo, 23:59.
             if ($fin !== null && $fin <= $inicio) {
                 $problemas[] = "La opción {$opcion} tiene que terminar después de empezar.";

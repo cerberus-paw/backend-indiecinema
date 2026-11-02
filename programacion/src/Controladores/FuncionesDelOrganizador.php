@@ -294,6 +294,38 @@ final class FuncionesDelOrganizador extends Controlador
     }
 
     /**
+     * El organizador confirma la franja ganadora cuando alcanza el mínimo de asistentes (E3-13.4 / IC-156).
+     */
+    public function confirmarAcuerdo(Peticion $peticion): Respuesta
+    {
+        $organizador = self::organizador($peticion);
+        $id = (string) $peticion->parametro('id');
+        if (!Uuid::esValido($id)) {
+            throw ExcepcionHttp::noEncontrada();
+        }
+
+        try {
+            $funcion = $this->servicio->confirmarAcuerdo($organizador, $id);
+        } catch (ReglaIncumplida $regla) {
+            if ($peticion->cabecera('Accept') === 'application/json' || $peticion->cabecera('Content-Type') === 'application/json') {
+                return $this->json(['error' => $regla->getMessage()], 422);
+            }
+
+            return $this->redirigir("/cartelera/{$id}?error_voto=" . rawurlencode($regla->getMessage()));
+        }
+
+        if ($peticion->cabecera('Accept') === 'application/json' || $peticion->cabecera('Content-Type') === 'application/json') {
+            return $this->json([
+                'ok' => true,
+                'estado' => $funcion->estado->value,
+                'fecha_hora' => $funcion->fechaHora?->format('Y-m-d H:i:s'),
+            ]);
+        }
+
+        return $this->redirigir("/cartelera/{$id}?guardada=1");
+    }
+
+    /**
      * @param list<Sala>                                                                                        $salas
      * @param list<Obra>                                                                                        $obras
      * @param array{formulario?: FormularioDeFuncion, valores?: array<string, mixed>, error_general?: ?string} $extra

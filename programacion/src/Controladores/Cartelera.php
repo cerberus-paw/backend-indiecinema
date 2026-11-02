@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace IndieCinema\Programacion\Controladores;
 
+use DateTimeImmutable;
 use IndieCinema\Nucleo\Controlador;
 use IndieCinema\Nucleo\Http\ExcepcionHttp;
 use IndieCinema\Nucleo\Http\Peticion;
@@ -120,19 +121,95 @@ final class Cartelera extends Controlador
         $votoActual = $usuario !== null ? $this->servicio->votoDe($detalle->id, $usuario->id) : null;
         $conteoVotos = $this->servicio->conteoDeVotos($detalle->id);
 
+        $datosFuncion = self::datosDeDetalle($detalle, $editable, $cancelable, $cerrable);
+        $votoFranja = null;
+        $conteoVotosFranjas = [];
+        $acuerdo = null;
+
+        if ($detalle->estado === EstadoFuncion::EnAcuerdoFecha) {
+            $acuerdo = $this->servicio->acuerdoDeFecha($id, $usuario?->id);
+            if ($acuerdo !== null) {
+                $minimoAsistentes = (int) ($acuerdo['minimo_asistentes'] ?? 20);
+                $datosFuncion['minimo_asistentes'] = $minimoAsistentes;
+                $datosFuncion['acuerdo_sin_minimo'] = ($acuerdo['estado'] ?? '') === 'sin_minimo';
+                $votoFranja = $acuerdo['voto_usuario_franja_id'] ?? null;
+                $datosFuncion['voto_franja'] = $votoFranja;
+
+                $duracionMinutos = !empty($detalle->obras)
+                    ? array_sum(array_map(static fn (ObraEnDetalle $o): int => $o->duracionMinutos, $detalle->obras))
+                    : 120;
+
+                $franjas = [];
+                $maxVotosFranja = -1;
+                $franjaLider = null;
+                foreach ($acuerdo['franjas'] ?? [] as $f) {
+                    $inicioStr = (string) ($f['inicio'] ?? '');
+                    $finStr = isset($f['fin']) && $f['fin'] !== null ? (string) $f['fin'] : null;
+                    $inicioDt = DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $inicioStr) ?: new DateTimeImmutable($inicioStr);
+                    $finDt = $finStr !== null
+                        ? (DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $finStr) ?: new DateTimeImmutable($finStr))
+                        : $inicioDt->modify("+{$duracionMinutos} minutes");
+
+                    $votosF = (int) ($f['votos'] ?? 0);
+                    $conteoVotosFranjas[$f['id']] = $votosF;
+
+                    $franjaItem = [
+                        'id' => $f['id'],
+                        'fecha' => self::formatearFechaLarga($inicioDt),
+                        'hora_inicio' => $inicioDt->format('H:i'),
+                        'hora_fin' => $finDt->format('H:i'),
+                        'desde' => $inicioDt->format('H:i'),
+                        'hasta' => $finDt->format('H:i'),
+                        'votos' => $votosF,
+                    ];
+
+                    if ($votosF > $maxVotosFranja) {
+                        $maxVotosFranja = $votosF;
+                        $franjaLider = $franjaItem;
+                    }
+
+                    $franjas[] = $franjaItem;
+                }
+                $datosFuncion['franjas'] = $franjas;
+                $datosFuncion['confirmable'] = $esPropia && ($maxVotosFranja >= $minimoAsistentes);
+                $datosFuncion['franja_ganadora'] = $franjaLider;
+                $datosFuncion['obra_ganadora'] = $datosFuncion['obras'][0] ?? null;
+            }
+        }
+
+        if ($peticion->cabecera('Accept') === 'application/json') {
+            return $this->json([
+                'funcion' => [
+                    ...$datosFuncion,
+                    'reservable' => Funcion::seReserva($detalle->estado, $detalle->fechaHora),
+                ],
+                'acuerdo_fecha' => $acuerdo,
+                'voto_usuario' => $votoActual,
+                'voto_franja' => $votoFranja,
+                'conteo_votos' => $conteoVotos,
+                'conteo_votos_franjas' => $conteoVotosFranjas,
+            ]);
+        }
+
         return $this->vista('ficha_funcion.html.twig', [
             'funcion' => [
-                ...self::datosDeDetalle($detalle, $editable, $cancelable, $cerrable),
+                ...$datosFuncion,
                 'reservable' => Funcion::seReserva($detalle->estado, $detalle->fechaHora),
             ],
+            'acuerdo_fecha' => $acuerdo,
             'voto_usuario' => $votoActual,
+            'voto_franja' => $votoFranja,
             'conteo_votos' => $conteoVotos,
+            'conteo_votos_franjas' => $conteoVotosFranjas,
             'votado' => $peticion->consulta('votado') === '1',
+            'franja_votada' => $peticion->consulta('votado') === '1',
             'error_voto' => $peticion->consulta('error_voto'),
+            'error_franja' => $peticion->consulta('error_voto'),
             'votacion_cerrada' => $esPropia && $peticion->consulta('votacion_cerrada') === '1',
             // El aviso de que se acaba de guardar: sólo para el organizador que la editó. La ficha
             // es pública, y si no, lo vería cualquiera que abra el enlace con el parámetro puesto.
             'guardada' => $esPropia && $peticion->consulta('guardada') === '1',
+            'accion_votar_franja' => "/cartelera/{$id}/votar",
         ]);
     }
 
@@ -249,5 +326,18 @@ final class Cartelera extends Controlador
                 'afiche' => $obra->afiche,
             ], $detalle->obras),
         ];
+    }
+
+    private const DIAS_COMPLETOS = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+    private const MESES_COMPLETOS = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+
+    public static function formatearFechaLarga(DateTimeImmutable $fecha): string
+    {
+        return sprintf(
+            '%s %d de %s',
+            self::DIAS_COMPLETOS[(int) $fecha->format('w')],
+            (int) $fecha->format('j'),
+            self::MESES_COMPLETOS[(int) $fecha->format('n') - 1],
+        );
     }
 }

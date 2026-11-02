@@ -31,7 +31,13 @@ final class OcupacionDeFunciones
     }
 
     /**
-     * Los de varias funciones en un solo pedido, para una página de tarjetas.
+     * Lo más que acepta GET /interno/ocupacion en un pedido (OcupacionInterna::MAXIMO_POR_PEDIDO).
+     * Una página de la cartelera nunca llega, pero la ficha de una sala muestra todas sus funciones.
+     */
+    public const MAXIMO_POR_PEDIDO = 100;
+
+    /**
+     * Los de varias funciones, para una lista de tarjetas: en un solo pedido, o de a 100 si son más.
      *
      * @param list<string> $funcionesIds
      *
@@ -45,13 +51,17 @@ final class OcupacionDeFunciones
         }
 
         return $this->pedir(function (ClienteInterno $cliente) use ($ids): array {
-            $datos = $cliente->get('funciones', '/interno/ocupacion', ['funciones' => implode(',', $ids)]);
-            $ocupados = is_array($datos) ? ($datos['lugares_ocupados'] ?? null) : null;
-            if (!is_array($ocupados) || array_filter($ocupados, is_int(...)) !== $ocupados) {
-                throw new RuntimeException('funciones no respondió los lugares ocupados a GET /interno/ocupacion.');
+            $todos = [];
+            foreach (array_chunk($ids, self::MAXIMO_POR_PEDIDO) as $tanda) {
+                $datos = $cliente->get('funciones', '/interno/ocupacion', ['funciones' => implode(',', $tanda)]);
+                $ocupados = is_array($datos) ? ($datos['lugares_ocupados'] ?? null) : null;
+                if (!is_array($ocupados) || array_filter($ocupados, is_int(...)) !== $ocupados) {
+                    throw new RuntimeException('funciones no respondió los lugares ocupados a GET /interno/ocupacion.');
+                }
+                $todos += $ocupados;
             }
 
-            return $ocupados;
+            return $todos;
         });
     }
 

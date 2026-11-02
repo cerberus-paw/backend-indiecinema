@@ -1,0 +1,15 @@
+# Análisis estático (composer analisis): nivel 5, el que encuentra llamadas a métodos y propiedades
+# que no existen, argumentos del tipo equivocado y código muerto sin pedir tipos en todo. Lo que ya
+# estaba antes de sumarlo queda en phpstan-baseline.neon: el CI marca sólo lo nuevo. Al arreglar
+# algo de la lista, se regenera con: composer analisis -- --generate-baseline
+includes:
+    - phpstan-baseline.neon
+
+parameters:
+    level: 5
+    # La de la imagen de los subsistemas y del CI, aunque se corra con otro PHP.
+    phpVersion: 80400
+    paths:
+        - src
+        - tests
+    tmpDir: .phpstan

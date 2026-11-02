@@ -42,7 +42,11 @@ final class Inicio extends Controlador
         $salas = $this->salas->publicadas();
 
         return $this->vista('inicio.html.twig', [
-            'funciones' => TarjetaDeFuncion::todas($proximas->funciones, $this->ocupacion->deVarias(array_column($proximas->funciones, 'id'))),
+            'funciones' => TarjetaDeFuncion::todas(
+                $proximas->funciones,
+                $this->cartelera->acuerdosDe($proximas->funciones),
+                $this->ocupacion->deVarias(TarjetaDeFuncion::conLugares($proximas->funciones)),
+            ),
             'total_funciones' => $proximas->total,
             'salas' => array_map(TarjetaDeSala::datos(...), array_slice($salas, 0, self::SALAS)),
             'total_salas' => count($salas),

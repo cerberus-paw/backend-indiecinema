@@ -8,7 +8,8 @@
  * otro lado), y como ellas, sólo a programación con su token.
  *
  * Los lugares ocupados de cada función los decide la prueba: los escribe en el JSON que nombra
- * la variable de entorno OCUPACION (funcion_id => ocupados). Las que no están, 0.
+ * la variable de entorno OCUPACION (funcion_id => ocupados). Las que no están, 0. Como la de
+ * verdad, no responde más de 100 funciones por pedido.
  */
 
 declare(strict_types=1);
@@ -28,6 +29,12 @@ $ruta = (string) parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 
 if ($ruta === '/interno/ocupacion') {
     $ids = array_filter(explode(',', (string) ($_GET['funciones'] ?? '')));
+    if (count($ids) > 100) {
+        http_response_code(400);
+        echo '{"error":"Se piden hasta 100 funciones por vez."}';
+
+        return;
+    }
     echo json_encode(['lugares_ocupados' => (object) array_map(static fn (string $id): int => $ocupados[$id] ?? 0, array_combine($ids, $ids))]);
 } elseif (preg_match('#^/interno/funciones/([0-9a-f-]{36})/ocupacion$#', $ruta, $partes) === 1) {
     echo json_encode(['funcion_id' => $partes[1], 'lugares_ocupados' => $ocupados[$partes[1]] ?? 0]);

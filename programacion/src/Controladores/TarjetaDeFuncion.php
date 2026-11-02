@@ -55,6 +55,14 @@ final class TarjetaDeFuncion
     }
 
     /**
+     * «17 sep 23:59», como la fecha límite del acuerdo en el wireframe.
+     */
+    public static function diaMesYHora(DateTimeImmutable $fecha): string
+    {
+        return sprintf('%d %s %s', (int) $fecha->format('j'), self::MESES[(int) $fecha->format('n') - 1], $fecha->format('H:i'));
+    }
+
+    /**
      * «$ 3.500», con los centavos sólo si tiene; 0 es «a la gorra».
      */
     public static function precio(float $precio): string

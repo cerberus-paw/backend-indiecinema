@@ -356,4 +356,92 @@ final class AcuerdosInternosTest extends TestCase
         self::assertSame([$nueva], $acuerdo['franjas_del_usuario']);
         self::assertSame(1, $acuerdo['franjas'][1]['votos']);
     }
+
+    /**
+     * E3-13.F8: «Me sirve» se marca hasta las 23:59 del día anterior a la primera franja, así que
+     * una franja de hoy no se acepta.
+     */
+    public function testNoAceptaUnaFranjaDeHoy(): void
+    {
+        $respuesta = $this->pedirInterno('POST', '/interno/acuerdos', [
+            'funcion_id' => self::FUNCION_ID,
+            'minimo_asistentes' => 2,
+            'franjas' => [
+                ['fecha_hora_inicio' => (new \DateTimeImmutable('today'))->format('Y-m-d') . ' 23:59:00'],
+                ['fecha_hora_inicio' => self::dentroDe(11, '20:00:00')],
+            ],
+        ]);
+
+        self::assertSame(422, $respuesta->estado());
+    }
+
+    /**
+     * E3-13.F8: la fecha límite sale de la primera franja, como en el wireframe.
+     */
+    public function testElAcuerdoDiceSuFechaLimite(): void
+    {
+        $this->pedirInterno('POST', '/interno/acuerdos', [
+            'funcion_id' => self::FUNCION_ID,
+            'minimo_asistentes' => 2,
+            'franjas' => [['fecha_hora_inicio' => self::dentroDe(11, '20:00:00')], ['fecha_hora_inicio' => self::dentroDe(10, '21:00:00')]],
+        ]);
+
+        $acuerdo = json_decode($this->pedirInterno('GET', '/interno/acuerdos/por-funcion/' . self::FUNCION_ID)->cuerpo(), true);
+
+        self::assertSame(self::dentroDe(9, '23:59:59'), $acuerdo['fecha_limite']);
+        self::assertTrue($acuerdo['votacion_abierta']);
+    }
+
+    /**
+     * E3-13.F8: pasada la fecha límite no se marca más, y si ninguna franja llegó al mínimo el
+     * acuerdo se cierra sin mínimo para que el organizador decida.
+     */
+    public function testPasadaLaFechaLimiteSinMinimoElAcuerdoSeCierra(): void
+    {
+        $acuerdo = $this->acuerdoConLaPrimeraFranjaYaEmpezada(minimo: 2, votoDeEva: false);
+
+        $voto = $this->pedirInterno('POST', "/interno/acuerdos/{$acuerdo['id']}/votar", ['franja_id' => $acuerdo['franjas'][1]['id'], 'usuario_id' => self::USUARIO_EVA]);
+        self::assertSame(422, $voto->estado());
+
+        $leido = json_decode($this->pedirInterno('GET', '/interno/acuerdos/por-funcion/' . self::FUNCION_ID)->cuerpo(), true);
+        self::assertSame('sin_minimo', $leido['estado']);
+        self::assertFalse($leido['votacion_abierta']);
+    }
+
+    /**
+     * E3-13.F8: con el mínimo alcanzado, el acuerdo sigue abierto después de la fecha límite: el
+     * organizador todavía tiene que confirmar la franja.
+     */
+    public function testPasadaLaFechaLimiteConElMinimoSigueAbierto(): void
+    {
+        $this->acuerdoConLaPrimeraFranjaYaEmpezada(minimo: 1, votoDeEva: true);
+
+        $leido = json_decode($this->pedirInterno('GET', '/interno/acuerdos/por-funcion/' . self::FUNCION_ID)->cuerpo(), true);
+
+        self::assertSame('abierto', $leido['estado']);
+        self::assertFalse($leido['votacion_abierta']);
+    }
+
+    /**
+     * Un acuerdo con dos franjas cuya primera se corre a una hora atrás: su fecha límite ya pasó.
+     *
+     * @return array<string, mixed> el acuerdo como lo devolvió el alta
+     */
+    private function acuerdoConLaPrimeraFranjaYaEmpezada(int $minimo, bool $votoDeEva): array
+    {
+        $acuerdo = json_decode($this->pedirInterno('POST', '/interno/acuerdos', [
+            'funcion_id' => self::FUNCION_ID,
+            'minimo_asistentes' => $minimo,
+            'franjas' => [['fecha_hora_inicio' => self::dentroDe(10, '20:00:00')], ['fecha_hora_inicio' => self::dentroDe(11, '20:00:00')]],
+        ])->cuerpo(), true);
+        if ($votoDeEva) {
+            $this->pedirInterno('POST', "/interno/acuerdos/{$acuerdo['id']}/votar", ['franja_id' => $acuerdo['franjas'][0]['id'], 'usuario_id' => self::USUARIO_EVA]);
+        }
+        $this->base->ejecutar(
+            'UPDATE acuerdo_franja SET fecha_hora_inicio = ? WHERE id = ?',
+            [(new \DateTimeImmutable('-1 hour'))->format('Y-m-d H:i:s'), $acuerdo['franjas'][0]['id']],
+        );
+
+        return $acuerdo;
+    }
 }

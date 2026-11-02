@@ -136,6 +136,10 @@ final class Cartelera extends Controlador
                 $minimoAsistentes = (int) ($acuerdo['minimo_asistentes'] ?? 20);
                 $datosFuncion['minimo_asistentes'] = $minimoAsistentes;
                 $datosFuncion['acuerdo_sin_minimo'] = ($acuerdo['estado'] ?? '') === 'sin_minimo';
+                // Hasta cuándo se marca «Me sirve» (E3-13.F8): pasada, la ficha no ofrece marcar.
+                $limite = is_string($acuerdo['fecha_limite'] ?? null) ? DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $acuerdo['fecha_limite']) : false;
+                $datosFuncion['fecha_limite'] = $limite !== false ? TarjetaDeFuncion::diaMesYHora($limite) : null;
+                $datosFuncion['votacion_abierta'] = ($acuerdo['votacion_abierta'] ?? true) === true;
                 // Las que marcó quien mira: pueden ser varias (E3-13.F7).
                 $franjasDelUsuario = is_array($acuerdo['franjas_del_usuario'] ?? null) ? $acuerdo['franjas_del_usuario'] : [];
                 $datosFuncion['franjas_del_usuario'] = $franjasDelUsuario;

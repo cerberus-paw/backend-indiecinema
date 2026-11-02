@@ -60,6 +60,42 @@ final class AcuerdoFecha
         return $lider !== null && $lider->votos >= $this->minimoAsistentes;
     }
 
+    /**
+     * Hasta cuándo se marca «Me sirve»: las 23:59 del día anterior a la primera franja, como en
+     * el wireframe (franjas del 18 al 20 de septiembre, fecha límite el 17 a las 23:59). Se
+     * calcula y no se guarda: depende sólo de las franjas, que no cambian (E3-13.F8).
+     */
+    public function fechaLimite(): ?DateTimeImmutable
+    {
+        $primera = null;
+        foreach ($this->franjas as $franja) {
+            if ($primera === null || $franja->inicio < $primera) {
+                $primera = $franja->inicio;
+            }
+        }
+
+        return $primera?->modify('-1 day')->setTime(23, 59, 59);
+    }
+
+    /**
+     * Si todavía se puede marcar «Me sirve»: el acuerdo está abierto y no pasó la fecha límite.
+     */
+    public function votacionAbierta(DateTimeImmutable $ahora): bool
+    {
+        $limite = $this->fechaLimite();
+
+        return $this->estaAbierto() && ($limite === null || $ahora <= $limite);
+    }
+
+    /**
+     * Si pasó la fecha límite sin que ninguna franja llegara al mínimo: el acuerdo se tiene que
+     * cerrar sin mínimo. Con el mínimo alcanzado sigue abierto, para que el organizador confirme.
+     */
+    public function vencioSinMinimo(DateTimeImmutable $ahora): bool
+    {
+        return $this->estaAbierto() && !$this->votacionAbierta($ahora) && !$this->alcanzoMinimo();
+    }
+
     public function franjaGanadora(): ?FranjaHoraria
     {
         if ($this->franjaGanadoraId === null) {
@@ -89,6 +125,8 @@ final class AcuerdoFecha
             'franja_ganadora_id' => $this->franjaGanadoraId,
             'franja_ganadora' => $this->franjaGanadora()?->paraJson(),
             'alcanzo_minimo' => $this->alcanzoMinimo(),
+            'fecha_limite' => $this->fechaLimite()?->format('Y-m-d H:i:s'),
+            'votacion_abierta' => $this->votacionAbierta(new DateTimeImmutable()),
             'creado_en' => $this->creadoEn?->format('Y-m-d H:i:s'),
             'cerrado_en' => $this->cerradoEn?->format('Y-m-d H:i:s'),
             'franjas' => array_map(static fn (FranjaHoraria $f): array => $f->paraJson(), $this->franjas),

@@ -77,6 +77,15 @@ if ($metodo === 'GET' && str_starts_with($ruta, '/interno/acuerdos/por-funcion/'
         $franja0 = (new DateTimeImmutable('-1 day'))->format('Y-m-d');
         $estado = 'abierto';
     }
+    // Pasó la fecha límite pero el acuerdo sigue abierto, porque llegó al mínimo (E3-13.F8).
+    $votacionAbierta = $estado === 'abierto';
+    if ($estado === 'vencido') {
+        $estado = 'abierto';
+        $votacionAbierta = false;
+    }
+    // Como la calcula funciones: las 23:59 del día anterior a la primera franja.
+    $fechaLimite = (new DateTimeImmutable($franja0))->modify('-1 day')->format('Y-m-d') . ' 23:59:59';
+    $votacionAbierta = $votacionAbierta && new DateTimeImmutable($fechaLimite) >= new DateTimeImmutable();
     echo json_encode([
         'id' => 'acuerdo-mock-1',
         'funcion_id' => $funcionId,
@@ -85,6 +94,8 @@ if ($metodo === 'GET' && str_starts_with($ruta, '/interno/acuerdos/por-funcion/'
         'estado_etiqueta' => $estado,
         'franja_ganadora_id' => null,
         'alcanzo_minimo' => false,
+        'fecha_limite' => $fechaLimite,
+        'votacion_abierta' => $votacionAbierta,
         'franjas_del_usuario' => ['franja-mock-0'],
         'franjas' => [
             ['id' => 'franja-mock-0', 'inicio' => "{$franja0} 20:00:00", 'fin' => "{$franja0} 22:30:00", 'votos' => ($estado === 'sin_minimo' ? 1 : 2)],

@@ -13,6 +13,7 @@ use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Log;
 use IndieCinema\Nucleo\Uuid;
 use IndieCinema\Programacion\Controladores\Cartelera;
+use IndieCinema\Programacion\Controladores\TarjetaDeFuncion;
 use IndieCinema\Programacion\Repositorios\RepositorioDeFunciones;
 use IndieCinema\Programacion\Repositorios\RepositorioDeGeneros;
 use IndieCinema\Programacion\Repositorios\RepositorioDeObras;
@@ -1126,6 +1127,37 @@ final class CarteleraTest extends TestCase
 
         self::assertSame(303, $respuesta->estado());
         self::assertStringContainsString(rawurlencode('no es de este acuerdo'), $respuesta->cabecera('Location') ?? '');
+    }
+
+    /**
+     * E3-13.F8: la ficha dice hasta cuándo se marca «Me sirve»: las 23:59 del día anterior a la
+     * primera franja, que en el doble de funciones es a diez días.
+     */
+    public function testLaFichaDiceLaFechaLimiteDelAcuerdo(): void
+    {
+        [$funcionId] = $this->funcionEnAcuerdo();
+
+        $cuerpo = $this->pedir("/cartelera/{$funcionId}")->cuerpo();
+
+        self::assertStringContainsString(TarjetaDeFuncion::diaMesYHora(new DateTimeImmutable('+9 days 23:59')), $cuerpo);
+    }
+
+    /**
+     * E3-13.F8: pasada la fecha límite no se marca más «Me sirve», aunque el acuerdo siga abierto
+     * porque una franja llegó al mínimo. El voto vuelve con el motivo y la ficha no ofrece marcar.
+     */
+    public function testPasadaLaFechaLimiteNoSeMarcaMeSirve(): void
+    {
+        [$funcionId] = $this->funcionEnAcuerdo();
+        file_put_contents(sys_get_temp_dir() . '/acuerdo_estado_global.txt', 'vencido');
+        $espectador = Uuid::nuevo();
+
+        $respuesta = $this->post("/cartelera/{$funcionId}/votar", ['franja_id' => 'franja-mock-1'], $espectador, 'espectador');
+
+        self::assertSame(303, $respuesta->estado());
+        self::assertStringContainsString(rawurlencode('Ya pasó la fecha límite'), $respuesta->cabecera('Location') ?? '');
+        $ficha = $this->pedir("/cartelera/{$funcionId}", [], ['X-Nginx-Secreto' => self::SECRETO, 'X-Usuario-Id' => $espectador, 'X-Rol' => 'espectador']);
+        self::assertStringNotContainsString('data-formulario-votar-franja', $ficha->cuerpo());
     }
 
     /**

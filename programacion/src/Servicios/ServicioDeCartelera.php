@@ -212,6 +212,9 @@ final class ServicioDeCartelera
         if ($acuerdo === null || ($acuerdo['estado'] ?? '') !== 'abierto') {
             throw new ReglaIncumplida('El acuerdo de fecha no está disponible o ya fue cerrado.');
         }
+        if (($acuerdo['votacion_abierta'] ?? true) === false) {
+            throw new ReglaIncumplida('Ya pasó la fecha límite para marcar «Me sirve».');
+        }
         $franjas = is_array($acuerdo['franjas'] ?? null) ? $acuerdo['franjas'] : [];
         $ids = array_map(static fn (mixed $franja): string => is_array($franja) ? (string) ($franja['id'] ?? '') : '', $franjas);
         if (!in_array($franjaId, $ids, true)) {

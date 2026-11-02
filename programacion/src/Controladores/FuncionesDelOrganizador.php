@@ -17,6 +17,7 @@ use IndieCinema\Programacion\Modelo\Obra;
 use IndieCinema\Programacion\Modelo\ReglaIncumplida;
 use IndieCinema\Programacion\Modelo\Sala;
 use IndieCinema\Programacion\Servicios\AcuerdosDeFunciones;
+use IndieCinema\Programacion\Servicios\ReservasDeFunciones;
 use IndieCinema\Programacion\Servicios\ServicioDeFuncionesDelOrganizador;
 use LogicException;
 
@@ -28,8 +29,10 @@ final class FuncionesDelOrganizador extends Controlador
 {
     private const PLANTILLA_ALTA = 'alta_funcion.html.twig';
 
-    public function __construct(private readonly ServicioDeFuncionesDelOrganizador $servicio)
-    {
+    public function __construct(
+        private readonly ServicioDeFuncionesDelOrganizador $servicio,
+        private readonly ReservasDeFunciones $reservas,
+    ) {
     }
 
     public function listar(Peticion $peticion): Respuesta
@@ -48,6 +51,8 @@ final class FuncionesDelOrganizador extends Controlador
             // El aviso de que se acaba de programar una: sólo si lo que llega tiene forma de id.
             'programada' => is_string($programada = $peticion->consulta('programada')) && Uuid::esValido($programada),
             'cancelada' => $peticion->consulta('cancelada') === '1',
+            // Se canceló, pero funciones no respondió y sus reservas siguen confirmadas.
+            'reservas_pendientes' => $peticion->consulta('cancelada') === '1' && $peticion->consulta('reservas') === 'pendientes',
             'votacion_cerrada' => $peticion->consulta('votacion_cerrada') === '1',
         ]);
     }
@@ -223,7 +228,19 @@ final class FuncionesDelOrganizador extends Controlador
             throw ExcepcionHttp::noEncontrada();
         }
 
+        // Antes de cancelarla, para el aviso a los espectadores: el título y la fecha.
+        $funcion = $this->servicio->paraCancelar($organizador, $id);
         $this->servicio->cancelar($organizador, $id);
+
+        // Sólo una programada pudo tener reservas: en votación todavía no se reserva (E4-03.4).
+        if ($funcion->estado === EstadoFuncion::Programada && !$this->reservas->cancelarDeLaFuncion(
+            $id,
+            $organizador->id,
+            implode(' + ', $funcion->titulos),
+            $funcion->fechaHora === null ? null : TarjetaDeFuncion::fecha($funcion->fechaHora),
+        )) {
+            return $this->redirigir('/organizador/funciones?cancelada=1&reservas=pendientes');
+        }
 
         return $this->redirigir('/organizador/funciones?cancelada=1');
     }

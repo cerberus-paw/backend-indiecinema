@@ -5,6 +5,9 @@ declare(strict_types=1);
 use IndieCinema\Funciones\Controladores\AcuerdosInternos;
 use IndieCinema\Funciones\Controladores\OcupacionInterna;
 use IndieCinema\Funciones\Controladores\Reservas;
+use IndieCinema\Funciones\Controladores\ReservasDeLaFuncion;
+use IndieCinema\Funciones\Controladores\ReservasDelAdministrador;
+use IndieCinema\Funciones\Controladores\ReservasInternas;
 use IndieCinema\Nucleo\Http\EstadoInterno;
 use IndieCinema\Nucleo\Ruteo\Router;
 use IndieCinema\Nucleo\Seguridad\Rol;
@@ -25,6 +28,17 @@ return static function (Router $router): void {
     // La cancelación del espectador, con una pantalla que la confirma antes (E4-01.5).
     $router->get('/reservas/{id}/cancelar', [Reservas::class, 'confirmarCancelacion'], Rol::Espectador);
     $router->post('/reservas/{id}/cancelar', [Reservas::class, 'cancelar'], Rol::Espectador);
+
+    // El seguimiento de las reservas (E4-03). El organizador, las de sus funciones: que la función
+    // sea suya lo controla el servicio, con el id del que pide.
+    $router->get('/organizador/funciones/{id}/reservas', [ReservasDeLaFuncion::class, 'listar'], Rol::Organizador);
+    $router->post('/organizador/funciones/{id}/asistencia', [ReservasDeLaFuncion::class, 'registrarAsistencia'], Rol::Organizador);
+    $router->get('/organizador/funciones/{id}/reservas.csv', [ReservasDeLaFuncion::class, 'descargar'], Rol::Organizador);
+    // El administrador, todas, y anula la que haga falta.
+    $router->get('/administracion/reservas', [ReservasDelAdministrador::class, 'listar'], Rol::Administrador);
+    $router->post('/administracion/reservas/{id}/anular', [ReservasDelAdministrador::class, 'anular'], Rol::Administrador);
+    // Programación canceló una función: se cancelan sus reservas y se avisa a los espectadores.
+    $router->interna('POST', '/interno/funciones/{id}/cancelar-reservas', [ReservasInternas::class, 'cancelarDeLaFuncion'], ['programacion']);
 
     // Los lugares ocupados, para que programación muestre los libres (E4-02): de una función en
     // su ficha, y de una página entera de tarjetas en un solo pedido.

@@ -181,8 +181,9 @@ final class UsuariosInternosTest extends TestCase
 
     public function testSoloLasLlamaProgramacionConSuToken(): void
     {
-        // Funciones existe y tiene su token, pero estas rutas no lo aceptan.
-        self::assertSame(403, $this->pedir('GET', "/interno/usuarios/{$this->eva}", llamador: 'funciones', token: self::TOKEN_DE_FUNCIONES)->estado());
+        // Funciones existe y tiene su token: lee usuarios (para avisarles por correo), pero no da roles.
+        self::assertSame(200, $this->pedir('GET', "/interno/usuarios/{$this->eva}", llamador: 'funciones', token: self::TOKEN_DE_FUNCIONES)->estado());
+        self::assertSame(403, $this->pedir('GET', "/interno/usuarios/{$this->eva}", llamador: 'funciones', token: 'otro-token')->estado());
         self::assertSame(403, $this->pedir('POST', "/interno/usuarios/{$this->eva}/roles", ['rol' => 'organizador', 'otorgado_por' => self::ADMINISTRADOR], 'funciones', self::TOKEN_DE_FUNCIONES)->estado());
         // Programación con un token que no es el suyo.
         self::assertSame(403, $this->pedir('GET', "/interno/usuarios/{$this->eva}", token: 'otro-token')->estado());

@@ -5,12 +5,14 @@ declare(strict_types=1);
 namespace IndieCinema\Funciones\Servicios;
 
 use DateTimeImmutable;
+use IndieCinema\Funciones\Modelo\AutorDelCambio;
 use IndieCinema\Funciones\Modelo\EstadoReserva;
 use IndieCinema\Funciones\Modelo\FuncionDeProgramacion;
 use IndieCinema\Funciones\Modelo\ReglaIncumplida;
 use IndieCinema\Funciones\Modelo\Reserva;
 use IndieCinema\Funciones\Repositorios\RepositorioDeReservas;
 use IndieCinema\Nucleo\Http\ExcepcionHttp;
+use IndieCinema\Nucleo\Seguridad\Rol;
 use IndieCinema\Nucleo\Seguridad\Usuario;
 use IndieCinema\Nucleo\Uuid;
 use LogicException;
@@ -98,7 +100,7 @@ final class ServicioDeReservas
             throw new ReglaIncumplida('La función ya empezó: la reserva ya no se puede cancelar.');
         }
         $cancelada = $reserva->cancelar();
-        if (!$this->reservas->guardarEstado($cancelada, $reserva->estado)) {
+        if (!$this->reservas->guardarEstado($cancelada, $reserva->estado, AutorDelCambio::de($espectador, Rol::Espectador), $ahora)) {
             throw new ReglaIncumplida('La reserva cambió mientras tanto. Volvé a cargarla para ver en qué quedó.');
         }
 

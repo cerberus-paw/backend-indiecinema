@@ -6,6 +6,7 @@ namespace IndieCinema\Funciones\Repositorios;
 
 use DateTimeImmutable;
 use DateTimeZone;
+use IndieCinema\Funciones\Modelo\AutorDelCambio;
 use IndieCinema\Funciones\Modelo\EstadoReserva;
 use IndieCinema\Funciones\Modelo\Reserva;
 use IndieCinema\Nucleo\BaseDeDatos;
@@ -104,7 +105,15 @@ final class RepositorioDeReservas
     {
         $fila = $this->base->fila('SELECT * FROM reserva WHERE id = ?', [$id]);
 
-        return $fila === null ? null : new Reserva(
+        return $fila === null ? null : self::reserva($fila);
+    }
+
+    /**
+     * @param array<string, mixed> $fila
+     */
+    private static function reserva(array $fila): Reserva
+    {
+        return new Reserva(
             $fila['id'],
             $fila['funcion_id'],
             $fila['usuario_id'],
@@ -117,18 +126,72 @@ final class RepositorioDeReservas
     }
 
     /**
-     * Guarda el estado nuevo de la reserva, si todavía está en $anterior. Así, si el espectador
-     * cancela mientras el organizador registra su asistencia, gana el primero y el otro se
-     * entera, en lugar de pisarse.
+     * Guarda el estado nuevo de la reserva, si todavía está en $anterior, y deja el cambio en el
+     * historial con su autor, en la misma transacción. Así, si el espectador cancela mientras el
+     * organizador registra su asistencia, gana el primero y el otro se entera, en lugar de pisarse;
+     * y el historial no anota un cambio que no pasó.
      *
      * @return bool false si otro la cambió antes, y entonces no guardó nada
      */
-    public function guardarEstado(Reserva $reserva, EstadoReserva $anterior): bool
+    public function guardarEstado(Reserva $reserva, EstadoReserva $anterior, AutorDelCambio $autor, DateTimeImmutable $ahora = new DateTimeImmutable()): bool
     {
-        return $this->base->ejecutar(
-            'UPDATE reserva SET estado = ? WHERE id = ? AND estado = ?',
-            [$reserva->estado, $reserva->id, $anterior],
-        ) === 1;
+        return $this->base->enTransaccion(function () use ($reserva, $anterior, $autor, $ahora): bool {
+            $cambio = $this->base->ejecutar(
+                'UPDATE reserva SET estado = ? WHERE id = ? AND estado = ?',
+                [$reserva->estado, $reserva->id, $anterior],
+            ) === 1;
+            if ($cambio) {
+                $this->base->ejecutar(
+                    'INSERT INTO cambio_reserva (reserva_id, estado_anterior, estado_nuevo, autor_id, autor_rol, motivo, hecho_en) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                    [$reserva->id, $anterior, $reserva->estado, $autor->id, $autor->rol->value, $autor->motivo, $ahora->setTimezone(new DateTimeZone('UTC'))],
+                );
+            }
+
+            return $cambio;
+        });
+    }
+
+    /**
+     * Las reservas de una función, de la primera a la última: la lista del organizador y su CSV.
+     *
+     * @return list<Reserva>
+     */
+    public function deLaFuncion(string $funcionId): array
+    {
+        return array_map(self::reserva(...), $this->base->filas(
+            'SELECT * FROM reserva WHERE funcion_id = ? ORDER BY creada_en, codigo',
+            [$funcionId],
+        ));
+    }
+
+    /**
+     * La reserva de una función con ese código: lo que el organizador tipea en la puerta. El
+     * código de otra función no sirve, aunque exista.
+     */
+    public function porCodigo(string $funcionId, string $codigo): ?Reserva
+    {
+        $fila = $this->base->fila('SELECT * FROM reserva WHERE funcion_id = ? AND codigo = ?', [$funcionId, $codigo]);
+
+        return $fila === null ? null : self::reserva($fila);
+    }
+
+    /**
+     * Todas las reservas, de la más nueva a la más vieja, para el panel del administrador.
+     *
+     * @param int $numero desde 1
+     *
+     * @return array{0: list<Reserva>, 1: int} las de la página y cuántas hay en total
+     */
+    public function pagina(?EstadoReserva $estado, int $numero, int $tamano): array
+    {
+        [$donde, $parametros] = $estado === null ? ['', []] : ['WHERE estado = ?', [$estado]];
+        $total = (int) $this->base->valor("SELECT COUNT(*) FROM reserva {$donde}", $parametros);
+        $filas = $this->base->filas(
+            "SELECT * FROM reserva {$donde} ORDER BY creada_en DESC, codigo LIMIT ? OFFSET ?",
+            [...$parametros, $tamano, ($numero - 1) * $tamano],
+        );
+
+        return [array_map(self::reserva(...), $filas), $total];
     }
 
     /**

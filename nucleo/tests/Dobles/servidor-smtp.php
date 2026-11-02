@@ -12,7 +12,8 @@
 
 declare(strict_types=1);
 
-[, $puerto, $archivo] = $argv;
+// Corre desde la línea de comandos; $_SERVER['argv'] y no $argv, que PHPStan no ve definida acá.
+[, $puerto, $archivo] = $_SERVER['argv'];
 $servidor = stream_socket_server("tcp://127.0.0.1:{$puerto}");
 
 while (($conexion = @stream_socket_accept($servidor, -1)) !== false) {

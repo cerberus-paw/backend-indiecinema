@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use IndieCinema\Funciones\Controladores\AcuerdosInternos;
 use IndieCinema\Funciones\Controladores\Reservas;
 use IndieCinema\Nucleo\Http\EstadoInterno;
 use IndieCinema\Nucleo\Ruteo\Router;
@@ -26,4 +27,11 @@ return static function (Router $router): void {
 
     // Para comprobar que los otros subsistemas llegan hasta acá con su token.
     $router->interna('GET', '/interno/estado', [EstadoInterno::class, 'mostrar'], ['cuentas', 'programacion']);
+
+    // API interna de acuerdos de fecha (E3-13 / IC-154, IC-155, IC-156, IC-157, IC-158).
+    $router->interna('POST', '/interno/acuerdos', [AcuerdosInternos::class, 'proponer'], ['programacion']);
+    $router->interna('GET', '/interno/acuerdos/por-funcion/{id}', [AcuerdosInternos::class, 'mostrarPorFuncion'], ['programacion']);
+    $router->interna('POST', '/interno/acuerdos/{id}/votar', [AcuerdosInternos::class, 'votar'], ['programacion']);
+    $router->interna('POST', '/interno/acuerdos/{id}/confirmar', [AcuerdosInternos::class, 'confirmar'], ['programacion']);
+    $router->interna('POST', '/interno/acuerdos/{id}/cerrar-sin-minimo', [AcuerdosInternos::class, 'cerrarSinMinimo'], ['programacion']);
 };

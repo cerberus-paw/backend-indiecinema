@@ -238,6 +238,62 @@ final class FuncionesDelOrganizador extends Controlador
     }
 
     /**
+     * El organizador propone las franjas y el mínimo de asistentes (E3-13.2 / IC-154).
+     */
+    public function proponerAcuerdo(Peticion $peticion): Respuesta
+    {
+        $organizador = self::organizador($peticion);
+        $id = (string) $peticion->parametro('id');
+        if (!Uuid::esValido($id)) {
+            throw ExcepcionHttp::noEncontrada();
+        }
+
+        $minimo = (int) $peticion->campo('minimo_asistentes', 0);
+        $franjasEntrada = $peticion->campo('franjas');
+        $franjas = [];
+
+        if (is_array($franjasEntrada)) {
+            foreach ($franjasEntrada as $f) {
+                if (is_array($f) && !empty($f['fecha_hora_inicio'])) {
+                    $franjas[] = [
+                        'fecha_hora_inicio' => (string) $f['fecha_hora_inicio'],
+                        'fecha_hora_fin' => !empty($f['fecha_hora_fin']) ? (string) $f['fecha_hora_fin'] : null,
+                    ];
+                }
+            }
+        }
+
+        if ($franjas === [] && is_array($peticion->campo('franja_inicio'))) {
+            $inicios = (array) $peticion->campo('franja_inicio');
+            $fines = (array) $peticion->campo('franja_fin', []);
+            foreach ($inicios as $idx => $inicio) {
+                if (is_string($inicio) && trim($inicio) !== '') {
+                    $franjas[] = [
+                        'fecha_hora_inicio' => trim($inicio),
+                        'fecha_hora_fin' => !empty($fines[$idx]) ? trim((string) $fines[$idx]) : null,
+                    ];
+                }
+            }
+        }
+
+        try {
+            $acuerdo = $this->servicio->proponerAcuerdoFecha($organizador, $id, $minimo, $franjas);
+        } catch (\InvalidArgumentException $error) {
+            if ($peticion->cabecera('Accept') === 'application/json' || $peticion->cabecera('Content-Type') === 'application/json') {
+                return $this->json(['error' => $error->getMessage()], 422);
+            }
+
+            return $this->redirigir("/cartelera/{$id}?error_acuerdo=" . urlencode($error->getMessage()));
+        }
+
+        if ($peticion->cabecera('Accept') === 'application/json' || $peticion->cabecera('Content-Type') === 'application/json') {
+            return $this->json($acuerdo, 201);
+        }
+
+        return $this->redirigir("/cartelera/{$id}?acuerdo_propuesto=1");
+    }
+
+    /**
      * @param list<Sala>                                                                                        $salas
      * @param list<Obra>                                                                                        $obras
      * @param array{formulario?: FormularioDeFuncion, valores?: array<string, mixed>, error_general?: ?string} $extra

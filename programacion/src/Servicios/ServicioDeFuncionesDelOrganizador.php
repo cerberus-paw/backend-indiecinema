@@ -32,6 +32,7 @@ final class ServicioDeFuncionesDelOrganizador
         private readonly RepositorioDeSalas $salas,
         private readonly RepositorioDeObras $obras,
         private readonly RepositorioDeVotos $votos,
+        private readonly ?AcuerdosDeFunciones $acuerdos = null,
     ) {
     }
 
@@ -241,6 +242,29 @@ final class ServicioDeFuncionesDelOrganizador
         $this->funciones->guardar($funcion);
 
         return $funcion;
+    }
+
+    /**
+     * El organizador propone las franjas horarias y el mínimo de asistentes para el acuerdo de fecha (E3-13.2 / IC-154).
+     *
+     * @param list<array{fecha_hora_inicio: string, fecha_hora_fin?: string|null}> $franjas
+     *
+     * @return array<string, mixed> los datos del acuerdo creado por funciones
+     *
+     * @throws ExcepcionHttp 404 si la función no es del organizador o no está en acuerdo de fecha
+     */
+    public function proponerAcuerdoFecha(Usuario $organizador, string $id, int $minimoAsistentes, array $franjas): array
+    {
+        $funcion = $this->propia($organizador, $id);
+        if ($funcion->estado !== EstadoFuncion::EnAcuerdoFecha) {
+            throw ExcepcionHttp::noEncontrada();
+        }
+
+        if ($this->acuerdos === null) {
+            throw new LogicException('No se configuró el cliente de acuerdos de funciones.');
+        }
+
+        return $this->acuerdos->proponer($funcion->id, $minimoAsistentes, $franjas);
     }
 
     /**

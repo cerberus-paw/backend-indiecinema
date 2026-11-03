@@ -25,13 +25,14 @@ final class Inicio extends Controlador
     private const FUNCIONES = 4;
     private const SALAS = 3;
     /**
-     * El carrusel (E4-07) mira las próximas de la cartelera, más que las tarjetas, y se queda con
-     * las que tienen afiche: es un carrusel de imágenes, y una diapositiva sin imagen sería el
-     * recuadro vacío del wireframe. Tampoco entra la que cerró su acuerdo sin quórum: ya no se
-     * da, y destacarla invitaría a algo que no va a pasar. Ocho alcanzan para recorrerlo sin que la
-     * barra de carga espere de más.
+     * El carrusel (E4-07) tiene hasta seis: destacar muchas es no destacar ninguna, y la barra de
+     * carga no espera de más. Son las primeras de la cartelera que tienen afiche (es un carrusel de
+     * imágenes, y una diapositiva sin imagen sería el recuadro vacío del wireframe) y que no
+     * cerraron su acuerdo sin quórum (ya no se dan: destacarlas invitaría a algo que no va a pasar).
      */
-    private const DESTACADAS = 8;
+    private const DESTACADAS = 6;
+    /** Entre cuántas de las próximas se buscan, para llegar a seis aunque alguna no tenga afiche. */
+    private const CANDIDATAS = 12;
 
     public function __construct(
         private readonly ServicioDeCartelera $cartelera,
@@ -47,7 +48,7 @@ final class Inicio extends Controlador
         }
 
         // Un solo pedido para el carrusel y las tarjetas: las tarjetas son las primeras de la lista.
-        $proximas = $this->cartelera->proximas(max(self::FUNCIONES, self::DESTACADAS));
+        $proximas = $this->cartelera->proximas(max(self::FUNCIONES, self::CANDIDATAS));
         $tarjetas = TarjetaDeFuncion::todas(
             $proximas->funciones,
             $this->cartelera->acuerdosDe($proximas->funciones),
@@ -56,10 +57,10 @@ final class Inicio extends Controlador
         $salas = $this->salas->publicadas();
 
         return $this->vista('inicio.html.twig', [
-            'destacadas' => array_values(array_filter(
+            'destacadas' => array_slice(array_values(array_filter(
                 $tarjetas,
                 static fn (array $tarjeta): bool => $tarjeta['afiche'] !== null && $tarjeta['estado'] !== 'ACUERDO_SIN_MINIMO',
-            )),
+            )), 0, self::DESTACADAS),
             'funciones' => array_slice($tarjetas, 0, self::FUNCIONES),
             'total_funciones' => $proximas->total,
             'salas' => array_map(TarjetaDeSala::datos(...), array_slice($salas, 0, self::SALAS)),

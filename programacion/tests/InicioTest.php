@@ -129,17 +129,17 @@ final class InicioTest extends TestCase
         $this->base->ejecutar("UPDATE obra SET afiche = NULL WHERE titulo = 'Metrópolis'");
         $proximas = array_map(
             static fn (FuncionEnCartelera $funcion): string => $funcion->id,
-            (new RepositorioDeCartelera($this->base))->pagina(new FiltrosDeCartelera(), 1, 8)->funciones,
+            (new RepositorioDeCartelera($this->base))->pagina(new FiltrosDeCartelera(), 1, 7)->funciones,
         );
 
         $cuerpo = $this->pedir()->cuerpo();
 
         self::assertStringContainsString('<div class="carrusel" data-carrusel', $cuerpo);
         preg_match_all('#<a href="/cartelera/([0-9a-f-]{36})" class="carrusel-titulo-enlace">#', $cuerpo, $enlaces);
-        // Las ocho primeras de la cartelera, en orden, salvo la que se quedó sin ningún afiche: la
-        // de dos obras entra con el de la otra.
+        // Seis, las primeras de la cartelera en orden, salteando la que se quedó sin ningún afiche
+        // (la de dos obras entra con el de la otra): para llegar a seis se mira una más.
         self::assertSame(array_slice($proximas, 1), $enlaces[1]);
-        self::assertSame(7, substr_count($cuerpo, '<li class="carrusel-diapositiva">'));
+        self::assertSame(6, substr_count($cuerpo, '<li class="carrusel-diapositiva">'));
         // Las tarjetas siguen siendo las cuatro primeras, con o sin afiche.
         self::assertSame(4, substr_count($cuerpo, '<article class="tarjeta-funcion">'));
     }

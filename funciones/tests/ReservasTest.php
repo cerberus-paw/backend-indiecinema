@@ -87,10 +87,14 @@ final class ReservasTest extends TestCase
 
     /**
      * @param array<string, string> $cuerpo
+     * @param ?string               $acepta el Accept del pedido; null, el de un navegador
      */
-    private function pedir(string $metodo, string $ruta, ?string $usuario = self::EVA, array $cuerpo = []): Respuesta
+    private function pedir(string $metodo, string $ruta, ?string $usuario = self::EVA, array $cuerpo = [], ?string $acepta = null): Respuesta
     {
         $cabeceras = $usuario === null ? [] : ['X-Nginx-Secreto' => self::SECRETO, 'X-Usuario-Id' => $usuario, 'X-Rol' => 'espectador'];
+        if ($acepta !== null) {
+            $cabeceras['Accept'] = $acepta;
+        }
         $this->log = fopen('php://memory', 'w+');
         $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion, new Log('funciones', $this->log));
 
@@ -122,6 +126,30 @@ final class ReservasTest extends TestCase
     private function estado(string $id): string
     {
         return (string) $this->base->valor('SELECT estado FROM reserva WHERE id = ?', [$id]);
+    }
+
+    /**
+     * Reservar como lo hace el componente de la ficha: el mismo POST, pidiendo JSON. El Accept es
+     * el que manda un fetch cuando se le pone la cabecera.
+     */
+    private function reservarEnJson(string $cantidad, string $funcion = self::PROXIMA, ?string $usuario = self::EVA): Respuesta
+    {
+        return $this->pedir('POST', "/reservar/{$funcion}", $usuario, ['_csrf' => self::CSRF, 'cantidad' => $cantidad], 'application/json, text/plain, */*');
+    }
+
+    private function cancelarEnJson(string $id, ?string $usuario = self::EVA): Respuesta
+    {
+        return $this->pedir('POST', "/reservas/{$id}/cancelar", $usuario, ['_csrf' => self::CSRF], 'application/json, text/plain, */*');
+    }
+
+    /**
+     * El JSON de una respuesta.
+     *
+     * @return array<string, mixed>
+     */
+    private static function json(Respuesta $respuesta): array
+    {
+        return (array) json_decode($respuesta->cuerpo(), true, flags: JSON_THROW_ON_ERROR);
     }
 
     /**
@@ -637,5 +665,120 @@ final class ReservasTest extends TestCase
 
         self::assertSame(20, substr_count($deEliasVista, 'data-reserva='));
         self::assertStringNotContainsString(self::partido($deEva), $deEliasVista);
+    }
+
+    public function testReservarEnJsonDevuelveLaReservaYLosLugaresQueQuedan(): void
+    {
+        $respuesta = $this->reservarEnJson('2');
+        $json = self::json($respuesta);
+
+        // 201: se creó la reserva. El link es el mismo al que redirige la página.
+        self::assertSame(201, $respuesta->estado());
+        $id = (string) $this->base->valor('SELECT id FROM reserva');
+        self::assertSame($id, $json['reserva']['id']);
+        self::assertSame("/funcion/reservas/{$id}", $json['url']);
+        self::assertSame(2, $json['reserva']['cantidad']);
+        self::assertSame('confirmada', $json['reserva']['estado']);
+        self::assertTrue($json['reserva']['cancelable']);
+        self::assertSame('$ 7.000', $json['reserva']['total']);
+        // Lo que la ficha necesita para actualizar el número sin volver a preguntar.
+        self::assertSame(38, $json['lugares_libres']);
+    }
+
+    /**
+     * El correo es el mismo que manda la página, pero sale después de la respuesta: quien reserva
+     * con fetch está mirando el número de lugares de la ficha, no esperando una página nueva.
+     */
+    public function testReservarEnJsonTambienMandaElCorreoDeConfirmada(): void
+    {
+        $respuesta = $this->reservarEnJson('2');
+
+        self::assertSame(201, $respuesta->estado());
+        // Todavía no salió: primero se suelta la respuesta.
+        self::assertCount(0, $this->correos());
+
+        $respuesta->terminar();
+
+        $correos = $this->correos();
+        self::assertCount(1, $correos);
+        self::assertSame('Reserva confirmada: «Zama»', $correos[0]['asunto']);
+        $id = self::json($respuesta)['reserva']['id'];
+        self::assertStringContainsString(self::SITIO . "/funcion/reservas/{$id}", $correos[0]['texto']);
+    }
+
+    public function testUnaCantidadInvalidaEnJsonVuelveConElErrorDelCampo(): void
+    {
+        foreach (['', 'dos', '0', '-1', '1.5', '41', "1' OR 1=1"] as $cantidad) {
+            $respuesta = $this->reservarEnJson($cantidad);
+
+            self::assertSame(422, $respuesta->estado(), "Aceptó «{$cantidad}».");
+            self::assertSame('Ingresá entre 1 y 40 lugares.', self::json($respuesta)['errores']['cantidad']);
+        }
+        self::assertSame(0, $this->reservas());
+    }
+
+    public function testSinLugaresSuficientesEnJsonLoDiceYNoReserva(): void
+    {
+        $this->ocupar(self::PROXIMA, 39);
+
+        $respuesta = $this->reservarEnJson('2');
+        $json = self::json($respuesta);
+
+        self::assertSame(422, $respuesta->estado());
+        self::assertSame('Queda 1 lugar.', $json['error']);
+        // Con el número de verdad, así la ficha corrige el máximo del campo.
+        self::assertSame(1, $json['lugares_libres']);
+        self::assertSame(1, $this->reservas());
+    }
+
+    public function testCancelarEnJsonDevuelveLaCanceladaYElLugarQueVolvio(): void
+    {
+        $id = $this->reservada('2');
+
+        $respuesta = $this->cancelarEnJson($id);
+        $json = self::json($respuesta);
+
+        self::assertSame(200, $respuesta->estado());
+        self::assertSame('cancelada', $json['reserva']['estado']);
+        self::assertFalse($json['reserva']['cancelable']);
+        self::assertSame("/funcion/reservas/{$id}?cancelada=1", $json['url']);
+        self::assertSame('cancelada', $this->estado($id));
+        // Que el lugar vuelva a quedar libre ya lo cubre testElLugarCanceladoVuelveAQuedarLibre:
+        // la respuesta de la cancelación no trae el número, porque el comprobante no lo muestra.
+        self::assertArrayNotHasKey('lugares_libres', $json);
+    }
+
+    public function testUnaCanceladaNoSeVuelveACancelarEnJson(): void
+    {
+        $id = $this->reservada();
+        $cancelada = $this->cancelarEnJson($id);
+        self::assertSame(200, $cancelada->estado());
+
+        $respuesta = $this->cancelarEnJson($id);
+
+        self::assertSame(422, $respuesta->estado());
+        self::assertSame('La reserva ya está cancelada.', self::json($respuesta)['error']);
+        // La reserva viene igual cuando sale bien y cuando no: el front la lee de un solo modo.
+        self::assertSame(self::json($cancelada)['reserva'], self::json($respuesta)['reserva']);
+    }
+
+    public function testLosErroresEnJsonNoCuentanNadaDeAdentro(): void
+    {
+        // Sin sesión, de otro y una que no existe: el error va en JSON, sin rastro ni clases.
+        $ajena = $this->ocupar(self::PROXIMA, 1, self::ELIAS);
+        $respuestas = [
+            $this->reservarEnJson('1', usuario: null),
+            $this->cancelarEnJson($ajena),
+            $this->cancelarEnJson(Uuid::nuevo()),
+        ];
+
+        foreach ($respuestas as $respuesta) {
+            self::assertContains($respuesta->estado(), [401, 404]);
+            self::assertArrayHasKey('error', self::json($respuesta));
+            self::assertArrayNotHasKey('detalle', self::json($respuesta));
+            foreach (['Exception', '.php', 'IndieCinema\\', '#0 '] as $interno) {
+                self::assertStringNotContainsString($interno, $respuesta->cuerpo());
+            }
+        }
     }
 }

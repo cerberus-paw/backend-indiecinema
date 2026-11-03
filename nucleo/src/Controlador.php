@@ -50,7 +50,17 @@ abstract class Controlador
      */
     protected function redirigir(string $ruta): Respuesta
     {
-        return Respuesta::redireccion($this->prefijo . $ruta);
+        return Respuesta::redireccion($this->ruta($ruta));
+    }
+
+    /**
+     * Una ruta de este subsistema como la ve el navegador: con el prefijo que nginx sacó. La usa
+     * redirigir(), y hace falta aparte para mandar la misma dirección dentro de un JSON, donde no
+     * hay cabecera Location que la lleve (E4-05.1).
+     */
+    protected function ruta(string $ruta): string
+    {
+        return $this->prefijo . $ruta;
     }
 
     protected function json(mixed $datos, int $estado = 200): Respuesta

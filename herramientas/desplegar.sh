@@ -2,7 +2,7 @@
 # Publica en este servidor lo que está en su rama: trae los dos repositorios, instala las
 # dependencias, recrea los contenedores que cambiaron, aplica las migraciones y comprueba que el
 # sitio responda. No toca los datos ni los secretos (.env y los config.ini). La rama es la que tiene
-# clonada cada repositorio: main en producción y desarrollo en el de desarrollo (README, «Ramas y
+# clonada cada repositorio: main en producción y dev en el de desarrollo (README, «Ramas y
 # entornos»); el script no la elige, así un pedido no puede cambiar lo que publica un servidor.
 #
 # Lo corre el workflow CD del back y del front cuando la CI pasa en esa rama. Entra por SSH con una

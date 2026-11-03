@@ -196,11 +196,12 @@ final class Reservas extends Controlador
                 : $this->pantallaDeCancelacion($reserva, $funcion, $error->getMessage(), 422);
         }
 
-        // Sin los lugares libres: después de cancelar se va al comprobante, que no los muestra, y
-        // traerlos costaría otro pedido interno a programación para un dato que nadie mira.
+        // La reserva con los mismos datos que en el 422, sin la función: cancelada ya no se cancela,
+        // así que la fecha no cambia «cancelable» y no hace falta otro pedido a programación. Sin
+        // los lugares libres: después se va al comprobante, que no los muestra.
         if ($enJson) {
             return $this->json([
-                'reserva' => ['id' => $reserva->id, 'estado' => $reserva->estado->value, 'cancelable' => false],
+                'reserva' => self::datosDeReserva($reserva, null),
                 'url' => $this->ruta("/reservas/{$reserva->id}?cancelada=1"),
             ]);
         }

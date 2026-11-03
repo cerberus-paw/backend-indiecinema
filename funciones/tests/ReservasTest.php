@@ -751,12 +751,15 @@ final class ReservasTest extends TestCase
     public function testUnaCanceladaNoSeVuelveACancelarEnJson(): void
     {
         $id = $this->reservada();
-        self::assertSame(200, $this->cancelarEnJson($id)->estado());
+        $cancelada = $this->cancelarEnJson($id);
+        self::assertSame(200, $cancelada->estado());
 
         $respuesta = $this->cancelarEnJson($id);
 
         self::assertSame(422, $respuesta->estado());
         self::assertSame('La reserva ya está cancelada.', self::json($respuesta)['error']);
+        // La reserva viene igual cuando sale bien y cuando no: el front la lee de un solo modo.
+        self::assertSame(self::json($cancelada)['reserva'], self::json($respuesta)['reserva']);
     }
 
     public function testLosErroresEnJsonNoCuentanNadaDeAdentro(): void

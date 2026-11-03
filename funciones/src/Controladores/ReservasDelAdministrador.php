@@ -46,18 +46,47 @@ final class ReservasDelAdministrador extends Controlador
         return $this->pantalla($peticion, anulada: is_string($anulada) ? $anulada : null);
     }
 
-    /** POST /administracion/reservas/{id}/anular */
+    /**
+     * POST /administracion/reservas/{id}/anular. En JSON contesta la fila como quedó, para que el
+     * panel la cambie sin recargar la lista (E4-05.5); si no, redirige como siempre.
+     */
     public function anular(Peticion $peticion): Respuesta
     {
         $administrador = $peticion->usuario() ?? throw new LogicException('Ruta de administrador sin usuario.');
+        $enJson = $peticion->aceptaJson();
         try {
             $reserva = $this->servicio->anular($administrador, (string) $peticion->parametro('id'));
         } catch (ReglaIncumplida $error) {
-            return $this->pantalla($peticion, error: $error->getMessage(), estado: 422);
+            // El mensaje de la regla es para el administrador («La reserva ya está cancelada.»).
+            return $enJson
+                ? $this->json(['error' => $error->getMessage()], 422)
+                : $this->pantalla($peticion, error: $error->getMessage(), estado: 422);
+        }
+
+        if ($enJson) {
+            return $this->json(['reserva' => self::estadoDeLaFila($reserva)]);
         }
 
         // 303 a la lista: recargar no la vuelve a mandar.
         return $this->redirigir("/administracion/reservas?anulada={$reserva->codigo}");
+    }
+
+    /**
+     * Lo único que cambia de la fila al anular: su estado y si todavía se puede anular. La función
+     * va aparte en fila(), y pedírsela de nuevo a programación por una anulación sería un pedido
+     * al pedo: esa celda queda como está.
+     *
+     * @return array{id: string, codigo: string, estado: string, estado_etiqueta: string, anulable: bool}
+     */
+    private static function estadoDeLaFila(Reserva $reserva): array
+    {
+        return [
+            'id' => $reserva->id,
+            'codigo' => $reserva->codigo,
+            'estado' => $reserva->estado->value,
+            'estado_etiqueta' => $reserva->estado->etiqueta(),
+            'anulable' => $reserva->estado === EstadoReserva::Confirmada,
+        ];
     }
 
     private function pantalla(Peticion $peticion, ?string $anulada = null, ?string $error = null, int $estado = 200): Respuesta

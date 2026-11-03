@@ -7,6 +7,7 @@ namespace IndieCinema\Programacion\Servicios;
 use IndieCinema\Nucleo\Configuracion;
 use IndieCinema\Nucleo\Http\ExcepcionHttp;
 use IndieCinema\Nucleo\Uuid;
+use IndieCinema\Programacion\Modelo\CupoDeFuncion;
 use IndieCinema\Programacion\Modelo\DetalleDeFuncion;
 use IndieCinema\Programacion\Modelo\EstadoFuncion;
 use IndieCinema\Programacion\Modelo\FiltrosDeCartelera;
@@ -109,6 +110,21 @@ final class ServicioDeCartelera
     public function generoPorNombre(string $nombre): ?Genero
     {
         return $this->generos->porNombre($nombre);
+    }
+
+    /**
+     * El cupo de una función de la ficha pública, sin sus obras ni su sala: para los lugares
+     * libres, que la ficha pide cada pocos segundos (E4-05.1).
+     *
+     * @throws ExcepcionHttp 404 en los mismos casos que detalle()
+     */
+    public function cupo(string $id): CupoDeFuncion
+    {
+        if (!Uuid::esValido($id)) {
+            throw ExcepcionHttp::noEncontrada();
+        }
+
+        return $this->cartelera->cupo($id) ?? throw ExcepcionHttp::noEncontrada();
     }
 
     /**

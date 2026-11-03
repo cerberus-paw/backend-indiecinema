@@ -32,6 +32,9 @@ final class PanelDeReservasTest extends TestCase
         tearDownAfterClass as detenerProgramacion;
     }
 
+    /** La cabecera con la que el panel pide la respuesta en JSON, como la manda fetch (E4-05.5). */
+    private const ACEPTA_JSON = ['Accept' => 'application/json'];
+
     private const SECRETO = 'secreto-de-nginx';
     private const CSRF = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
     private const ORGANIZADORA = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
@@ -82,9 +85,10 @@ final class PanelDeReservasTest extends TestCase
     /**
      * @param array<string, mixed> $cuerpo
      */
-    private function pedir(string $metodo, string $ruta, ?string $usuario = self::ORGANIZADORA, string $rol = 'organizador', array $cuerpo = []): Respuesta
+    private function pedir(string $metodo, string $ruta, ?string $usuario = self::ORGANIZADORA, string $rol = 'organizador', array $cuerpo = [], array $extra = []): Respuesta
     {
         $cabeceras = $usuario === null ? [] : ['X-Nginx-Secreto' => self::SECRETO, 'X-Usuario-Id' => $usuario, 'X-Rol' => $rol];
+        $cabeceras = [...$cabeceras, ...$extra];
         $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion, new Log('funciones', fopen('php://memory', 'w')));
         parse_str((string) parse_url($ruta, PHP_URL_QUERY), $consulta);
         $cuerpo = $metodo === 'POST' ? ['_csrf' => self::CSRF, ...$cuerpo] : $cuerpo;
@@ -152,9 +156,9 @@ final class PanelDeReservasTest extends TestCase
         }
         self::assertStringNotContainsString($deOtra, $cuerpo);
         // 2 + 3 reservados de 40: la cancelada soltó los suyos.
-        self::assertMatchesRegularExpression('#Lugares reservados</dt>\s*<dd class="panel-admin-dato-valor">5</dd>#', $cuerpo);
-        self::assertMatchesRegularExpression('#Lugares libres</dt>\s*<dd class="panel-admin-dato-valor">35</dd>#', $cuerpo);
-        self::assertMatchesRegularExpression('#Asistentes registrados</dt>\s*<dd class="panel-admin-dato-valor">3</dd>#', $cuerpo);
+        self::assertMatchesRegularExpression('#Lugares reservados</dt>\s*<dd class="panel-admin-dato-valor"[^>]*>5</dd>#', $cuerpo);
+        self::assertMatchesRegularExpression('#Lugares libres</dt>\s*<dd class="panel-admin-dato-valor"[^>]*>35</dd>#', $cuerpo);
+        self::assertMatchesRegularExpression('#Asistentes registrados</dt>\s*<dd class="panel-admin-dato-valor"[^>]*>3</dd>#', $cuerpo);
         self::assertStringContainsString('$ 17.500', $cuerpo);
     }
 
@@ -181,6 +185,30 @@ final class PanelDeReservasTest extends TestCase
             'autor_rol' => 'organizador',
             'motivo' => null,
         ]], $this->historialDe($codigo));
+    }
+
+    public function testLaAsistenciaEnJsonDevuelveLaFilaComoQuedoYElResumenDeArriba(): void
+    {
+        $codigo = $this->reserva(self::PROXIMA, 2);
+        $ruta = '/organizador/funciones/' . self::PROXIMA . '/asistencia';
+
+        $respuesta = $this->pedir('POST', $ruta, cuerpo: ['codigo' => $codigo], extra: self::ACEPTA_JSON);
+
+        self::assertSame(200, $respuesta->estado());
+        $datos = json_decode($respuesta->cuerpo(), true);
+        self::assertSame($codigo, $datos['reserva']['codigo']);
+        self::assertSame('asistio', $datos['reserva']['estado']);
+        self::assertSame('con asistencia', $datos['reserva']['estado_etiqueta']);
+        // Ya no se registra de nuevo: la fila deja de tener botón.
+        self::assertFalse($datos['reserva']['registrable']);
+        // El resumen viaja porque «Asistentes registrados» se mueve con cada asistencia.
+        self::assertSame(2, $datos['resumen']['asistentes']);
+        self::assertSame('asistio', $this->estadoDe($codigo));
+
+        // Y la segunda vez, el mismo mensaje que la pantalla pero en JSON.
+        $otraVez = $this->pedir('POST', $ruta, cuerpo: ['codigo' => $codigo], extra: self::ACEPTA_JSON);
+        self::assertSame(422, $otraVez->estado());
+        self::assertStringContainsString('ya tiene la asistencia registrada', json_decode($otraVez->cuerpo(), true)['error']);
     }
 
     public function testNoRegistraUnCodigoDeOtraFuncionNiUnaCanceladaNiEnUnaFuncionCancelada(): void
@@ -256,6 +284,29 @@ final class PanelDeReservasTest extends TestCase
         self::assertSame(303, $reservaDeElias->estado());
         self::assertSame('administrador', $this->historialDe($codigo)[0]['autor_rol']);
         self::assertSame(422, $this->pedir('POST', "/administracion/reservas/{$id}/anular", self::ADMINISTRADORA, 'administrador')->estado());
+    }
+
+    public function testLaAnulacionEnJsonDevuelveLaFilaComoQuedo(): void
+    {
+        $codigo = $this->reserva(self::PROXIMA, 3);
+        $id = (string) $this->base->valor('SELECT id FROM reserva WHERE codigo = ?', [$codigo]);
+        $ruta = "/administracion/reservas/{$id}/anular";
+
+        $respuesta = $this->pedir('POST', $ruta, self::ADMINISTRADORA, 'administrador', extra: self::ACEPTA_JSON);
+
+        self::assertSame(200, $respuesta->estado());
+        $datos = json_decode($respuesta->cuerpo(), true);
+        self::assertSame($codigo, $datos['reserva']['codigo']);
+        self::assertSame('cancelada', $datos['reserva']['estado']);
+        self::assertSame('cancelada', $datos['reserva']['estado_etiqueta']);
+        // Ya no se anula de nuevo: la fila deja de tener botón.
+        self::assertFalse($datos['reserva']['anulable']);
+        self::assertSame('cancelada', $this->estadoDe($codigo));
+
+        // Y la segunda vez, el mismo mensaje que la pantalla pero en JSON.
+        $otraVez = $this->pedir('POST', $ruta, self::ADMINISTRADORA, 'administrador', extra: self::ACEPTA_JSON);
+        self::assertSame(422, $otraVez->estado());
+        self::assertArrayHasKey('error', json_decode($otraVez->cuerpo(), true));
     }
 
     // ---- Cancelar la función cancela sus reservas (E4-03.4) ---------------------------------

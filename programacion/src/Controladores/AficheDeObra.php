@@ -40,9 +40,10 @@ final class AficheDeObra extends Controlador
             throw ExcepcionHttp::noEncontrada();
         }
 
-        // El ETag sale del contenido y no del nombre, como en la foto de la sala: los afiches de los
-        // datos de prueba se cambian pisando el archivo con el mismo nombre, y con el nombre de ETag
-        // el navegador seguía mostrando el viejo. Leerlo para cada pedido es barato: pesan poco.
+        // El ETag sale del contenido y no del nombre, a diferencia de la foto de la sala (que cambia de
+        // nombre con cada imagen nueva): los afiches de los datos de prueba se cambian pisando el
+        // archivo con el mismo nombre, y con el nombre de ETag el navegador seguía mostrando el viejo.
+        // Leerlo para cada pedido es barato: pesan poco.
         $etiqueta = '"' . hash('xxh128', $contenido) . '"';
         if ($peticion->cabecera('If-None-Match') === $etiqueta) {
             return (new Respuesta('', 304))->conCabecera('ETag', $etiqueta)->conCabecera('Cache-Control', 'no-cache');

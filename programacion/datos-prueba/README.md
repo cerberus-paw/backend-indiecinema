@@ -71,7 +71,7 @@ Distribuidas entre las 4 salas, con cupo menor o igual a la capacidad de la sala
 
 ## 4. Licencias y Reproducibilidad
 
-- Los afiches son los originales de cada película, o un fotograma cuando Commons no tiene el afiche, todos en **dominio público** y bajados de Wikimedia Commons (lista abajo). Los fotogramas van enteros sobre fondo negro, así la tarjeta de la función, que es 16:10, los muestra casi completos.
+- Los afiches son los originales de cada película, o un fotograma cuando Commons no tiene el afiche, todos en **dominio público** y bajados de Wikimedia Commons (lista abajo). Los fotogramas van recortados, apaisados y sin bandas negras.
 - Las fotos de salas son creaciones visuales originales para IndieCinema bajo licencia **CC0 1.0 Universal (Public Domain Dedication)**.
 - El script reproductor de las fotos de salas está versionado en `generar_imagenes.py` (también dibuja afiches, que ya no se usan: no pisar los de `afiches/`). Necesita Python 3 con Pillow y las fuentes Open Sans Condensed ExtraBold, Noto Serif y Adwaita Sans (todas con licencia libre) en las rutas que figuran al principio del script; si falta alguna, frena en vez de usar otra.
 

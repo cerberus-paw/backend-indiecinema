@@ -90,15 +90,13 @@ final class ReservasTest extends TestCase
     /**
      * @param array<string, string> $cuerpo
      * @param ?string               $acepta el Accept del pedido; null, el de un navegador
-     * @param array<string, string> $extra  otras cabeceras, como el token CSRF del JavaScript
      */
-    private function pedir(string $metodo, string $ruta, ?string $usuario = self::EVA, array $cuerpo = [], ?string $acepta = null, array $extra = []): Respuesta
+    private function pedir(string $metodo, string $ruta, ?string $usuario = self::EVA, array $cuerpo = [], ?string $acepta = null): Respuesta
     {
         $cabeceras = $usuario === null ? [] : ['X-Nginx-Secreto' => self::SECRETO, 'X-Usuario-Id' => $usuario, 'X-Rol' => 'espectador'];
         if ($acepta !== null) {
             $cabeceras['Accept'] = $acepta;
         }
-        $cabeceras = [...$cabeceras, ...$extra];
         $this->log = fopen('php://memory', 'w+');
         $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion, new Log('funciones', $this->log));
 
@@ -236,21 +234,18 @@ final class ReservasTest extends TestCase
     }
 
     /**
-     * El componente de la ficha manda el formulario con FormData, así que el token viaja en el
-     * campo oculto, y PAW.enviar además lo pone en la cabecera (E4-05.3). Las dos formas valen, y
-     * sin ninguna no se reserva.
+     * Sin token, el 403 del formulario de la ficha (E4-05.3) va en JSON con el mensaje para el
+     * espectador: el formulario lo muestra debajo del campo, y le dice que recargue en lugar de un
+     * «probá de nuevo» que volvería a fallar. Que se rechace y que el token pueda ir en la cabecera
+     * ya lo prueba el núcleo (AplicacionTest).
      */
-    public function testEnJsonSinTokenNoSeReservaYConLaCabeceraSi(): void
+    public function testEnJsonSinTokenElErrorVaEnJsonYNoSeReserva(): void
     {
-        $sinToken = $this->pedir('POST', '/reservar/' . self::PROXIMA, self::EVA, ['cantidad' => '1'], self::ACEPTA_JSON);
+        $respuesta = $this->pedir('POST', '/reservar/' . self::PROXIMA, self::EVA, ['cantidad' => '1'], self::ACEPTA_JSON);
 
-        self::assertSame(403, $sinToken->estado());
+        self::assertSame(403, $respuesta->estado());
+        self::assertSame(['error' => 'La página venció. Volvé a cargarla y probá de nuevo.'], self::json($respuesta));
         self::assertSame(0, $this->reservas());
-
-        $conCabecera = $this->pedir('POST', '/reservar/' . self::PROXIMA, self::EVA, ['cantidad' => '1'], self::ACEPTA_JSON, ['X-CSRF-Token' => self::CSRF]);
-
-        self::assertSame(201, $conCabecera->estado());
-        self::assertSame(1, $this->reservas());
     }
 
     public function testUnaCantidadInvalidaSeRechazaEnElServidor(): void

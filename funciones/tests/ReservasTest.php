@@ -30,6 +30,8 @@ final class ReservasTest extends TestCase
     }
 
     private const SECRETO = 'secreto-de-nginx';
+    /** El Accept que manda un fetch cuando se le pide JSON. */
+    private const ACEPTA_JSON = 'application/json, text/plain, */*';
     private const CSRF = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
     private const EVA = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
     private const ELIAS = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
@@ -134,12 +136,12 @@ final class ReservasTest extends TestCase
      */
     private function reservarEnJson(string $cantidad, string $funcion = self::PROXIMA, ?string $usuario = self::EVA): Respuesta
     {
-        return $this->pedir('POST', "/reservar/{$funcion}", $usuario, ['_csrf' => self::CSRF, 'cantidad' => $cantidad], 'application/json, text/plain, */*');
+        return $this->pedir('POST', "/reservar/{$funcion}", $usuario, ['_csrf' => self::CSRF, 'cantidad' => $cantidad], self::ACEPTA_JSON);
     }
 
     private function cancelarEnJson(string $id, ?string $usuario = self::EVA): Respuesta
     {
-        return $this->pedir('POST', "/reservas/{$id}/cancelar", $usuario, ['_csrf' => self::CSRF], 'application/json, text/plain, */*');
+        return $this->pedir('POST', "/reservas/{$id}/cancelar", $usuario, ['_csrf' => self::CSRF], self::ACEPTA_JSON);
     }
 
     /**
@@ -228,6 +230,21 @@ final class ReservasTest extends TestCase
         $respuesta = $this->pedir('POST', '/reservar/' . self::PROXIMA, self::EVA, ['_csrf' => 'otro', 'cantidad' => '1']);
 
         self::assertSame(403, $respuesta->estado());
+        self::assertSame(0, $this->reservas());
+    }
+
+    /**
+     * Sin token, el 403 del formulario de la ficha (E4-05.3) va en JSON con el mensaje para el
+     * espectador: el formulario lo muestra debajo del campo, y le dice que recargue en lugar de un
+     * «probá de nuevo» que volvería a fallar. Que se rechace y que el token pueda ir en la cabecera
+     * ya lo prueba el núcleo (AplicacionTest).
+     */
+    public function testEnJsonSinTokenElErrorVaEnJsonYNoSeReserva(): void
+    {
+        $respuesta = $this->pedir('POST', '/reservar/' . self::PROXIMA, self::EVA, ['cantidad' => '1'], self::ACEPTA_JSON);
+
+        self::assertSame(403, $respuesta->estado());
+        self::assertSame(['error' => 'La página venció. Volvé a cargarla y probá de nuevo.'], self::json($respuesta));
         self::assertSame(0, $this->reservas());
     }
 

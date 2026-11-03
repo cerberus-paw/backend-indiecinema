@@ -508,6 +508,11 @@ elige el workflow por la rama, porque `workflow_run` corre siempre en la rama po
 servidor, la clave pública sólo puede correr ese script: la línea de `authorized_keys` está en su
 encabezado.
 
+Después de publicar `desarrollo`, el CD corre las pruebas de punta a punta del front contra ese
+sitio (su `e2e/README.md`). Para eso el environment `desarrollo` tiene además la variable `E2E_URL`,
+los secretos `E2E_CORREO` y `E2E_CLAVE` (una cuenta de espectador) y la variable `E2E_FUNCION` (el
+id de una función con lugares), distintas de las del front para que las dos corridas no se pisen.
+
 ### Sin Docker
 
 Para ver las pantallas rápido, `herramientas/servidor-local.php` hace con el servidor de PHP lo que

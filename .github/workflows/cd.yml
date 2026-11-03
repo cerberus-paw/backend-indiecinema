@@ -54,3 +54,15 @@ jobs:
         env:
           SERVIDOR: ${{ vars.SERVIDOR }}
         run: ssh -i ~/.ssh/despliegue -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o BatchMode=yes "$SERVIDOR"
+
+  # Después de publicar desarrollo, las pruebas de punta a punta contra ese sitio: el workflow E2E
+  # del front, de su rama desarrollo, porque las pruebas viven allá. La corrida queda en verde o en
+  # rojo según pasen. Usan la cuenta y la función del environment desarrollo de este repositorio,
+  # distintas en el back y en el front para que no se pisen si los dos despliegan a la vez.
+  e2e:
+    name: Pruebas de punta a punta
+    needs: desplegar
+    if: (github.event.workflow_run.head_branch || github.ref_name) == 'desarrollo'
+    permissions:
+      contents: read
+    uses: cerberus-paw/frontend-indiecinema/.github/workflows/e2e.yml@desarrollo

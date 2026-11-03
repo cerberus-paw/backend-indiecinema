@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace IndieCinema\Programacion\Pruebas;
 
 use DateTimeImmutable;
+use Dom\HTMLDocument;
 use IndieCinema\Nucleo\Uuid;
 use IndieCinema\Nucleo\Aplicacion;
 use IndieCinema\Nucleo\BaseDeDatos;
@@ -503,6 +504,34 @@ final class FuncionesDelOrganizadorTest extends TestCase
 
         self::assertSame(422, $respuesta->estado());
         self::assertStringContainsString('Tenés que elegir al menos una obra del catálogo.', $respuesta->cuerpo());
+    }
+
+    /**
+     * E4-09.3: el error de las obras está escrito fuera del parcial de campo; cada casilla lo
+     * apunta con aria-describedby, así el lector de pantalla lo lee al pararse en una obra y no
+     * sólo cuando aparece.
+     */
+    public function testSinObrasCadaCasillaDescribeElError(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+
+        $respuesta = $this->enviar('/organizador/funciones/nueva', [
+            'sala_id' => $sala->id,
+            'obras' => [],
+            'fecha' => '2030-10-25',
+            'hora' => '20:30',
+            'precio' => '2500',
+            'cupo' => '40',
+        ]);
+
+        $documento = HTMLDocument::createFromString($respuesta->cuerpo(), LIBXML_NOERROR);
+        self::assertStringContainsString('Tenés que elegir al menos una obra del catálogo.', (string) $documento->getElementById('error-obras')?->textContent);
+        $casillas = $documento->querySelectorAll('input[name="obras[]"]');
+        self::assertGreaterThan(0, $casillas->length);
+        foreach ($casillas as $casilla) {
+            self::assertSame('error-obras', $casilla->getAttribute('aria-describedby'));
+            self::assertSame('true', $casilla->getAttribute('aria-invalid'));
+        }
     }
 
     public function testRechazaFechaPasada(): void
@@ -1796,6 +1825,17 @@ final class FuncionesDelOrganizadorTest extends TestCase
         ]);
         self::assertSame(422, $una->estado());
         self::assertStringContainsString('Proponé al menos 2 franjas', $una->cuerpo());
+        // E4-09.3: el error del conjunto lo describen la lista y la fecha y el inicio de cada opción,
+        // así se lee al tabular por ellas. El fin no: su aria-describedby lo maneja el gestor de
+        // franjas, para el aviso del rango.
+        $documento = HTMLDocument::createFromString($una->cuerpo(), LIBXML_NOERROR);
+        self::assertStringContainsString('Proponé al menos 2 franjas', (string) $documento->getElementById('error-franjas')?->textContent);
+        self::assertSame('error-franjas', $documento->querySelector('[data-contenedor-franjas]')?->getAttribute('aria-describedby'));
+        foreach ($documento->querySelectorAll('[data-contenedor-franjas] .fila-franja-horaria') as $fila) {
+            self::assertSame('error-franjas', $fila->querySelector('[data-campo-fecha]')?->getAttribute('aria-describedby'));
+            self::assertSame('error-franjas', $fila->querySelector('[data-campo-inicio]')?->getAttribute('aria-describedby'));
+            self::assertNull($fila->querySelector('[data-campo-fin]')?->getAttribute('aria-describedby'));
+        }
 
         // Bien cargadas, se proponen.
         $bien = $this->enviar($ruta, [

@@ -33,6 +33,7 @@ final class FormularioDeFuncion
     private const FALTA_FECHA = 'Falta la fecha de la función.';
     private const FALTA_HORA = 'Falta el horario de la función.';
     private const FALTA_PRECIO = 'Falta el precio de la entrada.';
+    private const PRECIO_NEGATIVO = 'El precio no puede ser negativo.';
     private const PRECIO_INVALIDO = 'El precio tiene que ser un número de hasta 99.999.999,99, sin puntos de miles.';
     private const CUPO_INVALIDO = 'El cupo tiene que ser de al menos un lugar.';
 
@@ -184,7 +185,7 @@ final class FormularioDeFuncion
         if ($precioRaw === '') {
             $this->errores['precio'] = self::FALTA_PRECIO;
         } elseif (preg_match('/^-/', $precioRaw) === 1 && is_numeric($precioRaw)) {
-            $this->errores['precio'] = 'El precio no puede ser negativo.';
+            $this->errores['precio'] = self::PRECIO_NEGATIVO;
         } elseif (preg_match(self::PRECIO, $precioRaw) !== 1) {
             // Sólo cifras y hasta dos decimales: «1e12» también es un número para PHP, y no entra
             // en la columna.
@@ -230,7 +231,16 @@ final class FormularioDeFuncion
             'precio' => [
                 'requerido' => true,
                 'patron' => self::PRECIO_PARA_EL_NAVEGADOR,
-                'mensajes' => ['requerido' => self::FALTA_PRECIO, 'patron' => self::PRECIO_INVALIDO, 'tipo' => self::PRECIO_INVALIDO],
+                // De a centavos, como acepta el servidor: con el paso de 1 de un campo numérico, el
+                // navegador rechazaría 1500,50.
+                'paso' => '0.01',
+                'valor_minimo' => 0,
+                'mensajes' => [
+                    'requerido' => self::FALTA_PRECIO,
+                    'valor_minimo' => self::PRECIO_NEGATIVO,
+                    'patron' => self::PRECIO_INVALIDO,
+                    'tipo' => self::PRECIO_INVALIDO,
+                ],
             ],
             'cupo' => [
                 'requerido' => true,

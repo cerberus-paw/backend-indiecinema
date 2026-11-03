@@ -66,3 +66,6 @@ jobs:
     permissions:
       contents: read
     uses: cerberus-paw/frontend-indiecinema/.github/workflows/e2e.yml@dev
+    # Un workflow reutilizable recibe las variables del environment, pero no los secretos: sin
+    # esto, E2E_CORREO y E2E_CLAVE llegan vacíos y las pruebas no pueden ingresar.
+    secrets: inherit

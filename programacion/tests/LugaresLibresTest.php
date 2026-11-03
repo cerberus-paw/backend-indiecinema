@@ -291,6 +291,21 @@ final class LugaresLibresTest extends TestCase
         self::assertStringNotContainsString('Exception', $respuesta->cuerpo());
     }
 
+    public function testLosLugaresDeUnaFuncionDeSalaSinPublicarSon404(): void
+    {
+        // Como la ficha: la consulta de los lugares tiene su propio filtro de sala publicada.
+        [, $conLugar] = $this->ocuparDosFunciones();
+        $url = "/cartelera/{$conLugar['id']}/lugares";
+
+        $this->base->ejecutar('UPDATE sala SET habilitada = FALSE WHERE id = ?', [$conLugar['sala_id']]);
+        $sinHabilitar = $this->pedirJson($url);
+        $this->base->ejecutar('UPDATE sala SET habilitada = TRUE, dada_de_baja_en = NOW() WHERE id = ?', [$conLugar['sala_id']]);
+        $deBaja = $this->pedirJson($url);
+
+        self::assertSame(404, $sinHabilitar->estado());
+        self::assertSame(404, $deBaja->estado());
+    }
+
     public function testSinFuncionesLosLugaresEnJsonVanEnNull(): void
     {
         [, $conLugar] = $this->ocuparDosFunciones();

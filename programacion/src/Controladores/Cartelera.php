@@ -11,6 +11,7 @@ use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Seguridad\Rol;
 use IndieCinema\Nucleo\Uuid;
+use IndieCinema\Programacion\Modelo\CupoDeFuncion;
 use IndieCinema\Programacion\Modelo\DetalleDeFuncion;
 use IndieCinema\Programacion\Modelo\EstadoFuncion;
 use IndieCinema\Programacion\Modelo\Funcion;
@@ -113,8 +114,9 @@ final class Cartelera extends Controlador
     {
         $id = (string) $peticion->parametro('id');
         $detalle = $this->servicio->detalle($id);
-        $lugares = $this->lugaresDe($detalle);
-        $reservable = self::seReservaConLugares($detalle, $lugares['agotada']);
+        $cupo = new CupoDeFuncion($detalle->id, $detalle->estado, $detalle->fechaHora, $detalle->cupo);
+        $lugares = $this->lugaresDe($cupo);
+        $reservable = self::seReservaConLugares($cupo, $lugares['agotada']);
 
         $usuario = $peticion->usuario();
         $esPropia = $usuario !== null
@@ -241,7 +243,8 @@ final class Cartelera extends Controlador
     /**
      * GET /cartelera/{id}/lugares: sólo los lugares libres de la función, en JSON, para que la
      * ficha los actualice sola sin recargar (E4-05.1). Es aparte de la ficha en JSON porque se
-     * pide cada pocos segundos: así no se vuelven a buscar las obras, el acuerdo ni los votos.
+     * pide cada pocos segundos: sólo busca el estado, la fecha y el cupo, sin las obras, la sala,
+     * el acuerdo ni los votos.
      *
      * Es pública, como la ficha, y no dice nada que la ficha no muestre.
      *
@@ -249,13 +252,13 @@ final class Cartelera extends Controlador
      */
     public function lugares(Peticion $peticion): Respuesta
     {
-        $detalle = $this->servicio->detalle((string) $peticion->parametro('id'));
-        $lugares = $this->lugaresDe($detalle);
+        $cupo = $this->servicio->cupo((string) $peticion->parametro('id'));
+        $lugares = $this->lugaresDe($cupo);
 
         return $this->json([
             ...$lugares,
-            'cupo' => $detalle->cupo,
-            'reservable' => self::seReservaConLugares($detalle, $lugares['agotada']),
+            'cupo' => $cupo->cupo,
+            'reservable' => self::seReservaConLugares($cupo, $lugares['agotada']),
         ]);
     }
 
@@ -266,10 +269,10 @@ final class Cartelera extends Controlador
      *
      * @return array{lugares_libres: ?int, agotada: bool}
      */
-    private function lugaresDe(DetalleDeFuncion $detalle): array
+    private function lugaresDe(CupoDeFuncion $funcion): array
     {
-        $libres = TarjetaDeFuncion::muestraLugares($detalle->estado, $detalle->fechaHora)
-            ? TarjetaDeFuncion::lugaresLibres($detalle->estado, $detalle->fechaHora, $detalle->cupo, $this->ocupacion->deUna($detalle->id))
+        $libres = TarjetaDeFuncion::muestraLugares($funcion->estado, $funcion->fechaHora)
+            ? TarjetaDeFuncion::lugaresLibres($funcion->estado, $funcion->fechaHora, $funcion->cupo, $this->ocupacion->deUna($funcion->id))
             : null;
 
         return ['lugares_libres' => $libres, 'agotada' => $libres === 0];
@@ -278,9 +281,9 @@ final class Cartelera extends Controlador
     /**
      * Agotada no se reserva: el formulario no tendría cómo salir bien.
      */
-    private static function seReservaConLugares(DetalleDeFuncion $detalle, bool $agotada): bool
+    private static function seReservaConLugares(CupoDeFuncion $funcion, bool $agotada): bool
     {
-        return Funcion::seReserva($detalle->estado, $detalle->fechaHora) && !$agotada;
+        return Funcion::seReserva($funcion->estado, $funcion->fechaHora) && !$agotada;
     }
 
     /**

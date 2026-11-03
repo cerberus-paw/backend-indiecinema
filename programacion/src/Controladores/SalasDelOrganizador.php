@@ -69,6 +69,10 @@ final class SalasDelOrganizador extends Controlador
         return $this->vista(self::PLANTILLA, [
             'es_edicion' => true,
             'accion' => "/organizador/salas/{$id}/editar",
+            // Las mismas con las que valida FormularioDeSala, con sus mensajes: el navegador
+            // revisa lo mismo y dice lo mismo (E4-09.1). Al editar la foto no es obligatoria:
+            // sin una nueva queda la que estaba.
+            'reglas' => FormularioDeSala::reglas(imagenObligatoria: false),
             'valores' => $formulario?->valores ?? [],
             'errores' => $formulario?->errores ?? [],
             'error_general' => $formulario?->errores ? 'Revisá los campos marcados.' : null,

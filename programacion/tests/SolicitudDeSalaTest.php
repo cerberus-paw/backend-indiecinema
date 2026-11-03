@@ -157,7 +157,9 @@ final class SolicitudDeSalaTest extends TestCase
         $respuesta = $this->pedir();
 
         self::assertSame(200, $respuesta->estado());
-        self::assertStringContainsString('<form action="/solicitar-sala" method="post" enctype="multipart/form-data">', $respuesta->cuerpo());
+        // Sin el > del final: al formulario se le pueden agregar atributos (el enganche de la
+        // validación en línea, por ejemplo) y lo que importa es que mande multipart a esta ruta.
+        self::assertStringContainsString('<form action="/solicitar-sala" method="post" enctype="multipart/form-data"', $respuesta->cuerpo());
         self::assertStringContainsString('name="_csrf" value="' . self::CSRF . '"', $respuesta->cuerpo());
         self::assertStringNotContainsString('No se pudo enviar la solicitud', $respuesta->cuerpo());
     }

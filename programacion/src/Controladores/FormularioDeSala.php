@@ -32,6 +32,10 @@ final class FormularioDeSala
         'tiempo_entre_funciones' => [0, 240, 'El intervalo tiene que estar entre 0 y 240 minutos.'],
     ];
 
+    /** Los mensajes de la imagen, acá para que reglas() y validarImagen() digan lo mismo. */
+    private const FALTA_LA_FOTO = 'Falta la foto de la sala.';
+    private const FOTO_DE_OTRO_TIPO = 'La foto tiene que ser JPG, PNG o WebP.';
+
     /** Lo que admite php.ini (upload_max_filesize) y dice la ayuda del formulario. */
     private const MAXIMO_IMAGEN = 5 * 1024 * 1024;
     /** Tipo según el contenido => extensión con la que se guarda. */
@@ -95,20 +99,51 @@ final class FormularioDeSala
      * valor_maximo y aceptar), así se le pasan tal cual y un límite cambia en un solo lugar. El
      * servidor igual valida todo: el navegador se puede saltear.
      *
+     * Cada campo lleva además sus mensajes, los mismos que contesta validar() (E4-09.1): el
+     * formulario los muestra mientras se escribe, y así el texto que ve quien carga es el mismo
+     * antes y después de mandar, en cualquier navegador. Salen de los mismos métodos que los del
+     * servidor, no de una copia.
+     *
      * @return array<string, array<string, mixed>>
      */
     public static function reglas(bool $imagenObligatoria): array
     {
         $reglas = [];
-        foreach (self::TEXTOS as $campo => [, $maximo]) {
-            $reglas[$campo] = ['requerido' => true, 'maximo' => $maximo];
+        foreach (self::TEXTOS as $campo => [$etiqueta, $maximo]) {
+            $reglas[$campo] = ['requerido' => true, 'maximo' => $maximo, 'mensajes' => [
+                'requerido' => self::faltaTexto($etiqueta),
+                'maximo' => self::textoDemasiadoLargo($etiqueta, $maximo),
+            ]];
         }
-        foreach (self::NUMEROS as $campo => [$minimo, $maximo]) {
-            $reglas[$campo] = ['requerido' => true, 'valor_minimo' => $minimo, 'valor_maximo' => $maximo];
+        foreach (self::NUMEROS as $campo => [$minimo, $maximo, $mensaje]) {
+            // El servidor contesta lo mismo para el vacío, lo que no es entero y lo que se va de
+            // rango, así que el navegador también: es un solo mensaje para las tres.
+            $reglas[$campo] = ['requerido' => true, 'valor_minimo' => $minimo, 'valor_maximo' => $maximo, 'mensajes' => [
+                'requerido' => $mensaje,
+                'valor_minimo' => $mensaje,
+                'valor_maximo' => $mensaje,
+                'tipo' => $mensaje,
+            ]];
         }
-        $reglas['imagen'] = ['requerido' => $imagenObligatoria, 'aceptar' => implode(',', array_keys(self::TIPOS_DE_IMAGEN))];
+        $reglas['imagen'] = [
+            'requerido' => $imagenObligatoria,
+            'aceptar' => implode(',', array_keys(self::TIPOS_DE_IMAGEN)),
+            'mensajes' => ['requerido' => self::FALTA_LA_FOTO, 'aceptar' => self::FOTO_DE_OTRO_TIPO],
+        ];
 
         return $reglas;
+    }
+
+    /** @return string el mismo texto que contesta el servidor cuando el campo viene vacío */
+    private static function faltaTexto(string $etiqueta): string
+    {
+        return 'Falta ' . $etiqueta . '.';
+    }
+
+    /** @return string el mismo texto que contesta el servidor cuando el campo se pasa de largo */
+    private static function textoDemasiadoLargo(string $etiqueta, int $maximo): string
+    {
+        return ucfirst($etiqueta) . " puede tener hasta {$maximo} caracteres.";
     }
 
     /**
@@ -129,9 +164,9 @@ final class FormularioDeSala
             $valor = self::texto($campos[$campo] ?? null, $campo === 'descripcion');
             $this->valores[$campo] = $valor;
             if ($valor === '') {
-                $this->errores[$campo] = 'Falta ' . $etiqueta . '.';
+                $this->errores[$campo] = self::faltaTexto($etiqueta);
             } elseif (mb_strlen($valor) > $maximo) {
-                $this->errores[$campo] = ucfirst($etiqueta) . " puede tener hasta {$maximo} caracteres.";
+                $this->errores[$campo] = self::textoDemasiadoLargo($etiqueta, $maximo);
             }
             $textos[$campo] = $valor;
         }
@@ -173,7 +208,7 @@ final class FormularioDeSala
         $error = $archivo['error'] ?? UPLOAD_ERR_NO_FILE;
         if ($error === UPLOAD_ERR_NO_FILE) {
             if ($obligatoria) {
-                $this->errores['imagen'] = 'Falta la foto de la sala.';
+                $this->errores['imagen'] = self::FALTA_LA_FOTO;
             }
 
             return;
@@ -198,7 +233,7 @@ final class FormularioDeSala
         $extension = self::TIPOS_DE_IMAGEN[(new finfo(FILEINFO_MIME_TYPE))->file($ruta)] ?? null;
         $medidas = $extension === null ? false : @getimagesize($ruta);
         if ($extension === null || $medidas === false) {
-            $this->errores['imagen'] = 'La foto tiene que ser JPG, PNG o WebP.';
+            $this->errores['imagen'] = self::FOTO_DE_OTRO_TIPO;
 
             return;
         }

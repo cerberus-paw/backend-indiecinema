@@ -69,12 +69,19 @@ final class FormularioDeSolicitud
     }
 
     /**
-     * Las del alta de la sala y las declaraciones, obligatorias.
+     * Las del alta de la sala y las declaraciones, obligatorias. Cada declaración lleva su
+     * mensaje, el mismo que contesta el servidor si no se tilda (E4-09.1): sin tildar es lo único
+     * que el navegador puede ver de ellas.
      *
      * @return array<string, array<string, mixed>>
      */
     public static function reglas(bool $imagenObligatoria): array
     {
-        return FormularioDeSala::reglas($imagenObligatoria) + array_fill_keys(array_keys(self::DECLARACIONES), ['requerido' => true]);
+        $declaraciones = [];
+        foreach (self::DECLARACIONES as $casilla => $mensaje) {
+            $declaraciones[$casilla] = ['requerido' => true, 'mensajes' => ['requerido' => $mensaje]];
+        }
+
+        return FormularioDeSala::reglas($imagenObligatoria) + $declaraciones;
     }
 }

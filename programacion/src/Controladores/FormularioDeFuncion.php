@@ -21,6 +21,22 @@ final class FormularioDeFuncion
     /** Hasta ocho cifras y dos decimales, lo que entra en funcion.precio_base (Funcion::PRECIO_MAXIMO). */
     private const PRECIO = '/^[0-9]{1,8}([.,][0-9]{1,2})?$/D';
 
+    /** La misma regla del precio para el atributo pattern, que ancla solo y no lleva barras. */
+    private const PRECIO_PARA_EL_NAVEGADOR = '[0-9]{1,8}([.,][0-9]{1,2})?';
+
+    /**
+     * Los mensajes que el navegador también puede dar, acá para que reglas() y validar() digan lo
+     * mismo. Los que dependen de la sala elegida —cuántas películas entran, la capacidad, que la
+     * fecha sea futura— no están: ésos sólo los sabe el servidor y llegan al mandar.
+     */
+    private const FALTA_SALA = 'Falta seleccionar la sala.';
+    private const FALTA_FECHA = 'Falta la fecha de la función.';
+    private const FALTA_HORA = 'Falta el horario de la función.';
+    private const FALTA_PRECIO = 'Falta el precio de la entrada.';
+    private const PRECIO_NEGATIVO = 'El precio no puede ser negativo.';
+    private const PRECIO_INVALIDO = 'El precio tiene que ser un número de hasta 99.999.999,99, sin puntos de miles.';
+    private const CUPO_INVALIDO = 'El cupo tiene que ser de al menos un lugar.';
+
     /** @var array<string, mixed> lo que mandó, para volver a mostrarlo si hay errores */
     public private(set) array $valores = [];
 
@@ -91,7 +107,7 @@ final class FormularioDeFuncion
         $this->valores['sala_id'] = $salaIdRaw;
         $salaElegida = null;
         if ($salaIdRaw === '') {
-            $this->errores['sala_id'] = 'Falta seleccionar la sala.';
+            $this->errores['sala_id'] = self::FALTA_SALA;
         } else {
             foreach ($salasHabilitadas as $s) {
                 if ($s->id === $salaIdRaw) {
@@ -143,10 +159,10 @@ final class FormularioDeFuncion
 
         if ($this->esProgramada()) {
             if ($fecha === '') {
-                $this->errores['fecha'] = 'Falta la fecha de la función.';
+                $this->errores['fecha'] = self::FALTA_FECHA;
             }
             if ($hora === '') {
-                $this->errores['hora'] = 'Falta el horario de la función.';
+                $this->errores['hora'] = self::FALTA_HORA;
             }
 
             if ($fecha !== '' && $hora !== '') {
@@ -167,13 +183,13 @@ final class FormularioDeFuncion
         $precioRaw = self::texto($campos['precio'] ?? null);
         $this->valores['precio'] = $precioRaw;
         if ($precioRaw === '') {
-            $this->errores['precio'] = 'Falta el precio de la entrada.';
+            $this->errores['precio'] = self::FALTA_PRECIO;
         } elseif (preg_match('/^-/', $precioRaw) === 1 && is_numeric($precioRaw)) {
-            $this->errores['precio'] = 'El precio no puede ser negativo.';
+            $this->errores['precio'] = self::PRECIO_NEGATIVO;
         } elseif (preg_match(self::PRECIO, $precioRaw) !== 1) {
             // Sólo cifras y hasta dos decimales: «1e12» también es un número para PHP, y no entra
             // en la columna.
-            $this->errores['precio'] = 'El precio tiene que ser un número de hasta 99.999.999,99, sin puntos de miles.';
+            $this->errores['precio'] = self::PRECIO_INVALIDO;
         } else {
             $this->precio = (float) str_replace(',', '.', $precioRaw);
         }
@@ -183,7 +199,7 @@ final class FormularioDeFuncion
         $this->valores['cupo'] = $cupoRaw;
         $cupoInt = filter_var($cupoRaw, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
         if ($cupoRaw === '' || $cupoInt === false) {
-            $this->errores['cupo'] = 'El cupo tiene que ser de al menos un lugar.';
+            $this->errores['cupo'] = self::CUPO_INVALIDO;
         } else {
             $cupo = (int) $cupoInt;
             if ($salaElegida !== null && $cupo > $salaElegida->datos->capacidad) {
@@ -192,6 +208,47 @@ final class FormularioDeFuncion
                 $this->cupo = $cupo;
             }
         }
+    }
+
+    /**
+     * Las reglas que el navegador puede revisar solo, con los mensajes que contesta este mismo
+     * formulario (E4-09.1): campo => las claves que espera el parcial de campo del paquete front.
+     * Así el texto que ve el organizador mientras carga es el mismo que si mandara, y es el mismo
+     * en cualquier navegador.
+     *
+     * Lo que depende de la sala elegida —cuántas películas entran, la duración, la capacidad— y
+     * que la fecha sea futura no están acá: ésos sólo los sabe el servidor, y llegan al mandar.
+     * El servidor igual valida todo: el navegador se puede saltear.
+     *
+     * @return array<string, array<string, mixed>>
+     */
+    public static function reglas(): array
+    {
+        return [
+            'sala_id' => ['requerido' => true, 'mensajes' => ['requerido' => self::FALTA_SALA]],
+            'fecha' => ['requerido' => true, 'mensajes' => ['requerido' => self::FALTA_FECHA]],
+            'hora' => ['requerido' => true, 'mensajes' => ['requerido' => self::FALTA_HORA]],
+            'precio' => [
+                'requerido' => true,
+                'patron' => self::PRECIO_PARA_EL_NAVEGADOR,
+                // De a centavos, como acepta el servidor: con el paso de 1 de un campo numérico, el
+                // navegador rechazaría 1500,50.
+                'paso' => '0.01',
+                'valor_minimo' => 0,
+                'mensajes' => [
+                    'requerido' => self::FALTA_PRECIO,
+                    'valor_minimo' => self::PRECIO_NEGATIVO,
+                    'patron' => self::PRECIO_INVALIDO,
+                    'tipo' => self::PRECIO_INVALIDO,
+                ],
+            ],
+            'cupo' => [
+                'requerido' => true,
+                'valor_minimo' => 1,
+                // El servidor contesta lo mismo para el vacío, lo que no es entero y el cero.
+                'mensajes' => ['requerido' => self::CUPO_INVALIDO, 'valor_minimo' => self::CUPO_INVALIDO, 'tipo' => self::CUPO_INVALIDO],
+            ],
+        ];
     }
 
     private static function texto(mixed $valor): string

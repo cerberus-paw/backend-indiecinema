@@ -1,13 +1,14 @@
-# Integración continua: en cada PR y en cada push a main. Son los controles de la etapa de
-# desarrollo que prometió la E1 (seguridad en el ciclo de vida): ningún secreto en el repositorio,
-# dependencias revisadas con composer audit y las pruebas pasando antes de integrar un cambio.
+# Integración continua: en cada PR y en cada push a main y a desarrollo. Son los controles de la
+# etapa de desarrollo que prometió la E1 (seguridad en el ciclo de vida): ningún secreto en el
+# repositorio, dependencias revisadas con composer audit y las pruebas pasando antes de integrar un
+# cambio.
 
 name: CI
 
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, desarrollo]
 
 # Sólo lee el código: ningún trabajo necesita escribir en el repositorio.
 permissions:
@@ -58,19 +59,22 @@ jobs:
     steps:
       # Los dos repositorios uno al lado del otro, como en la máquina de cada uno: los subsistemas
       # instalan el front desde ../../frontend-indiecinema.
-      # La rama del front con el mismo nombre que ésta, si existe; si no, main. Así un cambio
-      # que toca los dos repositorios (las ramas IC-… se llaman igual en los dos) se prueba entero
-      # antes de mergear ninguno. La rama va por env y no en el script, por si trae algo raro.
+      # La rama del front con el mismo nombre que ésta, si existe; si no, la rama a la que apunta
+      # el PR (desarrollo o main), y si tampoco existe, main. Así un cambio que toca los dos
+      # repositorios (las ramas IC-… se llaman igual en los dos) se prueba entero antes de mergear
+      # ninguno. Las ramas van por env y no en el script, por si traen algo raro.
       - name: Elegir la rama del front
         id: front
         env:
           RAMA: ${{ github.head_ref || github.ref_name }}
+          BASE: ${{ github.base_ref || github.ref_name }}
         run: |
-          if git ls-remote --exit-code --heads https://github.com/cerberus-paw/frontend-indiecinema.git "refs/heads/$RAMA" >/dev/null; then
-            echo "ref=$RAMA" >> "$GITHUB_OUTPUT"
-          else
-            echo "ref=main" >> "$GITHUB_OUTPUT"
-          fi
+          for ref in "$RAMA" "$BASE" main; do
+            if git ls-remote --exit-code --heads https://github.com/cerberus-paw/frontend-indiecinema.git "refs/heads/$ref" >/dev/null; then
+              echo "ref=$ref" >> "$GITHUB_OUTPUT"
+              break
+            fi
+          done
           grep ref= "$GITHUB_OUTPUT"
       - uses: actions/checkout@v7
         with:

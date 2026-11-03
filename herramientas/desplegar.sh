@@ -1,11 +1,13 @@
 #!/bin/bash
-# Publica en el VPS lo que está en main: trae los dos repositorios, instala las dependencias,
-# recrea los contenedores que cambiaron, aplica las migraciones y comprueba que el sitio responda.
-# No toca los datos ni los secretos (.env y los config.ini).
+# Publica en este servidor lo que está en su rama: trae los dos repositorios, instala las
+# dependencias, recrea los contenedores que cambiaron, aplica las migraciones y comprueba que el
+# sitio responda. No toca los datos ni los secretos (.env y los config.ini). La rama es la que tiene
+# clonada cada repositorio: main en producción y desarrollo en el de desarrollo (README, «Ramas y
+# entornos»); el script no la elige, así un pedido no puede cambiar lo que publica un servidor.
 #
-# Lo corre el workflow CD del back y del front cuando la CI pasa en main. Entra por SSH con una
+# Lo corre el workflow CD del back y del front cuando la CI pasa en esa rama. Entra por SSH con una
 # clave que en ~/.ssh/authorized_keys sólo puede correr este script, sin terminal ni túneles: si
-# el secreto de GitHub se filtrara, lo único que permite es volver a desplegar main.
+# el secreto de GitHub se filtrara, lo único que permite es volver a desplegar la misma rama.
 #
 #   restrict,command="/home/ubuntu/indiecinema/backend-indiecinema/herramientas/desplegar.sh" ssh-ed25519 AAAA… cd-github
 #

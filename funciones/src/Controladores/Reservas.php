@@ -8,6 +8,7 @@ use IndieCinema\Funciones\Modelo\EstadoReserva;
 use IndieCinema\Funciones\Modelo\FuncionDeProgramacion;
 use IndieCinema\Funciones\Modelo\ReglaIncumplida;
 use IndieCinema\Funciones\Modelo\Reserva;
+use IndieCinema\Funciones\Servicios\AvisosDeReservas;
 use IndieCinema\Funciones\Servicios\ServicioDeReservas;
 use IndieCinema\Nucleo\Controlador;
 use IndieCinema\Nucleo\Http\ExcepcionHttp;
@@ -15,6 +16,8 @@ use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Seguridad\Usuario;
 use LogicException;
+use Psr\Log\LoggerInterface;
+use RuntimeException;
 
 /**
  * La reserva de una función, como el wireframe de la E2 (reserva-pago-comprobante) sin el paso del
@@ -26,8 +29,76 @@ use LogicException;
  */
 final class Reservas extends Controlador
 {
-    public function __construct(private readonly ServicioDeReservas $servicio)
+    public function __construct(
+        private readonly ServicioDeReservas $servicio,
+        private readonly AvisosDeReservas $avisos,
+        private readonly LoggerInterface $log,
+    ) {
+    }
+
+    /**
+     * GET /reservas: «Mis reservas» (E4-04.1), con ?pagina=. Una página que no existe es 404, como
+     * en el panel del administrador. Si programación no responde, o responde algo que no son
+     * funciones, la lista sale igual, con los códigos y sin los datos de las funciones.
+     */
+    public function mias(Peticion $peticion): Respuesta
     {
+        $espectador = self::usuario($peticion);
+        $numero = filter_var($peticion->consulta('pagina', '1'), FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+        if ($numero === false) {
+            throw ExcepcionHttp::noEncontrada();
+        }
+        [$reservas, $total] = $this->servicio->pagina($espectador, $numero);
+        $paginas = max(1, (int) ceil($total / ServicioDeReservas::POR_PAGINA));
+        if ($numero > $paginas) {
+            throw ExcepcionHttp::noEncontrada();
+        }
+        try {
+            $funciones = $this->servicio->funcionesDe($reservas);
+            $sinProgramacion = false;
+        } catch (ExcepcionHttp) {
+            // ClienteInterno ya dejó en el log que programación no respondió.
+            $funciones = [];
+            $sinProgramacion = true;
+        } catch (RuntimeException $error) {
+            $this->log->error('Sin las funciones de «Mis reservas»: {mensaje}', ['mensaje' => $error->getMessage()]);
+            $funciones = [];
+            $sinProgramacion = true;
+        }
+
+        return $this->vista('mis_reservas.html.twig', [
+            'reservas' => array_map(static function (Reserva $reserva) use ($funciones, $sinProgramacion): array {
+                $funcion = $funciones[$reserva->funcionId] ?? null;
+
+                return [
+                    ...self::datosDeReserva($reserva, $funcion),
+                    'estado_etiqueta' => $reserva->estado->etiqueta(),
+                    // Sin programación no se sabe si empezó: el botón queda en el comprobante.
+                    'cancelable' => !$sinProgramacion && ServicioDeReservas::seCancela($reserva, $funcion),
+                    'funcion' => $funcion === null ? null : self::datosDeFuncion($funcion),
+                ];
+            }, $reservas),
+            'sin_programacion' => $sinProgramacion,
+            'paginado' => [
+                'numero' => $numero,
+                'total_paginas' => $paginas,
+                'total' => $total,
+                'anterior' => $numero > 1 ? self::urlDePagina($numero - 1) : null,
+                'siguiente' => $numero < $paginas ? self::urlDePagina($numero + 1) : null,
+                'paginas' => array_map(
+                    static fn (int $n): array => ['numero' => $n, 'url' => self::urlDePagina($n), 'actual' => $n === $numero],
+                    range(1, $paginas),
+                ),
+            ],
+        ]);
+    }
+
+    /**
+     * Relativa a la página: así no depende del prefijo de funciones, que pone nginx.
+     */
+    private static function urlDePagina(int $numero): string
+    {
+        return $numero > 1 ? "?pagina={$numero}" : '?';
     }
 
     public function formulario(Peticion $peticion): Respuesta
@@ -49,11 +120,15 @@ final class Reservas extends Controlador
             return $this->pantalla($funcion, ['cantidad' => $valor], ['cantidad' => "Ingresá entre 1 y {$funcion->cupo} lugares."], estado: 422);
         }
 
+        // Un error de configuración, antes de guardar nada.
+        $this->avisos->comprobarConfiguracion();
         try {
             $reserva = $this->servicio->reservar(self::usuario($peticion), $funcion->id, $cantidad);
         } catch (ReglaIncumplida $error) {
             return $this->pantalla($funcion, ['cantidad' => $valor], error: $error->getMessage(), estado: 422);
         }
+        // Ya confirmada: si el correo no sale, la reserva queda igual y el aviso queda en el log.
+        $this->avisos->reservaConfirmada($reserva, $funcion);
 
         // 303: recargar la confirmación no vuelve a reservar.
         return $this->redirigir("/reservas/{$reserva->id}");

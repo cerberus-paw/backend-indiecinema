@@ -4,10 +4,10 @@ Juego de datos para demostración y pruebas del subsistema `programacion` de Ind
 
 Cumple con los criterios de **E3-02.1**:
 - **4 salas** en localidades distintas (`Luján`, `Mercedes`, `General Rodríguez` y `San Antonio de Areco`), todas habilitadas.
-- **12 obras** con afiche, correspondientes a clásicos históricos del cine en **dominio público**.
+- **12 obras** con su afiche real, correspondientes a clásicos históricos del cine en **dominio público**.
 - **15 funciones futuras** con cupo dentro de la capacidad de su sala, precio base y obras programadas.
 - **Sin datos personales reales**: nombres de salas y direcciones ficticias, organizadores de prueba (`@indiecinema.test`), y figuras históricas del cine.
-- **Imágenes de licencia libre**: afiches e ilustraciones de salas bajo licencia **Creative Commons Zero (CC0)** / **Dominio Público**.
+- **Imágenes de licencia libre**: afiches en **dominio público** e ilustraciones de salas bajo **Creative Commons Zero (CC0)**.
 
 ---
 
@@ -71,6 +71,25 @@ Distribuidas entre las 4 salas, con cupo menor o igual a la capacidad de la sala
 
 ## 4. Licencias y Reproducibilidad
 
-- Los afiches y fotos de salas son creaciones visuales originales para IndieCinema bajo licencia **CC0 1.0 Universal (Public Domain Dedication)**.
-- El script reproductor está versionado en `generar_imagenes.py`. Necesita Python 3 con Pillow y las fuentes Open Sans Condensed ExtraBold, Noto Serif y Adwaita Sans (todas con licencia libre) en las rutas que figuran al principio del script; si falta alguna, frena en vez de usar otra.
+- Los afiches son los originales de cada película, o un fotograma cuando Commons no tiene el afiche, todos en **dominio público** y bajados de Wikimedia Commons (lista abajo). Los fotogramas van enteros sobre fondo negro, así la tarjeta de la función, que es 16:10, los muestra casi completos.
+- Las fotos de salas son creaciones visuales originales para IndieCinema bajo licencia **CC0 1.0 Universal (Public Domain Dedication)**.
+- El script reproductor de las fotos de salas está versionado en `generar_imagenes.py` (también dibuja afiches, que ya no se usan: no pisar los de `afiches/`). Necesita Python 3 con Pillow y las fuentes Open Sans Condensed ExtraBold, Noto Serif y Adwaita Sans (todas con licencia libre) en las rutas que figuran al principio del script; si falta alguna, frena en vez de usar otra.
+
+### Origen de los afiches
+
+| Afiche | Obra | Qué es | En Wikimedia Commons |
+|---|---|---|---|
+| `af1c0001000000000000000000000001.jpg` | Metrópolis | afiche de Boris Bilinsky | [File:Boris Bilinski (1900-1948) Plakat für den Film Metropolis (1).jpg](https://commons.wikimedia.org/wiki/File:Boris_Bilinski_%281900-1948%29_Plakat_für_den_Film_Metropolis_%281%29.jpg) |
+| `af1c0002000000000000000000000002.jpg` | Nosferatu | fotograma: Orlok en la puerta | [File:Nosferatu (1922) - Count Orlok Standing In A Wooden Doorway.png](https://commons.wikimedia.org/wiki/File:Nosferatu_%281922%29_-_Count_Orlok_Standing_In_A_Wooden_Doorway.png) |
+| `af1c0003000000000000000000000003.jpg` | Viaje a la Luna | fotograma coloreado de la Luna | [File:Melies color Voyage dans la lune.jpg](https://commons.wikimedia.org/wiki/File:Melies_color_Voyage_dans_la_lune.jpg) |
+| `af1c0004000000000000000000000004.jpg` | El gabinete del Dr. Caligari | afiche de Rudolf Ledl / Fritz Bernhard | [File:Das Cabinet des Dr. Caligari.JPG](https://commons.wikimedia.org/wiki/File:Das_Cabinet_des_Dr._Caligari.JPG) |
+| `af1c0005000000000000000000000005.jpg` | El maquinista de la General | afiche de United Artists | [File:The General (1926) - Movie Poster 2.png](https://commons.wikimedia.org/wiki/File:The_General_%281926%29_-_Movie_Poster_2.png) |
+| `af1c0006000000000000000000000006.jpg` | El acorazado Potemkin | afiche soviético | [File:Vintage Potemkin.jpg](https://commons.wikimedia.org/wiki/File:Vintage_Potemkin.jpg) |
+| `af1c0007000000000000000000000007.jpg` | La noche de los muertos vivientes | afiche | [File:Night Of The Living Dead (1968) - Poster.jpg](https://commons.wikimedia.org/wiki/File:Night_Of_The_Living_Dead_%281968%29_-_Poster.jpg) |
+| `af1c0008000000000000000000000008.jpg` | Sherlock Jr. | afiche de Metro | [File:Sherlock jr poster.jpg](https://commons.wikimedia.org/wiki/File:Sherlock_jr_poster.jpg) |
+| `af1c0009000000000000000000000009.jpg` | El hombre de la cámara | fotograma: la cámara y el camarógrafo | [File:Man with a Movie Camera by Dziga Vertov.jpg](https://commons.wikimedia.org/wiki/File:Man_with_a_Movie_Camera_by_Dziga_Vertov.jpg) |
+| `af1c0010000000000000000000000010.jpg` | El fantasma de la ópera | afiche de Universal | [File:The Phantom of the Opera (1925).jpg](https://commons.wikimedia.org/wiki/File:The_Phantom_of_the_Opera_%281925%29.jpg) |
+| `af1c0011000000000000000000000011.jpg` | Viaje a través de lo imposible | fotograma: el título de Star Film | [File:Méliès, Le voyage a travers l'impossible1904 colorizée 01.jpg](https://commons.wikimedia.org/wiki/File:Méliès,_Le_voyage_a_travers_l'impossible1904_colorizée_01.jpg) |
+| `af1c0012000000000000000000000012.jpg` | El pibe | afiche de First National | [File:The Kid (1921) poster.jpg](https://commons.wikimedia.org/wiki/File:The_Kid_%281921%29_poster.jpg) |
+
 - No requiere dependencias externas en tiempo de ejecución de la aplicación web: los archivos JPEG ya se encuentran generados y versionados en el repositorio.

@@ -194,7 +194,9 @@ todo el sitio se vea igual aunque lo sirvan subsistemas distintos.
   subsistema no responde en dos segundos, la página corta con un 503 en lugar de quedar colgada.
   `GET /interno/estado` responde quién es y a quién reconoció, para probar la conexión. La
   primera ruta de verdad es `GET /interno/funciones/{id}` de programación: le da a funciones el
-  estado, la fecha, el precio, el cupo, los títulos, la sala y el organizador de una función.
+  estado, la fecha, el precio, el cupo, los títulos, la sala y el organizador de una función;
+  `GET /interno/funciones?ids=…` da lo mismo de hasta 20 juntas, para una página de «Mis
+  reservas».
   Cuentas tiene `GET /interno/usuarios/{id}` y `POST /interno/usuarios/{id}/roles`, que llama
   programación desde la bandeja de solicitudes de sala.
   Funciones tiene `GET /interno/funciones/{id}/ocupacion` y `GET /interno/ocupacion?funciones=…`
@@ -210,8 +212,13 @@ todo el sitio se vea igual aunque lo sirvan subsistemas distintos.
   rol: si cuentas no responde no cambia nada, y nunca queda una sala publicada cuyo dueño no
   puede entrar a «Mis salas». La resuelve el administrador mientras no haya moderación.
 - **Los correos salen por SMTP con el curl de PHP** (`ClienteSmtp` del núcleo), sin librerías.
-  El servidor está en `[correo]` del `config.ini` de programación, que manda el aviso de cada
-  solicitud de sala. Por ahora el correo se simula, también en el VPS: va al buzón de prueba del
+  El servidor y el remitente están en `[correo]` del `config.ini` de cada subsistema que manda
+  correos: programación, el aviso de cada solicitud de sala, y funciones, los de los espectadores
+  (la reserva confirmada, con el código y el enlace al comprobante, y la función cancelada). El
+  enlace sale de `[sitio] url` de funciones, la dirección pública del sitio sin la barra final:
+  si falta o no es http(s), reservar responde 500 y el motivo queda en el log. Si un correo no
+  sale, la reserva queda igual y el log lo cuenta con el id de la reserva, sin la dirección.
+  Por ahora el correo se simula, también en el VPS: va al buzón de prueba del
   compose (`COMPOSE_PROFILES=buzon` en `.env`), que en el VPS sólo escucha en la máquina y se ve
   con `ssh -L 8025:127.0.0.1:8025 …`. Con un proveedor de verdad, un servidor con usuario exige
   `smtps://` o STARTTLS para no mandar la clave sin cifrar.
@@ -283,6 +290,7 @@ docker run --rm -u "$(id -u):$(id -g)" -v "$PWD/..:/app" -w /app/backend-indieci
 | http://localhost:8080/administracion/solicitudes | la bandeja de solicitudes de sala, para aprobarlas (publica la sala y da el rol de organizador) o rechazarlas con un motivo, y el historial; sólo el administrador |
 | http://localhost:8025 | el buzón de prueba (Mailpit): los correos que mandan los subsistemas, sin que salgan a nadie |
 | http://localhost:8080/cuenta/administracion/usuarios | usuarios y roles, con los números de las cuentas, buscador por nombre o correo, filtros de rol, estado y año de alta, y el rol de cada uno en un desplegable (espectador u organizador), con «Guardar cambios» para toda la tabla; sólo el administrador |
+| http://localhost:8080/funcion/reservas | «Mis reservas», con sesión: las del espectador, con su estado, el comprobante (que se imprime) y cancelar mientras se pueda |
 | http://localhost:8080/funcion/organizador/funciones/{id}/reservas | las reservas de una función para su organizador: lugares reservados y libres, asistencia con el código y descarga en CSV |
 | http://localhost:8080/funcion/administracion/reservas | todas las reservas, con filtro por estado y la anulación; sólo el administrador |
 | http://localhost:8080/estaticos/… | CSS, JavaScript e imágenes del paquete front |
@@ -548,8 +556,10 @@ mismo con las del organizador y fija cuáles son públicas), y las restricciones
 usuario y rol (correo único, y roles sin repetir y sólo de un usuario que existe); en funciones, las
 restricciones de la tabla reserva (código único, cantidad positiva y total no negativo) y el cupo de
 la reserva, con varios procesos a la vez por el último lugar, sus cambios de estado, y la reserva de punta a punta (sesión,
-token CSRF, cantidad inválida, sin lugares, la reserva de otro y la cancelación). Para correrlas
-con el PHP de la máquina (8.4 o superior, con `pdo_mysql`), contra un MySQL descartable:
+token CSRF, cantidad inválida, sin lugares, la reserva de otro y la cancelación), el correo de la
+reserva confirmada (también sin cuentas, sin servidor de correo o sin `[sitio] url`) y «Mis
+reservas» (el orden, el paginado, sólo las propias y programación caída). Para correrlas con el PHP
+de la máquina (8.4 o superior, con `pdo_mysql`), contra un MySQL descartable:
 
 ```
 docker run -d --rm --name mysql-pruebas -e MYSQL_ROOT_PASSWORD=pruebas -e MYSQL_DATABASE=pruebas -p 127.0.0.1:3307:3306 mysql:8.4

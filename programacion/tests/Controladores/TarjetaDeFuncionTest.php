@@ -32,6 +32,8 @@ final class TarjetaDeFuncionTest extends TestCase
         self::assertSame([
             'id' => 'f',
             'titulo' => 'Viaje a la Luna + Metrópolis',
+            // La primera que tiene afiche: Viaje a la Luna no tiene.
+            'afiche' => '/obras/b/afiche',
             'estado' => 'PROGRAMADA',
             'precio' => '$ 3.500',
             'sala' => 'Cine Club Areco',
@@ -58,6 +60,7 @@ final class TarjetaDeFuncionTest extends TestCase
         self::assertSame([
             'id' => 'f-votacion',
             'titulo' => 'Viaje a la Luna + Metrópolis',
+            'afiche' => '/obras/b/afiche',
             'estado' => 'EN_VOTACION_TITULOS',
             'precio' => '$ 2.500',
             'sala' => 'Cine Club Areco',
@@ -72,6 +75,11 @@ final class TarjetaDeFuncionTest extends TestCase
     private static function programada(string $id = 'f', int $cupo = 40, string $fecha = '+10 days 20:30'): FuncionEnCartelera
     {
         return new FuncionEnCartelera($id, new DateTimeImmutable($fecha), 3500.0, 's', 'Cine Club Areco', 'San Antonio de Areco', [new ObraEnCartelera('a', 'Zama', null)], EstadoFuncion::Programada, $cupo);
+    }
+
+    public function testSinNingunAficheLaTarjetaNoLlevaImagen(): void
+    {
+        self::assertNull(TarjetaDeFuncion::datos(self::programada())['afiche']);
     }
 
     public function testLosLugaresLibresSonElCupoMenosLosOcupados(): void

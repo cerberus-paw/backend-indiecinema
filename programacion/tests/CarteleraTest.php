@@ -553,7 +553,7 @@ final class CarteleraTest extends TestCase
         self::assertCount(12, $json['funciones']);
         // Cada función con lo mismo que muestra la tarjeta, y el link a su ficha.
         $primera = $json['funciones'][0];
-        self::assertSame(['id', 'titulo', 'estado', 'precio', 'sala', 'localidad', 'fecha', 'lugares_libres', 'agotada', 'url'], array_keys($primera));
+        self::assertSame(['id', 'titulo', 'afiche', 'estado', 'precio', 'sala', 'localidad', 'fecha', 'lugares_libres', 'agotada', 'url'], array_keys($primera));
         self::assertSame("/cartelera/{$primera['id']}", $primera['url']);
         self::assertSame(
             ['numero' => 1, 'total_paginas' => 2, 'total_funciones' => 15, 'anterior' => null, 'siguiente' => '/cartelera?pagina=2'],

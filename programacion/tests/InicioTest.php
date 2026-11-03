@@ -10,6 +10,7 @@ use IndieCinema\Nucleo\Configuracion;
 use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Log;
+use IndieCinema\Nucleo\Uuid;
 use IndieCinema\Programacion\Modelo\FiltrosDeCartelera;
 use IndieCinema\Programacion\Modelo\FuncionEnCartelera;
 use IndieCinema\Programacion\Repositorios\RepositorioDeCartelera;
@@ -31,6 +32,17 @@ use PHPUnit\Framework\TestCase;
 final class InicioTest extends TestCase
 {
     use ConBaseDePruebas;
+    use ConFuncionesDePrueba;
+
+    public static function setUpBeforeClass(): void
+    {
+        self::setUpBeforeClassFunciones();
+    }
+
+    public static function tearDownAfterClass(): void
+    {
+        self::tearDownAfterClassFunciones();
+    }
 
     private const SECRETO = 'secreto-de-nginx';
 
@@ -39,6 +51,7 @@ final class InicioTest extends TestCase
 
     protected function setUp(): void
     {
+        @unlink(sys_get_temp_dir() . '/acuerdo_estado_global.txt');
         // Antes de saltearla: tearDown() corre igual y la usa.
         $this->carpeta = sys_get_temp_dir() . '/archivos-' . bin2hex(random_bytes(4));
         $this->base = self::baseConTablasNuevas($this->configuracion());
@@ -46,6 +59,7 @@ final class InicioTest extends TestCase
 
     protected function tearDown(): void
     {
+        @unlink(sys_get_temp_dir() . '/acuerdo_estado_global.txt');
         foreach (['salas', 'afiches'] as $subcarpeta) {
             array_map('unlink', glob("{$this->carpeta}/{$subcarpeta}/*") ?: []);
             @rmdir("{$this->carpeta}/{$subcarpeta}");
@@ -60,6 +74,12 @@ final class InicioTest extends TestCase
             'archivos' => ['carpeta' => $this->carpeta],
             'base' => self::baseDePruebas(),
             'nginx' => ['secreto' => self::SECRETO],
+            // El estado del acuerdo de fecha lo da funciones: acá, el doble de pruebas.
+            'subsistemas' => [
+                'cuentas' => 'http://127.0.0.1:1',
+                'funciones' => self::$urlFunciones,
+            ],
+            'interno' => ['token' => 'token-de-programacion'],
         ]);
     }
 
@@ -142,6 +162,32 @@ final class InicioTest extends TestCase
         self::assertSame(6, substr_count($cuerpo, '<li class="carrusel-diapositiva">'));
         // Las tarjetas siguen siendo las cuatro primeras, con o sin afiche.
         self::assertSame(4, substr_count($cuerpo, '<article class="tarjeta-funcion">'));
+    }
+
+    public function testElCarruselDejaAfueraLaFuncionCuyoAcuerdoCerroSinQuorum(): void
+    {
+        $this->cargarDatosDePrueba();
+        // Una sola función en la cartelera, en acuerdo de fecha y con afiche: sin fecha, si hubiera
+        // programadas quedaría detrás de todas, fuera de las candidatas al carrusel.
+        $this->base->ejecutar("UPDATE funcion SET estado = 'cancelada'");
+        $obra = $this->base->fila('SELECT id FROM obra WHERE afiche IS NOT NULL ORDER BY id LIMIT 1') ?? self::fail();
+        $sala = $this->base->fila('SELECT id FROM sala WHERE habilitada = TRUE AND dada_de_baja_en IS NULL LIMIT 1') ?? self::fail();
+        $funcionId = Uuid::nuevo();
+        $this->base->ejecutar(
+            "INSERT INTO funcion (id, sala_id, estado, precio_base, cupo) VALUES (?, ?, 'en_acuerdo_fecha', 2000, 50)",
+            [$funcionId, $sala['id']],
+        );
+        $this->base->ejecutar("INSERT INTO funcion_obra (funcion_id, obra_id, estado) VALUES (?, ?, 'elegida')", [$funcionId, $obra['id']]);
+
+        // Con el acuerdo abierto, se destaca: todavía se puede votar la fecha.
+        self::assertStringContainsString("<a href=\"/cartelera/{$funcionId}\" class=\"carrusel-titulo-enlace\">", $this->pedir()->cuerpo());
+
+        file_put_contents(sys_get_temp_dir() . '/acuerdo_estado_global.txt', 'sin_minimo');
+        $cuerpo = $this->pedir()->cuerpo();
+
+        // Cerró sin quórum: ya no se da. Sigue en las tarjetas, que lo dicen, pero no se destaca.
+        self::assertStringNotContainsString('data-carrusel', $cuerpo);
+        self::assertStringContainsString("/cartelera/{$funcionId}", $cuerpo);
     }
 
     public function testElBuscadorLlevaALaCarteleraConLasLocalidades(): void

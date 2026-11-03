@@ -122,6 +122,28 @@ final class InicioTest extends TestCase
         }
     }
 
+    public function testElCarruselTieneLasProximasConAfiche(): void
+    {
+        $this->cargarDatosDePrueba();
+        // La primera función proyecta sólo Metrópolis; la segunda, Metrópolis y Viaje a la Luna.
+        $this->base->ejecutar("UPDATE obra SET afiche = NULL WHERE titulo = 'Metrópolis'");
+        $proximas = array_map(
+            static fn (FuncionEnCartelera $funcion): string => $funcion->id,
+            (new RepositorioDeCartelera($this->base))->pagina(new FiltrosDeCartelera(), 1, 8)->funciones,
+        );
+
+        $cuerpo = $this->pedir()->cuerpo();
+
+        self::assertStringContainsString('<div class="carrusel" data-carrusel', $cuerpo);
+        preg_match_all('#<a href="/cartelera/([0-9a-f-]{36})" class="carrusel-titulo-enlace">#', $cuerpo, $enlaces);
+        // Las ocho primeras de la cartelera, en orden, salvo la que se quedó sin ningún afiche: la
+        // de dos obras entra con el de la otra.
+        self::assertSame(array_slice($proximas, 1), $enlaces[1]);
+        self::assertSame(7, substr_count($cuerpo, '<li class="carrusel-diapositiva">'));
+        // Las tarjetas siguen siendo las cuatro primeras, con o sin afiche.
+        self::assertSame(4, substr_count($cuerpo, '<article class="tarjeta-funcion">'));
+    }
+
     public function testElBuscadorLlevaALaCarteleraConLasLocalidades(): void
     {
         $this->cargarDatosDePrueba();
@@ -158,6 +180,8 @@ final class InicioTest extends TestCase
         self::assertStringContainsString('Todavía no hay funciones programadas.', $respuesta->cuerpo());
         self::assertStringContainsString('Todavía no hay salas publicadas.', $respuesta->cuerpo());
         self::assertStringContainsString('0 funciones en cartelera', $respuesta->cuerpo());
+        // Sin funciones con afiche no hay carrusel, ni siquiera vacío.
+        self::assertStringNotContainsString('data-carrusel', $respuesta->cuerpo());
     }
 
     public function testSeVeConSesion(): void

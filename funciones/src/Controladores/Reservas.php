@@ -136,13 +136,15 @@ final class Reservas extends Controlador
                 : $this->pantalla($funcion, ['cantidad' => $valor], error: $error->getMessage(), estado: 422);
         }
 
-        // 201 con el link al comprobante: lo mismo que la redirección, sin recargar (E4-05.1).
+        // 201 con el link al comprobante: lo mismo que la redirección, sin recargar (E4-05.1). El
+        // correo es el mismo que el de la página; sale con alTerminar() para no hacer esperar a
+        // quien reservó, que con fetch está mirando el número de lugares, no una página nueva.
         if ($enJson) {
             return $this->json([
                 'reserva' => self::datosDeReserva($reserva, $funcion),
                 'url' => $this->ruta("/reservas/{$reserva->id}"),
                 ...$this->lugaresDe($funcion),
-            ], 201);
+            ], 201)->alTerminar(fn (): bool => $this->avisos->reservaConfirmada($reserva, $funcion));
         }
         // Ya confirmada: si el correo no sale, la reserva queda igual y el aviso queda en el log.
         $this->avisos->reservaConfirmada($reserva, $funcion);

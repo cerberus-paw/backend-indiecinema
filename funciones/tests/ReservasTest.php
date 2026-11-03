@@ -685,6 +685,27 @@ final class ReservasTest extends TestCase
         self::assertSame(38, $json['lugares_libres']);
     }
 
+    /**
+     * El correo es el mismo que manda la página, pero sale después de la respuesta: quien reserva
+     * con fetch está mirando el número de lugares de la ficha, no esperando una página nueva.
+     */
+    public function testReservarEnJsonTambienMandaElCorreoDeConfirmada(): void
+    {
+        $respuesta = $this->reservarEnJson('2');
+
+        self::assertSame(201, $respuesta->estado());
+        // Todavía no salió: primero se suelta la respuesta.
+        self::assertCount(0, $this->correos());
+
+        $respuesta->terminar();
+
+        $correos = $this->correos();
+        self::assertCount(1, $correos);
+        self::assertSame('Reserva confirmada: «Zama»', $correos[0]['asunto']);
+        $id = self::json($respuesta)['reserva']['id'];
+        self::assertStringContainsString(self::SITIO . "/funcion/reservas/{$id}", $correos[0]['texto']);
+    }
+
     public function testUnaCantidadInvalidaEnJsonVuelveConElErrorDelCampo(): void
     {
         foreach (['', 'dos', '0', '-1', '1.5', '41', "1' OR 1=1"] as $cantidad) {

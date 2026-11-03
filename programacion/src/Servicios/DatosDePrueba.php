@@ -572,8 +572,8 @@ final class DatosDePrueba
      * que cargarlos ahí no abre ninguna cuenta.
      *
      * Las fotos de las salas van adonde las guarda el formulario (ArchivosDeSalas). Los afiches,
-     * a la carpeta afiches del mismo volumen: todavía nada los muestra, pero así quedan donde los
-     * va a buscar la página de la obra.
+     * a la carpeta afiches del mismo volumen, de donde los sirve /obras/{id}/afiche
+     * (AfichesDeObras) para las tarjetas de las funciones.
      *
      * @throws RuntimeException en producción, sin la confirmación
      */

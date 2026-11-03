@@ -6,6 +6,7 @@ use IndieCinema\Nucleo\Http\EstadoInterno;
 use IndieCinema\Nucleo\Ruteo\Router;
 use IndieCinema\Nucleo\Seguridad\Rol;
 use IndieCinema\Programacion\Controladores\AcercaDe;
+use IndieCinema\Programacion\Controladores\AficheDeObra;
 use IndieCinema\Programacion\Controladores\AdministracionDeSolicitudes;
 use IndieCinema\Programacion\Controladores\Cartelera;
 use IndieCinema\Programacion\Controladores\FuncionesDelOrganizador;
@@ -80,6 +81,8 @@ return static function (Router $router): void {
     $router->get('/salas/{id}', [Salas::class, 'mostrar']);
     // Pública si la sala está habilitada; si no, sólo para su organizador (lo decide el servicio).
     $router->get('/salas/{id}/imagen', [ImagenDeSala::class, 'mostrar']);
+    // El afiche de una obra, para las tarjetas de sus funciones: público como el catálogo.
+    $router->get('/obras/{id}/afiche', [AficheDeObra::class, 'mostrar']);
 
     // Una función para el subsistema funciones (acuerdo de fecha y reservas): sólo la pide él.
     $router->interna('GET', '/interno/funciones/{id}', [FuncionesInternas::class, 'mostrar'], ['funciones']);

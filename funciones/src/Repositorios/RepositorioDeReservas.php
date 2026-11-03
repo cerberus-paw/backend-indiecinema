@@ -195,6 +195,25 @@ final class RepositorioDeReservas
     }
 
     /**
+     * Las reservas de un espectador, de la más nueva a la más vieja, para «Mis reservas»
+     * (E4-04.1). Usa el índice por usuario y fecha de alta.
+     *
+     * @param int $numero desde 1
+     *
+     * @return array{0: list<Reserva>, 1: int} las de la página y cuántas tiene en total
+     */
+    public function delUsuario(string $usuarioId, int $numero, int $tamano): array
+    {
+        $total = (int) $this->base->valor('SELECT COUNT(*) FROM reserva WHERE usuario_id = ?', [$usuarioId]);
+        $filas = $this->base->filas(
+            'SELECT * FROM reserva WHERE usuario_id = ? ORDER BY creada_en DESC, codigo LIMIT ? OFFSET ?',
+            [$usuarioId, $tamano, ($numero - 1) * $tamano],
+        );
+
+        return [array_map(self::reserva(...), $filas), $total];
+    }
+
+    /**
      * @return bool false si el código ya es de otra reserva, y entonces no guardó nada
      */
     public function agregar(Reserva $reserva): bool

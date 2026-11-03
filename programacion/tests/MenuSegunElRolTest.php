@@ -33,7 +33,7 @@ final class MenuSegunElRolTest extends TestCase
     /** En el pie, con o sin sesión: «Explorar» y «Comunidad». */
     private const PIE_PUBLICO = ['/cartelera', '/salas', '/acerca-de#quienes-somos', '/acerca-de#como-funciona'];
     private const SIN_SESION = ['/cuenta/ingresar', '/cuenta/registro'];
-    private const CON_SESION = ['/cuenta/'];
+    private const CON_SESION = ['/cuenta/', '/funcion/reservas'];
     private const DEL_ESPECTADOR = ['/solicitar-sala'];
     private const DEL_ORGANIZADOR = ['/organizador/salas', '/organizador/funciones', '/organizador/funciones/nueva', '/solicitar-sala'];
     private const DEL_ADMINISTRADOR = ['/cuenta/administracion/usuarios', '/administracion/solicitudes'];

@@ -16,6 +16,7 @@ use IndieCinema\Nucleo\Seguridad\Rol;
 use IndieCinema\Nucleo\Seguridad\Usuario;
 use IndieCinema\Nucleo\Uuid;
 use LogicException;
+use RuntimeException;
 
 /**
  * Las reservas de los espectadores (E4-01): que nunca se confirmen más lugares que el cupo,
@@ -25,6 +26,9 @@ final class ServicioDeReservas
 {
     /** Cuántas veces se sortea el código si sale uno repetido, que ya es muy raro una vez. */
     private const INTENTOS_DE_CODIGO = 3;
+
+    /** Las reservas por página de «Mis reservas»: las funciones de una página van en un pedido. */
+    public const POR_PAGINA = 20;
 
     public function __construct(
         private readonly FuncionesDeProgramacion $funciones,
@@ -66,6 +70,35 @@ final class ServicioDeReservas
         }
 
         return [$reserva, $this->funciones->buscar($reserva->funcionId)];
+    }
+
+    /**
+     * Una página de «Mis reservas» (E4-04.1): sólo las del espectador, de la más nueva a la más
+     * vieja y en cualquier estado.
+     *
+     * @param int $numero desde 1
+     *
+     * @return array{0: list<Reserva>, 1: int} las de la página y cuántas tiene en total
+     */
+    public function pagina(Usuario $espectador, int $numero): array
+    {
+        return $this->reservas->delUsuario($espectador->id, $numero, self::POR_PAGINA);
+    }
+
+    /**
+     * Las funciones de esas reservas, en un solo pedido a programación.
+     *
+     * @param list<Reserva> $reservas
+     *
+     * @return array<string, FuncionDeProgramacion> con el id como clave; las que programación ya
+     *                                              no muestra no están
+     *
+     * @throws ExcepcionHttp    503 si programación no responde
+     * @throws RuntimeException si responde algo que no son funciones
+     */
+    public function funcionesDe(array $reservas): array
+    {
+        return $this->funciones->buscarVarias(array_values(array_unique(array_map(static fn (Reserva $reserva): string => $reserva->funcionId, $reservas))));
     }
 
     /**

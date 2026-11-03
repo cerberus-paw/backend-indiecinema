@@ -60,8 +60,9 @@ final class TarjetaDeFuncion
      * @param array<string, mixed>|null $acuerdo  el de funciones, si la función está en acuerdo de fecha
      * @param ?int                      $ocupados los lugares que ya tomaron las reservas, o null si no se saben
      *
-     * @return array<string, mixed> id, titulo, estado, precio, sala, localidad, fecha, lugares_libres y
-     *                              agotada; con el acuerdo abierto, también franjas_propuestas
+     * @return array<string, mixed> id, titulo, afiche, estado, precio, sala, localidad, fecha,
+     *                              lugares_libres y agotada; con el acuerdo abierto, también
+     *                              franjas_propuestas
      */
     public static function datos(FuncionEnCartelera $funcion, ?array $acuerdo = null, ?int $ocupados = null): array
     {
@@ -71,6 +72,7 @@ final class TarjetaDeFuncion
             'id' => $funcion->id,
             // Una función con varias obras las proyecta todas: el título las nombra a todas.
             'titulo' => implode(' + ', array_map(static fn (ObraEnCartelera $obra): string => $obra->titulo, $funcion->obras)),
+            'afiche' => self::afiche($funcion),
             'estado' => match ($funcion->estado) {
                 EstadoFuncion::EnVotacionTitulos => 'EN_VOTACION_TITULOS',
                 EstadoFuncion::EnAcuerdoFecha => 'EN_ACUERDO_FECHA',
@@ -83,6 +85,21 @@ final class TarjetaDeFuncion
             'lugares_libres' => $libres,
             'agotada' => $libres === 0,
         ], $acuerdo);
+    }
+
+    /**
+     * La tarjeta tiene lugar para una sola imagen: la de la primera obra que tenga afiche. Sin
+     * ninguno, null, y la plantilla dibuja el recuadro del wireframe.
+     */
+    private static function afiche(FuncionEnCartelera $funcion): ?string
+    {
+        foreach ($funcion->obras as $obra) {
+            if ($obra->afiche !== null) {
+                return "/obras/{$obra->id}/afiche";
+            }
+        }
+
+        return null;
     }
 
     /**

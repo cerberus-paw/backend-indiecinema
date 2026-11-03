@@ -30,6 +30,8 @@ final class ReservasTest extends TestCase
     }
 
     private const SECRETO = 'secreto-de-nginx';
+    /** El Accept que manda un fetch cuando se le pide JSON. */
+    private const ACEPTA_JSON = 'application/json, text/plain, */*';
     private const CSRF = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
     private const EVA = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
     private const ELIAS = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
@@ -88,13 +90,15 @@ final class ReservasTest extends TestCase
     /**
      * @param array<string, string> $cuerpo
      * @param ?string               $acepta el Accept del pedido; null, el de un navegador
+     * @param array<string, string> $extra  otras cabeceras, como el token CSRF del JavaScript
      */
-    private function pedir(string $metodo, string $ruta, ?string $usuario = self::EVA, array $cuerpo = [], ?string $acepta = null): Respuesta
+    private function pedir(string $metodo, string $ruta, ?string $usuario = self::EVA, array $cuerpo = [], ?string $acepta = null, array $extra = []): Respuesta
     {
         $cabeceras = $usuario === null ? [] : ['X-Nginx-Secreto' => self::SECRETO, 'X-Usuario-Id' => $usuario, 'X-Rol' => 'espectador'];
         if ($acepta !== null) {
             $cabeceras['Accept'] = $acepta;
         }
+        $cabeceras = [...$cabeceras, ...$extra];
         $this->log = fopen('php://memory', 'w+');
         $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion, new Log('funciones', $this->log));
 
@@ -134,12 +138,12 @@ final class ReservasTest extends TestCase
      */
     private function reservarEnJson(string $cantidad, string $funcion = self::PROXIMA, ?string $usuario = self::EVA): Respuesta
     {
-        return $this->pedir('POST', "/reservar/{$funcion}", $usuario, ['_csrf' => self::CSRF, 'cantidad' => $cantidad], 'application/json, text/plain, */*');
+        return $this->pedir('POST', "/reservar/{$funcion}", $usuario, ['_csrf' => self::CSRF, 'cantidad' => $cantidad], self::ACEPTA_JSON);
     }
 
     private function cancelarEnJson(string $id, ?string $usuario = self::EVA): Respuesta
     {
-        return $this->pedir('POST', "/reservas/{$id}/cancelar", $usuario, ['_csrf' => self::CSRF], 'application/json, text/plain, */*');
+        return $this->pedir('POST', "/reservas/{$id}/cancelar", $usuario, ['_csrf' => self::CSRF], self::ACEPTA_JSON);
     }
 
     /**
@@ -229,6 +233,24 @@ final class ReservasTest extends TestCase
 
         self::assertSame(403, $respuesta->estado());
         self::assertSame(0, $this->reservas());
+    }
+
+    /**
+     * El componente de la ficha manda el formulario con FormData, así que el token viaja en el
+     * campo oculto, y PAW.enviar además lo pone en la cabecera (E4-05.3). Las dos formas valen, y
+     * sin ninguna no se reserva.
+     */
+    public function testEnJsonSinTokenNoSeReservaYConLaCabeceraSi(): void
+    {
+        $sinToken = $this->pedir('POST', '/reservar/' . self::PROXIMA, self::EVA, ['cantidad' => '1'], self::ACEPTA_JSON);
+
+        self::assertSame(403, $sinToken->estado());
+        self::assertSame(0, $this->reservas());
+
+        $conCabecera = $this->pedir('POST', '/reservar/' . self::PROXIMA, self::EVA, ['cantidad' => '1'], self::ACEPTA_JSON, ['X-CSRF-Token' => self::CSRF]);
+
+        self::assertSame(201, $conCabecera->estado());
+        self::assertSame(1, $this->reservas());
     }
 
     public function testUnaCantidadInvalidaSeRechazaEnElServidor(): void

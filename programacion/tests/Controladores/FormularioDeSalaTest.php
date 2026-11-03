@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace IndieCinema\Programacion\Pruebas\Controladores;
 
+use IndieCinema\Programacion\Controladores\FormularioDeFuncion;
 use IndieCinema\Programacion\Controladores\FormularioDeSala;
 use IndieCinema\Programacion\Pruebas\Dobles\Imagenes;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -28,6 +29,39 @@ final class FormularioDeSalaTest extends TestCase
         ];
     }
 
+
+    public function testLasReglasLlevanLosMismosMensajesQueDevuelveLaValidacion(): void
+    {
+        // Lo que ve quien carga mientras escribe (E4-09.1) tiene que ser lo mismo que contesta el
+        // servidor si manda igual: el navegador no inventa su propio texto.
+        $vacio = FormularioDeSala::desdeCampos([], imagenObligatoria: true);
+        $reglas = FormularioDeSala::reglas(imagenObligatoria: true);
+
+        foreach (['nombre', 'descripcion', 'direccion', 'localidad', 'capacidad', 'peliculas_por_funcion', 'duracion_funcion', 'tiempo_entre_funciones', 'imagen'] as $campo) {
+            self::assertSame($vacio->errores[$campo], $reglas[$campo]['mensajes']['requerido'], "el mensaje de {$campo} vacío");
+        }
+
+        // Y el del texto que se pasa de largo, que el navegador corta con maxlength.
+        $largo = FormularioDeSala::desdeCampos([...self::camposValidos(), 'nombre' => str_repeat('a', 101)]);
+        self::assertSame($largo->errores['nombre'], $reglas['nombre']['mensajes']['maximo']);
+
+        // El de un número fuera de rango es el mismo que el del vacío: una sola frase para las dos.
+        $fuera = FormularioDeSala::desdeCampos([...self::camposValidos(), 'capacidad' => '5000']);
+        self::assertSame($fuera->errores['capacidad'], $reglas['capacidad']['mensajes']['valor_maximo']);
+    }
+
+    public function testLasReglasDeLaFuncionLlevanLosMensajesDeSuFormulario(): void
+    {
+        $reglas = FormularioDeFuncion::reglas();
+
+        // Los que el navegador puede revisar solo; los que dependen de la sala no están.
+        self::assertSame(['sala_id', 'fecha', 'hora', 'precio', 'cupo'], array_keys($reglas));
+        self::assertSame('Falta seleccionar la sala.', $reglas['sala_id']['mensajes']['requerido']);
+        self::assertSame('Falta el precio de la entrada.', $reglas['precio']['mensajes']['requerido']);
+        self::assertSame('El cupo tiene que ser de al menos un lugar.', $reglas['cupo']['mensajes']['valor_minimo']);
+        // El pattern es la misma regla del precio, sin las barras de PHP.
+        self::assertMatchesRegularExpression('/^\^?\[0-9\]/', $reglas['precio']['patron']);
+    }
     public function testConTodoBienDaLosDatos(): void
     {
         $formulario = FormularioDeSala::desdeCampos(self::camposValidos());

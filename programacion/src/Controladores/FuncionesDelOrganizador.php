@@ -432,6 +432,9 @@ final class FuncionesDelOrganizador extends Controlador
                 : '/organizador/funciones/nueva',
             'salas' => array_map(self::datosSala(...), $salas),
             'obras' => array_map(self::datosObra(...), $obras),
+            // Las que el navegador puede revisar solo, con los mensajes de FormularioDeFuncion:
+            // dice lo mismo que diría el servidor, mientras se carga (E4-09.1).
+            'reglas' => FormularioDeFuncion::reglas(),
             'valores' => $valores,
             'errores' => $formulario?->errores ?? [],
             'error_general' => $extra['error_general'] ?? null,

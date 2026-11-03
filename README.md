@@ -489,15 +489,15 @@ Hay dos sitios, cada uno en su EC2, con su base y sus secretos:
 
 | Rama | Sitio | Para qué |
 | --- | --- | --- |
-| `desarrollo` (por defecto) | https://indiecinema-dev.duckdns.org | Probar lo que se integra, con datos que se pueden borrar |
+| `dev` (por defecto) | https://indiecinema-dev.duckdns.org | Probar lo que se integra, con datos que se pueden borrar |
 | `main` y los tags `entrega-N` | https://indiecinema.duckdns.org | Lo que revisa el profesor |
 
-Cada subtarea sale de `desarrollo` y su PR apunta ahí. Para publicar, un PR de `desarrollo` a
-`main`, con lo nuevo probado en el sitio de desarrollo. El front tiene las mismas dos ramas.
+Cada subtarea sale de `dev` y su PR apunta ahí. Para publicar, un PR de `dev` a `main`, con lo
+nuevo probado en el sitio de desarrollo. El front tiene las mismas dos ramas.
 
 ### Despliegue continuo
 
-Cuando la CI pasa en un push a `main` o a `desarrollo` del back o del front, el workflow `CD` entra
+Cuando la CI pasa en un push a `main` o a `dev` del back o del front, el workflow `CD` entra
 por SSH al servidor de esa rama y corre `herramientas/desplegar.sh`: trae los dos repositorios (cada
 servidor tiene clonada su rama), instala las dependencias, recrea lo que cambió, migra y comprueba
 que el sitio responda. A mano: Actions → CD → Run workflow, eligiendo la rama. Cada repositorio
@@ -508,7 +508,7 @@ elige el workflow por la rama, porque `workflow_run` corre siempre en la rama po
 servidor, la clave pública sólo puede correr ese script: la línea de `authorized_keys` está en su
 encabezado.
 
-Después de publicar `desarrollo`, el CD corre las pruebas de punta a punta del front contra ese
+Después de publicar `dev`, el CD corre las pruebas de punta a punta del front contra ese
 sitio (su `e2e/README.md`). Para eso el environment `desarrollo` tiene además la variable `E2E_URL`,
 los secretos `E2E_CORREO` y `E2E_CLAVE` (una cuenta de espectador) y la variable `E2E_FUNCION` (el
 id de una función con lugares), distintas de las del front para que las dos corridas no se pisen.
@@ -605,7 +605,7 @@ docker compose exec mysql mysql -uroot -p cuentas -e "INSERT INTO rol (usuario_i
 
 ### Integración continua
 
-En cada PR y en cada push a `main` o a `desarrollo`, GitHub Actions (`.github/workflows/ci.yml`) corre:
+En cada PR y en cada push a `main` o a `dev`, GitHub Actions (`.github/workflows/ci.yml`) corre:
 
 - **gitleaks** sobre todo el historial, con las reglas que trae más las de `.gitleaks.toml` (el
   access token de Mercado Pago, que gitleaks no conoce). Si encuentra algo, el log no lo muestra.
@@ -613,8 +613,7 @@ En cada PR y en cada push a `main` o a `desarrollo`, GitHub Actions (`.github/wo
   estaba antes de sumarlo queda en su `phpstan-baseline.neon`, y marca sólo lo nuevo. Al arreglar
   algo de la lista, se regenera con `composer analisis -- --generate-baseline`.
 - **Las pruebas** del núcleo, cuentas y programación contra un MySQL 8.4, con el front al lado: el
-  de la rama del mismo nombre si existe en el front, y si no el de la base del PR (`desarrollo` o
-  `main`). Un cambio que toca los
+  de la rama del mismo nombre si existe en el front, y si no el de la base del PR (`dev` o `main`). Un cambio que toca los
   dos repositorios va en ramas que se llaman igual, y sus dos PR pasan sin esperar al otro.
 - **`composer audit`** sobre el `composer.lock` de cada subsistema y del núcleo.
 - **La configuración**: que el compose sea válido y que nginx acepte las plantillas (`nginx -t`).

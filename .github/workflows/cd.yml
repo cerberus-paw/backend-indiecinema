@@ -1,5 +1,5 @@
-# Despliegue continuo: cuando la CI pasa en un push a main o a desarrollo, publica esa versión en su
-# servidor: main en producción y desarrollo en el de desarrollo (README, «Ramas y entornos»). Entra
+# Despliegue continuo: cuando la CI pasa en un push a main o a dev, publica esa versión en su
+# servidor: main en producción y dev en el de desarrollo (README, «Ramas y entornos»). Entra
 # por SSH con la clave del secreto SSH_CLAVE_DESPLIEGUE de cada environment, que en el servidor sólo
 # puede correr herramientas/desplegar.sh (README, «Despliegue continuo»). El front tiene el mismo
 # workflow, y los dos corren ese script, que trae los dos repositorios.
@@ -10,7 +10,7 @@ on:
   workflow_run:
     workflows: [CI]
     types: [completed]
-    branches: [main, desarrollo]
+    branches: [main, dev]
   # Para volver a desplegar a mano, desde la pestaña Actions, eligiendo la rama.
   workflow_dispatch:
 
@@ -26,11 +26,11 @@ concurrency:
 jobs:
   desplegar:
     name: Desplegar ${{ github.event.workflow_run.head_branch || github.ref_name }}
-    # Sólo main y desarrollo, y sólo si la CI pasó en un push: también corre en los PR. La rama
+    # Sólo main y dev, y sólo si la CI pasó en un push: también corre en los PR. La rama
     # elige el environment y no al revés: workflow_run corre siempre en la rama por defecto, así que
     # la política de ramas del environment no alcanza para separar los dos servidores.
     if: >-
-      contains(fromJSON('["main", "desarrollo"]'), github.event.workflow_run.head_branch || github.ref_name)
+      contains(fromJSON('["main", "dev"]'), github.event.workflow_run.head_branch || github.ref_name)
       && (github.event_name == 'workflow_dispatch'
         || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'))
     runs-on: ubuntu-latest
@@ -55,14 +55,14 @@ jobs:
           SERVIDOR: ${{ vars.SERVIDOR }}
         run: ssh -i ~/.ssh/despliegue -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o BatchMode=yes "$SERVIDOR"
 
-  # Después de publicar desarrollo, las pruebas de punta a punta contra ese sitio: el workflow E2E
-  # del front, de su rama desarrollo, porque las pruebas viven allá. La corrida queda en verde o en
+  # Después de publicar dev, las pruebas de punta a punta contra ese sitio: el workflow E2E
+  # del front, de su rama dev, porque las pruebas viven allá. La corrida queda en verde o en
   # rojo según pasen. Usan la cuenta y la función del environment desarrollo de este repositorio,
   # distintas en el back y en el front para que no se pisen si los dos despliegan a la vez.
   e2e:
     name: Pruebas de punta a punta
     needs: desplegar
-    if: (github.event.workflow_run.head_branch || github.ref_name) == 'desarrollo'
+    if: (github.event.workflow_run.head_branch || github.ref_name) == 'dev'
     permissions:
       contents: read
-    uses: cerberus-paw/frontend-indiecinema/.github/workflows/e2e.yml@desarrollo
+    uses: cerberus-paw/frontend-indiecinema/.github/workflows/e2e.yml@dev

@@ -48,15 +48,33 @@ final class ReservasDeLaFuncion extends Controlador
      * POST /organizador/funciones/{id}/asistencia, con el código que tipea el organizador o el
      * botón de una fila. Vuelve a la lista con 303 y el código registrado, así recargar no lo
      * vuelve a mandar.
+     *
+     * En JSON contesta la fila como quedó y el resumen de arriba, para que el panel los cambie
+     * sin recargar la lista (E4-05.5). El resumen va también porque registrar una asistencia
+     * mueve «Asistentes registrados»: sin él la fila diría una cosa y el número de arriba otra.
      */
     public function registrarAsistencia(Peticion $peticion): Respuesta
     {
         $id = (string) $peticion->parametro('id');
+        $enJson = $peticion->aceptaJson();
         $codigo = $peticion->campo('codigo');
         try {
             $reserva = $this->servicio->registrarAsistencia(self::usuario($peticion), $id, is_string($codigo) ? $codigo : '');
         } catch (ReglaIncumplida $error) {
-            return $this->pantalla($peticion, error: $error->getMessage(), codigo: is_string($codigo) ? $codigo : '', estado: 422);
+            // El mensaje de la regla es para el organizador («No hay ninguna reserva con ese código.»).
+            return $enJson
+                ? $this->json(['error' => $error->getMessage()], 422)
+                : $this->pantalla($peticion, error: $error->getMessage(), codigo: is_string($codigo) ? $codigo : '', estado: 422);
+        }
+
+        if ($enJson) {
+            [$funcion, $reservas] = $this->servicio->deLaFuncion(self::usuario($peticion), $id);
+            $resumen = ServicioDePanelDeReservas::resumen($funcion, $reservas);
+
+            return $this->json([
+                'reserva' => self::fila($reserva),
+                'resumen' => [...$resumen, 'recaudado' => TextoParaMostrar::monto($resumen['recaudado'])],
+            ]);
         }
 
         return $this->redirigir("/organizador/funciones/{$id}/reservas?asistencia={$reserva->codigo}");

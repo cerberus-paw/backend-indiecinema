@@ -6,6 +6,7 @@ namespace IndieCinema\Programacion\Repositorios;
 
 use DateTimeImmutable;
 use IndieCinema\Nucleo\BaseDeDatos;
+use IndieCinema\Programacion\Modelo\CupoDeFuncion;
 use IndieCinema\Programacion\Modelo\DetalleDeFuncion;
 use IndieCinema\Programacion\Modelo\EstadoFuncion;
 use IndieCinema\Programacion\Modelo\FiltrosDeCartelera;
@@ -90,6 +91,30 @@ final class RepositorioDeCartelera
      *
      * Devuelve null si la función no existe o si su sala no está habilitada o está dada de baja.
      */
+    /**
+     * Sólo el estado, la fecha y el cupo de una función, con el mismo filtro que detalle(): sin
+     * sala publicada no aparece (E4-05.1).
+     */
+    public function cupo(string $id): ?CupoDeFuncion
+    {
+        $fila = $this->base->fila(
+            'SELECT f.id, f.estado, f.fecha_hora, f.cupo '
+            . self::DESDE . '
+             WHERE f.id = ? AND s.habilitada = TRUE AND s.dada_de_baja_en IS NULL',
+            [$id],
+        );
+        if ($fila === null) {
+            return null;
+        }
+
+        return new CupoDeFuncion(
+            (string) $fila['id'],
+            EstadoFuncion::from((string) $fila['estado']),
+            $fila['fecha_hora'] === null ? null : new DateTimeImmutable((string) $fila['fecha_hora']),
+            (int) $fila['cupo'],
+        );
+    }
+
     public function detalle(string $id): ?DetalleDeFuncion
     {
         $fila = $this->base->fila(

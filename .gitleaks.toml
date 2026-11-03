@@ -12,3 +12,14 @@ id = "mercadopago-access-token"
 description = "Access token de Mercado Pago"
 regex = '''\b(?:APP_USR|TEST)-\d{10,20}-\d{6}-[0-9a-f]{32}-\d{6,12}\b'''
 keywords = ["app_usr-", "test-"]
+
+# Valores de prueba que parecen secretos y no lo son. Sólo el valor exacto, no el archivo: un
+# secreto de verdad en el mismo lugar se sigue encontrando. Gitleaks revisa todas las ramas (el CI
+# baja el historial entero), así que un falso positivo en la rama de cualquiera tira el de todos.
+[[allowlists]]
+description = "Valores falsos de las pruebas"
+regexes = [
+  # El token CSRF de las pruebas del núcleo: 64 caracteres hexadecimales, el formato que
+  # ProteccionCsrf da por válido.
+  '''^(?:abcdef0123456789){4}$''',
+]

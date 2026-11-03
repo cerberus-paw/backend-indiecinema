@@ -75,10 +75,12 @@ final class SalasDeLosDatosDePruebaTest extends TestCase
 
     /**
      * Un pedido como lo manda nginx: con sesión, el id y el rol del usuario y el secreto.
+     *
+     * @param array<string, string> $otras otras cabeceras del pedido
      */
-    private function pedir(string $url, ?string $usuario = null, string $rol = 'organizador'): Respuesta
+    private function pedir(string $url, ?string $usuario = null, string $rol = 'organizador', array $otras = []): Respuesta
     {
-        $cabeceras = $usuario === null ? [] : ['X-Nginx-Secreto' => self::SECRETO, 'X-Usuario-Id' => $usuario, 'X-Rol' => $rol];
+        $cabeceras = $otras + ($usuario === null ? [] : ['X-Nginx-Secreto' => self::SECRETO, 'X-Usuario-Id' => $usuario, 'X-Rol' => $rol]);
         $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion, new Log('programacion', $this->salidaDelLog));
 
         return $aplicacion->atender(new Peticion('GET', $url, [], [], $cabeceras, [], []));
@@ -123,6 +125,24 @@ final class SalasDeLosDatosDePruebaTest extends TestCase
         }
         self::assertStringContainsString('src="/obras/', $cuerpo);
         self::assertStringNotContainsString('afiche-placeholder', $cuerpo);
+    }
+
+    public function testSiSePisaElArchivoDelAficheElNavegadorRecibeElNuevo(): void
+    {
+        $this->cargarLosDatos();
+        $obra = DatosDePrueba::OBRAS[0];
+        $url = "/obras/{$obra['id']}/afiche";
+        $etiqueta = (string) $this->pedir($url)->cabecera('ETag');
+
+        self::assertSame(304, $this->pedir($url, otras: ['If-None-Match' => $etiqueta])->estado());
+
+        // Así se cambian los afiches de los datos de prueba en un volumen ya cargado: mismo nombre.
+        file_put_contents("{$this->carpeta}/afiches/{$obra['afiche']}", 'otro afiche');
+        $otraVez = $this->pedir($url, otras: ['If-None-Match' => $etiqueta]);
+
+        self::assertSame(200, $otraVez->estado());
+        self::assertSame('otro afiche', $otraVez->cuerpo());
+        self::assertNotSame($etiqueta, $otraVez->cabecera('ETag'));
     }
 
     public function testElAficheDeUnaObraQueNoExisteNoSeEncuentra(): void

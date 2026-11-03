@@ -22,8 +22,8 @@ https://indiecinema.duckdns.org, con los datos de la demo cargados: salas, obras
 
 Las contraseñas de los tres van en la entrega de Classroom: el
 repositorio es público, y con ellas se entra al sitio de verdad. El recorrido para probarlo todo
-está en [`docs/guion-de-prueba.md`](docs/guion-de-prueba.md). Cada cambio que entra a `main` se
-publica solo (ver «Despliegue continuo»).
+está en [`docs/guion-de-prueba.md`](docs/guion-de-prueba.md). Cada cambio pasa primero por el
+sitio de desarrollo, y lo que entra a `main` se publica solo (ver «Ramas y entornos»).
 
 ## Estructura
 
@@ -483,15 +483,35 @@ sudo certbot reconfigure --cert-name indiecinema.ejemplo.org --webroot -w /var/w
 sudo certbot renew --dry-run
 ```
 
+### Ramas y entornos
+
+Hay dos sitios, cada uno en su EC2, con su base y sus secretos:
+
+| Rama | Sitio | Para qué |
+| --- | --- | --- |
+| `dev` (por defecto) | https://indiecinema-dev.duckdns.org | Probar lo que se integra, con datos que se pueden borrar |
+| `main` y los tags `entrega-N` | https://indiecinema.duckdns.org | Lo que revisa el profesor |
+
+Cada subtarea sale de `dev` y su PR apunta ahí. Para publicar, un PR de `dev` a `main`, con lo
+nuevo probado en el sitio de desarrollo. El front tiene las mismas dos ramas.
+
 ### Despliegue continuo
 
-Cuando la CI pasa en un push a `main` del back o del front, el workflow `CD` entra al VPS por SSH y
-corre `herramientas/desplegar.sh`: trae los dos repositorios, instala las dependencias, recrea lo
-que cambió, migra y comprueba que el sitio responda. A mano: Actions → CD → Run workflow. Cada
-repositorio tiene un environment `produccion`, sólo para `main`, con el secreto
-`SSH_CLAVE_DESPLIEGUE` (una clave ed25519 sólo para esto) y las variables `SERVIDOR`
-(`ubuntu@<ip>`) y `SSH_HUELLA_SERVIDOR` (su línea de `known_hosts`). En el servidor, la clave
-pública sólo puede correr ese script: la línea de `authorized_keys` está en su encabezado.
+Cuando la CI pasa en un push a `main` o a `dev` del back o del front, el workflow `CD` entra
+por SSH al servidor de esa rama y corre `herramientas/desplegar.sh`: trae los dos repositorios (cada
+servidor tiene clonada su rama), instala las dependencias, recrea lo que cambió, migra y comprueba
+que el sitio responda. A mano: Actions → CD → Run workflow, eligiendo la rama. Cada repositorio
+tiene un environment por servidor, `produccion` y `desarrollo`, con el secreto
+`SSH_CLAVE_DESPLIEGUE` (una clave ed25519 sólo para esto, distinta en cada uno) y las variables
+`SERVIDOR` (`ubuntu@<ip>`) y `SSH_HUELLA_SERVIDOR` (su línea de `known_hosts`). El environment lo
+elige el workflow por la rama, porque `workflow_run` corre siempre en la rama por defecto. En el
+servidor, la clave pública sólo puede correr ese script: la línea de `authorized_keys` está en su
+encabezado.
+
+Después de publicar `dev`, el CD corre las pruebas de punta a punta del front contra ese
+sitio (su `e2e/README.md`). Para eso el environment `desarrollo` tiene además la variable `E2E_URL`,
+los secretos `E2E_CORREO` y `E2E_CLAVE` (una cuenta de espectador) y la variable `E2E_FUNCION` (el
+id de una función con lugares), distintas de las del front para que las dos corridas no se pisen.
 
 ### Sin Docker
 
@@ -585,7 +605,7 @@ docker compose exec mysql mysql -uroot -p cuentas -e "INSERT INTO rol (usuario_i
 
 ### Integración continua
 
-En cada PR y en cada push a `main`, GitHub Actions (`.github/workflows/ci.yml`) corre:
+En cada PR y en cada push a `main` o a `dev`, GitHub Actions (`.github/workflows/ci.yml`) corre:
 
 - **gitleaks** sobre todo el historial, con las reglas que trae más las de `.gitleaks.toml` (el
   access token de Mercado Pago, que gitleaks no conoce). Si encuentra algo, el log no lo muestra.
@@ -593,7 +613,7 @@ En cada PR y en cada push a `main`, GitHub Actions (`.github/workflows/ci.yml`) 
   estaba antes de sumarlo queda en su `phpstan-baseline.neon`, y marca sólo lo nuevo. Al arreglar
   algo de la lista, se regenera con `composer analisis -- --generate-baseline`.
 - **Las pruebas** del núcleo, cuentas y programación contra un MySQL 8.4, con el front al lado: el
-  de la rama del mismo nombre si existe en el front, y si no el de `main`. Un cambio que toca los
+  de la rama del mismo nombre si existe en el front, y si no el de la base del PR (`dev` o `main`). Un cambio que toca los
   dos repositorios va en ramas que se llaman igual, y sus dos PR pasan sin esperar al otro.
 - **`composer audit`** sobre el `composer.lock` de cada subsistema y del núcleo.
 - **La configuración**: que el compose sea válido y que nginx acepte las plantillas (`nginx -t`).

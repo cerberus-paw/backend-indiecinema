@@ -117,6 +117,19 @@ final class FichaDeLaFuncionTest extends TestCase
     }
 
     /**
+     * La misma función, pero abierta a votación de títulos: sus obras pasan a ser las candidatas,
+     * todavía no hay ninguna elegida, y no tiene fecha hasta que la votación cierre.
+     */
+    private function enVotacionConocida(): string
+    {
+        $id = $this->programadaConocida();
+        $this->base->ejecutar("UPDATE funcion SET estado = 'en_votacion_titulos', fecha_hora = NULL WHERE id = ?", [$id]);
+        $this->base->ejecutar("UPDATE funcion_obra SET estado = 'candidata' WHERE funcion_id = ?", [$id]);
+
+        return $id;
+    }
+
+    /**
      * Lo que dice el recuadro con ese rótulo, o null si no está.
      */
     private static function recuadro(DOMXPath $ficha, string $rotulo): ?string
@@ -140,6 +153,21 @@ final class FichaDeLaFuncionTest extends TestCase
 
         self::assertSame('20:30 a 23:30', self::recuadro($ficha, 'Horario'));
         self::assertSame('180 min', self::recuadro($ficha, 'Duración total'));
+    }
+
+    /**
+     * En votación de títulos las obras del detalle son las candidatas: sumar sus duraciones daría
+     * la de todo lo que compite y no la de la función, que todavía no se sabe. Sin fecha, tampoco
+     * hay día ni horario.
+     */
+    public function testEnVotacionDeTitulosNoHayNiDuracionTotalNiHorario(): void
+    {
+        // Las mismas dos obras de 95 y 85 minutos, ahora candidatas: no son «180 min».
+        $ficha = $this->ficha($this->enVotacionConocida());
+
+        self::assertNull(self::recuadro($ficha, 'Duración total'));
+        self::assertNull(self::recuadro($ficha, 'Horario'));
+        self::assertNull(self::recuadro($ficha, 'Fecha'));
     }
 
     public function testLaEntradaVaEnSuRecuadroYLaReservaAlCostado(): void

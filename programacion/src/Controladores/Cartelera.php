@@ -363,7 +363,7 @@ final class Cartelera extends Controlador
      * Lo que muestra programacion/ficha_funcion del paquete front, con la fecha y el precio ya
      * escritos como en la tarjeta. La fecha llega entera («Sáb 19 sep · 20:30») y también en los
      * recuadros del wireframe «funcion-programada» (E4-10.10): el día solo, el horario de inicio a
-     * fin y la duración total, la suma de las de sus obras.
+     * fin y la duración total, la suma de las de sus obras elegidas.
      *
      * @return array{
      *     id: string,
@@ -376,7 +376,7 @@ final class Cartelera extends Controlador
      *     fecha: ?string,
      *     dia: ?string,
      *     horario: ?string,
-     *     duracion_total: int,
+     *     duracion_total: ?int,
      *     obras_elegidas: bool,
      *     editable: bool,
      *     cancelable: bool,
@@ -391,8 +391,13 @@ final class Cartelera extends Controlador
         bool $cancelable = false,
         bool $cerrable = false,
     ): array {
-        // Una función tiene siempre alguna obra (DetalleDeFuncion), así que hay duración.
-        $duracion = array_sum(array_map(static fn (ObraEnDetalle $obra): int => $obra->duracionMinutos, $detalle->obras));
+        // Una función tiene siempre alguna obra (DetalleDeFuncion), pero mientras los títulos
+        // están en votación ésas son las candidatas y no lo que se va a proyectar: sumarlas daría
+        // la duración de todo lo que compite. Hasta que la votación cierre no hay duración, y sin
+        // duración tampoco hay horario de fin.
+        $duracion = $detalle->obrasElegidas
+            ? array_sum(array_map(static fn (ObraEnDetalle $obra): int => $obra->duracionMinutos, $detalle->obras))
+            : null;
 
         return [
             'id' => $detalle->id,
@@ -405,7 +410,7 @@ final class Cartelera extends Controlador
             'fecha' => $detalle->fechaHora !== null ? TarjetaDeFuncion::fecha($detalle->fechaHora) : null,
             'dia' => $detalle->fechaHora !== null ? TarjetaDeFuncion::dia($detalle->fechaHora) : null,
             // «20:30 a 23:30»: termina cuando termina la última de sus obras.
-            'horario' => $detalle->fechaHora !== null
+            'horario' => $detalle->fechaHora !== null && $duracion !== null
                 ? $detalle->fechaHora->format('H:i') . ' a ' . $detalle->fechaHora->modify("+{$duracion} minutes")->format('H:i')
                 : null,
             'duracion_total' => $duracion,

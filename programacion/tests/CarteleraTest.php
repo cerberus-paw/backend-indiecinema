@@ -230,6 +230,41 @@ final class CarteleraTest extends TestCase
         self::assertStringContainsString('Página 1 de 4', $respuesta->cuerpo());
     }
 
+    public function testElPaginadoNumeraLaPrimeraLaUltimaYLasDeAlrededor(): void
+    {
+        $this->cargarDatosDePrueba();
+
+        $primera = self::json($this->pedirJson('/cartelera?orden=precio_asc', ['por_pagina' => 1]));
+        self::assertSame(
+            [
+                ['numero' => 1, 'url' => '/cartelera?orden=precio_asc', 'actual' => true],
+                ['numero' => 2, 'url' => '/cartelera?orden=precio_asc&pagina=2', 'actual' => false],
+                ['numero' => 3, 'url' => '/cartelera?orden=precio_asc&pagina=3', 'actual' => false],
+                ['numero' => 4, 'url' => '/cartelera?orden=precio_asc&pagina=4', 'actual' => false],
+                ['numero' => 5, 'url' => '/cartelera?orden=precio_asc&pagina=5', 'actual' => false],
+                null,
+                ['numero' => 15, 'url' => '/cartelera?orden=precio_asc&pagina=15', 'actual' => false],
+            ],
+            $primera['paginado']['paginas'],
+        );
+
+        $delMedio = self::json($this->pedirJson('/cartelera?orden=precio_asc&pagina=8', ['por_pagina' => 1]));
+        self::assertSame(
+            [
+                ['numero' => 1, 'url' => '/cartelera?orden=precio_asc', 'actual' => false],
+                null,
+                ['numero' => 6, 'url' => '/cartelera?orden=precio_asc&pagina=6', 'actual' => false],
+                ['numero' => 7, 'url' => '/cartelera?orden=precio_asc&pagina=7', 'actual' => false],
+                ['numero' => 8, 'url' => '/cartelera?orden=precio_asc&pagina=8', 'actual' => true],
+                ['numero' => 9, 'url' => '/cartelera?orden=precio_asc&pagina=9', 'actual' => false],
+                ['numero' => 10, 'url' => '/cartelera?orden=precio_asc&pagina=10', 'actual' => false],
+                null,
+                ['numero' => 15, 'url' => '/cartelera?orden=precio_asc&pagina=15', 'actual' => false],
+            ],
+            $delMedio['paginado']['paginas'],
+        );
+    }
+
     /**
      * @return iterable<string, array{string, int, string}>
      */
@@ -675,7 +710,17 @@ final class CarteleraTest extends TestCase
         self::assertSame(['id', 'titulo', 'afiche', 'estado', 'precio', 'sala', 'localidad', 'fecha', 'lugares_libres', 'agotada', 'url'], array_keys($primera));
         self::assertSame("/cartelera/{$primera['id']}", $primera['url']);
         self::assertSame(
-            ['numero' => 1, 'total_paginas' => 2, 'total_funciones' => 15, 'anterior' => null, 'siguiente' => '/cartelera?pagina=2'],
+            [
+                'numero' => 1,
+                'total_paginas' => 2,
+                'total_funciones' => 15,
+                'anterior' => null,
+                'siguiente' => '/cartelera?pagina=2',
+                'paginas' => [
+                    ['numero' => 1, 'url' => '/cartelera', 'actual' => true],
+                    ['numero' => 2, 'url' => '/cartelera?pagina=2', 'actual' => false],
+                ],
+            ],
             $json['paginado'],
         );
         self::assertSame([], $json['avisos']);

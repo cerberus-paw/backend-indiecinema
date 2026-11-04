@@ -228,9 +228,10 @@ todo el sitio se vea igual aunque lo sirvan subsistemas distintos.
   compose (`COMPOSE_PROFILES=buzon` en `.env`), que en el VPS sólo escucha en la máquina y se ve
   con `ssh -L 8025:127.0.0.1:8025 …`. Con un proveedor de verdad, un servidor con usuario exige
   `smtps://` o STARTTLS para no mandar la clave sin cifrar.
-- **Las tareas programadas, cuando las haya**, las va a disparar el cron del servidor con `docker compose exec -T <subsistema> php bin/<tarea>.php`,
-  en lugar de sumar un contenedor sólo para eso. Por ahora no hace falta ninguna: la votación y
-  el acuerdo los cierra el organizador desde la ficha.
+- **Las tareas programadas, cuando las haya**, las va a disparar el cron del servidor con
+  `docker compose exec -T <subsistema> php bin/<tarea>.php`, en lugar de sumar un contenedor sólo
+  para eso. Por ahora no hace falta ninguna: la votación y el acuerdo los cierra el organizador
+  desde la ficha.
 - **Las rutas dentro del contenedor copian las del disco** (`/src/backend-indiecinema/<subsistema>`
   y `/src/frontend-indiecinema`), así los repositorios `path` de Composer funcionan igual si se
   instala desde afuera o desde adentro del contenedor.

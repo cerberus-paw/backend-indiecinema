@@ -23,7 +23,7 @@ crean en el guion (pasos 14 y 16) se cancelan al final, así no quedan en la car
 
 | Paso | Qué hacer | Qué se tiene que ver |
 |---|---|---|
-| 1 | Abrir `http://indiecinema.duckdns.org` | Pasa a `https://`, con el candado. La portada muestra el carrusel de destacadas, las próximas funciones y algunas salas |
+| 1 | Abrir el sitio con `http://` (`http://indiecinema-dev.duckdns.org` en desarrollo, `http://indiecinema.duckdns.org` en producción) | Pasa a `https://`, con el candado. La portada muestra el carrusel de destacadas, las próximas funciones y algunas salas |
 | 2 | En el carrusel, esperar, usar las flechas, tocar una miniatura y, con el foco adentro, las teclas ← y → | Pasa solo cuando terminan de cargar las imágenes. Se detiene con el botón de pausa o con el mouse encima, y cada control lleva a la diapositiva que corresponde |
 | 3 | Ir a «Cartelera» y escribir parte de un título en «Buscar», sin apretar Enter | La lista se filtra sin recargar la página |
 | 4 | Filtrar por localidad, fecha y género, y cambiar de página | Sólo las funciones que cumplen todo. Cambiar de página conserva los filtros. «Limpiar» los saca |

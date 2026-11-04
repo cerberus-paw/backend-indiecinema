@@ -20,6 +20,8 @@ use PHPUnit\Framework\TestCase;
  */
 final class AcercaDeTest extends TestCase
 {
+    use ConSaltoAlContenido;
+
     private const SECRETO = 'secreto-de-nginx';
 
     /**
@@ -87,6 +89,11 @@ final class AcercaDeTest extends TestCase
             self::assertLessThanOrEqual($anterior + 1, $nivel, 'Un encabezado salta un nivel.');
             $anterior = $nivel;
         }
+    }
+
+    public function testLoPrimeroQueTomaElFocoEsSaltarAlContenido(): void
+    {
+        self::assertSaltaAlContenido($this->pedir('/acerca-de')->cuerpo());
     }
 
     public function testSeVeConSesion(): void

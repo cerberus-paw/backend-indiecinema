@@ -514,7 +514,7 @@ final class AdministracionDeUsuariosTest extends TestCase
         // Con una búsqueda, los números siguen siendo de todas las cuentas.
         $cuerpo = $this->pedir(self::URL . '?q=ana')->cuerpo();
 
-        preg_match_all('#<dd class="panel-admin-dato-valor">([^<]*)</dd>\s*<dd class="panel-admin-dato-nota">([^<]*)</dd>#', $cuerpo, $datos);
+        preg_match_all('#<dd class="panel-dato-valor">([^<]*)</dd>\s*<dd class="panel-dato-nota">([^<]*)</dd>#', $cuerpo, $datos);
         self::assertSame(['7', '2'], $datos[1], $cuerpo);
         self::assertSame(['+6 este mes', 'con la cuenta activa'], $datos[2]);
     }

@@ -17,7 +17,8 @@ use IndieCinema\Nucleo\Seguridad\Rol;
  * middleware del núcleo lo controla antes de llegar al controlador.
  */
 return static function (Router $router): void {
-    $router->get('/', [Inicio::class, 'mostrar']);
+    // «Mi cuenta»: los datos de quien está en sesión.
+    $router->get('/', [Inicio::class, 'mostrar'], Rol::Espectador);
 
     // Sin sesión: es para el visitante que todavía no tiene cuenta.
     $router->get('/registro', [Registro::class, 'mostrar']);

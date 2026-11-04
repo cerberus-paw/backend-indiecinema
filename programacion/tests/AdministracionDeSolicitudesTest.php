@@ -28,6 +28,7 @@ use PHPUnit\Framework\TestCase;
 final class AdministracionDeSolicitudesTest extends TestCase
 {
     use ConBaseDePruebas;
+    use ConSaltoAlContenido;
 
     private const SECRETO = 'secreto-de-nginx';
     private const CSRF = 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc';
@@ -194,6 +195,16 @@ final class AdministracionDeSolicitudesTest extends TestCase
         self::assertStringContainsString("action=\"/administracion/solicitudes/{$vieja}/resolver\"", $respuesta->cuerpo());
         // La pestaña dice cuántas esperan.
         self::assertMatchesRegularExpression('#Solicitudes de sala <span class="bandeja-cuenta">2</span>#', $respuesta->cuerpo());
+    }
+
+    /**
+     * El panel saca el encabezado del sitio, pero no el enlace: pasa de largo la barra lateral.
+     */
+    public function testElPanelTambienEmpiezaConSaltarAlContenido(): void
+    {
+        $this->solicitar(self::ESPECTADORA, 'El Galpón');
+
+        self::assertSaltaAlContenido($this->pedir('GET', '/administracion/solicitudes')->cuerpo());
     }
 
     public function testLaElegidaMuestraLaSalaYLoQueCuentaCuentasDeQuienLaMando(): void

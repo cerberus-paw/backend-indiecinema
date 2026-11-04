@@ -156,10 +156,34 @@ final class PanelDeReservasTest extends TestCase
         }
         self::assertStringNotContainsString($deOtra, $cuerpo);
         // 2 + 3 reservados de 40: la cancelada soltó los suyos.
-        self::assertMatchesRegularExpression('#Lugares reservados</dt>\s*<dd class="panel-admin-dato-valor"[^>]*>5</dd>#', $cuerpo);
-        self::assertMatchesRegularExpression('#Lugares libres</dt>\s*<dd class="panel-admin-dato-valor"[^>]*>35</dd>#', $cuerpo);
-        self::assertMatchesRegularExpression('#Asistentes registrados</dt>\s*<dd class="panel-admin-dato-valor"[^>]*>3</dd>#', $cuerpo);
+        self::assertMatchesRegularExpression('#Lugares reservados</dt>\s*<dd class="panel-dato-valor"[^>]*>5</dd>#', $cuerpo);
+        self::assertMatchesRegularExpression('#Lugares libres</dt>\s*<dd class="panel-dato-valor"[^>]*>35</dd>#', $cuerpo);
+        self::assertMatchesRegularExpression('#Asistentes registrados</dt>\s*<dd class="panel-dato-valor"[^>]*>3</dd>#', $cuerpo);
         self::assertStringContainsString('$ 17.500', $cuerpo);
+    }
+
+    /**
+     * La pantalla es parte del panel del organizador (E4-10.12): la barra lateral de programación,
+     * con Mis funciones marcada, en lugar del encabezado del sitio. Las otras pantallas del panel
+     * lo prueban en programación (BarraDelOrganizadorTest).
+     */
+    public function testLasReservasDeLaFuncionTienenLaBarraDelPanelConMisFuncionesMarcada(): void
+    {
+        $pagina = $this->pedir('GET', '/organizador/funciones/' . self::PROXIMA . '/reservas', extra: ['X-Usuario-Nombre' => rawurlencode('Ana Prueba')])->cuerpo();
+
+        preg_match('#<aside[^>]*aria-label="Panel del organizador"[^>]*>.*?</aside>#s', $pagina, $barra);
+        $barra = $barra[0] ?? '';
+        preg_match_all('#href="([^"]*)"#', $barra, $enlaces);
+        $enlaces = array_values(array_unique($enlaces[1]));
+        sort($enlaces);
+        preg_match_all('#<a href="([^"]*)"[^>]*aria-current="page"#', $barra, $actuales);
+
+        // Los enlaces van sin el prefijo de funciones: las pantallas del panel son de programación.
+        self::assertSame(['/', '/organizador/funciones', '/organizador/funciones/nueva', '/organizador/salas', '/solicitar-sala'], $enlaces);
+        self::assertSame(['/organizador/funciones'], $actuales[1]);
+        self::assertStringContainsString('Ana Prueba', $barra);
+        self::assertStringContainsString('action="/cuenta/salir"', $barra);
+        self::assertStringNotContainsString('aria-label="Navegación principal"', $pagina);
     }
 
     // ---- La asistencia (E4-03.2) ------------------------------------------------------------

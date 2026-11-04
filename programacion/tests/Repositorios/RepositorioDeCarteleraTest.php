@@ -16,6 +16,7 @@ use IndieCinema\Programacion\Modelo\FuncionEnCartelera;
 use IndieCinema\Programacion\Modelo\Obra;
 use IndieCinema\Programacion\Modelo\ObraEnCartelera;
 use IndieCinema\Programacion\Modelo\ObraEnDetalle;
+use IndieCinema\Programacion\Modelo\OrdenDeCartelera;
 use IndieCinema\Programacion\Modelo\OrigenCopia;
 use IndieCinema\Programacion\Modelo\PaginaDeCartelera;
 use IndieCinema\Programacion\Modelo\Sala;
@@ -198,6 +199,40 @@ final class RepositorioDeCarteleraTest extends TestCase
 
         self::assertSame(['cienaga', 'carroza', 'zama', 'cien', 'acuerdo', 'votacion'], $this->nombres($pagina));
         self::assertSame(6, $pagina->total);
+    }
+
+    /**
+     * @return iterable<string, array{OrdenDeCartelera, list<string>}>
+     */
+    public static function ordenes(): iterable
+    {
+        yield 'fecha ascendente' => [OrdenDeCartelera::FechaAscendente, ['cienaga', 'carroza', 'zama', 'cien', 'acuerdo', 'votacion']];
+        yield 'fecha descendente' => [OrdenDeCartelera::FechaDescendente, ['cien', 'zama', 'carroza', 'cienaga', 'acuerdo', 'votacion']];
+        yield 'precio ascendente' => [OrdenDeCartelera::PrecioAscendente, ['carroza', 'cienaga', 'zama', 'cien', 'acuerdo', 'votacion']];
+        yield 'precio descendente' => [OrdenDeCartelera::PrecioDescendente, ['cienaga', 'zama', 'cien', 'acuerdo', 'votacion', 'carroza']];
+        yield 'título ascendente' => [OrdenDeCartelera::TituloAscendente, ['cien', 'carroza', 'cienaga', 'votacion', 'zama', 'acuerdo']];
+        yield 'título descendente' => [OrdenDeCartelera::TituloDescendente, ['zama', 'acuerdo', 'cienaga', 'votacion', 'carroza', 'cien']];
+    }
+
+    /**
+     * @param list<string> $esperadas
+     */
+    #[DataProvider('ordenes')]
+    public function testOrdenaPorFechaPrecioYTituloAscendenteYDescendente(OrdenDeCartelera $orden, array $esperadas): void
+    {
+        $filtros = new FiltrosDeCartelera(orden: $orden);
+
+        self::assertSame($esperadas, $this->nombres($this->pagina($filtros)));
+        self::assertSame($esperadas, $this->nombres($this->todas($filtros)));
+        // Al paginar se mantiene el mismo orden entre las páginas.
+        self::assertSame(
+            $esperadas,
+            [
+                ...$this->nombres($this->pagina($filtros, numero: 1, tamano: 2)),
+                ...$this->nombres($this->pagina($filtros, numero: 2, tamano: 2)),
+                ...$this->nombres($this->pagina($filtros, numero: 3, tamano: 2)),
+            ],
+        );
     }
 
     public function testCadaFuncionTraeSusObrasLaSalaLaLocalidadLaFechaYElPrecio(): void

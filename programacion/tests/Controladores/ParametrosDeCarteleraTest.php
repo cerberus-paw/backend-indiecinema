@@ -8,11 +8,12 @@ use DateTimeImmutable;
 use IndieCinema\Programacion\Controladores\ParametrosDeCartelera;
 use IndieCinema\Programacion\Modelo\FiltrosDeCartelera;
 use IndieCinema\Programacion\Modelo\Genero;
+use IndieCinema\Programacion\Modelo\OrdenDeCartelera;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Los parámetros de la URL de la cartelera, que cualquiera puede escribir a mano: un filtro
+ * Los parámetros de la URL de la cartelera, que cualquiera puede escribir a mano: un filtro u orden
  * inválido se deja afuera con un aviso, y una página inválida queda en null para el 404.
  */
 final class ParametrosDeCarteleraTest extends TestCase
@@ -48,19 +49,53 @@ final class ParametrosDeCarteleraTest extends TestCase
             'localidad' => 'Luján',
             'fecha' => '2026-10-24',
             'genero' => ' drama ',
+            'orden' => 'precio_asc',
             'pagina' => '3',
         ]);
 
         // El género filtra por su id, y vuelve con el nombre como está guardado.
-        self::assertEquals(new FiltrosDeCartelera('la ciénaga', 'Luján', new DateTimeImmutable('2026-10-24'), self::GENERO), $parametros->filtros);
-        self::assertSame(['q' => 'la ciénaga', 'localidad' => 'Luján', 'fecha' => '2026-10-24', 'genero' => 'Drama'], $parametros->valores);
+        self::assertEquals(
+            new FiltrosDeCartelera('la ciénaga', 'Luján', new DateTimeImmutable('2026-10-24'), self::GENERO, orden: OrdenDeCartelera::PrecioAscendente),
+            $parametros->filtros,
+        );
+        self::assertSame(
+            ['q' => 'la ciénaga', 'localidad' => 'Luján', 'fecha' => '2026-10-24', 'genero' => 'Drama', 'orden' => 'precio_asc'],
+            $parametros->valores,
+        );
         self::assertSame([], $parametros->avisos);
         self::assertSame(3, $parametros->pagina);
     }
 
+    /**
+     * @return iterable<string, array{string, OrdenDeCartelera, array<string, string>}>
+     */
+    public static function ordenesValidos(): iterable
+    {
+        yield 'fecha ascendente (por defecto, no viaja en valores)' => ['fecha_asc', OrdenDeCartelera::FechaAscendente, []];
+        yield 'fecha descendente' => ['fecha_desc', OrdenDeCartelera::FechaDescendente, ['orden' => 'fecha_desc']];
+        yield 'precio ascendente' => ['precio_asc', OrdenDeCartelera::PrecioAscendente, ['orden' => 'precio_asc']];
+        yield 'precio descendente' => ['precio_desc', OrdenDeCartelera::PrecioDescendente, ['orden' => 'precio_desc']];
+        yield 'título ascendente' => ['titulo_asc', OrdenDeCartelera::TituloAscendente, ['orden' => 'titulo_asc']];
+        yield 'título descendente' => ['titulo_desc', OrdenDeCartelera::TituloDescendente, ['orden' => 'titulo_desc']];
+        yield 'con guion y mayúsculas' => [' PRECIO-ASC ', OrdenDeCartelera::PrecioAscendente, ['orden' => 'precio_asc']];
+    }
+
+    /**
+     * @param array<string, string> $valoresEsperados
+     */
+    #[DataProvider('ordenesValidos')]
+    public function testAceptaCadaOrdenValido(string $valor, OrdenDeCartelera $esperado, array $valoresEsperados): void
+    {
+        $parametros = self::parametros(['orden' => $valor]);
+
+        self::assertSame($esperado, $parametros->filtros->orden);
+        self::assertSame($valoresEsperados, $parametros->valores);
+        self::assertSame([], $parametros->avisos);
+    }
+
     public function testLosVaciosNoFiltranNiAvisan(): void
     {
-        $parametros = self::parametros(['q' => '', 'localidad' => '   ', 'fecha' => '', 'genero' => '', 'pagina' => '']);
+        $parametros = self::parametros(['q' => '', 'localidad' => '   ', 'fecha' => '', 'genero' => '', 'orden' => '  ', 'pagina' => '']);
 
         self::assertEquals(new FiltrosDeCartelera(), $parametros->filtros);
         self::assertSame([[], [], 1], [$parametros->valores, $parametros->avisos, $parametros->pagina]);
@@ -87,6 +122,11 @@ final class ParametrosDeCarteleraTest extends TestCase
         yield 'un género como arreglo' => [['genero' => ['Drama']], 'El género no es válido'];
         yield 'un género que no es UTF-8' => [['genero' => "\xC3\x28"], 'El género no es válido'];
         yield 'un género muy largo' => [['genero' => str_repeat('d', 51)], 'El género no es válido'];
+        yield 'un orden que no existe' => [['orden' => 'popularidad'], 'El orden no es válido'];
+        yield 'un orden sin sentido' => [['orden' => 'precio'], 'El orden no es válido'];
+        yield 'un orden con una inyección' => [['orden' => "precio_asc' OR 1=1 -- "], 'El orden no es válido'];
+        yield 'un orden como arreglo' => [['orden' => ['precio_asc']], 'El orden no es válido'];
+        yield 'un orden que no es UTF-8' => [['orden' => "\xC3\x28"], 'El orden no es válido'];
     }
 
     /**
@@ -133,9 +173,9 @@ final class ParametrosDeCarteleraTest extends TestCase
 
     public function testCadaFiltroInvalidoTieneSuAviso(): void
     {
-        $parametros = self::parametros(['q' => ['x'], 'fecha' => 'x', 'genero' => 'x']);
+        $parametros = self::parametros(['q' => ['x'], 'fecha' => 'x', 'genero' => 'x', 'orden' => 'x']);
 
-        self::assertCount(3, $parametros->avisos);
+        self::assertCount(4, $parametros->avisos);
         self::assertEquals(new FiltrosDeCartelera(), $parametros->filtros);
     }
 
@@ -170,22 +210,24 @@ final class ParametrosDeCarteleraTest extends TestCase
         self::assertSame([], $parametros->avisos);
     }
 
-    public function testLasUrlDePaginaConservanLosFiltros(): void
+    public function testLasUrlDePaginaConservanLosFiltrosYElOrden(): void
     {
-        $parametros = self::parametros(['q' => 'el pibe & cía', 'localidad' => 'San Antonio de Areco', 'fecha' => 'x', 'pagina' => '2']);
+        $parametros = self::parametros(['q' => 'el pibe & cía', 'localidad' => 'San Antonio de Areco', 'fecha' => 'x', 'orden' => 'titulo_desc', 'pagina' => '2']);
 
-        self::assertSame('/cartelera?q=el%20pibe%20%26%20c%C3%ADa&localidad=San%20Antonio%20de%20Areco&pagina=3', $parametros->urlDePagina(3));
+        self::assertSame('/cartelera?q=el%20pibe%20%26%20c%C3%ADa&localidad=San%20Antonio%20de%20Areco&orden=titulo_desc&pagina=3', $parametros->urlDePagina(3));
         // La primera, sin el número; y el filtro inválido no viaja.
-        self::assertSame('/cartelera?q=el%20pibe%20%26%20c%C3%ADa&localidad=San%20Antonio%20de%20Areco', $parametros->urlDePagina(1));
+        self::assertSame('/cartelera?q=el%20pibe%20%26%20c%C3%ADa&localidad=San%20Antonio%20de%20Areco&orden=titulo_desc', $parametros->urlDePagina(1));
+        self::assertSame('/cartelera?orden=precio_asc&pagina=2', self::parametros(['orden' => 'precio_asc'])->urlDePagina(2));
+        self::assertSame('/cartelera?pagina=2', self::parametros(['orden' => 'fecha_asc'])->urlDePagina(2));
         self::assertSame('/cartelera?pagina=2', self::parametros([])->urlDePagina(2));
         self::assertSame('/cartelera', self::parametros([])->urlDePagina(1));
     }
 
-    public function testLaUrlDelCsvConservaLosFiltrosYNoLlevaLaPagina(): void
+    public function testLaUrlDelCsvConservaLosFiltrosYElOrdenYNoLlevaLaPagina(): void
     {
-        $parametros = self::parametros(['q' => 'el pibe & cía', 'localidad' => 'San Antonio de Areco', 'fecha' => 'x', 'pagina' => '2']);
+        $parametros = self::parametros(['q' => 'el pibe & cía', 'localidad' => 'San Antonio de Areco', 'fecha' => 'x', 'orden' => 'precio_desc', 'pagina' => '2']);
 
-        self::assertSame('/cartelera.csv?q=el%20pibe%20%26%20c%C3%ADa&localidad=San%20Antonio%20de%20Areco', $parametros->urlDeCsv());
-        self::assertSame('/cartelera.csv', self::parametros(['pagina' => '3'])->urlDeCsv());
+        self::assertSame('/cartelera.csv?q=el%20pibe%20%26%20c%C3%ADa&localidad=San%20Antonio%20de%20Areco&orden=precio_desc', $parametros->urlDeCsv());
+        self::assertSame('/cartelera.csv', self::parametros(['orden' => 'fecha_asc', 'pagina' => '3'])->urlDeCsv());
     }
 }

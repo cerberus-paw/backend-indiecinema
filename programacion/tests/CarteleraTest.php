@@ -656,12 +656,18 @@ final class CarteleraTest extends TestCase
         self::assertSame(200, $respuesta->estado());
         $cuerpo = $respuesta->cuerpo();
         self::assertStringContainsString('Metrópolis', $cuerpo);
-        // La obra en su fila, como el wireframe «funcion-programada»: año · género · duración, sin
-        // el director (E4-10.10).
+        // La obra en su fila (E4-10.10): año · género · duración, y debajo el director.
+        self::assertStringContainsString('Fritz Lang', $cuerpo);
         self::assertStringContainsString('153 min', $cuerpo);
         self::assertStringContainsString('Cine Club El Alambique', $cuerpo);
         self::assertStringContainsString('href="/salas/' . $salaId . '"', $cuerpo);
         self::assertStringContainsString('San Martín 420, Luján', $cuerpo);
+        // Debajo de la obra, su sinopsis; en la tarjeta de la sala, la capacidad y la descripción.
+        $sinopsis = (string) $this->base->valor("SELECT sinopsis FROM obra WHERE titulo = 'Metrópolis'");
+        $descripcion = (string) $this->base->valor('SELECT descripcion FROM sala WHERE id = ?', [$salaId]);
+        self::assertStringContainsString(htmlspecialchars($sinopsis), $cuerpo);
+        self::assertStringContainsString(htmlspecialchars($descripcion), $cuerpo);
+        self::assertStringContainsString('80 butacas', $cuerpo);
         self::assertStringContainsString('$ 2.500', $cuerpo);
         // La línea de estados del wireframe marca «PROGRAMADA» como el estado actual (E3-13.F10).
         self::assertMatchesRegularExpression('/aria-current="step">\s*<span>PROGRAMADA<\/span>/', $cuerpo);

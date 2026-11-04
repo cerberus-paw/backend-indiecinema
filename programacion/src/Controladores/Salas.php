@@ -39,8 +39,9 @@ final class Salas extends Controlador
     }
 
     /**
-     * La plantilla recibe la sala (lo de la tarjeta, más la descripción y la dirección) y sus
-     * funciones, como las recibe parciales/tarjeta_funcion.
+     * La plantilla recibe la sala (lo de la tarjeta, más la descripción, la dirección y los
+     * parámetros con los que programa: películas por función, duración máxima de la función y
+     * tiempo entre funciones, en minutos) y sus funciones, como las recibe parciales/fila_funcion.
      *
      * @throws ExcepcionHttp 404 si no existe o quien la pide no la puede ver
      */
@@ -52,8 +53,11 @@ final class Salas extends Controlador
             'sala' => TarjetaDeSala::datos($ficha->sala) + [
                 'descripcion' => $ficha->sala->datos->descripcion,
                 'direccion' => $ficha->sala->datos->direccion,
+                'peliculas_por_funcion' => $ficha->sala->datos->peliculasPorFuncion,
+                'duracion_funcion' => $ficha->sala->datos->duracionFuncion,
+                'tiempo_entre_funciones' => $ficha->sala->datos->tiempoEntreFunciones,
             ],
-            'funciones' => TarjetaDeFuncion::todas(
+            'funciones' => FilaDeFuncion::todas(
                 $ficha->funciones,
                 $this->cartelera->acuerdosDe($ficha->funciones),
                 $this->ocupacion->deVarias(TarjetaDeFuncion::conLugares($ficha->funciones)),

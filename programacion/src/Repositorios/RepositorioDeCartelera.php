@@ -13,6 +13,7 @@ use IndieCinema\Programacion\Modelo\FiltrosDeCartelera;
 use IndieCinema\Programacion\Modelo\FuncionEnCartelera;
 use IndieCinema\Programacion\Modelo\ObraEnCartelera;
 use IndieCinema\Programacion\Modelo\ObraEnDetalle;
+use IndieCinema\Programacion\Modelo\OrdenDeCartelera;
 use IndieCinema\Programacion\Modelo\PaginaDeCartelera;
 use IndieCinema\Programacion\Modelo\SalaEnDetalle;
 use IndieCinema\Programacion\Modelo\TipoObra;
@@ -33,7 +34,14 @@ final class RepositorioDeCartelera
     /** La sala y el id desempatan, así una función no cambia de página entre una consulta y otra. */
     // Las que no tienen fecha van al final; entre ellas, primero las que ya están acordando la
     // fecha y después las que todavía votan los títulos (E3-13.F1).
-    private const ORDEN = 'ORDER BY (f.fecha_hora IS NULL), f.fecha_hora, (f.estado = \'en_votacion_titulos\'), s.nombre, f.id';
+    private const DESEMPATE = '(f.fecha_hora IS NULL), f.fecha_hora, (f.estado = \'en_votacion_titulos\'), s.nombre, f.id';
+    private const TITULO = "(
+        SELECT GROUP_CONCAT(o.titulo ORDER BY o.titulo, o.id SEPARATOR ' + ')
+        FROM funcion_obra fo
+        JOIN obra o ON o.id = fo.obra_id
+        WHERE fo.funcion_id = f.id
+            AND (fo.estado = 'elegida' OR (f.estado = 'en_votacion_titulos' AND fo.estado = 'candidata'))
+    )";
 
     public function __construct(private readonly BaseDeDatos $base)
     {
@@ -63,7 +71,7 @@ final class RepositorioDeCartelera
             return $pagina;
         }
 
-        $funciones = $this->funciones("{$condiciones} " . self::ORDEN . ' LIMIT ? OFFSET ?', [...$parametros, $tamano, ($numero - 1) * $tamano]);
+        $funciones = $this->funciones("{$condiciones} " . self::orden($filtros->orden) . ' LIMIT ? OFFSET ?', [...$parametros, $tamano, ($numero - 1) * $tamano]);
 
         return new PaginaDeCartelera($funciones, $numero, $tamano, $total);
     }
@@ -78,19 +86,9 @@ final class RepositorioDeCartelera
     {
         [$condiciones, $parametros] = self::condiciones($filtros, $ahora);
 
-        return $this->funciones("{$condiciones} " . self::ORDEN, $parametros);
+        return $this->funciones("{$condiciones} " . self::orden($filtros->orden), $parametros);
     }
 
-    /**
-     * El detalle de una función, en cualquier estado, con su sala y sus obras: las elegidas si ya
-     * se definieron, o las candidatas si está en votación (o se canceló durante la votación).
-     *
-     * Las obras dadas de baja también: la baja es lógica justamente para que las funciones sigan
-     * apuntando a ellas. Si se filtraran, una función cuya elegida se dio de baja mostraría las
-     * candidatas que perdieron.
-     *
-     * Devuelve null si la función no existe o si su sala no está habilitada o está dada de baja.
-     */
     /**
      * Sólo el estado, la fecha y el cupo de una función, con el mismo filtro que detalle(): sin
      * sala publicada no aparece (E4-05.1).
@@ -115,6 +113,16 @@ final class RepositorioDeCartelera
         );
     }
 
+    /**
+     * El detalle de una función, en cualquier estado, con su sala y sus obras: las elegidas si ya
+     * se definieron, o las candidatas si está en votación (o se canceló durante la votación).
+     *
+     * Las obras dadas de baja también: la baja es lógica justamente para que las funciones sigan
+     * apuntando a ellas. Si se filtraran, una función cuya elegida se dio de baja mostraría las
+     * candidatas que perdieron.
+     *
+     * Devuelve null si la función no existe o si su sala no está habilitada o está dada de baja.
+     */
     public function detalle(string $id): ?DetalleDeFuncion
     {
         $fila = $this->base->fila(
@@ -265,6 +273,23 @@ final class RepositorioDeCartelera
         }
 
         return [implode(' AND ', $condiciones), $parametros];
+    }
+
+    /**
+     * El ORDER BY de la cartelera según el criterio elegido (E4-06.1), sólo con fragmentos fijos:
+     * las funciones sin fecha quedan al final al ordenar por fecha, y a igualdad de criterio
+     * desempatan la fecha, el estado, la sala y el id para que el paginado sea estable.
+     */
+    private static function orden(OrdenDeCartelera $orden): string
+    {
+        return 'ORDER BY ' . match ($orden) {
+            OrdenDeCartelera::FechaAscendente => self::DESEMPATE,
+            OrdenDeCartelera::FechaDescendente => "(f.fecha_hora IS NULL), f.fecha_hora DESC, (f.estado = 'en_votacion_titulos'), s.nombre, f.id",
+            OrdenDeCartelera::PrecioAscendente => 'f.precio_base ASC, ' . self::DESEMPATE,
+            OrdenDeCartelera::PrecioDescendente => 'f.precio_base DESC, ' . self::DESEMPATE,
+            OrdenDeCartelera::TituloAscendente => self::TITULO . ' ASC, ' . self::DESEMPATE,
+            OrdenDeCartelera::TituloDescendente => self::TITULO . ' DESC, ' . self::DESEMPATE,
+        };
     }
 
     /**

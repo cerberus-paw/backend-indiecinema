@@ -310,6 +310,57 @@ final class CarteleraTest extends TestCase
     }
 
     /**
+     * @return iterable<string, array{string, string, string}>
+     */
+    public static function ordenes(): iterable
+    {
+        yield 'fecha ascendente' => ['fecha_asc', 'Metrópolis', 'Nosferatu'];
+        yield 'fecha descendente' => ['fecha_desc', 'Nosferatu', 'Metrópolis'];
+        yield 'precio ascendente' => ['precio_asc', 'Metrópolis + Viaje a la Luna', 'Sherlock Jr.'];
+        yield 'precio descendente' => ['precio_desc', 'El gabinete del Dr. Caligari + Viaje a la Luna', 'Sherlock Jr. + Viaje a través de lo imposible'];
+        yield 'título ascendente' => ['titulo_asc', 'El acorazado Potemkin', 'Sherlock Jr. + Viaje a través de lo imposible'];
+        yield 'título descendente' => ['titulo_desc', 'Sherlock Jr. + Viaje a través de lo imposible', 'El acorazado Potemkin'];
+    }
+
+    #[DataProvider('ordenes')]
+    public function testOrdenaPorFechaPrecioYTituloAscendenteYDescendenteYLoConservaAlPaginar(
+        string $orden,
+        string $primero,
+        string $ultimo,
+    ): void {
+        $this->cargarDatosDePrueba();
+
+        $primera = $this->pedir("/cartelera?orden={$orden}");
+        $segunda = $this->pedir("/cartelera?orden={$orden}&pagina=2");
+        $json = self::json($this->pedirJson("/cartelera?orden={$orden}"));
+        $filasCsv = self::filasDelCsv($this->pedir("/cartelera.csv?orden={$orden}"));
+
+        self::assertPagina($primera, 12, '15 funciones');
+        self::assertPagina($segunda, 3, '15 funciones');
+        preg_match_all('#<article class="tarjeta-funcion.*?</article>#s', $primera->cuerpo(), $tarjetasPrimera);
+        preg_match_all('#<article class="tarjeta-funcion.*?</article>#s', $segunda->cuerpo(), $tarjetasSegunda);
+        self::assertStringContainsString(htmlspecialchars($primero), $tarjetasPrimera[0][0] ?? '');
+        self::assertStringContainsString(htmlspecialchars($ultimo), $tarjetasSegunda[0][2] ?? '');
+        self::assertSame($primero, $json['funciones'][0]['titulo']);
+        self::assertSame($primero, $filasCsv[0][2]);
+        self::assertSame($ultimo, $filasCsv[14][2]);
+
+        if ($orden === 'fecha_asc') {
+            self::assertSame([], $json['filtros']);
+            self::assertSame('/cartelera?pagina=2', $json['paginado']['siguiente']);
+            self::assertStringContainsString('href="/cartelera?pagina=2"', $primera->cuerpo());
+            self::assertStringContainsString('href="/cartelera" class="boton boton-secundario boton-chico" rel="prev"', $segunda->cuerpo());
+            self::assertSame('/cartelera.csv', $json['csv']);
+        } else {
+            self::assertSame(['orden' => $orden], $json['filtros']);
+            self::assertSame("/cartelera?orden={$orden}&pagina=2", $json['paginado']['siguiente']);
+            self::assertStringContainsString("href=\"/cartelera?orden={$orden}&amp;pagina=2\"", $primera->cuerpo());
+            self::assertStringContainsString("href=\"/cartelera?orden={$orden}\" class=\"boton boton-secundario boton-chico\" rel=\"prev\"", $segunda->cuerpo());
+            self::assertSame("/cartelera.csv?orden={$orden}", $json['csv']);
+        }
+    }
+
+    /**
      * Lo que podría escribir alguien a mano en la URL: con cada uno, la página responde 200 y
      * muestra la cartelera entera con el aviso.
      *
@@ -328,6 +379,9 @@ final class CarteleraTest extends TestCase
         yield 'una búsqueda que no es UTF-8' => ['q=%C3%28'];
         yield 'una búsqueda enorme' => ['q=' . str_repeat('a', 5000)];
         yield 'una localidad como arreglo' => ['localidad[]=Luj%C3%A1n'];
+        yield 'un orden que no existe' => ['orden=popularidad'];
+        yield 'un orden incompleto' => ['orden=precio'];
+        yield 'un orden como arreglo' => ['orden[]=precio_asc'];
     }
 
     #[DataProvider('parametrosInvalidos')]
@@ -345,7 +399,7 @@ final class CarteleraTest extends TestCase
     {
         $this->cargarDatosDePrueba();
 
-        $respuesta = $this->pedir('/cartelera?orden=precio&tamano=1000&por_pagina=1000');
+        $respuesta = $this->pedir('/cartelera?tamano=1000&por_pagina=1000');
 
         self::assertPagina($respuesta, 12, '15 funciones');
         self::assertStringNotContainsString('Algunos filtros no se aplicaron', $respuesta->cuerpo());

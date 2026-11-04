@@ -18,6 +18,7 @@ use IndieCinema\Programacion\Modelo\Funcion;
 use IndieCinema\Programacion\Modelo\FuncionEnCartelera;
 use IndieCinema\Programacion\Modelo\Genero;
 use IndieCinema\Programacion\Modelo\ObraEnDetalle;
+use IndieCinema\Programacion\Modelo\OrdenDeCartelera;
 use IndieCinema\Programacion\Modelo\ReglaIncumplida;
 use IndieCinema\Programacion\Servicios\OcupacionDeFunciones;
 use IndieCinema\Programacion\Servicios\ServicioDeCartelera;
@@ -87,6 +88,7 @@ final class Cartelera extends Controlador
             'avisos' => $parametros->avisos,
             'localidades' => $this->servicio->localidades(),
             'generos' => array_map(static fn (Genero $genero): array => ['id' => $genero->id, 'nombre' => $genero->nombre], $this->servicio->generos()),
+            'ordenes' => OrdenDeCartelera::opciones(),
             'paginado' => $paginado,
             'csv' => $parametros->urlDeCsv(),
         ])->conCabecera('Vary', 'Accept');
@@ -355,6 +357,7 @@ final class Cartelera extends Controlador
             'localidad' => $peticion->consulta('localidad'),
             'fecha' => $peticion->consulta('fecha'),
             'genero' => $peticion->consulta('genero'),
+            'orden' => $peticion->consulta('orden'),
             'pagina' => $peticion->consulta('pagina'),
         ], $this->servicio->generoPorNombre(...));
     }

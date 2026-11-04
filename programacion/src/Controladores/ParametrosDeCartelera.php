@@ -8,13 +8,14 @@ use Closure;
 use DateTimeImmutable;
 use IndieCinema\Programacion\Modelo\FiltrosDeCartelera;
 use IndieCinema\Programacion\Modelo\Genero;
+use IndieCinema\Programacion\Modelo\OrdenDeCartelera;
 
 /**
  * Valida los parámetros de la URL de la cartelera, que cualquiera puede escribir a mano.
  *
- * Un filtro inválido no rompe la página: se deja afuera, la cartelera se muestra sin él y el
- * aviso dice por qué. La página es distinta: una que no es un número positivo no existe, como
- * la que pasa de la última, y la decide el controlador con un 404.
+ * Un filtro o un orden inválido no rompe la página: se deja afuera, la cartelera se muestra sin él
+ * (u ordenada por fecha) y el aviso dice por qué. La página es distinta: una que no es un número
+ * positivo no existe, como la que pasa de la última, y la decide el controlador con un 404.
  *
  * Los nombres son los del formulario de programacion/cartelera en el paquete front. El género
  * viaja por su nombre, como la localidad, así la URL se lee y se puede escribir a mano; quién lo
@@ -31,10 +32,10 @@ final class ParametrosDeCartelera
     /** Hasta acá, una página más no cambia nada: sólo evita pasar un número enorme a la base. */
     private const PAGINA = '/^[1-9][0-9]{0,8}$/D';
 
-    /** @var array<string, string> los filtros que se aplicaron, para el formulario y los links */
+    /** @var array<string, string> los filtros y el orden que se aplicaron, para el formulario y los links */
     public private(set) array $valores = [];
 
-    /** @var list<string> qué filtro se dejó afuera y por qué */
+    /** @var list<string> qué filtro u orden se dejó afuera y por qué */
     public private(set) array $avisos = [];
 
     /** El número de página, o null si no es uno válido. */
@@ -58,14 +59,17 @@ final class ParametrosDeCartelera
         $localidad = $parametros->texto($consulta['localidad'] ?? null, 'La localidad', self::LARGO_LOCALIDAD);
         $fecha = $parametros->fecha($consulta['fecha'] ?? null);
         $genero = $parametros->genero($consulta['genero'] ?? null, $generoPorNombre);
-        $parametros->filtros = new FiltrosDeCartelera($texto, $localidad, $fecha, $genero?->id);
+        $orden = $parametros->orden($consulta['orden'] ?? null);
+        $parametros->filtros = new FiltrosDeCartelera($texto, $localidad, $fecha, $genero?->id, orden: $orden);
         // Lo que se aplicó, como quedó en los filtros (sin los espacios de alrededor), y el género
-        // con su nombre como está guardado, así «comedia» en la URL vuelve como «Comedia».
+        // con su nombre como está guardado, así «comedia» en la URL vuelve como «Comedia». El orden
+        // por defecto no viaja en los links ni en el formulario, como la página 1.
         $parametros->valores = array_filter([
             'q' => $parametros->filtros->texto,
             'localidad' => $parametros->filtros->localidad,
             'fecha' => $parametros->filtros->fecha?->format('Y-m-d'),
             'genero' => $genero?->nombre,
+            'orden' => $orden !== OrdenDeCartelera::FechaAscendente ? $orden->value : null,
         ], static fn (?string $valor): bool => $valor !== null);
         $parametros->pagina = self::pagina($consulta['pagina'] ?? null);
 
@@ -73,8 +77,8 @@ final class ParametrosDeCartelera
     }
 
     /**
-     * La URL de otra página con los mismos filtros. La primera va sin el número, así es la misma
-     * que se arma al filtrar.
+     * La URL de otra página con los mismos filtros y orden. La primera va sin el número, así es la
+     * misma que se arma al filtrar.
      */
     public function urlDePagina(int $numero): string
     {
@@ -82,7 +86,7 @@ final class ParametrosDeCartelera
     }
 
     /**
-     * La URL del CSV con los mismos filtros. No lleva la página: el archivo las trae todas.
+     * La URL del CSV con los mismos filtros y orden. No lleva la página: el archivo las trae todas.
      */
     public function urlDeCsv(): string
     {
@@ -148,6 +152,24 @@ final class ParametrosDeCartelera
         }
 
         return $genero;
+    }
+
+    private function orden(mixed $valor): OrdenDeCartelera
+    {
+        if ($valor === null || (is_string($valor) && trim($valor) === '')) {
+            return OrdenDeCartelera::FechaAscendente;
+        }
+        $normalizado = is_string($valor) && mb_check_encoding($valor, 'UTF-8')
+            ? str_replace('-', '_', mb_strtolower(trim($valor)))
+            : '';
+        $orden = OrdenDeCartelera::tryFrom($normalizado);
+        if ($orden === null) {
+            $this->avisos[] = 'El orden no es válido: se muestra la cartelera ordenada por fecha.';
+
+            return OrdenDeCartelera::FechaAscendente;
+        }
+
+        return $orden;
     }
 
     private static function pagina(mixed $valor): ?int

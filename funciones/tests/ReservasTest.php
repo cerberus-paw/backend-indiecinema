@@ -568,6 +568,20 @@ final class ReservasTest extends TestCase
         self::assertStringNotContainsString('<table', $respuesta->cuerpo());
     }
 
+    /**
+     * La misma barra lateral que «Mi cuenta» (E4-10.13), con «Mis reservas» marcada.
+     */
+    public function testMisReservasTieneLaBarraDeMiCuentaConLaSeccionMarcada(): void
+    {
+        $respuesta = $this->pedir('GET', '/reservas');
+
+        self::assertSame(200, $respuesta->estado());
+        preg_match('#<nav[^>]*aria-label="Mi cuenta".*?</nav>#s', $respuesta->cuerpo(), $barra);
+        self::assertMatchesRegularExpression('#<a href="/funcion/reservas"[^>]*aria-current="page"#', $barra[0] ?? '');
+        self::assertStringContainsString('href="/cuenta/"', $barra[0] ?? '');
+        self::assertDoesNotMatchRegularExpression('#<a href="/cuenta/"[^>]*aria-current#', $barra[0] ?? '');
+    }
+
     public function testMisReservasPideSesion(): void
     {
         self::assertSame(401, $this->pedir('GET', '/reservas', null)->estado());

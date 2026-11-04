@@ -16,7 +16,7 @@ use IndieCinema\Nucleo\Uuid;
 final readonly class Obra
 {
     /** El de la película más antigua que se conserva (La escena del jardín de Roundhay). */
-    private const PRIMER_ANIO = 1888;
+    public const PRIMER_ANIO = 1888;
 
     /**
      * @param int                    $duracionMinutos en minutos
@@ -56,6 +56,71 @@ final readonly class Obra
         array $generosIds,
         ?string $afiche = null,
     ): self {
+        self::validar($titulo, $duracionMinutos, $anio, $generosIds);
+
+        return new self(Uuid::nuevo(), $duenoId, $titulo, $sinopsis, $anio, $director, $duracionMinutos, $tipo, $origenCopia, $generosIds, $afiche);
+    }
+
+    public static function crear(
+        string $duenoId,
+        DatosDeObra $datos,
+        ?string $afiche = null,
+    ): self {
+        self::validar($datos->titulo, $datos->duracionMinutos, $datos->anio, $datos->generosIds);
+
+        return new self(
+            Uuid::nuevo(),
+            $duenoId,
+            $datos->titulo,
+            $datos->sinopsis,
+            $datos->anio,
+            $datos->director,
+            $datos->duracionMinutos,
+            $datos->tipo,
+            $datos->origenCopia,
+            $datos->generosIds,
+            $afiche,
+        );
+    }
+
+    public function actualizar(DatosDeObra $datos, ?string $nuevoAfiche = null): self
+    {
+        self::validar($datos->titulo, $datos->duracionMinutos, $datos->anio, $datos->generosIds);
+
+        return new self(
+            $this->id,
+            $this->duenoId,
+            $datos->titulo,
+            $datos->sinopsis,
+            $datos->anio,
+            $datos->director,
+            $datos->duracionMinutos,
+            $datos->tipo,
+            $datos->origenCopia,
+            $datos->generosIds,
+            $nuevoAfiche ?? $this->afiche,
+        );
+    }
+
+    public function datos(): DatosDeObra
+    {
+        return new DatosDeObra(
+            $this->titulo,
+            $this->sinopsis,
+            $this->anio,
+            $this->director,
+            $this->duracionMinutos,
+            $this->tipo,
+            $this->origenCopia,
+            $this->generosIds,
+        );
+    }
+
+    /**
+     * @param list<string> $generosIds
+     */
+    private static function validar(string $titulo, int $duracionMinutos, int $anio, array $generosIds): void
+    {
         if (trim($titulo) === '') {
             throw new ReglaIncumplida('La obra necesita un título.');
         }
@@ -71,7 +136,5 @@ final readonly class Obra
         if (count(array_unique($generosIds)) !== count($generosIds)) {
             throw new ReglaIncumplida('Un género no puede estar dos veces en la misma obra.');
         }
-
-        return new self(Uuid::nuevo(), $duenoId, $titulo, $sinopsis, $anio, $director, $duracionMinutos, $tipo, $origenCopia, $generosIds, $afiche);
     }
 }

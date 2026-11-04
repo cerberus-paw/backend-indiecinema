@@ -13,6 +13,7 @@ use IndieCinema\Programacion\Controladores\FuncionesDelOrganizador;
 use IndieCinema\Programacion\Controladores\FuncionesInternas;
 use IndieCinema\Programacion\Controladores\ImagenDeSala;
 use IndieCinema\Programacion\Controladores\Inicio;
+use IndieCinema\Programacion\Controladores\ObrasDelOrganizador;
 use IndieCinema\Programacion\Controladores\Salas;
 use IndieCinema\Programacion\Controladores\SalasDelOrganizador;
 use IndieCinema\Programacion\Controladores\SolicitudDeSala;
@@ -47,6 +48,14 @@ return static function (Router $router): void {
     $router->get('/organizador/salas', [SalasDelOrganizador::class, 'listar'], Rol::Organizador);
     $router->get('/organizador/salas/{id}/editar', [SalasDelOrganizador::class, 'editar'], Rol::Organizador);
     $router->post('/organizador/salas/{id}/editar', [SalasDelOrganizador::class, 'actualizar'], Rol::Organizador);
+
+    // «Mis obras», alta y edición de obras del catálogo.
+    $router->get('/organizador/obras', [ObrasDelOrganizador::class, 'listar'], Rol::Organizador);
+    $router->get('/organizador/obras/nueva', [ObrasDelOrganizador::class, 'nueva'], Rol::Organizador);
+    $router->post('/organizador/obras/nueva', [ObrasDelOrganizador::class, 'crear'], Rol::Organizador);
+    $router->get('/organizador/obras/{id}/editar', [ObrasDelOrganizador::class, 'editar'], Rol::Organizador);
+    $router->post('/organizador/obras/{id}/editar', [ObrasDelOrganizador::class, 'actualizar'], Rol::Organizador);
+
     // «Mis funciones»: las de las salas propias, en cualquier estado. Que sean las suyas lo
     // controla el servicio, con el id del que pide.
     $router->get('/organizador/funciones', [FuncionesDelOrganizador::class, 'listar'], Rol::Organizador);

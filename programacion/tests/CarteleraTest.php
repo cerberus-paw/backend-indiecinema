@@ -328,6 +328,19 @@ final class CarteleraTest extends TestCase
         self::assertStringContainsString('Limpiar', $this->pedir('/cartelera?orden=titulo_asc&localidad=Luj%C3%A1n')->cuerpo());
     }
 
+    public function testElJsonTraeLaBusquedaParaLasUltimasBusquedas(): void
+    {
+        $this->cargarDatosDePrueba();
+
+        $filtrada = self::json($this->pedirJson('/cartelera?localidad=Luj%C3%A1n&orden=precio_desc&pagina=1'));
+        self::assertSame(
+            ['url' => '/cartelera?localidad=Luj%C3%A1n&orden=precio_desc', 'etiqueta' => 'Luján · Precio: mayor a menor', 'filtros' => ['localidad' => 'Luján', 'orden' => 'precio_desc']],
+            $filtrada['busqueda'],
+        );
+        self::assertNull(self::json($this->pedirJson('/cartelera?orden=precio_desc'))['busqueda']);
+        self::assertNull(self::json($this->pedirJson('/cartelera'))['busqueda']);
+    }
+
     public function testSinFuncionesProgramadasElOrdenNoLasHaceParecerUnaBusqueda(): void
     {
         $respuesta = $this->pedir('/cartelera?orden=precio_asc');
@@ -703,7 +716,7 @@ final class CarteleraTest extends TestCase
         self::assertSame(200, $respuesta->estado());
         self::assertSame('Accept', $respuesta->cabecera('Vary'));
         $json = self::json($respuesta);
-        self::assertSame(['funciones', 'filtros', 'avisos', 'paginado', 'csv'], array_keys($json));
+        self::assertSame(['funciones', 'filtros', 'avisos', 'paginado', 'csv', 'busqueda'], array_keys($json));
         self::assertCount(12, $json['funciones']);
         // Cada función con lo mismo que muestra la tarjeta, y el link a su ficha.
         $primera = $json['funciones'][0];

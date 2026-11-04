@@ -331,4 +331,44 @@ final class ParametrosDeCarteleraTest extends TestCase
         );
         self::assertSame('/cartelera.csv', self::parametros(['orden' => 'fecha_asc', 'pagina' => '3'])->urlDeCsv());
     }
+
+    public function testElResumenDeBusquedaDescribeLosFiltrosYSinFiltrosOConSoloUnOrdenEsNull(): void
+    {
+        self::assertNull(self::parametros([])->busqueda());
+        self::assertNull(self::parametros(['orden' => 'fecha_asc', 'pagina' => '2'])->busqueda());
+        // Un orden solo no recorta la cartelera: no es una búsqueda que haya que recordar.
+        self::assertNull(self::parametros(['orden' => 'precio_desc'])->busqueda());
+
+        $completa = self::parametros([
+            'q' => 'keaton',
+            'localidad' => 'Luján',
+            'fecha' => '2026-10-24',
+            'genero' => 'drama',
+            'precio_min' => '0',
+            'precio_max' => '2500',
+            'orden' => 'precio_asc',
+            'pagina' => '3',
+        ])->busqueda();
+
+        self::assertSame(
+            [
+                'url' => '/cartelera?q=keaton&localidad=Luj%C3%A1n&fecha=2026-10-24&genero=Drama&precio_min=0&precio_max=2500&orden=precio_asc',
+                'etiqueta' => '«keaton» · Luján · 24/10/2026 · Drama · $ 0 a $ 2.500 · Precio: menor a mayor',
+                'filtros' => [
+                    'q' => 'keaton',
+                    'localidad' => 'Luján',
+                    'fecha' => '2026-10-24',
+                    'genero' => 'Drama',
+                    'precio_min' => '0',
+                    'precio_max' => '2500',
+                    'orden' => 'precio_asc',
+                ],
+            ],
+            $completa,
+        );
+
+        self::assertSame('A la gorra', self::parametros(['precio_max' => '0'])->busqueda()['etiqueta'] ?? null);
+        self::assertSame('Desde $ 1.500', self::parametros(['precio_min' => '1500'])->busqueda()['etiqueta'] ?? null);
+        self::assertSame('Hasta $ 3.000', self::parametros(['precio_max' => '3000'])->busqueda()['etiqueta'] ?? null);
+    }
 }

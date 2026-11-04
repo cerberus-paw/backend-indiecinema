@@ -86,7 +86,8 @@ final class ServicioDeUsuarios
     }
 
     /**
-     * El usuario como lo ve el administrador, o null si no existe.
+     * El usuario como lo ve el administrador, o null si no existe. También es lo que ve cada uno
+     * de su cuenta en «Mi cuenta»: el nombre, el correo, los roles y la fecha de alta.
      */
     public function buscarEnListado(string $id): ?UsuarioEnListado
     {

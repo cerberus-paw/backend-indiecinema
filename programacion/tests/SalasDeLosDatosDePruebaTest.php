@@ -201,24 +201,43 @@ final class SalasDeLosDatosDePruebaTest extends TestCase
         $cuerpo = $respuesta->cuerpo();
         self::assertStringContainsString('<h1 class="ficha-sala-nombre">' . htmlspecialchars($sala['nombre']) . '</h1>', $cuerpo);
         self::assertStringContainsString(htmlspecialchars("{$sala['direccion']} · {$sala['localidad']}"), $cuerpo);
-        self::assertStringContainsString("{$sala['capacidad']} butacas", $cuerpo);
         self::assertStringContainsString(htmlspecialchars($sala['descripcion']), $cuerpo);
         self::assertStringContainsString("src=\"/salas/{$sala['id']}/imagen\"", $cuerpo);
         self::assertStringNotContainsString('Todavía no está publicada', $cuerpo);
-        // Una tarjeta por cada función de la sala, y cada una enlaza a su ficha.
+        // Una fila por cada función de la sala, y cada una enlaza a su ficha con «Ver».
         $funciones = self::funcionesDe($sala['id']);
         self::assertNotEmpty($funciones);
-        self::assertSame(count($funciones), substr_count($cuerpo, '<article class="tarjeta-funcion'));
+        self::assertSame(count($funciones), substr_count($cuerpo, 'aria-label="Ver la función '));
         foreach ($funciones as $funcion) {
             self::assertStringContainsString("href=\"/cartelera/{$funcion}\"", $cuerpo);
         }
-        // Los encabezados no saltan niveles: h1 la sala, h2 las funciones, h3 cada una.
+        // Los encabezados no saltan niveles: h1 la sala, h2 cada sección, h3 cada función.
         preg_match_all('#<h([1-6])[ >]#', $cuerpo, $niveles);
         $anterior = 0;
         foreach (array_map('intval', $niveles[1]) as $nivel) {
             self::assertLessThanOrEqual($anterior + 1, $nivel, 'Un encabezado salta un nivel.');
             $anterior = $nivel;
         }
+    }
+
+    public function testAlCostadoDeLaFichaVanDondeQuedaYLosParametrosDeLaSala(): void
+    {
+        $this->cargarLosDatos();
+        $sala = DatosDePrueba::SALAS[1];
+
+        $cuerpo = $this->pedir("/salas/{$sala['id']}")->cuerpo();
+
+        // El costado es un complementario (aside): quien usa lector de pantalla lo encuentra como tal.
+        self::assertSame(1, preg_match('#<aside\b[^>]*>(.*?)</aside>#s', $cuerpo, $costado), 'La ficha no tiene costado.');
+        $costado = preg_replace('/\s+/', ' ', strip_tags($costado[1]));
+        self::assertStringContainsString('Dónde queda', $costado);
+        self::assertStringContainsString(htmlspecialchars($sala['direccion']), $costado);
+        self::assertStringContainsString(htmlspecialchars($sala['localidad']), $costado);
+        self::assertStringContainsString('Parámetros de la sala', $costado);
+        self::assertStringContainsString("Capacidad {$sala['capacidad']} lugares", $costado);
+        self::assertStringContainsString("Películas por función {$sala['peliculas_por_funcion']}", $costado);
+        self::assertStringContainsString("Duración máxima {$sala['duracion_funcion']} min", $costado);
+        self::assertStringContainsString("Tiempo entre funciones {$sala['tiempo_entre_funciones']} min", $costado);
     }
 
     public function testDesdeUnaFuncionSeLlegaASuSalaYDesdeLaSalaASusFunciones(): void
@@ -253,7 +272,7 @@ final class SalasDeLosDatosDePruebaTest extends TestCase
 
         self::assertSame(200, $respuesta->estado());
         self::assertStringContainsString('Esta sala no tiene funciones programadas por ahora.', $respuesta->cuerpo());
-        self::assertStringNotContainsString('<article class="tarjeta-funcion', $respuesta->cuerpo());
+        self::assertStringNotContainsString('Ver la función', $respuesta->cuerpo());
     }
 
     public function testSuOrganizadorVeLaFichaSinPublicarConElAviso(): void

@@ -235,6 +235,44 @@ final class LugaresLibresTest extends TestCase
         self::assertStringContainsString('lugares libres', $this->pedir("/salas/{$conLugar['sala_id']}")->cuerpo());
     }
 
+    public function testLaFichaDeLaSalaMuestraCadaFuncionEnUnaFilaConSusLugaresYSuEstado(): void
+    {
+        [, $conLugar] = $this->ocuparDosFunciones();
+        // Otra función de la misma sala vuelve a votación: no tiene fecha ni lugares que ofrecer.
+        $enVotacion = (string) $this->base->valor(
+            "SELECT id FROM funcion WHERE sala_id = ? AND id <> ? AND estado = 'programada' ORDER BY fecha_hora DESC LIMIT 1",
+            [$conLugar['sala_id'], $conLugar['id']],
+        );
+        $this->base->ejecutar("UPDATE funcion SET estado = 'en_votacion_titulos', fecha_hora = NULL WHERE id = ?", [$enVotacion]);
+
+        $cuerpo = $this->pedir("/salas/{$conLugar['sala_id']}")->cuerpo();
+
+        $filas = self::filasDeFunciones($cuerpo);
+        self::assertGreaterThan(1, count($filas));
+        self::assertStringContainsString("5 de {$conLugar['cupo']} lugares libres", $filas[$conLugar['id']]);
+        self::assertStringContainsString('Programada', $filas[$conLugar['id']]);
+        self::assertStringContainsString('Ver', $filas[$conLugar['id']]);
+        self::assertStringContainsString('En votación', $filas[$enVotacion]);
+        self::assertStringNotContainsString('lugares', $filas[$enVotacion]);
+    }
+
+    /**
+     * Las filas de la lista de próximas funciones de una ficha de sala, por id de función, con su
+     * texto: cada una es un ítem de la lista que enlaza a la ficha de su función.
+     *
+     * @return array<string, string>
+     */
+    private static function filasDeFunciones(string $cuerpo): array
+    {
+        preg_match_all('#<li\b[^>]*>((?:(?!</li>).)*href="/cartelera/([0-9a-f-]{36})"(?:(?!</li>).)*)</li>#s', $cuerpo, $coincidencias, PREG_SET_ORDER);
+        $filas = [];
+        foreach ($coincidencias as [, $html, $id]) {
+            $filas[$id] = trim((string) preg_replace('/\s+/', ' ', strip_tags($html)));
+        }
+
+        return $filas;
+    }
+
     public function testSinFuncionesLaCarteleraYLaFichaSeVenIgualSinLosLugares(): void
     {
         [, $conLugar] = $this->ocuparDosFunciones();

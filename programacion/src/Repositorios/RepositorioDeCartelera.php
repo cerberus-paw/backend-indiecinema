@@ -271,6 +271,14 @@ final class RepositorioDeCartelera
             $condiciones[] = 'f.sala_id = ?';
             $parametros[] = $filtros->salaId;
         }
+        if ($filtros->precioMinimo !== null) {
+            $condiciones[] = 'f.precio_base >= ?';
+            $parametros[] = number_format($filtros->precioMinimo, 2, '.', '');
+        }
+        if ($filtros->precioMaximo !== null) {
+            $condiciones[] = 'f.precio_base <= ?';
+            $parametros[] = number_format($filtros->precioMaximo, 2, '.', '');
+        }
 
         return [implode(' AND ', $condiciones), $parametros];
     }

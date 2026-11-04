@@ -389,6 +389,38 @@ final class CarteleraTest extends TestCase
         }
     }
 
+    public function testFiltraPorRangoDePrecioIncluyendoLasGratuitasYLoConservaAlPaginar(): void
+    {
+        $this->cargarDatosDePrueba();
+
+        $gratuitas = self::json($this->pedirJson('/cartelera?precio_min=0&precio_max=0'));
+        self::assertSame(2, $gratuitas['paginado']['total_funciones']);
+        self::assertSame(['A la gorra', 'A la gorra'], array_column($gratuitas['funciones'], 'precio'));
+        self::assertSame(['precio_min' => '0', 'precio_max' => '0'], $gratuitas['filtros']);
+        self::assertSame('/cartelera.csv?precio_min=0&precio_max=0', $gratuitas['csv']);
+
+        $primera = $this->pedir('/cartelera?precio_min=0&precio_max=2000', ['por_pagina' => 2]);
+        $segunda = $this->pedir('/cartelera?precio_min=0&precio_max=2000&pagina=2', ['por_pagina' => 2]);
+        $json = self::json($this->pedirJson('/cartelera?precio_min=0&precio_max=2000', ['por_pagina' => 2]));
+
+        self::assertPagina($primera, 2, '4 funciones');
+        self::assertPagina($segunda, 2, '4 funciones');
+        // Las dos a la gorra (precio 0) entran con las de hasta $ 2.000, y el paginado las reparte.
+        self::assertSame(
+            ['Metrópolis + Viaje a la Luna', 'El acorazado Potemkin', 'El maquinista de la General', 'Sherlock Jr. + Viaje a través de lo imposible'],
+            array_column(self::filasDelCsv($this->pedir('/cartelera.csv?precio_min=0&precio_max=2000')), 2),
+        );
+        self::assertSame(
+            ['Metrópolis + Viaje a la Luna', 'El acorazado Potemkin'],
+            array_column($json['funciones'], 'titulo'),
+        );
+        self::assertSame(['precio_min' => '0', 'precio_max' => '2000'], $json['filtros']);
+        self::assertSame('/cartelera?precio_min=0&precio_max=2000&pagina=2', $json['paginado']['siguiente']);
+        self::assertStringContainsString('href="/cartelera?precio_min=0&amp;precio_max=2000&amp;pagina=2"', $primera->cuerpo());
+        self::assertStringContainsString('href="/cartelera?precio_min=0&amp;precio_max=2000" class="boton boton-secundario boton-chico" rel="prev"', $segunda->cuerpo());
+        self::assertSame('/cartelera.csv?precio_min=0&precio_max=2000', $json['csv']);
+    }
+
     /**
      * Lo que podría escribir alguien a mano en la URL: con cada uno, la página responde 200 y
      * muestra la cartelera entera con el aviso.
@@ -411,6 +443,10 @@ final class CarteleraTest extends TestCase
         yield 'un orden que no existe' => ['orden=popularidad'];
         yield 'un orden incompleto' => ['orden=precio'];
         yield 'un orden como arreglo' => ['orden[]=precio_asc'];
+        yield 'un precio mínimo negativo' => ['precio_min=-100'];
+        yield 'un precio máximo que no es un número' => ['precio_max=gratis'];
+        yield 'un precio mínimo mayor que el máximo' => ['precio_min=3000&precio_max=2000'];
+        yield 'un precio como arreglo' => ['precio_min[]=0'];
     }
 
     #[DataProvider('parametrosInvalidos')]

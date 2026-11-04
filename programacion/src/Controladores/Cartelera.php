@@ -357,6 +357,8 @@ final class Cartelera extends Controlador
             'localidad' => $peticion->consulta('localidad'),
             'fecha' => $peticion->consulta('fecha'),
             'genero' => $peticion->consulta('genero'),
+            'precio_min' => $peticion->consulta('precio_min'),
+            'precio_max' => $peticion->consulta('precio_max'),
             'orden' => $peticion->consulta('orden'),
             'pagina' => $peticion->consulta('pagina'),
         ], $this->servicio->generoPorNombre(...));

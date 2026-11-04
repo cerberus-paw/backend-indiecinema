@@ -29,6 +29,8 @@ final class ParametrosDeCartelera
     private const LARGO_LOCALIDAD = 100;
     /** Como la columna genero.nombre. */
     private const LARGO_GENERO = 50;
+    /** Hasta ocho cifras y dos decimales, incluido el 0: lo que entra en funcion.precio_base. */
+    private const PRECIO = '/^[0-9]{1,8}([.,][0-9]{1,2})?$/D';
     /** Hasta acá, una página más no cambia nada: sólo evita pasar un número enorme a la base. */
     private const PAGINA = '/^[1-9][0-9]{0,8}$/D';
 
@@ -59,16 +61,34 @@ final class ParametrosDeCartelera
         $localidad = $parametros->texto($consulta['localidad'] ?? null, 'La localidad', self::LARGO_LOCALIDAD);
         $fecha = $parametros->fecha($consulta['fecha'] ?? null);
         $genero = $parametros->genero($consulta['genero'] ?? null, $generoPorNombre);
+        $precioMinimo = $parametros->precio($consulta['precio_min'] ?? null, 'El precio mínimo');
+        $precioMaximo = $parametros->precio($consulta['precio_max'] ?? null, 'El precio máximo');
+        if ($precioMinimo !== null && $precioMaximo !== null && $precioMinimo > $precioMaximo) {
+            $parametros->avisos[] = 'El precio mínimo no puede ser mayor que el máximo: se muestra la cartelera de todos los precios.';
+            $precioMinimo = null;
+            $precioMaximo = null;
+        }
         $orden = $parametros->orden($consulta['orden'] ?? null);
-        $parametros->filtros = new FiltrosDeCartelera($texto, $localidad, $fecha, $genero?->id, orden: $orden);
+        $parametros->filtros = new FiltrosDeCartelera(
+            $texto,
+            $localidad,
+            $fecha,
+            $genero?->id,
+            orden: $orden,
+            precioMinimo: $precioMinimo,
+            precioMaximo: $precioMaximo,
+        );
         // Lo que se aplicó, como quedó en los filtros (sin los espacios de alrededor), y el género
-        // con su nombre como está guardado, así «comedia» en la URL vuelve como «Comedia». El orden
-        // por defecto no viaja en los links ni en el formulario, como la página 1.
+        // con su nombre como está guardado, así «comedia» en la URL vuelve como «Comedia». El 0 de
+        // un tope de precio sí viaja («precio_min=0» o «precio_max=0»), por eso se filtra sólo null.
+        // El orden por defecto no viaja en los links ni en el formulario, como la página 1.
         $parametros->valores = array_filter([
             'q' => $parametros->filtros->texto,
             'localidad' => $parametros->filtros->localidad,
             'fecha' => $parametros->filtros->fecha?->format('Y-m-d'),
             'genero' => $genero?->nombre,
+            'precio_min' => self::precioParaUrl($parametros->filtros->precioMinimo),
+            'precio_max' => self::precioParaUrl($parametros->filtros->precioMaximo),
             'orden' => $orden !== OrdenDeCartelera::FechaAscendente ? $orden->value : null,
         ], static fn (?string $valor): bool => $valor !== null);
         $parametros->pagina = self::pagina($consulta['pagina'] ?? null);
@@ -161,6 +181,33 @@ final class ParametrosDeCartelera
         }
 
         return $genero;
+    }
+
+    private function precio(mixed $valor, string $etiqueta): ?float
+    {
+        if ($valor === null || (is_string($valor) && trim($valor) === '')) {
+            return null;
+        }
+        $limpio = is_string($valor) && mb_check_encoding($valor, 'UTF-8') ? trim($valor) : '';
+        if (preg_match(self::PRECIO, $limpio) !== 1) {
+            $this->avisos[] = "{$etiqueta} no es válido: se muestra la cartelera sin ese filtro.";
+
+            return null;
+        }
+
+        return 0.0 + round((float) str_replace(',', '.', $limpio), 2);
+    }
+
+    private static function precioParaUrl(?float $precio): ?string
+    {
+        if ($precio === null) {
+            return null;
+        }
+        if (fmod($precio, 1.0) == 0.0) {
+            return number_format($precio, 0, '.', '');
+        }
+
+        return rtrim(rtrim(number_format($precio, 2, '.', ''), '0'), '.');
     }
 
     private function orden(mixed $valor): OrdenDeCartelera

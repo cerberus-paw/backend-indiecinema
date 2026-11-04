@@ -49,21 +49,71 @@ final class ParametrosDeCarteleraTest extends TestCase
             'localidad' => 'Luján',
             'fecha' => '2026-10-24',
             'genero' => ' drama ',
+            'precio_min' => '0',
+            'precio_max' => ' 2500 ',
             'orden' => 'precio_asc',
             'pagina' => '3',
         ]);
 
         // El género filtra por su id, y vuelve con el nombre como está guardado.
         self::assertEquals(
-            new FiltrosDeCartelera('la ciénaga', 'Luján', new DateTimeImmutable('2026-10-24'), self::GENERO, orden: OrdenDeCartelera::PrecioAscendente),
+            new FiltrosDeCartelera(
+                'la ciénaga',
+                'Luján',
+                new DateTimeImmutable('2026-10-24'),
+                self::GENERO,
+                orden: OrdenDeCartelera::PrecioAscendente,
+                precioMinimo: 0.0,
+                precioMaximo: 2500.0,
+            ),
             $parametros->filtros,
         );
         self::assertSame(
-            ['q' => 'la ciénaga', 'localidad' => 'Luján', 'fecha' => '2026-10-24', 'genero' => 'Drama', 'orden' => 'precio_asc'],
+            [
+                'q' => 'la ciénaga',
+                'localidad' => 'Luján',
+                'fecha' => '2026-10-24',
+                'genero' => 'Drama',
+                'precio_min' => '0',
+                'precio_max' => '2500',
+                'orden' => 'precio_asc',
+            ],
             $parametros->valores,
         );
         self::assertSame([], $parametros->avisos);
         self::assertSame(3, $parametros->pagina);
+    }
+
+    /**
+     * @return iterable<string, array{array<string, mixed>, ?float, ?float, array<string, string>}>
+     */
+    public static function rangosDePrecioValidos(): iterable
+    {
+        yield 'sólo mínimo en 0 (incluye gratuitas)' => [['precio_min' => '0'], 0.0, null, ['precio_min' => '0']];
+        yield 'sólo máximo en 0 (sólo gratuitas)' => [['precio_max' => '0'], null, 0.0, ['precio_max' => '0']];
+        yield 'ambos en 0 (sólo gratuitas)' => [['precio_min' => '0', 'precio_max' => '0'], 0.0, 0.0, ['precio_min' => '0', 'precio_max' => '0']];
+        yield 'rango entero' => [['precio_min' => '1500', 'precio_max' => '3500'], 1500.0, 3500.0, ['precio_min' => '1500', 'precio_max' => '3500']];
+        yield 'con decimales y coma' => [['precio_min' => '1500,50', 'precio_max' => '2500.25'], 1500.5, 2500.25, ['precio_min' => '1500.5', 'precio_max' => '2500.25']];
+        yield 'decimales en cero se normalizan a entero' => [['precio_min' => '0,00', 'precio_max' => '2000.00'], 0.0, 2000.0, ['precio_min' => '0', 'precio_max' => '2000']];
+    }
+
+    /**
+     * @param array<string, mixed>  $consulta
+     * @param array<string, string> $valoresEsperados
+     */
+    #[DataProvider('rangosDePrecioValidos')]
+    public function testAceptaCadaRangoDePrecioValido(
+        array $consulta,
+        ?float $minimoEsperado,
+        ?float $maximoEsperado,
+        array $valoresEsperados,
+    ): void {
+        $parametros = self::parametros($consulta);
+
+        self::assertSame($minimoEsperado, $parametros->filtros->precioMinimo);
+        self::assertSame($maximoEsperado, $parametros->filtros->precioMaximo);
+        self::assertSame($valoresEsperados, $parametros->valores);
+        self::assertSame([], $parametros->avisos);
     }
 
     /**
@@ -95,7 +145,16 @@ final class ParametrosDeCarteleraTest extends TestCase
 
     public function testLosVaciosNoFiltranNiAvisan(): void
     {
-        $parametros = self::parametros(['q' => '', 'localidad' => '   ', 'fecha' => '', 'genero' => '', 'orden' => '  ', 'pagina' => '']);
+        $parametros = self::parametros([
+            'q' => '',
+            'localidad' => '   ',
+            'fecha' => '',
+            'genero' => '',
+            'precio_min' => '',
+            'precio_max' => '  ',
+            'orden' => '  ',
+            'pagina' => '',
+        ]);
 
         self::assertEquals(new FiltrosDeCartelera(), $parametros->filtros);
         self::assertSame([[], [], 1], [$parametros->valores, $parametros->avisos, $parametros->pagina]);
@@ -122,6 +181,16 @@ final class ParametrosDeCarteleraTest extends TestCase
         yield 'un género como arreglo' => [['genero' => ['Drama']], 'El género no es válido'];
         yield 'un género que no es UTF-8' => [['genero' => "\xC3\x28"], 'El género no es válido'];
         yield 'un género muy largo' => [['genero' => str_repeat('d', 51)], 'El género no es válido'];
+        yield 'un precio mínimo negativo' => [['precio_min' => '-100'], 'El precio mínimo no es válido'];
+        yield 'un precio mínimo con texto' => [['precio_min' => 'gratis'], 'El precio mínimo no es válido'];
+        yield 'un precio mínimo con más de dos decimales' => [['precio_min' => '100.123'], 'El precio mínimo no es válido'];
+        yield 'un precio mínimo enorme' => [['precio_min' => '100000000'], 'El precio mínimo no es válido'];
+        yield 'un precio mínimo como arreglo' => [['precio_min' => ['0']], 'El precio mínimo no es válido'];
+        yield 'un precio mínimo que no es UTF-8' => [['precio_min' => "\xC3\x28"], 'El precio mínimo no es válido'];
+        yield 'un precio máximo negativo' => [['precio_max' => '-1'], 'El precio máximo no es válido'];
+        yield 'un precio máximo con notación científica' => [['precio_max' => '1e5'], 'El precio máximo no es válido'];
+        yield 'un precio máximo como arreglo' => [['precio_max' => ['2000']], 'El precio máximo no es válido'];
+        yield 'un precio mínimo mayor que el máximo' => [['precio_min' => '3000', 'precio_max' => '2000'], 'El precio mínimo no puede ser mayor que el máximo'];
         yield 'un orden que no existe' => [['orden' => 'popularidad'], 'El orden no es válido'];
         yield 'un orden sin sentido' => [['orden' => 'precio'], 'El orden no es válido'];
         yield 'un orden con una inyección' => [['orden' => "precio_asc' OR 1=1 -- "], 'El orden no es válido'];
@@ -173,9 +242,16 @@ final class ParametrosDeCarteleraTest extends TestCase
 
     public function testCadaFiltroInvalidoTieneSuAviso(): void
     {
-        $parametros = self::parametros(['q' => ['x'], 'fecha' => 'x', 'genero' => 'x', 'orden' => 'x']);
+        $parametros = self::parametros([
+            'q' => ['x'],
+            'fecha' => 'x',
+            'genero' => 'x',
+            'precio_min' => 'x',
+            'precio_max' => 'x',
+            'orden' => 'x',
+        ]);
 
-        self::assertCount(4, $parametros->avisos);
+        self::assertCount(6, $parametros->avisos);
         self::assertEquals(new FiltrosDeCartelera(), $parametros->filtros);
     }
 
@@ -212,11 +288,25 @@ final class ParametrosDeCarteleraTest extends TestCase
 
     public function testLasUrlDePaginaConservanLosFiltrosYElOrden(): void
     {
-        $parametros = self::parametros(['q' => 'el pibe & cía', 'localidad' => 'San Antonio de Areco', 'fecha' => 'x', 'orden' => 'titulo_desc', 'pagina' => '2']);
+        $parametros = self::parametros([
+            'q' => 'el pibe & cía',
+            'localidad' => 'San Antonio de Areco',
+            'fecha' => 'x',
+            'precio_min' => '0',
+            'precio_max' => '2500',
+            'orden' => 'titulo_desc',
+            'pagina' => '2',
+        ]);
 
-        self::assertSame('/cartelera?q=el%20pibe%20%26%20c%C3%ADa&localidad=San%20Antonio%20de%20Areco&orden=titulo_desc&pagina=3', $parametros->urlDePagina(3));
+        self::assertSame(
+            '/cartelera?q=el%20pibe%20%26%20c%C3%ADa&localidad=San%20Antonio%20de%20Areco&precio_min=0&precio_max=2500&orden=titulo_desc&pagina=3',
+            $parametros->urlDePagina(3),
+        );
         // La primera, sin el número; y el filtro inválido no viaja.
-        self::assertSame('/cartelera?q=el%20pibe%20%26%20c%C3%ADa&localidad=San%20Antonio%20de%20Areco&orden=titulo_desc', $parametros->urlDePagina(1));
+        self::assertSame(
+            '/cartelera?q=el%20pibe%20%26%20c%C3%ADa&localidad=San%20Antonio%20de%20Areco&precio_min=0&precio_max=2500&orden=titulo_desc',
+            $parametros->urlDePagina(1),
+        );
         self::assertSame('/cartelera?orden=precio_asc&pagina=2', self::parametros(['orden' => 'precio_asc'])->urlDePagina(2));
         self::assertSame('/cartelera?pagina=2', self::parametros(['orden' => 'fecha_asc'])->urlDePagina(2));
         self::assertSame('/cartelera?pagina=2', self::parametros([])->urlDePagina(2));
@@ -225,9 +315,20 @@ final class ParametrosDeCarteleraTest extends TestCase
 
     public function testLaUrlDelCsvConservaLosFiltrosYElOrdenYNoLlevaLaPagina(): void
     {
-        $parametros = self::parametros(['q' => 'el pibe & cía', 'localidad' => 'San Antonio de Areco', 'fecha' => 'x', 'orden' => 'precio_desc', 'pagina' => '2']);
+        $parametros = self::parametros([
+            'q' => 'el pibe & cía',
+            'localidad' => 'San Antonio de Areco',
+            'fecha' => 'x',
+            'precio_min' => '0',
+            'precio_max' => '3000',
+            'orden' => 'precio_desc',
+            'pagina' => '2',
+        ]);
 
-        self::assertSame('/cartelera.csv?q=el%20pibe%20%26%20c%C3%ADa&localidad=San%20Antonio%20de%20Areco&orden=precio_desc', $parametros->urlDeCsv());
+        self::assertSame(
+            '/cartelera.csv?q=el%20pibe%20%26%20c%C3%ADa&localidad=San%20Antonio%20de%20Areco&precio_min=0&precio_max=3000&orden=precio_desc',
+            $parametros->urlDeCsv(),
+        );
         self::assertSame('/cartelera.csv', self::parametros(['orden' => 'fecha_asc', 'pagina' => '3'])->urlDeCsv());
     }
 }

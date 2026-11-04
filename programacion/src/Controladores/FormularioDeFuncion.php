@@ -21,7 +21,10 @@ final class FormularioDeFuncion
     /** Hasta ocho cifras y dos decimales, lo que entra en funcion.precio_base (Funcion::PRECIO_MAXIMO). */
     private const PRECIO = '/^[0-9]{1,8}([.,][0-9]{1,2})?$/D';
 
-    /** La misma regla del precio para el atributo pattern, que ancla solo y no lleva barras. */
+    /**
+     * La misma regla del precio para el atributo pattern, que ancla solo y no lleva barras. El campo
+     * del precio es de texto y no numérico (E4-09.4), así que el navegador sí lo aplica.
+     */
     private const PRECIO_PARA_EL_NAVEGADOR = '[0-9]{1,8}([.,][0-9]{1,2})?';
 
     /**
@@ -228,18 +231,18 @@ final class FormularioDeFuncion
             'sala_id' => ['requerido' => true, 'mensajes' => ['requerido' => self::FALTA_SALA]],
             'fecha' => ['requerido' => true, 'mensajes' => ['requerido' => self::FALTA_FECHA]],
             'hora' => ['requerido' => true, 'mensajes' => ['requerido' => self::FALTA_HORA]],
+            // El precio va en un campo de texto con inputmode="decimal" (E4-09.4): en uno numérico
+            // Chromium descarta la coma de 1500,50 sin avisar y además no aplica el pattern. Por eso
+            // no van min ni step, que sólo valen en un campo numérico, ni sus mensajes: acá el
+            // navegador puede revisar que esté y que cumpla el patrón, nada más. El signo menos lo
+            // rechaza el patrón, así que en línea se lee el mensaje del formato; al mandar, validar()
+            // sigue contestando que el precio no puede ser negativo.
             'precio' => [
                 'requerido' => true,
                 'patron' => self::PRECIO_PARA_EL_NAVEGADOR,
-                // De a centavos, como acepta el servidor: con el paso de 1 de un campo numérico, el
-                // navegador rechazaría 1500,50.
-                'paso' => '0.01',
-                'valor_minimo' => 0,
                 'mensajes' => [
                     'requerido' => self::FALTA_PRECIO,
-                    'valor_minimo' => self::PRECIO_NEGATIVO,
                     'patron' => self::PRECIO_INVALIDO,
-                    'tipo' => self::PRECIO_INVALIDO,
                 ],
             ],
             'cupo' => [

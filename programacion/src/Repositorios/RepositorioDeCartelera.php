@@ -263,6 +263,15 @@ final class RepositorioDeCartelera
             $condiciones[] = 'f.sala_id = ?';
             $parametros[] = $filtros->salaId;
         }
+        if ($filtros->obraId !== null) {
+            $condiciones[] = "EXISTS (
+                SELECT 1 FROM funcion_obra fo
+                WHERE fo.funcion_id = f.id
+                    AND fo.obra_id = ?
+                    AND (fo.estado = 'elegida' OR (f.estado = 'en_votacion_titulos' AND fo.estado = 'candidata'))
+            )";
+            $parametros[] = $filtros->obraId;
+        }
 
         return [implode(' AND ', $condiciones), $parametros];
     }

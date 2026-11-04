@@ -7,9 +7,9 @@ namespace IndieCinema\Programacion\Modelo;
 use DateTimeImmutable;
 
 /**
- * Lo que el visitante elige para recortar la cartelera, y la sala, para la ficha de una sala con
- * sus funciones. Cada filtro es opcional, y los que vienen se cumplen todos a la vez. Un texto en
- * blanco es lo mismo que no buscar nada.
+ * Lo que el visitante elige para recortar la cartelera, y la sala o la obra, para la ficha de una
+ * sala u obra con sus funciones. Cada filtro es opcional, y los que vienen se cumplen todos a la
+ * vez. Un texto en blanco es lo mismo que no buscar nada.
  *
  * Son los valores tal como los mandó el visitante: que la fecha y el género tengan forma lo
  * controla quien los lee de la URL, y la consulta los pasa siempre aparte del SQL.
@@ -29,18 +29,23 @@ final readonly class FiltrosDeCartelera
     /** No viene de la URL de la cartelera: lo pone la ficha de la sala. */
     public ?string $salaId;
 
+    /** No viene de la URL de la cartelera: lo pone la ficha de la obra. */
+    public ?string $obraId;
+
     public function __construct(
         ?string $texto = null,
         ?string $localidad = null,
         ?DateTimeImmutable $fecha = null,
         ?string $generoId = null,
         ?string $salaId = null,
+        ?string $obraId = null,
     ) {
         $this->texto = self::sinBlancos($texto);
         $this->localidad = self::sinBlancos($localidad);
         $this->fecha = $fecha?->setTime(0, 0);
         $this->generoId = self::sinBlancos($generoId);
         $this->salaId = self::sinBlancos($salaId);
+        $this->obraId = self::sinBlancos($obraId);
     }
 
     private static function sinBlancos(?string $valor): ?string

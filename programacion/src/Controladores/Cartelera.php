@@ -436,6 +436,7 @@ final class Cartelera extends Controlador
                 'duracion' => $obra->duracionMinutos,
                 'generos' => $obra->generos,
                 'afiche' => $obra->afiche,
+                'url' => "/obras/{$obra->id}",
             ], $detalle->obras),
         ];
     }

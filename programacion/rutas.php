@@ -93,6 +93,8 @@ return static function (Router $router): void {
     $router->get('/salas/{id}/imagen', [ImagenDeSala::class, 'mostrar']);
     // El listado público de obras: sólo las que no se dieron de baja, sin sesión.
     $router->get('/obras', [Obras::class, 'listar']);
+    // La ficha pública de una obra con sus datos y sus próximas funciones en cartelera (E4-08.3).
+    $router->get('/obras/{id}', [Obras::class, 'mostrar']);
     // El afiche de una obra, para las tarjetas de sus funciones: público como el catálogo.
     $router->get('/obras/{id}/afiche', [AficheDeObra::class, 'mostrar']);
 

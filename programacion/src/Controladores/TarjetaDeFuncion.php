@@ -150,13 +150,15 @@ final class TarjetaDeFuncion
      */
     public static function fecha(DateTimeImmutable $fecha): string
     {
-        return sprintf(
-            '%s %d %s · %s',
-            self::DIAS[(int) $fecha->format('w')],
-            (int) $fecha->format('j'),
-            self::MESES[(int) $fecha->format('n') - 1],
-            $fecha->format('H:i'),
-        );
+        return self::dia($fecha) . ' · ' . $fecha->format('H:i');
+    }
+
+    /**
+     * «Sáb 19 sep», la fecha sola, como el recuadro de la ficha en el wireframe.
+     */
+    public static function dia(DateTimeImmutable $fecha): string
+    {
+        return sprintf('%s %d %s', self::DIAS[(int) $fecha->format('w')], (int) $fecha->format('j'), self::MESES[(int) $fecha->format('n') - 1]);
     }
 
     /**

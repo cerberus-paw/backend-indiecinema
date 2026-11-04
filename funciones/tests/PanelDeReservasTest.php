@@ -156,9 +156,9 @@ final class PanelDeReservasTest extends TestCase
         }
         self::assertStringNotContainsString($deOtra, $cuerpo);
         // 2 + 3 reservados de 40: la cancelada soltó los suyos.
-        self::assertMatchesRegularExpression('#Lugares reservados</dt>\s*<dd class="panel-admin-dato-valor"[^>]*>5</dd>#', $cuerpo);
-        self::assertMatchesRegularExpression('#Lugares libres</dt>\s*<dd class="panel-admin-dato-valor"[^>]*>35</dd>#', $cuerpo);
-        self::assertMatchesRegularExpression('#Asistentes registrados</dt>\s*<dd class="panel-admin-dato-valor"[^>]*>3</dd>#', $cuerpo);
+        self::assertMatchesRegularExpression('#Lugares reservados</dt>\s*<dd class="panel-dato-valor"[^>]*>5</dd>#', $cuerpo);
+        self::assertMatchesRegularExpression('#Lugares libres</dt>\s*<dd class="panel-dato-valor"[^>]*>35</dd>#', $cuerpo);
+        self::assertMatchesRegularExpression('#Asistentes registrados</dt>\s*<dd class="panel-dato-valor"[^>]*>3</dd>#', $cuerpo);
         self::assertStringContainsString('$ 17.500', $cuerpo);
     }
 

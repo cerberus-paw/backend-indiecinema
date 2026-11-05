@@ -84,7 +84,7 @@ final class Cartelera extends Controlador
         return $this->vista('cartelera.html.twig', [
             'funciones' => $tarjetas,
             'filtros' => $parametros->valores,
-            'filtrada' => $parametros->valores !== [],
+            'filtrada' => $parametros->filtrada(),
             'avisos' => $parametros->avisos,
             'localidades' => $this->servicio->localidades(),
             'generos' => array_map(static fn (Genero $genero): array => ['id' => $genero->id, 'nombre' => $genero->nombre], $this->servicio->generos()),

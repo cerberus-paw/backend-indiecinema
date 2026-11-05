@@ -273,6 +273,35 @@ final class CarteleraTest extends TestCase
         self::assertMatchesRegularExpression('#name="fecha"\s+class="campo-control control-input"\s+value="2030-01-02"#', $cuerpo);
     }
 
+    public function testElDesplegableMuestraElOrdenElegidoYSinJavaScriptSeAplicaConUnBoton(): void
+    {
+        $this->cargarDatosDePrueba();
+        $cuerpo = $this->pedir('/cartelera?orden=precio_desc')->cuerpo();
+
+        self::assertMatchesRegularExpression('#<select id="cartelera-orden" name="orden" form="filtros-cartelera"#', $cuerpo);
+        self::assertMatchesRegularExpression('#<option value="precio_desc" selected>Precio: mayor a menor</option>#', $cuerpo);
+        self::assertMatchesRegularExpression('#<noscript>\s*<button type="submit" form="filtros-cartelera"#', $cuerpo);
+        // El orden por defecto va con valor vacío, así no viaja en la URL.
+        self::assertMatchesRegularExpression('#<option value="" selected>Fecha: más próxima</option>#', $this->pedir('/cartelera')->cuerpo());
+    }
+
+    public function testElOrdenSoloNoEsUnFiltroQueHayaQueLimpiar(): void
+    {
+        $this->cargarDatosDePrueba();
+
+        self::assertStringNotContainsString('Limpiar', $this->pedir('/cartelera?orden=titulo_asc')->cuerpo());
+        self::assertStringContainsString('Limpiar', $this->pedir('/cartelera?orden=titulo_asc&localidad=Luj%C3%A1n')->cuerpo());
+    }
+
+    public function testSinFuncionesProgramadasElOrdenNoLasHaceParecerUnaBusqueda(): void
+    {
+        $respuesta = $this->pedir('/cartelera?orden=precio_asc');
+
+        self::assertPagina($respuesta, 0);
+        self::assertStringContainsString('Todavía no hay funciones programadas.', $respuesta->cuerpo());
+        self::assertStringNotContainsString('Limpiar', $respuesta->cuerpo());
+    }
+
     /**
      * El género viaja por su nombre, que se puede escribir a mano sin mayúsculas ni tildes: filtra
      * igual, y el formulario, los links y el JSON lo devuelven como está guardado.

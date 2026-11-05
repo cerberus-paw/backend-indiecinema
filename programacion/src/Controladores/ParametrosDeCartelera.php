@@ -86,6 +86,15 @@ final class ParametrosDeCartelera
     }
 
     /**
+     * Si se recortó la cartelera. El orden no cuenta: no saca funciones, así que con él solo no
+     * hay nada que limpiar y una cartelera vacía es porque no hay funciones programadas.
+     */
+    public function filtrada(): bool
+    {
+        return array_diff_key($this->valores, ['orden' => true]) !== [];
+    }
+
+    /**
      * La URL del CSV con los mismos filtros y orden. No lleva la página: el archivo las trae todas.
      */
     public function urlDeCsv(): string

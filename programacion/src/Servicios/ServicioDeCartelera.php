@@ -31,6 +31,9 @@ final class ServicioDeCartelera
     private const POR_PAGINA = 12;
     private const MAXIMO_POR_PAGINA = 100;
 
+    /** Cuántas búsquedas recientes guarda la cartelera en el navegador: al entrar una sexta se borra la más vieja (E4-06.4). */
+    public const ULTIMAS_BUSQUEDAS = 5;
+
     private readonly int $porPagina;
 
     /**

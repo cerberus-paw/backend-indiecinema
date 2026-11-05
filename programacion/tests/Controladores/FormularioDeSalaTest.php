@@ -58,12 +58,24 @@ final class FormularioDeSalaTest extends TestCase
         self::assertSame(['sala_id', 'fecha', 'hora', 'precio', 'cupo'], array_keys($reglas));
         self::assertSame('Falta seleccionar la sala.', $reglas['sala_id']['mensajes']['requerido']);
         self::assertSame('Falta el precio de la entrada.', $reglas['precio']['mensajes']['requerido']);
-        self::assertSame('El precio no puede ser negativo.', $reglas['precio']['mensajes']['valor_minimo']);
-        // De a centavos: con el paso de 1 de un campo numérico, el navegador rechazaría 1500,50.
-        self::assertSame('0.01', $reglas['precio']['paso']);
         self::assertSame('El cupo tiene que ser de al menos un lugar.', $reglas['cupo']['mensajes']['valor_minimo']);
         // El pattern es la misma regla del precio, sin las barras de PHP.
         self::assertMatchesRegularExpression('/^\^?\[0-9\]/', $reglas['precio']['patron']);
+
+        // El precio va en un campo de texto (E4-09.4), así que lo único que el navegador puede
+        // revisar es que esté y que cumpla el patrón: min y step sólo valen en uno numérico, y sin
+        // ellos no tiene sentido mandar sus mensajes.
+        self::assertSame(['requerido', 'patron', 'mensajes'], array_keys($reglas['precio']));
+        self::assertSame(['requerido', 'patron'], array_keys($reglas['precio']['mensajes']));
+        // Y los dos textos son los que contesta el servidor para lo mismo.
+        self::assertSame(
+            FormularioDeFuncion::desdeCampos([], [], [])->errores['precio'],
+            $reglas['precio']['mensajes']['requerido'],
+        );
+        self::assertSame(
+            FormularioDeFuncion::desdeCampos(['precio' => '1.500'], [], [])->errores['precio'],
+            $reglas['precio']['mensajes']['patron'],
+        );
     }
     public function testConTodoBienDaLosDatos(): void
     {

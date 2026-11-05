@@ -10,6 +10,7 @@ use IndieCinema\Nucleo\Configuracion;
 use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Log;
+use IndieCinema\Nucleo\Pruebas\Dobles\PaginasParaValidar;
 use IndieCinema\Nucleo\Uuid;
 use IndieCinema\Programacion\Modelo\FiltrosDeCartelera;
 use IndieCinema\Programacion\Modelo\FuncionEnCartelera;
@@ -116,6 +117,7 @@ final class InicioTest extends TestCase
 
         self::assertSame(200, $respuesta->estado(), $respuesta->cuerpo());
         $cuerpo = $respuesta->cuerpo();
+        PaginasParaValidar::guardar('portada', $cuerpo);
         self::assertSame(4, substr_count($cuerpo, '<article class="tarjeta-funcion">'));
         // Las mismas que encabezan la cartelera, en el mismo orden, cada una con su ficha.
         preg_match_all('#<a href="/cartelera/([0-9a-f-]{36})" class="tarjeta-funcion-titulo-enlace">#', $cuerpo, $enlaces);

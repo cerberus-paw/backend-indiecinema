@@ -123,6 +123,66 @@ final class ParametrosDeCartelera
     }
 
     /**
+     * Resumen de la búsqueda actual para recuperarla entre las últimas búsquedas (E4-06.4), o null
+     * si no recorta la cartelera: un orden solo no es una búsqueda, como para filtrada(). La URL
+     * lleva siempre a la primera página, así paginar una búsqueda no la duplica en el historial.
+     *
+     * @return ?array{url: string, etiqueta: string, filtros: array<string, string>}
+     */
+    public function busqueda(): ?array
+    {
+        if (!$this->filtrada()) {
+            return null;
+        }
+        $partes = [];
+        if (isset($this->valores['q'])) {
+            $partes[] = "«{$this->valores['q']}»";
+        }
+        if (isset($this->valores['localidad'])) {
+            $partes[] = $this->valores['localidad'];
+        }
+        if ($this->filtros->fecha !== null) {
+            $partes[] = $this->filtros->fecha->format('d/m/Y');
+        }
+        if (isset($this->valores['genero'])) {
+            $partes[] = $this->valores['genero'];
+        }
+        $rangoDePrecio = self::etiquetaDePrecio($this->filtros->precioMinimo, $this->filtros->precioMaximo);
+        if ($rangoDePrecio !== null) {
+            $partes[] = $rangoDePrecio;
+        }
+        if ($this->filtros->orden !== OrdenDeCartelera::FechaAscendente) {
+            $partes[] = $this->filtros->orden->etiqueta();
+        }
+
+        return [
+            'url' => $this->urlDePagina(1),
+            'etiqueta' => implode(' · ', $partes),
+            'filtros' => $this->valores,
+        ];
+    }
+
+    private static function etiquetaDePrecio(?float $minimo, ?float $maximo): ?string
+    {
+        if ($minimo === null && $maximo === null) {
+            return null;
+        }
+        if ($maximo !== null && $maximo == 0.0) {
+            return 'A la gorra';
+        }
+        if ($minimo !== null && $maximo !== null) {
+            $desde = $minimo == 0.0 ? '$ 0' : TarjetaDeFuncion::precio($minimo);
+
+            return $minimo == $maximo ? TarjetaDeFuncion::precio($maximo) : "{$desde} a " . TarjetaDeFuncion::precio($maximo);
+        }
+        if ($minimo !== null) {
+            return 'Desde ' . ($minimo == 0.0 ? '$ 0' : TarjetaDeFuncion::precio($minimo));
+        }
+
+        return 'Hasta ' . TarjetaDeFuncion::precio((float) $maximo);
+    }
+
+    /**
      * @param array<string, int|string> $consulta
      */
     private static function url(string $ruta, array $consulta): string

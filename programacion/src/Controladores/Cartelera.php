@@ -82,6 +82,8 @@ final class Cartelera extends Controlador
                 'avisos' => $parametros->avisos,
                 'paginado' => $paginado,
                 'csv' => $parametros->urlDeCsv(),
+                // Para las últimas búsquedas del navegador: la URL y cómo se lee, o null.
+                'busqueda' => $parametros->busqueda(),
             ])->conCabecera('Vary', 'Accept');
         }
 
@@ -93,6 +95,8 @@ final class Cartelera extends Controlador
             'localidades' => $this->servicio->localidades(),
             'generos' => array_map(static fn (Genero $genero): array => ['id' => $genero->id, 'nombre' => $genero->nombre], $this->servicio->generos()),
             'ordenes' => OrdenDeCartelera::opciones(),
+            'busqueda' => $parametros->busqueda(),
+            'max_ultimas_busquedas' => ServicioDeCartelera::ULTIMAS_BUSQUEDAS,
             'paginado' => $paginado,
             'csv' => $parametros->urlDeCsv(),
         ])->conCabecera('Vary', 'Accept');

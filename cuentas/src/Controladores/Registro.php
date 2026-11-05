@@ -57,11 +57,8 @@ final class Registro extends Controlador
             'valores' => $formulario?->valores ?? [],
             'errores' => $formulario?->errores ?? [],
         ];
-        // La plantilla muestra cada mensaje si la variable existe, aunque sea null: sólo se pasan
-        // cuando hay algo que decir.
-        if ($formulario?->errores) {
-            $datos['error_general'] = 'Revisá los campos marcados.';
-        }
+        // La plantilla muestra el mensaje si la variable existe, aunque sea null: sólo se pasa cuando
+        // hay algo que decir. Los errores de los campos los resume la plantilla (E4-10.5).
         if ($exito !== null) {
             $datos['mensaje_exito'] = $exito;
         }

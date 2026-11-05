@@ -33,6 +33,9 @@ use IndieCinema\Programacion\Servicios\ServicioDeCartelera;
  */
 final class Cartelera extends Controlador
 {
+    /** Cuántas páginas se numeran a cada lado de la actual antes de los puntos suspensivos. */
+    private const PAGINAS_ALREDEDOR = 2;
+
     public function __construct(
         private readonly ServicioDeCartelera $servicio,
         private readonly OcupacionDeFunciones $ocupacion,
@@ -62,6 +65,7 @@ final class Cartelera extends Controlador
             'total_funciones' => $pagina->total,
             'anterior' => $pagina->numero > 1 ? $parametros->urlDePagina($pagina->numero - 1) : null,
             'siguiente' => $pagina->numero < $total ? $parametros->urlDePagina($pagina->numero + 1) : null,
+            'paginas' => self::paginas($pagina->numero, $total, $parametros),
         ];
 
         $tarjetas = $this->tarjetas($pagina->funciones);
@@ -362,6 +366,38 @@ final class Cartelera extends Controlador
             'orden' => $peticion->consulta('orden'),
             'pagina' => $peticion->consulta('pagina'),
         ], $this->servicio->generoPorNombre(...));
+    }
+
+    /**
+     * Los números de página que muestra la barra: la primera, la última y una ventana de ancho fijo
+     * alrededor de la actual, con null donde quedan páginas salteadas. Con el mismo ancho en los
+     * bordes, la barra no se achica en las puntas.
+     *
+     * @return list<?array{numero: int, url: string, actual: bool}>
+     */
+    private static function paginas(int $actual, int $total, ParametrosDeCartelera $parametros): array
+    {
+        $ancho = 2 * self::PAGINAS_ALREDEDOR + 1;
+        $desde = max(1, min($actual - self::PAGINAS_ALREDEDOR, $total - $ancho + 1));
+        $hasta = min($total, $desde + $ancho - 1);
+        $numeros = array_values(array_unique([1, ...range($desde, $hasta), $total]));
+        sort($numeros);
+
+        $paginas = [];
+        $anterior = 0;
+        foreach ($numeros as $numero) {
+            if ($anterior > 0 && $numero > $anterior + 1) {
+                $paginas[] = null;
+            }
+            $paginas[] = [
+                'numero' => $numero,
+                'url' => $parametros->urlDePagina($numero),
+                'actual' => $numero === $actual,
+            ];
+            $anterior = $numero;
+        }
+
+        return $paginas;
     }
 
     /**

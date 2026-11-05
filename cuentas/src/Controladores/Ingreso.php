@@ -33,7 +33,8 @@ final class Ingreso extends Controlador
     {
         $formulario = FormularioDeIngreso::desdeCampos($peticion->cuerpo());
         if (!$formulario->esValido()) {
-            return $this->formulario($formulario, 'Revisá los campos marcados.');
+            // Sin mensaje general: la plantilla resume los errores de los campos (E4-10.5).
+            return $this->formulario($formulario);
         }
 
         try {
@@ -92,6 +93,6 @@ final class Ingreso extends Controlador
             $datos['error_general'] = $error;
         }
 
-        return $this->vista(self::PLANTILLA, $datos, $error === null ? 200 : 422);
+        return $this->vista(self::PLANTILLA, $datos, $error === null && $datos['errores'] === [] ? 200 : 422);
     }
 }

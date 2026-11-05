@@ -11,6 +11,7 @@ use IndieCinema\Nucleo\Configuracion;
 use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Log;
+use IndieCinema\Nucleo\Pruebas\Dobles\Formularios;
 use IndieCinema\Nucleo\Pruebas\Dobles\ServidorSmtpDePrueba;
 use IndieCinema\Programacion\Controladores\FormularioDeSolicitud;
 use IndieCinema\Programacion\Pruebas\Controladores\FormularioDeSalaTest;
@@ -210,7 +211,8 @@ final class SolicitudDeSalaTest extends TestCase
         $respuesta = $this->enviar($cambios);
 
         self::assertSame(422, $respuesta->estado());
-        self::assertStringContainsString('Revisá los campos marcados.', $respuesta->cuerpo());
+        // Arriba, el resumen con un link al campo y el mismo mensaje (E4-10.5).
+        self::assertSame(["#{$campo}" => $mensaje], Formularios::resumen($respuesta->cuerpo())['enlaces'] ?? null);
         self::assertMatchesRegularExpression('#id="error-' . $campo . '"[^>]*>.*' . preg_quote($mensaje, '#') . '#s', $respuesta->cuerpo());
         self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM sala'));
         self::assertSame([], $this->imagenesGuardadas());

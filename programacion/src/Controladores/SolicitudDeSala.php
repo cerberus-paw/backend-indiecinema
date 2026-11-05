@@ -47,7 +47,8 @@ final class SolicitudDeSala extends Controlador
         $formulario = FormularioDeSolicitud::desdeCampos($peticion->cuerpo(), $peticion->archivo('imagen'), imagenObligatoria: !$corrigiendo);
         $datos = $formulario->datos();
         if ($datos === null) {
-            return $this->pantalla($ultima, $formulario, 'Revisá los campos marcados.', estado: 422);
+            // Sin mensaje general: la plantilla resume los errores de los campos (E4-10.5).
+            return $this->pantalla($ultima, $formulario, estado: 422);
         }
 
         try {

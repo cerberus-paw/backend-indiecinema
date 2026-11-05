@@ -350,6 +350,22 @@ final class RepositorioDeCarteleraTest extends TestCase
         self::assertSame(['zama'], $this->nombres($this->todas(new FiltrosDeCartelera(fecha: new DateTimeImmutable('2026-10-13'), salaId: $this->salaIds['Cine Club El Galpón']))));
     }
 
+    public function testFiltraPorRangoDePrecioIncluyendoLasGratuitas(): void
+    {
+        // «cien» pasa a ser gratuita (a la gorra, $0), «carroza» cuesta $2000 y las demás $3500.
+        $this->base->ejecutar('UPDATE funcion SET precio_base = 0 WHERE id = ?', [$this->enCartelera['cien']]);
+
+        self::assertSame(['cien'], $this->nombres($this->pagina(new FiltrosDeCartelera(precioMaximo: 0.0))));
+        self::assertSame(['cien'], $this->nombres($this->pagina(new FiltrosDeCartelera(precioMinimo: 0.0, precioMaximo: 0.0))));
+        self::assertSame(['carroza', 'cien'], $this->nombres($this->pagina(new FiltrosDeCartelera(precioMaximo: 2000.0))));
+        self::assertSame(['carroza', 'cien'], $this->nombres($this->pagina(new FiltrosDeCartelera(precioMinimo: 0.0, precioMaximo: 2000.0))));
+        self::assertSame(['carroza'], $this->nombres($this->pagina(new FiltrosDeCartelera(precioMinimo: 1.0, precioMaximo: 2000.0))));
+        self::assertSame(['cienaga', 'zama', 'acuerdo', 'votacion'], $this->nombres($this->pagina(new FiltrosDeCartelera(precioMinimo: 3500.0))));
+        self::assertSame(['cienaga', 'carroza', 'zama', 'cien', 'acuerdo', 'votacion'], $this->nombres($this->pagina(new FiltrosDeCartelera(precioMinimo: 0.0))));
+        self::assertSame([], $this->nombres($this->pagina(new FiltrosDeCartelera(precioMinimo: 5000.0))));
+        self::assertSame(['carroza', 'cien'], $this->nombres($this->todas(new FiltrosDeCartelera(precioMinimo: 0.0, precioMaximo: 2000.0))));
+    }
+
     public function testLosFiltrosSeCumplenTodosALaVez(): void
     {
         $comedia = $this->generos['Comedia'];

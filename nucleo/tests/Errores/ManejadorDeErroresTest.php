@@ -110,7 +110,12 @@ final class ManejadorDeErroresTest extends TestCase
     {
         $this->instalar();
 
-        self::assertTrue(@trigger_error('silenciado con arroba', E_USER_WARNING));
+        // Con el @, el manejador devuelve false y PHP lo ignora. Lo que se prueba es que la línea
+        // no corte: si cortara, la ErrorException haría fallar la prueba acá mismo, y el aviso
+        // tampoco tiene por qué haber dejado nada en el log.
+        @trigger_error('silenciado con arroba', E_USER_WARNING);
+
+        self::assertSame('', $this->log());
     }
 
     public function testEnProduccionLaPaginaNoLlevaElMensajeInternoNiLaTraza(): void

@@ -17,3 +17,6 @@
 
 # La caché del análisis estático (phpstan.neon).
 .phpstan/
+
+# Las páginas que guardan las pruebas para el validador del W3C (herramientas/validar-html.sh).
+.paginas-para-validar/

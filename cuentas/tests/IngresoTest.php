@@ -15,6 +15,7 @@ use IndieCinema\Nucleo\Configuracion;
 use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Log;
+use IndieCinema\Nucleo\Pruebas\Dobles\PaginasParaValidar;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -90,6 +91,7 @@ final class IngresoTest extends TestCase
         $respuesta = $this->pedir('GET', '/ingresar');
 
         self::assertSame(200, $respuesta->estado());
+        PaginasParaValidar::guardar('ingresar', $respuesta->cuerpo());
         self::assertStringContainsString('action="/cuenta/ingresar"', $respuesta->cuerpo());
         self::assertStringContainsString('name="_csrf" value="' . self::CSRF . '"', $respuesta->cuerpo());
         self::assertStringNotContainsString('No pudimos iniciar tu sesión', $respuesta->cuerpo());

@@ -1,7 +1,8 @@
 # Seguridad por capa
 
 Qué protege cada capa de IndieCinema (red, sistema operativo, base de datos y aplicación), dónde
-está configurado y cómo se comprueba; al final, qué se hace en cada etapa del ciclo de vida. Red y
+está configurado y cómo se comprueba; después, las amenazas ordenadas por impacto y probabilidad;
+al final, qué se hace en cada etapa del ciclo de vida. Red y
 sistema operativo describen el VPS de https://indiecinema.duckdns.org tal como quedó el
 18/10/2026: una instancia EC2 de AWS (t3.small) con IP elástica, donde corre el
 `docker-compose.yml` de este repositorio. Desde el 03/11 hay además un servidor de desarrollo, en
@@ -51,12 +52,21 @@ por la red interna del compose.
 | En la base no hay secretos en claro: de cada contraseña queda el hash Argon2id, y de cada sesión, el SHA-256 de su identificador | `usuario.contrasena_hash` y `sesion.huella` | `RegistroTest::testConTodoBienGuardaElUsuarioConArgon` |
 | Sentencias preparadas de verdad, no emuladas por PDO, y conexión en `utf8mb4`: los datos nunca se mezclan con el SQL | `PDO::ATTR_EMULATE_PREPARES => false` en `nucleo/src/BaseDeDatos.php` | `CarteleraTest::testUnaInyeccionEnLaBusquedaNoTraeNada` |
 | La base también hace cumplir las reglas del modelo: claves foráneas, únicos (correo, roles sin repetir, una solicitud pendiente por sala) y `CHECK` en rangos y estados | `migraciones/` de cada subsistema | `MigracionesTest` («la base rechaza…») |
+| El código que el espectador muestra en la puerta es único: dos reservas hechas a la vez no salen con el mismo | `UNIQUE INDEX reserva_por_codigo` en `funciones/migraciones/001_tabla_reserva.sql` | `MigracionesTest::testDosReservasNoTienenElMismoCodigo` (funciones) |
+| Un voto por usuario en cada acuerdo de fecha y uno por franja: cambiar el voto reemplaza el que había en lugar de sumar otro | los `UNIQUE INDEX` de `voto_acuerdo` en `funciones/migraciones/004…` y `005…` | `MigracionesTest::testUnUsuarioMarcaVariasFranjasPeroCadaUnaUnaSolaVez` (funciones) |
+| Cada cambio de estado de una reserva queda registrado con su autor y el estado anterior, y la base rechaza un cambio que no cambia nada | `funciones/migraciones/006_tabla_cambio_reserva.sql` | `RepositorioDeReservasTest::testCadaCambioQuedaEnElHistorialConSuAutor` |
+| El cupo no lo puede hacer cumplir la base: la función vive en programación y no hay fila que bloquear acá. Lo controla la aplicación (ver «Aplicación») | comentario de `funciones/migraciones/001_tabla_reserva.sql` | — |
 
 ## Aplicación
 
 Revisado pantalla por pantalla el 18/10, sobre todo lo de la Entrega 3: registro, ingreso,
 cartelera y su CSV, fichas de función y de sala, solicitud de sala, salas y funciones del
 organizador, y la bandeja y los usuarios del administrador. Las pruebas nombradas corren en la CI.
+
+Repasado el 05/11 con lo que sumó la Entrega 4: la reserva de una función y su cancelación, «Mis
+reservas» y el comprobante, el panel de seguimiento del organizador con su CSV, la anulación del
+administrador, el acuerdo de fecha y la votación de títulos, y los pedidos que el navegador hace
+con `fetch` sin recargar la página. Lo que agregó esa entrega está en las filas que la nombran.
 
 | Control | Dónde | Cómo se comprueba |
 |---|---|---|
@@ -69,9 +79,15 @@ organizador, y la bandeja y los usuarios del administrador. Las pruebas nombrada
 | Los id de la URL se validan como UUID antes de ir a la base | `nucleo/src/Uuid.php`, en cada servicio que busca por id | `CarteleraTest::testDetalleConIdInvalidoResponde` |
 | Escape de la salida: Twig escapa todo lo que muestra y ninguna plantilla usa `raw`. El JavaScript del front arma lo que muestra sin `innerHTML` | `nucleo/src/Vista.php` (`autoescape`) y las plantillas del front | `SolicitudDeSalaTest::testConErroresVuelveConLoCargadoYEscapado` |
 | Sesión propia en la base de cuentas: el identificador son 32 bytes al azar en una cookie `HttpOnly`, `Secure` y `SameSite=Lax`, y al ingresar siempre es uno nuevo. Se cierra con dos horas sin uso y dura como mucho siete días. Cambiar el rol de un usuario o suspenderlo cierra sus sesiones | `cuentas/src/Modelo/Sesion.php` y `ServicioDeSesiones` | `SesionTest`, `SesionInternaTest::testDosHorasSinUsoLaCierran` |
-| Token CSRF en todo pedido que cambia algo: va en una cookie y en el formulario, y tienen que coincidir. La cookie es `HttpOnly`, `Secure` y `SameSite=Lax` | `nucleo/src/Seguridad/ProteccionCsrf.php`, para todo el sitio | `AplicacionTest::testUnPostSinTokenCsrfSeRechaza` y la prueba «sin el token» de cada formulario |
+| Token CSRF en todo pedido que cambia algo: va en una cookie y en el formulario, y tienen que coincidir. La cookie es `HttpOnly`, `Secure` y `SameSite=Lax`. Lo que el navegador manda con `fetch` sin recargar (E4) lleva el mismo token en la cabecera `X-CSRF-Token`: sin él no se reserva, y el error vuelve en JSON | `nucleo/src/Seguridad/ProteccionCsrf.php`, para todo el sitio | `AplicacionTest::testUnPostSinTokenCsrfSeRechaza`, `AplicacionTest::testElJavaScriptPuedeMandarElTokenEnUnaCabecera`, `ReservasTest::testEnJsonSinTokenElErrorVaEnJsonYNoSeReserva` y la prueba «sin el token» de cada formulario |
 | La foto de una sala se acepta por su contenido, no por el nombre ni por lo que dice el navegador: JPG, PNG o WebP, hasta 5 MB y 8000 píxeles de lado. Se guarda con un nombre nuevo y se sirve con el tipo de su extensión | `FormularioDeSala`, `ArchivosDeSalas` e `ImagenDeSala` en `programacion/src/` | `SolicitudDeSalaTest::testUnaSalaNuevaNecesitaUnaFotoDeVerdad` |
 | En el CSV de la cartelera, un texto que una planilla tomaría como fórmula va con un apóstrofo adelante | `programacion/src/Controladores/CsvDeCartelera.php` | `CsvDeCarteleraTest::testUnaFormulaSeEscribeComoTexto` |
+| El CSV de reservas del organizador (E4) no necesita ese escape: todos sus campos los arma el sistema (el código, los números, el estado y la fecha) y ninguno empieza con `=`, `+`, `-` ni `@`. Si alguna vez lleva texto cargado por una persona, hay que escaparlo como el de la cartelera | `funciones/src/Controladores/CsvDeReservas.php` | el alfabeto del código, `23456789ABCDEFGHJKMNPQRSTUVWXYZ` en `funciones/src/Modelo/Reserva.php` |
+| Control de dueño de la reserva (E4): el espectador sólo ve y cancela las suyas, y el organizador sólo las de sus funciones. Lo ajeno responde 404, igual que lo que no existe | `funciones/src/Servicios/` y `rutas.php` de funciones | `ReservasTest::testLaReservaDeOtroEsUn404`, `ReservasTest::testLaReservaDeOtroNoSeCancela` |
+| No se reservan más lugares que los que quedan, ni con dos pedidos a la vez: las reservas de una misma función se serializan con un bloqueo por función (`GET_LOCK`) y la transacción se confirma antes de soltarlo. Funciones distintas no se esperan entre sí, y si el bloqueo no se suelta a tiempo responde 503 | `RepositorioDeReservas::conLaFuncionBloqueada()` | `ServicioDeReservasTest::testDeVariasReservasALaVezPorElUltimoLugarSeConfirmaUnaSola`, `ServicioDeReservasTest::testNoSeReservanMasLugaresQueLosQueQuedan` |
+| Cambiar el estado de una reserva no pisa el cambio de otro: si alguien la movió en el medio, no se guarda | `RepositorioDeReservas` | `RepositorioDeReservasTest::testSiOtroLaCambioAntesNoLaPisa` |
+| El código del comprobante se sortea con `random_int` sobre 31 caracteres en 8 posiciones (casi 10¹²) y va aparte del id: no se adivina ni se recorre, y el id de la reserva es un UUID | `Reserva::nuevoCodigo()` en `funciones/src/Modelo/` | `MigracionesTest::testDosReservasNoTienenElMismoCodigo` (funciones) |
+| Si el correo del comprobante no se puede mandar, la reserva igual queda hecha y el fallo va al log: el envío no decide si el espectador tiene su lugar | `funciones/src/Servicios/` y `nucleo/src/Correo/ClienteSmtp.php` | `ReservasTest::testSinServidorDeCorreoLaReservaQuedaIgual`, `ReservasTest::testSinLaDireccionDelEspectadorLaReservaQuedaIgual` |
 | La API interna (`/interno/`) sólo atiende a los subsistemas que declara cada ruta, cada uno con su token; en la configuración está sólo el SHA-256 del token | `$router->interna()` en cada `rutas.php` y `[llamadores]` en cada `config.ini` | `UsuariosInternosTest::testSoloLasLlamaProgramacionConSuToken`, `FuncionesInternasTest::testSoloLaPideFuncionesConSuToken` |
 | En producción, un error responde 500 sin el detalle, que queda en el log. Con algún valor de ejemplo en `config.ini` el subsistema no arranca | `nucleo/src/Aplicacion.php` y `entorno = "produccion"` | `AplicacionTest::testUnErrorEnProduccionNoMuestraElDetalleYQuedaEnElLog` |
 | Las dependencias se revisan contra los avisos de seguridad conocidos en cada pull request | `composer audit` en `.github/workflows/ci.yml` | la CI |
@@ -84,14 +100,52 @@ organizador, y la bandeja y los usuarios del administrador. Las pruebas nombrada
 - **El registro avisa si el correo ya tiene cuenta.** Sin verificar el correo no hay otra forma de
   decírselo a quien se equivocó. El ingreso, en cambio, no lo revela. Recorrer correos en masa lo
   frena el límite de 5 pedidos por minuto por IP en nginx (ver «Red»). Se revisa cuando el
-  registro mande un correo de verificación.
+  registro mande un correo de verificación (IC-330).
+- **Por qué el cupo se controla con un bloqueo con nombre y no con `SELECT … FOR UPDATE`.** El
+  cupo vive en la función, que es de programación, y en el esquema de funciones no hay una fila
+  que bloquear: sólo están las reservas. Un `GET_LOCK` por función serializa las reservas de esa
+  función y deja correr las de todas las demás; si el bloqueo no se consigue en el tiempo de
+  espera, la reserva responde 503 en lugar de arriesgarse a contar mal los lugares.
+- **El correo del comprobante no decide la reserva.** Si el servidor de correo no responde, la
+  reserva igual queda confirmada y el fallo va al log. Al revés, un espectador podría perder el
+  lugar por algo que no depende de él, y el comprobante se puede ver siempre en «Mis reservas».
+
+## Amenazas
+
+Lo que puede salir mal, de lo más grave y probable a lo menos. **Impacto** es qué se pierde si
+pasa: alto, si se ven o se cambian datos de otra persona, o si alguien entra al servidor; medio,
+si se degrada el servicio o se filtra algo que ayuda a un ataque mayor; bajo, si queda en una
+molestia. **Probabilidad** es qué tan seguido se intenta contra un sitio así en internet, no qué
+tan fácil es acá: por eso una amenaza bien contenida puede seguir siendo probable.
+
+La columna **Qué falta** nombra el ticket cuando el control está planificado y todavía no entró.
+
+| Amenaza | Impacto | Probabilidad | Qué la contiene hoy | Qué falta |
+|---|---|---|---|---|
+| Entrar a la reserva, la sala o la función de otro cambiando el id de la URL | Alto | Media | Rol mínimo declarado por ruta y controlado antes del controlador; control de dueño que responde 404 y no 403, así no se averigua qué existe; los id son UUID y se validan antes de ir a la base | — |
+| Dos reservas a la vez se llevan el mismo último lugar y la función queda sobrevendida | Alto | Media | Las reservas de una misma función se serializan con `GET_LOCK` y la transacción se confirma antes de soltar el bloqueo | — |
+| Robo o reutilización de la cookie de sesión | Alto | Baja | Identificador de 32 bytes al azar, nuevo en cada ingreso; cookie `HttpOnly`, `Secure` y `SameSite=Lax`; dos horas de inactividad y siete días de tope; cambiar el rol o suspender al usuario cierra sus sesiones; TLS 1.2+ y HSTS | La CSP (IC-313) achicaría el robo por un script inyectado |
+| Inyección SQL | Alto | Baja | Un único `prepare`, sin emulación de PDO; los filtros se arman con fragmentos fijos y `?`, y los comodines de `LIKE` van escapados | — |
+| XSS: un texto cargado por un usuario se ejecuta en el navegador de otro | Alto | Baja | Twig escapa todo y ninguna plantilla usa `raw`; el JavaScript del front no usa `innerHTML`; `X-Content-Type-Options: nosniff` | La CSP (IC-313), que ataja lo que se escape del escapado |
+| Un subsistema comprometido llega a los datos o los secretos de los otros | Alto | Baja | Un esquema y un usuario de MySQL por subsistema, sin ver los otros; la API interna pide un token por llamador y en la configuración queda sólo su SHA-256; cada contenedor monta sólo su carpeta, corre sin capacidades de root y con el sistema de archivos de sólo lectura | — |
+| Alguien entra al VPS | Alto | Baja | SSH sólo con clave y sin root; fail2ban; la clave del despliegue sólo corre `desplegar.sh`; secretos fuera del repositorio y gitleaks en cada pull request; IMDSv2 para los metadatos de AWS | — |
+| Prueba masiva de contraseñas, o recorrido de correos para ver cuáles tienen cuenta | Medio | Alta | 5 pedidos por minuto por IP al ingresar y al registrarse; Argon2id; el error de ingreso no dice si falló el correo o la contraseña, y un correo inexistente igual calcula un hash | La verificación de correo (IC-330) sacaría la pista que hoy da el registro |
+| CSRF: otro sitio hace que el navegador de un usuario con sesión mande un pedido | Medio | Media | Token en cookie y en el formulario, o en la cabecera `X-CSRF-Token` para lo que va por `fetch`; cookie `SameSite=Lax` | — |
+| Abuso de la reserva y de la búsqueda: muchos pedidos seguidos desde una misma IP | Medio | Media | Nada específico: hoy el límite por IP cubre el ingreso, el registro y la solicitud de sala, no estas dos | **IC-314** (E4-12.2), que suma la zona de la reserva y de la búsqueda |
+| Un error de producción muestra la traza o un mensaje interno | Medio | Baja | `display_errors` apagado desde antes de arrancar; en producción el 500 sale con un mensaje genérico en HTML y en JSON, y el detalle va al log; con un valor de ejemplo en `config.ini` el subsistema no arranca | — |
+| Un archivo malicioso subido como foto de sala | Medio | Baja | Se acepta por el contenido y no por el nombre ni por lo que dice el navegador: JPG, PNG o WebP, hasta 5 MB y 8000 píxeles; se guarda con un nombre nuevo, fuera del webroot, y se sirve con el tipo de su extensión | El afiche de la obra (IC-290) va a necesitar el mismo control cuando entre |
+| Una fórmula escondida en un CSV se ejecuta al abrirlo en una planilla | Bajo | Baja | En el CSV de la cartelera, lo que empieza como fórmula va con un apóstrofo adelante; el de reservas sólo lleva campos que arma el sistema | — |
+
+Lo que todavía no se puede afirmar: el análisis con OWASP ZAP del sitio desplegado (**IC-310**,
+E4-11.3) está pendiente, así que esta tabla sale de leer el código y la configuración, no de
+haberlo atacado.
 
 ## Por etapa
 
 | Etapa | Qué se hace | Dónde |
 |---|---|---|
 | Diseño | Cada capa con sus controles antes de programar: subsistemas con esquema y usuario propios, sesión validada por nginx con cuentas y API interna con un token por llamador | capítulo 6 de `entrega-2/Entrega_2.pdf`, en el repositorio de entregas |
-| Desarrollo | Cada cambio entra por pull request y lo revisa otro integrante. El núcleo concentra lo que se repite (consultas, escape, CSRF, rol por ruta), así ninguna pantalla lo resuelve por su cuenta | `nucleo/` y `.github/pull_request_template.md` |
-| Prueba | Pruebas de cada control en la CI, en cada pull request: rol y dueño, CSRF, inyección, validación. También gitleaks, `composer audit` y la configuración de nginx desde afuera | `.github/workflows/ci.yml` y `nginx/comprobar-desde-afuera.sh` |
+| Desarrollo | Cada cambio entra por pull request y lo revisa otro integrante. Desde la Entrega 4 los pull request van contra `dev`, que se despliega en su propio servidor, y `main` queda para lo entregado. El núcleo concentra lo que se repite (consultas, escape, CSRF, rol por ruta), así ninguna pantalla lo resuelve por su cuenta | `nucleo/`, `.github/pull_request_template.md` y el README («Ramas y entornos») |
+| Prueba | Pruebas de cada control en la CI, en cada pull request: rol y dueño, CSRF, inyección, validación. También gitleaks, `composer audit` y la configuración de nginx desde afuera. Desde la Entrega 4, después de publicar en el servidor de desarrollo corren además las pruebas de punta a punta contra ese sitio, con sesión iniciada | `.github/workflows/ci.yml`, `nginx/comprobar-desde-afuera.sh` y el trabajo `e2e` de `.github/workflows/cd.yml` |
 | Despliegue | Secretos generados en el servidor y fuera del repositorio; con `entorno = "produccion"` no arranca con valores de ejemplo. El despliegue continuo entra con una clave que sólo puede correr el script | `herramientas/desplegar.sh` y `.github/workflows/cd.yml` (README, «Despliegue continuo») |
 | Operación | Actualizaciones de seguridad automáticas, fail2ban, renovación del certificado y logs de cada subsistema | «Sistema operativo» y «Red», arriba; `docker compose logs` |

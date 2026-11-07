@@ -69,3 +69,57 @@ jobs:
     # Un workflow reutilizable recibe las variables del environment, pero no los secretos: sin
     # esto, E2E_CORREO y E2E_CLAVE llegan vacíos y las pruebas no pueden ingresar.
     secrets: inherit
+
+  # También después de publicar dev, el análisis pasivo de OWASP ZAP (zap-baseline) contra ese
+  # sitio: recorre las páginas públicas y revisa cada respuesta (cabeceras, cookies, formularios)
+  # sin atacarlo. Falla con cualquier alerta media o alta que no esté revisada en .zap/reglas.tsv
+  # (docs/seguridad.md, «Análisis con OWASP ZAP»). Sin sesión y sin que el spider mande los
+  # formularios por POST (spider.postform): con sesión podría cancelar las funciones o llenar el
+  # cupo que usan las pruebas de punta a punta, que corren al mismo tiempo. Sólo quedan un POST a
+  # ingresar y otro a registro sin el token, que el CSRF rechaza con 403. El escaneo activo, con
+  # sesión, se corre a mano contra el compose local.
+  zap:
+    name: Análisis con OWASP ZAP
+    needs: desplegar
+    if: (github.event.workflow_run.head_branch || github.ref_name) == 'dev'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      SITIO: https://indiecinema-dev.duckdns.org/
+    steps:
+      # Las reglas de la versión que se acaba de publicar.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          sparse-checkout: .zap
+      # -I: que una alerta no haga fallar este paso; lo decide el que sigue, por el riesgo y no por
+      # la regla. La imagen corre como otro usuario y escribe el informe en la carpeta montada.
+      # La versión estable y no una fija: una regla nueva que encuentre algo es lo que se quiere ver.
+      - name: Escaneo pasivo del sitio de desarrollo
+        run: |
+          install -d -m 777 informe
+          cp .zap/reglas.tsv informe/
+          docker run --rm -v "$PWD/informe:/zap/wrk:rw" ghcr.io/zaproxy/zaproxy:stable \
+            zap-baseline.py -t "$SITIO" -c reglas.tsv -r zap.html -J zap.json -I \
+            -z "-config spider.postform=false"
+      # Las reglas en IGNORE siguen apareciendo en el JSON: se descuentan acá.
+      - name: Ninguna alerta media o alta sin revisar
+        run: |
+          revisadas=$(awk -F '\t' '$2 == "IGNORE" { print $1 }' .zap/reglas.tsv | jq -R . | jq -s .)
+          jq -r --argjson revisadas "$revisadas" '
+            [.site[].alerts[] | select((.riskcode | tonumber) >= 2 and (.pluginid | IN($revisadas[]) | not))]
+            | map("::error::\(.riskdesc) · \(.name) [\(.pluginid)] en \(.count) URL") | .[]' informe/zap.json | tee alertas
+          if [[ -s alertas ]]; then
+            echo "Hay alertas medias o altas sin revisar: ver el informe (artefacto informe-zap)."
+            exit 1
+          fi
+          echo "Ninguna alerta media o alta sin revisar."
+      - name: Guardar el informe
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: informe-zap
+          path: informe/zap.html
+          retention-days: 14

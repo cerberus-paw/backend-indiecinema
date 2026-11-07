@@ -18,6 +18,7 @@ otra EC2 (README, «Ramas y entornos»); lo de abajo describe el de producción.
 | Certificado de Let's Encrypt que se renueva solo: certbot por webroot y un hook que recarga nginx | `certbot.timer` en el servidor (README, «HTTPS en el VPS») | `sudo certbot certificates` |
 | HSTS por un año: el navegador ya no intenta por HTTP | `Strict-Transport-Security` en `servidor-https.inc.template` | `curl -I https://indiecinema.duckdns.org/` |
 | Cabeceras contra el sniffing de tipos, el clickjacking y la fuga del Referer, y sin la versión de nginx | `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy` y `server_tokens off` en `nginx/templates/sitio.inc.template` | la misma respuesta |
+| Lo que el sitio no usa, apagado (cámara, micrófono, ubicación, pagos y USB), y aislado de otros orígenes: una ventana de otro sitio no tiene referencia a la nuestra, otro sitio no puede incrustar nuestras respuestas, y la página sólo carga lo que lo permite | `Permissions-Policy`, `Cross-Origin-Opener-Policy`, `Cross-Origin-Resource-Policy` y `Cross-Origin-Embedder-Policy` en `nginx/templates/sitio.inc.template` | `nginx/comprobar-desde-afuera.sh` |
 | Content-Security-Policy: el navegador sólo carga scripts, estilos, fuentes e imágenes del mismo sitio, y nada en línea. Si un texto se escapara del escapado de Twig, el script que trajera no corre. Por eso el front sirve su fuente y no tiene `onclick` ni `style` en el HTML | `Content-Security-Policy` en `nginx/templates/sitio.inc.template` | `nginx/comprobar-desde-afuera.sh`, que corre la CI; las pruebas de punta a punta fallan si una página viola la política |
 | Un solo punto de entrada: sólo nginx publica puertos. MySQL y los subsistemas quedan en la red interna del compose | `ports` de `docker-compose.yml` | en el servidor escuchan sólo el 22, el 80 y el 443 (`ss -tln`) |
 | El buzón de prueba (Mailpit), que simula el envío de correos, sólo escucha en la máquina | `127.0.0.1:8025` en `docker-compose.yml` | se ve con un túnel: `ssh -L 8025:127.0.0.1:8025 …` |
@@ -78,7 +79,7 @@ con `fetch` sin recargar la página. Lo que agregó esa entrega está en las fil
 | Quién es el usuario lo dice nginx, que lo pregunta a cuentas. Un subsistema sólo cree esas cabeceras si traen el secreto que comparte con nginx: otro contenedor de la red interna no puede hacerse pasar por un usuario | `nucleo/src/Seguridad/Identificacion.php` y `[nginx] secreto` en cada `config.ini` | `IdentificacionTest::testSinElSecretoIgnoraLasCabecerasYLoRegistra` |
 | Control de dueño: un organizador sólo ve y cambia sus salas y sus funciones. Lo ajeno responde 404, como lo que no existe, así no se averigua qué hay | `ServicioDeSalas` y `ServicioDeFuncionesDelOrganizador` en `programacion/src/Servicios/` | `SalasDelOrganizadorTest::testOtroOrganizadorNoVeNiGuardaLaSalaAjena`, `FuncionesDelOrganizadorTest::testFormularioEdicionDevuelve404SiNoExisteOEsAjena` |
 | Los id de la URL se validan como UUID antes de ir a la base | `nucleo/src/Uuid.php`, en cada servicio que busca por id | `CarteleraTest::testDetalleConIdInvalidoResponde` |
-| Escape de la salida: Twig escapa todo lo que muestra y ninguna plantilla usa `raw`. El JavaScript del front arma lo que muestra sin `innerHTML` | `nucleo/src/Vista.php` (`autoescape`) y las plantillas del front | `SolicitudDeSalaTest::testConErroresVuelveConLoCargadoYEscapado` |
+| Escape de la salida: Twig escapa todo lo que muestra y ninguna plantilla usa `raw`. El JavaScript del front arma lo que muestra sin `innerHTML`, salvo `gestor-franjas.js`, que clona la fila de su `<template>` y sólo le reemplaza números. Lo que se escapara de esto lo frena la Content-Security-Policy (ver «Red») | `nucleo/src/Vista.php` (`autoescape`) y las plantillas del front | `SolicitudDeSalaTest::testConErroresVuelveConLoCargadoYEscapado` |
 | Sesión propia en la base de cuentas: el identificador son 32 bytes al azar en una cookie `HttpOnly`, `Secure` y `SameSite=Lax`, y al ingresar siempre es uno nuevo. Se cierra con dos horas sin uso y dura como mucho siete días. Cambiar el rol de un usuario o suspenderlo cierra sus sesiones | `cuentas/src/Modelo/Sesion.php` y `ServicioDeSesiones` | `SesionTest`, `SesionInternaTest::testDosHorasSinUsoLaCierran` |
 | Token CSRF en todo pedido que cambia algo: va en una cookie y en el formulario, y tienen que coincidir. La cookie es `HttpOnly`, `Secure` y `SameSite=Lax`. Lo que el navegador manda con `fetch` sin recargar (E4) lleva el mismo token en la cabecera `X-CSRF-Token`: sin él no se reserva, y el error vuelve en JSON | `nucleo/src/Seguridad/ProteccionCsrf.php`, para todo el sitio | `AplicacionTest::testUnPostSinTokenCsrfSeRechaza`, `AplicacionTest::testElJavaScriptPuedeMandarElTokenEnUnaCabecera`, `ReservasTest::testEnJsonSinTokenElErrorVaEnJsonYNoSeReserva` y la prueba «sin el token» de cada formulario |
 | La foto de una sala y el afiche de una obra se aceptan por su contenido, no por el nombre ni por lo que dice el navegador: JPG, PNG o WebP, hasta 5 MB y 8000 píxeles de lado. Se guardan con un nombre nuevo y se sirven con el tipo de su extensión | `FormularioDeSala`, `ArchivosDeSalas` e `ImagenDeSala`; `FormularioDeObra` y `AfichesDeObras`, en `programacion/src/` | `SolicitudDeSalaTest::testUnaSalaNuevaNecesitaUnaFotoDeVerdad`, `FormularioDeObraTest::testVerificaAfichePorContenidoReal` |
@@ -125,9 +126,9 @@ La columna **Qué falta** nombra el ticket cuando el control está planificado y
 |---|---|---|---|---|
 | Entrar a la reserva, la sala o la función de otro cambiando el id de la URL | Alto | Media | Rol mínimo declarado por ruta y controlado antes del controlador; control de dueño que responde 404 y no 403, así no se averigua qué existe; los id son UUID y se validan antes de ir a la base | — |
 | Dos reservas a la vez se llevan el mismo último lugar y la función queda sobrevendida | Alto | Media | Las reservas de una misma función se serializan con `GET_LOCK` y la transacción se confirma antes de soltar el bloqueo | — |
-| Robo o reutilización de la cookie de sesión | Alto | Baja | Identificador de 32 bytes al azar, nuevo en cada ingreso; cookie `HttpOnly`, `Secure` y `SameSite=Lax`; dos horas de inactividad y siete días de tope; cambiar el rol o suspender al usuario cierra sus sesiones; TLS 1.2+ y HSTS | La CSP (IC-313) achicaría el robo por un script inyectado |
+| Robo o reutilización de la cookie de sesión | Alto | Baja | Identificador de 32 bytes al azar, nuevo en cada ingreso; cookie `HttpOnly`, `Secure` y `SameSite=Lax`; dos horas de inactividad y siete días de tope; cambiar el rol o suspender al usuario cierra sus sesiones; TLS 1.2+ y HSTS; la CSP no deja correr un script inyectado, que igual no podría leer la cookie | — |
 | Inyección SQL | Alto | Baja | Un único `prepare`, sin emulación de PDO; los filtros se arman con fragmentos fijos y `?`, y los comodines de `LIKE` van escapados | — |
-| XSS: un texto cargado por un usuario se ejecuta en el navegador de otro | Alto | Baja | Twig escapa todo y ninguna plantilla usa `raw`; el JavaScript del front no usa `innerHTML`; `X-Content-Type-Options: nosniff` | La CSP (IC-313), que ataja lo que se escape del escapado |
+| XSS: un texto cargado por un usuario se ejecuta en el navegador de otro | Alto | Baja | Twig escapa todo y ninguna plantilla usa `raw`; el JavaScript del front no arma HTML con texto de nadie (el único `innerHTML`, en `gestor-franjas.js`, sólo pone números); la CSP no deja correr scripts en línea ni de otro origen; `X-Content-Type-Options: nosniff` | — |
 | Un subsistema comprometido llega a los datos o los secretos de los otros | Alto | Baja | Un esquema y un usuario de MySQL por subsistema, sin ver los otros; la API interna pide un token por llamador y en la configuración queda sólo su SHA-256; cada contenedor monta sólo su carpeta, corre sin capacidades de root y con el sistema de archivos de sólo lectura | — |
 | Alguien entra al VPS | Alto | Baja | SSH sólo con clave y sin root; fail2ban; la clave del despliegue sólo corre `desplegar.sh`; secretos fuera del repositorio y gitleaks en cada pull request; IMDSv2 para los metadatos de AWS | — |
 | Prueba masiva de contraseñas, o recorrido de correos para ver cuáles tienen cuenta | Medio | Alta | 5 pedidos por minuto por IP al ingresar y al registrarse; Argon2id; el error de ingreso no dice si falló el correo o la contraseña, y un correo inexistente igual calcula un hash | La verificación de correo (IC-330) sacaría la pista que hoy da el registro |
@@ -137,9 +138,74 @@ La columna **Qué falta** nombra el ticket cuando el control está planificado y
 | Un archivo malicioso subido como foto de sala o afiche de obra | Medio | Baja | Se aceptan por el contenido y no por el nombre ni por lo que dice el navegador: JPG, PNG o WebP, hasta 5 MB y 8000 píxeles; se guardan con un nombre nuevo, fuera del webroot, y se sirven con el tipo de su extensión | — |
 | Una fórmula escondida en un CSV se ejecuta al abrirlo en una planilla | Bajo | Baja | En el CSV de la cartelera, lo que empieza como fórmula va con un apóstrofo adelante; el de reservas sólo lleva campos que arma el sistema | — |
 
-Lo que todavía no se puede afirmar: el análisis con OWASP ZAP del sitio desplegado (**IC-310**,
-E4-11.3) está pendiente, así que esta tabla sale de leer el código y la configuración, no de
-haberlo atacado.
+La tabla sale de leer el código y la configuración, y la contrastó el análisis con OWASP ZAP de
+la sección siguiente, que atacó el sitio con cada rol.
+
+## Análisis con OWASP ZAP
+
+Hecho entre el 7 y el 8/11/2026 con la imagen `ghcr.io/zaproxy/zaproxy:stable` (ZAP 2.17), en dos
+partes:
+
+- **Pasivo (baseline), sin sesión**, contra https://indiecinema-dev.duckdns.org: recorre las páginas
+  públicas (104 URL) y revisa cada respuesta, sin atacar. Se repitió contra el compose local con las
+  correcciones de abajo, y desde entonces lo corre el despliegue continuo después de cada
+  publicación de `dev` (trabajo `zap` de `.github/workflows/cd.yml`): falla con cualquier alerta
+  media o alta que no esté revisada en `.zap/reglas.tsv`, y deja el informe HTML como artefacto.
+- **Activo, con sesión**, contra el compose local: además de recorrer, ataca cada parámetro
+  (inyección SQL, XSS, inclusión de archivos, inyección de comandos, entre otras; unas 140 reglas en
+  total), con la sesión de Eva (espectadora, 68 URL), Omar (organizador, 379) y Ana (administradora,
+  100). Sólo en local: en `dev` podría cancelar las funciones de las pruebas de punta a punta,
+  llenarles el cupo o suspender su cuenta. Después se recrea la base. Se saltea la regla de XSS
+  basado en el DOM (40026), que abre un Firefox y tumbaba a ZAP por memoria; ese riesgo lo cubren la
+  CSP y que el JavaScript no arma HTML con texto de nadie.
+
+**Alertas medias y altas.** Altas no hubo.
+
+| Alerta | Dónde | Tratamiento |
+|---|---|---|
+| Falta `Content-Security-Policy` (10038) | todas las páginas | **Corregida**: la cabecera en `nginx/templates/sitio.inc.template` (ver «Red»). El front dejó de usar recursos de afuera y código o estilos en línea |
+| Falta Subresource Integrity (90003) | el `<link>` a Google Fonts de `base.html.twig` | **Corregida**: Google Fonts no admite SRI, porque devuelve un CSS distinto según el navegador. La fuente se sirve desde el sitio (`estaticos/fuentes/` del front) |
+| Anti-CSRF Tokens Check (20012) | el formulario de «Cerrar sesión» del panel del organizador, en las respuestas al registro de asistencia (sólo con Omar) | **Falso positivo**: el formulario lleva `_csrf` en todas las respuestas que se reprodujeron (bien, sin token, con un token ajeno, con error 422 y 403), y `POST /cuenta/salir` sin el token o con el de otro usuario responde 403 y la sesión sigue |
+| Bypassing 403 (40038) | `GET /` con `X-Original-URL: /estaticos/css` (con los tres roles) | **Falso positivo**: nginx no usa esa cabecera; el 200 es de la portada, no del directorio |
+| HTTP Only Site (10106) | el compose local | **No aplica**: en local se usa HTTP a propósito. Los servidores redirigen a HTTPS y mandan HSTS |
+
+Las bajas también se corrigieron: faltaban `Permissions-Policy`, `Cross-Origin-Opener-Policy`,
+`Cross-Origin-Resource-Policy` y `Cross-Origin-Embedder-Policy`, que ahora están en la misma
+plantilla (ver «Red»).
+
+**Falsos positivos que quedan en el informe**
+
+- *User Controllable HTML Element Attribute (Potential XSS)*, informativa (10031, entre 12 y 26 URL
+  según el recorrido): los filtros de la cartelera vuelven en el `value` del formulario, y Twig los
+  escapa. Está en `IGNORE` en `.zap/reglas.tsv`.
+- *Inyección SQL*: en un primer escaneo activo como organizador, el 7/11, la regla 40018 levantó una
+  alerta, pero ZAP se quedó sin memoria antes de escribir el informe y no se supo en qué URL. En los
+  escaneos completos las seis reglas de inyección SQL, la booleana y las de tiempo, pasaron sin
+  alertas con los tres roles, también con el organizador (379 URL). Es lo esperable: toda consulta
+  pasa por un `prepare` sin emulación (ver «Aplicación»).
+
+**Cómo repetirlo.** El pasivo lo corre el CD. El activo, con el compose levantado y los datos de
+prueba cargados, por cada cuenta: ingresar con `POST /cuenta/ingresar` (`email`, `password` y
+`_csrf`, igual a la cookie `csrf`), y pasarle a ZAP las cookies `csrf` y `sesion`. Son `Secure`,
+así que por HTTP hay que mandarlas a mano, con el reemplazo de cabeceras. Además, excluir
+`/cuenta/salir`, que le cerraría la sesión, y limitar la memoria de Java:
+
+```
+echo -Xmx2g > zap-jvm.properties
+printf '40026\tIGNORE\n' > activo.tsv
+SESION='csrf=…;sesion=…'
+R='replacer.full_list(0)'
+OPCIONES="-config $R.description=sesion -config $R.enabled=true -config $R.matchtype=REQ_HEADER"
+OPCIONES+=" -config $R.matchstr=Cookie -config $R.regex=false -config $R.replacement=$SESION"
+OPCIONES+=" -config globalexcludeurl.url_list.url(0).regex=.*/cuenta/salir.*"
+OPCIONES+=" -config globalexcludeurl.url_list.url(0).enabled=true"
+docker run --rm --network indiecinema_interna -m 4g -v "$PWD:/zap/wrk:rw" \
+  -v "$PWD/zap-jvm.properties:/home/zap/.ZAP/.ZAP_JVM.properties:ro" ghcr.io/zaproxy/zaproxy:stable \
+  zap-full-scan.py -t http://nginx/ -m 5 -I -c activo.tsv -r informe.html -z "$OPCIONES"
+```
+
+`activo.tsv` saltea la regla 40026. Con 4 GB por contenedor entran dos a la vez, pero el del
+administrador va solo, porque puede suspender a las otras cuentas o cambiarles el rol.
 
 ## Por etapa
 
@@ -147,6 +213,6 @@ haberlo atacado.
 |---|---|---|
 | Diseño | Cada capa con sus controles antes de programar: subsistemas con esquema y usuario propios, sesión validada por nginx con cuentas y API interna con un token por llamador | capítulo 6 de `entrega-2/Entrega_2.pdf`, en el repositorio de entregas |
 | Desarrollo | Cada cambio entra por pull request y lo revisa otro integrante. Desde la Entrega 4 los pull request van contra `dev`, que se despliega en su propio servidor, y `main` queda para lo entregado. El núcleo concentra lo que se repite (consultas, escape, CSRF, rol por ruta), así ninguna pantalla lo resuelve por su cuenta | `nucleo/`, `.github/pull_request_template.md` y el README («Ramas y entornos») |
-| Prueba | Pruebas de cada control en la CI, en cada pull request: rol y dueño, CSRF, inyección, validación. También gitleaks, `composer audit` y la configuración de nginx desde afuera. Desde la Entrega 4, después de publicar en el servidor de desarrollo corren además las pruebas de punta a punta contra ese sitio, con sesión iniciada | `.github/workflows/ci.yml`, `nginx/comprobar-desde-afuera.sh` y el trabajo `e2e` de `.github/workflows/cd.yml` |
+| Prueba | Pruebas de cada control en la CI, en cada pull request: rol y dueño, CSRF, inyección, validación. También gitleaks, `composer audit` y la configuración de nginx desde afuera. Desde la Entrega 4, después de publicar en el servidor de desarrollo corren además las pruebas de punta a punta contra ese sitio, con sesión iniciada y fallando ante cualquier violación de la CSP, y el análisis pasivo de OWASP ZAP. El escaneo activo con sesión se corre a mano contra el compose local (ver «Análisis con OWASP ZAP») | `.github/workflows/ci.yml`, `nginx/comprobar-desde-afuera.sh` y los trabajos `e2e` y `zap` de `.github/workflows/cd.yml` |
 | Despliegue | Secretos generados en el servidor y fuera del repositorio; con `entorno = "produccion"` no arranca con valores de ejemplo. El despliegue continuo entra con una clave que sólo puede correr el script | `herramientas/desplegar.sh` y `.github/workflows/cd.yml` (README, «Despliegue continuo») |
 | Operación | Actualizaciones de seguridad automáticas, fail2ban, renovación del certificado y logs de cada subsistema | «Sistema operativo» y «Red», arriba; `docker compose logs` |

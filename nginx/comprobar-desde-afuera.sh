@@ -37,6 +37,10 @@ cabecera() {
 
 echo "Las cabeceras de seguridad:"
 cabecera Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+cabecera Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+cabecera Cross-Origin-Opener-Policy same-origin
+cabecera Cross-Origin-Resource-Policy same-origin
+cabecera Cross-Origin-Embedder-Policy require-corp
 
 echo "Las rutas /interno/ no existen desde afuera:"
 espera 404 /interno/estado

@@ -44,6 +44,8 @@ final class PanelDelOrganizadorTest extends TestCase
         'GET /salas',
         'GET /salas/{id}',
         'GET /salas/{id}/imagen',
+        'GET /obras',
+        'GET /obras/{id}',
         'GET /obras/{id}/afiche',
     ];
 

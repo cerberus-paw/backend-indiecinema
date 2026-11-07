@@ -84,6 +84,11 @@ final class Cartelera extends Controlador
                 'csv' => $parametros->urlDeCsv(),
                 // Para las últimas búsquedas del navegador: la URL y cómo se lee, o null.
                 'busqueda' => $parametros->busqueda(),
+                // Para el resumen de arriba: cómo están ordenadas (E4-10.9).
+                'orden' => $parametros->ordenAplicado(),
+                // Las etiquetas de los filtros activos y «Quitar todos» (E4-10.9).
+                'filtros_activos' => $parametros->filtrosActivos(),
+                'quitar_filtros' => $parametros->urlSinFiltros(),
             ])->conCabecera('Vary', 'Accept');
         }
 
@@ -99,6 +104,9 @@ final class Cartelera extends Controlador
             'max_ultimas_busquedas' => ServicioDeCartelera::ULTIMAS_BUSQUEDAS,
             'paginado' => $paginado,
             'csv' => $parametros->urlDeCsv(),
+            'orden' => $parametros->ordenAplicado(),
+            'filtros_activos' => $parametros->filtrosActivos(),
+            'quitar_filtros' => $parametros->urlSinFiltros(),
         ])->conCabecera('Vary', 'Accept');
     }
 
@@ -427,7 +435,7 @@ final class Cartelera extends Controlador
      *     cancelable: bool,
      *     cerrable: bool,
      *     sala: array{url: string, nombre: string, descripcion: string, direccion: string, localidad: string, capacidad: int, imagen: ?string},
-     *     obras: list<array{id: string, titulo: string, sinopsis: string, anio: int, director: string, duracion: int, generos: list<string>, afiche: ?string}>
+     *     obras: list<array{id: string, titulo: string, sinopsis: string, anio: int, director: string, duracion: int, generos: list<string>, afiche: ?string, url: string}>
      * }
      */
     private static function datosDeDetalle(
@@ -480,7 +488,9 @@ final class Cartelera extends Controlador
                 'director' => $obra->director,
                 'duracion' => $obra->duracionMinutos,
                 'generos' => $obra->generos,
-                'afiche' => $obra->afiche,
+                // La URL que lo sirve, como en las tarjetas: el nombre del archivo no le sirve al navegador.
+                'afiche' => $obra->afiche !== null ? "/obras/{$obra->id}/afiche" : null,
+                'url' => "/obras/{$obra->id}",
             ], $detalle->obras),
         ];
     }

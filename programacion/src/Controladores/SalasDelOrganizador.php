@@ -75,7 +75,6 @@ final class SalasDelOrganizador extends Controlador
             'reglas' => FormularioDeSala::reglas(imagenObligatoria: false),
             'valores' => $formulario?->valores ?? [],
             'errores' => $formulario?->errores ?? [],
-            'error_general' => $formulario?->errores ? 'Revisá los campos marcados.' : null,
             'mensaje_exito' => $extra['mensaje_exito'] ?? null,
         ], $estado);
     }

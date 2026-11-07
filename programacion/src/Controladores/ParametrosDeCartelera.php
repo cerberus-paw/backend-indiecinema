@@ -33,6 +33,8 @@ final class ParametrosDeCartelera
     private const PRECIO = '/^[0-9]{1,8}([.,][0-9]{1,2})?$/D';
     /** Hasta acá, una página más no cambia nada: sólo evita pasar un número enorme a la base. */
     private const PAGINA = '/^[1-9][0-9]{0,8}$/D';
+    /** Cómo se lee la fecha en la etiqueta de la búsqueda y en la de su filtro. */
+    private const FECHA_LEIDA = 'd/m/Y';
 
     /** @var array<string, string> los filtros y el orden que se aplicaron, para el formulario y los links */
     public private(set) array $valores = [];
@@ -106,6 +108,26 @@ final class ParametrosDeCartelera
     }
 
     /**
+     * El orden aplicado, como lo muestra el resumen de la cartelera (E4-10.9): el valor, vacío
+     * para el de siempre como en las opciones del desplegable; la etiqueta del desplegable; y
+     * cómo se lee después de «ordenadas por», en minúscula. Lo arma sólo el back, así la plantilla
+     * y el buscador muestran lo mismo.
+     *
+     * @return array{valor: string, etiqueta: string, leida: string}
+     */
+    public function ordenAplicado(): array
+    {
+        $orden = $this->filtros->orden;
+        $etiqueta = $orden->etiqueta();
+
+        return [
+            'valor' => $orden === OrdenDeCartelera::FechaAscendente ? '' : $orden->value,
+            'etiqueta' => $etiqueta,
+            'leida' => mb_strtolower(mb_substr($etiqueta, 0, 1)) . mb_substr($etiqueta, 1),
+        ];
+    }
+
+    /**
      * Si se recortó la cartelera. El orden no cuenta: no saca funciones, así que con él solo no
      * hay nada que limpiar y una cartelera vacía es porque no hay funciones programadas.
      */
@@ -142,7 +164,7 @@ final class ParametrosDeCartelera
             $partes[] = $this->valores['localidad'];
         }
         if ($this->filtros->fecha !== null) {
-            $partes[] = $this->filtros->fecha->format('d/m/Y');
+            $partes[] = $this->filtros->fecha->format(self::FECHA_LEIDA);
         }
         if (isset($this->valores['genero'])) {
             $partes[] = $this->valores['genero'];
@@ -160,6 +182,50 @@ final class ParametrosDeCartelera
             'etiqueta' => implode(' · ', $partes),
             'filtros' => $this->valores,
         ];
+    }
+
+    /**
+     * Los filtros aplicados, uno por etiqueta (E4-10.9), en el orden de la columna de filtros: el
+     * texto y la cartelera sin ese filtro, con los demás y el orden, en la primera página. El
+     * mínimo y el máximo del precio van separados, así cada uno se quita solo. Un filtro inválido
+     * no está, porque no se aplicó; el orden no es un filtro.
+     *
+     * @return list<array{texto: string, url: string}>
+     */
+    public function filtrosActivos(): array
+    {
+        $activos = [];
+        $agregar = function (string $clave, string $texto) use (&$activos): void {
+            $activos[] = ['texto' => $texto, 'url' => self::url('/cartelera', array_diff_key($this->valores, [$clave => true]))];
+        };
+        if (isset($this->valores['q'])) {
+            $agregar('q', "Buscar: {$this->valores['q']}");
+        }
+        if (isset($this->valores['localidad'])) {
+            $agregar('localidad', "Localidad: {$this->valores['localidad']}");
+        }
+        if ($this->filtros->fecha !== null) {
+            $agregar('fecha', 'Fecha: ' . $this->filtros->fecha->format(self::FECHA_LEIDA));
+        }
+        if (isset($this->valores['genero'])) {
+            $agregar('genero', "Género: {$this->valores['genero']}");
+        }
+        if ($this->filtros->precioMinimo !== null) {
+            $agregar('precio_min', (string) self::etiquetaDePrecio($this->filtros->precioMinimo, null));
+        }
+        if ($this->filtros->precioMaximo !== null) {
+            $agregar('precio_max', (string) self::etiquetaDePrecio(null, $this->filtros->precioMaximo));
+        }
+
+        return $activos;
+    }
+
+    /**
+     * «Quitar todos» (E4-10.9): la cartelera sin filtros, con el orden si se eligió otro.
+     */
+    public function urlSinFiltros(): string
+    {
+        return self::url('/cartelera', array_intersect_key($this->valores, ['orden' => true]));
     }
 
     private static function etiquetaDePrecio(?float $minimo, ?float $maximo): ?string

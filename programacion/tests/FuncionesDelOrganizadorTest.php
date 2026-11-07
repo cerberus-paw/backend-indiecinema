@@ -6,6 +6,7 @@ namespace IndieCinema\Programacion\Pruebas;
 
 use DateTimeImmutable;
 use Dom\HTMLDocument;
+use IndieCinema\Nucleo\Pruebas\Dobles\Formularios;
 use IndieCinema\Nucleo\Uuid;
 use IndieCinema\Nucleo\Aplicacion;
 use IndieCinema\Nucleo\BaseDeDatos;
@@ -325,6 +326,29 @@ final class FuncionesDelOrganizadorTest extends TestCase
             '#<dt>Tiempo entre funciones</dt>\s*<dd>' . $propiaHabilitada->datos->tiempoEntreFunciones . ' min</dd>#',
             $cuerpo,
         );
+    }
+
+    /**
+     * El navegador no sugiere fechas de otras funciones (E4-10.5); y si el envío vuelve vacío, el
+     * resumen lleva a cada campo, también a los grupos sin un control propio, como las obras.
+     */
+    public function testLaFechaNoSeAutocompletaYElResumenLlevaACadaCampo(): void
+    {
+        $this->sala(self::ORGANIZADORA, 'El Galpón Habilitado');
+
+        $campos = Formularios::autocompletado($this->pedir('GET', '/organizador/funciones/nueva', self::ORGANIZADORA)->cuerpo());
+        $respuesta = $this->enviar('/organizador/funciones/nueva', [], self::ORGANIZADORA);
+
+        self::assertSame('off', $campos['fecha']);
+        self::assertSame(422, $respuesta->estado());
+        $resumen = Formularios::resumen($respuesta->cuerpo());
+        self::assertNotNull($resumen);
+        self::assertContains('#obras', array_keys($resumen['enlaces']));
+        self::assertContains('#sala_id', array_keys($resumen['enlaces']));
+        self::assertSame('Revisá ' . count($resumen['enlaces']) . ' campos', $resumen['titulo']);
+        foreach (array_keys($resumen['enlaces']) as $enlace) {
+            self::assertStringContainsString('id="' . substr($enlace, 1) . '"', $respuesta->cuerpo(), "El link {$enlace} no lleva a ningún lado.");
+        }
     }
 
     /**

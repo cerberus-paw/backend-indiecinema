@@ -11,6 +11,7 @@ use IndieCinema\Nucleo\BaseDeDatos;
 use IndieCinema\Nucleo\Configuracion;
 use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Log;
+use IndieCinema\Nucleo\Pruebas\Dobles\PaginasParaValidar;
 use IndieCinema\Programacion\Repositorios\RepositorioDeFunciones;
 use IndieCinema\Programacion\Repositorios\RepositorioDeGeneros;
 use IndieCinema\Programacion\Repositorios\RepositorioDeObras;
@@ -83,6 +84,7 @@ final class FichaDeLaFuncionTest extends TestCase
         ] : [];
         $respuesta = $aplicacion->atender(new Peticion('GET', "/cartelera/{$id}", [], [], $cabeceras, [], []));
         self::assertSame(200, $respuesta->estado());
+        PaginasParaValidar::guardar($conSesion ? 'ficha-de-una-funcion-con-sesion' : 'ficha-de-una-funcion', $respuesta->cuerpo());
 
         $documento = new DOMDocument();
         @$documento->loadHTML('<?xml encoding="UTF-8">' . $respuesta->cuerpo());

@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace IndieCinema\Programacion\Repositorios;
 
 use IndieCinema\Nucleo\BaseDeDatos;
-use IndieCinema\Nucleo\Like;
 use IndieCinema\Programacion\Modelo\Obra;
 use IndieCinema\Programacion\Modelo\OrigenCopia;
 use IndieCinema\Programacion\Modelo\TipoObra;
@@ -81,6 +80,7 @@ final class RepositorioDeObras
              JOIN obra o ON o.id = og.obra_id
              WHERE o.dueno_id = ? AND o.dada_de_baja_en IS NULL
              ORDER BY og.genero_id',
+            [$duenoId],
         ) as $genero) {
             $generos[$genero['obra_id']][] = $genero['genero_id'];
         }

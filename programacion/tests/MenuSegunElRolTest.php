@@ -200,7 +200,7 @@ final class MenuSegunElRolTest extends TestCase
     {
         $organizador = [
             'Mi cuenta' => ['/cuenta/', '/funcion/reservas'],
-            'Panel del Organizador' => ['/organizador/salas', '/organizador/funciones', '/organizador/funciones/nueva', '/solicitar-sala'],
+            'Panel del Organizador' => ['/organizador/salas', '/organizador/obras', '/organizador/obras/nueva', '/organizador/funciones', '/organizador/funciones/nueva', '/solicitar-sala'],
         ];
         yield 'espectador' => ['espectador', ['Mi cuenta' => ['/cuenta/', '/funcion/reservas', '/solicitar-sala']]];
         yield 'organizador' => ['organizador', $organizador];

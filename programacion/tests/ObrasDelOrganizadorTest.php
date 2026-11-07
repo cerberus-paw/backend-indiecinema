@@ -11,6 +11,7 @@ use IndieCinema\Nucleo\Configuracion;
 use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Log;
+use IndieCinema\Nucleo\Pruebas\Dobles\Formularios;
 use IndieCinema\Nucleo\Uuid;
 use IndieCinema\Programacion\Controladores\FormularioDeObra;
 use IndieCinema\Programacion\Modelo\DatosDeObra;
@@ -139,6 +140,27 @@ final class ObrasDelOrganizadorTest extends TestCase
 
         self::assertSame(200, $respuesta->estado());
         self::assertStringContainsString('Cargar obra', $respuesta->cuerpo());
+    }
+
+    /**
+     * Si el envío vuelve vacío, el resumen lleva a cada campo (E4-10.5), también a los géneros, que
+     * son un grupo sin un control propio; y no hay un aviso genérico aparte.
+     */
+    public function testElResumenDeErroresLlevaACadaCampoDeLaObra(): void
+    {
+        $respuesta = $this->pedir('POST', '/organizador/obras/nueva');
+
+        self::assertSame(422, $respuesta->estado());
+        $resumen = Formularios::resumen($respuesta->cuerpo());
+        self::assertNotNull($resumen);
+        self::assertContains('#titulo', array_keys($resumen['enlaces']));
+        self::assertContains('#generos', array_keys($resumen['enlaces']));
+        self::assertSame('Revisá ' . count($resumen['enlaces']) . ' campos', $resumen['titulo']);
+        self::assertTrue($resumen['anunciado']);
+        self::assertStringNotContainsString('Revisá los campos marcados.', $respuesta->cuerpo());
+        foreach (array_keys($resumen['enlaces']) as $enlace) {
+            self::assertStringContainsString('id="' . substr($enlace, 1) . '"', $respuesta->cuerpo(), "El link {$enlace} no lleva a ningún lado.");
+        }
     }
 
     public function testCrearObraConAficheExitoso(): Obra

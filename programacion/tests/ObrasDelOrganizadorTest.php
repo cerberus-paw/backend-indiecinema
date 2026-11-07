@@ -97,10 +97,14 @@ final class ObrasDelOrganizadorTest extends TestCase
             ...$cabecerasAdicionales,
         ];
 
+        // La consulta, si viene en la ruta («/organizador/obras?error_baja=1»), va aparte, como la arma PHP.
+        [$camino, $consulta] = explode('?', $ruta, 2) + [1 => ''];
+        parse_str($consulta, $parametros);
+
         return $aplicacion->atender(new Peticion(
             $metodo,
-            $ruta,
-            [],
+            $camino,
+            $parametros,
             $metodo === 'POST' ? ['_csrf' => self::CSRF, ...$cuerpo] : $cuerpo,
             $cabeceras,
             ['csrf' => self::CSRF],
@@ -239,7 +243,7 @@ final class ObrasDelOrganizadorTest extends TestCase
 
         $respuesta = $this->pedir('POST', "/organizador/obras/{$obra->id}/baja");
 
-        self::assertSame(302, $respuesta->estado());
+        self::assertSame(303, $respuesta->estado());
         self::assertSame('/organizador/obras?dada_de_baja=1', $respuesta->cabecera('Location'));
 
         // Ya no aparece en las obras del dueño
@@ -267,7 +271,7 @@ final class ObrasDelOrganizadorTest extends TestCase
         $obra = $this->testCrearObraConAficheExitoso();
 
         // Sala habilitada
-        $sala = Sala::nueva(self::ORGANIZADORA, 'Cine Tita', 'Descripción', 'Calle 123', 'Luján', 50, 1, 120, 15, '00000000000000000000000000000001.jpg');
+        $sala = Sala::nueva(self::ORGANIZADORA, new DatosDeSala('Cine Tita', 'Descripción', 'Calle 123', 'Luján', 50, 1, 120, 15), '00000000000000000000000000000001.jpg');
         (new RepositorioDeSalas($this->base))->agregar($sala);
         $this->base->ejecutar('UPDATE sala SET habilitada = TRUE WHERE id = ?', [$sala->id]);
 
@@ -284,8 +288,10 @@ final class ObrasDelOrganizadorTest extends TestCase
 
         // Intento de baja en HTML
         $respuesta = $this->pedir('POST', "/organizador/obras/{$obra->id}/baja");
-        self::assertSame(302, $respuesta->estado());
-        self::assertStringContainsString('/organizador/obras?error_baja=', $respuesta->cabecera('Location'));
+        self::assertSame(303, $respuesta->estado());
+        self::assertSame('/organizador/obras?error_baja=1', $respuesta->cabecera('Location'));
+        self::assertStringContainsString('funciones futuras', $this->pedir('GET', '/organizador/obras?error_baja=1')->cuerpo());
+        self::assertStringNotContainsString('inventado', $this->pedir('GET', '/organizador/obras?error_baja=inventado')->cuerpo());
 
         // Intento de baja en JSON
         $respuestaJson = $this->pedir('POST', "/organizador/obras/{$obra->id}/baja", cabecerasAdicionales: ['Accept' => 'application/json']);
@@ -302,7 +308,7 @@ final class ObrasDelOrganizadorTest extends TestCase
     {
         $obra = $this->testCrearObraConAficheExitoso();
 
-        $sala = Sala::nueva(self::ORGANIZADORA, 'Cine Tita', 'Descripción', 'Calle 123', 'Luján', 50, 1, 120, 15, '00000000000000000000000000000001.jpg');
+        $sala = Sala::nueva(self::ORGANIZADORA, new DatosDeSala('Cine Tita', 'Descripción', 'Calle 123', 'Luján', 50, 1, 120, 15), '00000000000000000000000000000001.jpg');
         (new RepositorioDeSalas($this->base))->agregar($sala);
         $this->base->ejecutar('UPDATE sala SET habilitada = TRUE WHERE id = ?', [$sala->id]);
 

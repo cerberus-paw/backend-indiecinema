@@ -24,6 +24,11 @@ final class ObrasDelOrganizador extends Controlador
 {
     private const PLANTILLA_ALTA = 'alta_obra.html.twig';
     private const PLANTILLA_LISTADO = 'mis_obras.html.twig';
+    /**
+     * Por la URL viaja sólo la marca, no el texto: si no, cualquiera podría armar un enlace que
+     * muestre en «Mis obras» el mensaje que quiera.
+     */
+    private const BAJA_RECHAZADA = 'No se puede dar de baja una obra que tiene funciones futuras o en votación.';
 
     public function __construct(private readonly ServicioDeObras $servicio)
     {
@@ -50,7 +55,7 @@ final class ObrasDelOrganizador extends Controlador
             'creada' => $peticion->consulta('creada') === '1',
             'guardada' => $peticion->consulta('guardada') === '1',
             'dada_de_baja' => $peticion->consulta('dada_de_baja') === '1',
-            'error_baja' => $peticion->consulta('error_baja'),
+            'error_baja' => $peticion->consulta('error_baja') === '1' ? self::BAJA_RECHAZADA : null,
         ]);
     }
 
@@ -136,7 +141,7 @@ final class ObrasDelOrganizador extends Controlador
                 return $this->json(['error' => $regla->getMessage()], 422);
             }
 
-            return $this->redirigir('/organizador/obras?error_baja=' . rawurlencode($regla->getMessage()));
+            return $this->redirigir('/organizador/obras?error_baja=1');
         }
 
         if ($json) {

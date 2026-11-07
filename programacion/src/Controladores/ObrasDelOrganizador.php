@@ -162,7 +162,8 @@ final class ObrasDelOrganizador extends Controlador
     ): Respuesta {
         $formulario = $extra['formulario'] ?? null;
         $mensajeExito = $extra['mensaje_exito'] ?? null;
-        $errorGeneral = $extra['error_general'] ?? ($formulario !== null && $formulario->errores !== [] ? 'Revisá los campos marcados.' : null);
+        // Los errores de los campos los resume la plantilla, con un link a cada uno (E4-10.5).
+        $errorGeneral = $extra['error_general'] ?? null;
 
         return $this->vista(self::PLANTILLA_ALTA, [
             'es_edicion' => $esEdicion,

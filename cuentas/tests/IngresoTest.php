@@ -15,6 +15,7 @@ use IndieCinema\Nucleo\Configuracion;
 use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Log;
+use IndieCinema\Nucleo\Pruebas\Dobles\Formularios;
 use IndieCinema\Nucleo\Pruebas\Dobles\PaginasParaValidar;
 use PHPUnit\Framework\TestCase;
 
@@ -133,6 +134,40 @@ final class IngresoTest extends TestCase
         // Vuelve el correo que escribió, nunca la contraseña.
         self::assertStringContainsString('value="nadie@ejemplo.com"', $correoInexistente->cuerpo());
         self::assertStringNotContainsString('butaca 2027', $contrasenaIncorrecta->cuerpo());
+    }
+
+    /** El navegador ofrece el correo y la contraseña que guardó (E4-10.5). */
+    public function testElNavegadorOfreceElCorreoYLaContrasenaGuardados(): void
+    {
+        $campos = Formularios::autocompletado($this->pedir('GET', '/ingresar')->cuerpo());
+
+        self::assertSame('email', $campos['email']);
+        self::assertSame('current-password', $campos['password']);
+    }
+
+    /**
+     * Las credenciales incorrectas no son de un campo: el resumen lo dice sin link, y sin el
+     * «Revisá N campos» (E4-10.5).
+     */
+    public function testLasCredencialesIncorrectasVanEnElResumenSinLink(): void
+    {
+        $resumen = Formularios::resumen($this->ingresar(contrasena: 'butaca 2027')->cuerpo());
+
+        self::assertNotNull($resumen);
+        self::assertTrue($resumen['anunciado']);
+        self::assertSame('No pudimos iniciar tu sesión', $resumen['titulo']);
+        self::assertSame([], $resumen['enlaces']);
+        self::assertSame(['El correo o la contraseña no son correctos.'], $resumen['textos']);
+    }
+
+    public function testSinCorreoNiContrasenaElResumenLlevaALosDosCampos(): void
+    {
+        $resumen = Formularios::resumen($this->ingresar('', '')->cuerpo());
+
+        self::assertNotNull($resumen);
+        self::assertSame('Revisá 2 campos', $resumen['titulo']);
+        self::assertSame(['#email', '#password'], array_keys($resumen['enlaces']));
+        self::assertSame([], $resumen['textos']);
     }
 
     public function testSinCorreoNiContrasenaMarcaLosCampos(): void

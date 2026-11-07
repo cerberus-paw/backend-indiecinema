@@ -80,10 +80,8 @@ final class FuncionesDelOrganizador extends Controlador
             || $formulario->precio === null
             || ($formulario->esProgramada() && $formulario->fechaHora === null)
         ) {
-            return $this->formularioAlta($salas, $obras, [
-                'formulario' => $formulario,
-                'error_general' => 'Revisá los campos marcados.',
-            ], 422);
+            // Sin mensaje general: la plantilla resume los errores de los campos (E4-10.5).
+            return $this->formularioAlta($salas, $obras, ['formulario' => $formulario], 422);
         }
 
         // Lo que el formulario no puede saber solo, como que se pisa con otra función de la sala,
@@ -169,10 +167,7 @@ final class FuncionesDelOrganizador extends Controlador
             return $this->formularioAlta(
                 salas: $salas,
                 obras: $obras,
-                extra: [
-                    'formulario' => $formulario,
-                    'error_general' => 'Revisá los campos marcados.',
-                ],
+                extra: ['formulario' => $formulario],
                 estado: 422,
                 esEdicion: true,
                 funcionId: $id,

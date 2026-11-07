@@ -10,6 +10,7 @@ use IndieCinema\Nucleo\Configuracion;
 use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Log;
+use IndieCinema\Nucleo\Pruebas\Dobles\Formularios;
 use IndieCinema\Nucleo\Pruebas\Dobles\PaginasParaValidar;
 use IndieCinema\Nucleo\Pruebas\Dobles\ServidorSmtpDePrueba;
 use IndieCinema\Nucleo\Uuid;
@@ -257,6 +258,8 @@ final class ReservasTest extends TestCase
 
             self::assertSame(422, $respuesta->estado(), "Aceptó «{$cantidad}».");
             self::assertStringContainsString('Ingresá entre 1 y 40 lugares.', $respuesta->cuerpo());
+            // Arriba, el resumen con el link a la cantidad (E4-10.5).
+            self::assertSame(['#cantidad' => 'Ingresá entre 1 y 40 lugares.'], Formularios::resumen($respuesta->cuerpo())['enlaces'] ?? null);
         }
         self::assertSame(0, $this->reservas());
     }
@@ -272,6 +275,12 @@ final class ReservasTest extends TestCase
 
         self::assertSame(422, $respuesta->estado());
         self::assertStringContainsString('Queda 1 lugar.', $respuesta->cuerpo());
+        // No es de un campo: va en el resumen sin link, y el resumen recibe el foco (E4-10.5).
+        $resumen = Formularios::resumen($respuesta->cuerpo());
+        self::assertNotNull($resumen);
+        self::assertSame(['Queda 1 lugar.'], $resumen['textos']);
+        self::assertSame([], $resumen['enlaces']);
+        self::assertTrue($resumen['anunciado']);
         // Vuelve con lo que había puesto.
         self::assertMatchesRegularExpression('/name="cantidad"[^>]*value="2"/s', $respuesta->cuerpo());
         self::assertSame(1, $this->reservas());

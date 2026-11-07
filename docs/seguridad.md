@@ -143,8 +143,8 @@ la sección siguiente, que atacó el sitio con cada rol.
 
 ## Análisis con OWASP ZAP
 
-Hecho entre el 7 y el 8/11/2026 con la imagen `ghcr.io/zaproxy/zaproxy:stable` (ZAP 2.17), en dos
-partes:
+Hecho entre el 7 y el 8/11/2026 con la imagen `ghcr.io/zaproxy/zaproxy:stable` (ZAP 2.17), en
+tres partes:
 
 - **Pasivo (baseline), sin sesión**, contra https://indiecinema-dev.duckdns.org: recorre las páginas
   públicas (104 URL) y revisa cada respuesta, sin atacar. Se repitió contra el compose local con las
@@ -158,6 +158,12 @@ partes:
   llenarles el cupo o suspender su cuenta. Después se recrea la base. Se saltea la regla de XSS
   basado en el DOM (40026), que abre un Firefox y tumbaba a ZAP por memoria; ese riesgo lo cubren la
   CSP y que el JavaScript no arma HTML con texto de nadie.
+- **Activo, sin sesión**, contra https://indiecinema-dev.duckdns.org, ya con las correcciones
+  publicadas: las mismas reglas que el anterior, sobre las 104 URL públicas y con el nginx, el
+  HTTPS y el HSTS de un servidor de verdad.
+
+Después de las correcciones, el pasivo contra dev no da ninguna alerta alta, media ni baja: quedan
+seis informativas. Antes daba dos medias y cuatro bajas.
 
 **Alertas medias y altas.** Altas no hubo.
 
@@ -165,8 +171,9 @@ partes:
 |---|---|---|
 | Falta `Content-Security-Policy` (10038) | todas las páginas | **Corregida**: la cabecera en `nginx/templates/sitio.inc.template` (ver «Red»). El front dejó de usar recursos de afuera y código o estilos en línea |
 | Falta Subresource Integrity (90003) | el `<link>` a Google Fonts de `base.html.twig` | **Corregida**: Google Fonts no admite SRI, porque devuelve un CSS distinto según el navegador. La fuente se sirve desde el sitio (`estaticos/fuentes/` del front) |
-| Anti-CSRF Tokens Check (20012) | el formulario de «Cerrar sesión» del panel del organizador, en las respuestas al registro de asistencia (sólo con Omar) | **Falso positivo**: el formulario lleva `_csrf` en todas las respuestas que se reprodujeron (bien, sin token, con un token ajeno, con error 422 y 403), y `POST /cuenta/salir` sin el token o con el de otro usuario responde 403 y la sesión sigue |
-| Bypassing 403 (40038) | `GET /` con `X-Original-URL: /estaticos/css` (con los tres roles) | **Falso positivo**: nginx no usa esa cabecera; el 200 es de la portada, no del directorio |
+| Anti-CSRF Tokens Check (20012) | en local, el formulario de «Cerrar sesión» del panel del organizador, en las respuestas al registro de asistencia (sólo con Omar); en dev, el buscador de la cartelera, en las respuestas a ingresar y a registrarse | **Falso positivo**: el formulario de salir lleva `_csrf` en todas las respuestas que se reprodujeron (bien, sin token, con un token ajeno, con error 422 y 403), y `POST /cuenta/salir` sin el token o con el de otro usuario responde 403 y la sesión sigue. El buscador es un formulario GET que sólo consulta: no cambia nada, así que no lleva token |
+| Bypassing 403 (40038) | `GET /` con `X-Original-URL: /estaticos/css` (con los tres roles y en dev) | **Falso positivo**: nginx no usa esa cabecera; el 200 es de la portada, no del directorio |
+| Proxy Disclosure (40025) | dev: con `TRACE`, `TRACK` y `OPTIONS` con `Max-Forwards`, ZAP identifica que hay un nginx | **Aceptada**: es lo mismo que dice la cabecera `Server: nginx` de cada respuesta, sin la versión (`server_tokens off`), y los tres métodos responden 405. Sacar también el nombre necesitaría un módulo que la imagen oficial de nginx no trae, y no esconde nada que no se averigüe de otra forma |
 | HTTP Only Site (10106) | el compose local | **No aplica**: en local se usa HTTP a propósito. Los servidores redirigen a HTTPS y mandan HSTS |
 
 Las bajas también se corrigieron: faltaban `Permissions-Policy`, `Cross-Origin-Opener-Policy`,
@@ -181,8 +188,8 @@ plantilla (ver «Red»).
 - *Inyección SQL*: en un primer escaneo activo como organizador, el 7/11, la regla 40018 levantó una
   alerta, pero ZAP se quedó sin memoria antes de escribir el informe y no se supo en qué URL. En los
   escaneos completos las seis reglas de inyección SQL, la booleana y las de tiempo, pasaron sin
-  alertas con los tres roles, también con el organizador (379 URL). Es lo esperable: toda consulta
-  pasa por un `prepare` sin emulación (ver «Aplicación»).
+  alertas con los tres roles, también con el organizador (379 URL), y sin sesión contra dev. Es lo
+  esperable: toda consulta pasa por un `prepare` sin emulación (ver «Aplicación»).
 
 **Cómo repetirlo.** El pasivo lo corre el CD. El activo, con el compose levantado y los datos de
 prueba cargados, por cada cuenta: ingresar con `POST /cuenta/ingresar` (`email`, `password` y

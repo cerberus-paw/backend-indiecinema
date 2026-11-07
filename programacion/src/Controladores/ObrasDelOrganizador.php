@@ -157,13 +157,13 @@ final class ObrasDelOrganizador extends Controlador
     ): Respuesta {
         $formulario = $extra['formulario'] ?? null;
         $mensajeExito = $extra['mensaje_exito'] ?? null;
-        $errorGeneral = $extra['error_general'] ?? ($formulario?->errores ? 'Revisá los campos marcados.' : null);
+        $errorGeneral = $extra['error_general'] ?? ($formulario !== null && $formulario->errores !== [] ? 'Revisá los campos marcados.' : null);
 
         return $this->vista(self::PLANTILLA_ALTA, [
             'es_edicion' => $esEdicion,
             'accion' => $esEdicion && $obra !== null ? "/organizador/obras/{$obra->id}/editar" : '/organizador/obras/nueva',
-            'valores' => $formulario?->valores ?? [],
-            'errores' => $formulario?->errores ?? [],
+            'valores' => $formulario === null ? [] : $formulario->valores,
+            'errores' => $formulario === null ? [] : $formulario->errores,
             'error_general' => $errorGeneral,
             'mensaje_exito' => $mensajeExito,
             'reglas' => FormularioDeObra::reglas(!$esEdicion),

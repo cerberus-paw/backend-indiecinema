@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace IndieCinema\Programacion\Pruebas;
 
 use DateTimeImmutable;
+use Dom\HTMLDocument;
 use IndieCinema\Nucleo\Aplicacion;
 use IndieCinema\Nucleo\BaseDeDatos;
 use IndieCinema\Nucleo\Configuracion;
@@ -718,7 +719,7 @@ final class CarteleraTest extends TestCase
         self::assertSame(200, $respuesta->estado());
         self::assertSame('Accept', $respuesta->cabecera('Vary'));
         $json = self::json($respuesta);
-        self::assertSame(['funciones', 'filtros', 'avisos', 'paginado', 'csv', 'busqueda'], array_keys($json));
+        self::assertSame(['funciones', 'filtros', 'avisos', 'paginado', 'csv', 'busqueda', 'orden'], array_keys($json));
         self::assertCount(12, $json['funciones']);
         // Cada función con lo mismo que muestra la tarjeta, y el link a su ficha.
         $primera = $json['funciones'][0];
@@ -742,6 +743,73 @@ final class CarteleraTest extends TestCase
         self::assertSame('/cartelera.csv', $json['csv']);
         // Sin filtros, un objeto vacío y no una lista.
         self::assertStringContainsString('"filtros":{}', $respuesta->cuerpo());
+    }
+
+    /**
+     * El resumen de arriba de la cartelera dice cómo están ordenadas (E4-10.9): el JSON trae el
+     * orden aplicado, así el buscador lo actualiza sin recargar.
+     */
+    public function testElJsonTraeElOrdenAplicadoConSuEtiqueta(): void
+    {
+        $this->cargarDatosDePrueba();
+
+        $deSiempre = self::json($this->pedirJson('/cartelera'));
+        $porPrecio = self::json($this->pedirJson('/cartelera?orden=precio_asc'));
+
+        self::assertSame(['valor' => '', 'etiqueta' => 'Fecha: más próxima', 'leida' => 'fecha: más próxima'], $deSiempre['orden']);
+        self::assertSame(['valor' => 'precio_asc', 'etiqueta' => 'Precio: menor a mayor', 'leida' => 'precio: menor a mayor'], $porPrecio['orden']);
+    }
+
+    /**
+     * La cartelera como el wireframe (E4-10.9): las migas, y debajo del título cuántas funciones
+     * hay y cómo están ordenadas.
+     */
+    public function testArribaVanLasMigasYElResumenConLaCantidadYElOrden(): void
+    {
+        $this->cargarDatosDePrueba();
+
+        $documento = HTMLDocument::createFromString($this->pedir('/cartelera?orden=precio_asc')->cuerpo(), LIBXML_NOERROR);
+
+        $migas = $documento->querySelector('nav[aria-label="Migas de pan"]');
+        self::assertNotNull($migas);
+        self::assertSame('/', $migas->querySelector('a')?->getAttribute('href'));
+        self::assertSame('Cartelera', trim((string) $migas->querySelector('[aria-current="page"]')?->textContent));
+        $resumen = $documento->querySelector('[data-cartelera-resumen]');
+        self::assertNotNull($resumen);
+        self::assertSame(
+            '15 funciones · ordenadas por precio: menor a mayor',
+            trim((string) preg_replace('/\s+/', ' ', (string) $resumen->textContent)),
+        );
+        // Arriba de la columna y de los resultados, no adentro de lo que redibuja el buscador.
+        self::assertNull($resumen->closest('#resultados-cartelera'));
+    }
+
+    /**
+     * Los filtros van en una columna plegable (E4-10.9), con los grupos en el orden del wireframe;
+     * «Filtrar» sólo sin JavaScript, porque con él filtran solos.
+     */
+    public function testLosFiltrosVanEnUnaColumnaPlegableConLosGruposEnOrden(): void
+    {
+        $this->cargarDatosDePrueba();
+
+        $documento = HTMLDocument::createFromString($this->pedir('/cartelera')->cuerpo(), LIBXML_NOERROR);
+
+        $columna = $documento->querySelector('details[data-filtros-cartelera]');
+        self::assertNotNull($columna);
+        // Llega abierta: sin JavaScript se usa así; con JavaScript se cierra en el celular.
+        self::assertTrue($columna->hasAttribute('open'));
+        self::assertStringStartsWith('Filtros', trim((string) $columna->querySelector('summary')?->textContent));
+        $formulario = $columna->querySelector('form#filtros-cartelera');
+        self::assertNotNull($formulario);
+        $grupos = array_map(
+            static fn ($grupo): string => trim((string) ($grupo->querySelector('legend') ?? $grupo->querySelector('label'))?->textContent),
+            iterator_to_array($formulario->querySelectorAll('.filtros-grupo')),
+        );
+        self::assertSame(['Buscar', 'Localidad', 'Fecha', 'Género', 'Precio'], $grupos);
+        $filtrar = $formulario->querySelector('noscript');
+        self::assertNotNull($filtrar);
+        self::assertStringContainsString('Filtrar', (string) $filtrar->textContent);
+        self::assertSame(1, substr_count((string) $formulario->textContent, 'Filtrar'));
     }
 
     public function testSinAcceptJsonSigueSiendoLaPagina(): void

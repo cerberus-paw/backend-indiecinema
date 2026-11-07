@@ -84,6 +84,8 @@ final class Cartelera extends Controlador
                 'csv' => $parametros->urlDeCsv(),
                 // Para las últimas búsquedas del navegador: la URL y cómo se lee, o null.
                 'busqueda' => $parametros->busqueda(),
+                // Para el resumen de arriba: cómo están ordenadas (E4-10.9).
+                'orden' => $parametros->ordenAplicado(),
             ])->conCabecera('Vary', 'Accept');
         }
 
@@ -99,6 +101,7 @@ final class Cartelera extends Controlador
             'max_ultimas_busquedas' => ServicioDeCartelera::ULTIMAS_BUSQUEDAS,
             'paginado' => $paginado,
             'csv' => $parametros->urlDeCsv(),
+            'orden' => $parametros->ordenAplicado(),
         ])->conCabecera('Vary', 'Accept');
     }
 

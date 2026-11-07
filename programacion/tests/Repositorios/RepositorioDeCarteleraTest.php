@@ -16,6 +16,7 @@ use IndieCinema\Programacion\Modelo\FuncionEnCartelera;
 use IndieCinema\Programacion\Modelo\Obra;
 use IndieCinema\Programacion\Modelo\ObraEnCartelera;
 use IndieCinema\Programacion\Modelo\ObraEnDetalle;
+use IndieCinema\Programacion\Modelo\OrdenDeCartelera;
 use IndieCinema\Programacion\Modelo\OrigenCopia;
 use IndieCinema\Programacion\Modelo\PaginaDeCartelera;
 use IndieCinema\Programacion\Modelo\Sala;
@@ -200,6 +201,40 @@ final class RepositorioDeCarteleraTest extends TestCase
         self::assertSame(6, $pagina->total);
     }
 
+    /**
+     * @return iterable<string, array{OrdenDeCartelera, list<string>}>
+     */
+    public static function ordenes(): iterable
+    {
+        yield 'fecha ascendente' => [OrdenDeCartelera::FechaAscendente, ['cienaga', 'carroza', 'zama', 'cien', 'acuerdo', 'votacion']];
+        yield 'fecha descendente' => [OrdenDeCartelera::FechaDescendente, ['cien', 'zama', 'carroza', 'cienaga', 'acuerdo', 'votacion']];
+        yield 'precio ascendente' => [OrdenDeCartelera::PrecioAscendente, ['carroza', 'cienaga', 'zama', 'cien', 'acuerdo', 'votacion']];
+        yield 'precio descendente' => [OrdenDeCartelera::PrecioDescendente, ['cienaga', 'zama', 'cien', 'acuerdo', 'votacion', 'carroza']];
+        yield 'título ascendente' => [OrdenDeCartelera::TituloAscendente, ['cien', 'carroza', 'cienaga', 'votacion', 'zama', 'acuerdo']];
+        yield 'título descendente' => [OrdenDeCartelera::TituloDescendente, ['zama', 'acuerdo', 'cienaga', 'votacion', 'carroza', 'cien']];
+    }
+
+    /**
+     * @param list<string> $esperadas
+     */
+    #[DataProvider('ordenes')]
+    public function testOrdenaPorFechaPrecioYTituloAscendenteYDescendente(OrdenDeCartelera $orden, array $esperadas): void
+    {
+        $filtros = new FiltrosDeCartelera(orden: $orden);
+
+        self::assertSame($esperadas, $this->nombres($this->pagina($filtros)));
+        self::assertSame($esperadas, $this->nombres($this->todas($filtros)));
+        // Al paginar se mantiene el mismo orden entre las páginas.
+        self::assertSame(
+            $esperadas,
+            [
+                ...$this->nombres($this->pagina($filtros, numero: 1, tamano: 2)),
+                ...$this->nombres($this->pagina($filtros, numero: 2, tamano: 2)),
+                ...$this->nombres($this->pagina($filtros, numero: 3, tamano: 2)),
+            ],
+        );
+    }
+
     public function testCadaFuncionTraeSusObrasLaSalaLaLocalidadLaFechaYElPrecio(): void
     {
         [$cienaga, $carroza] = $this->pagina()->funciones;
@@ -313,6 +348,22 @@ final class RepositorioDeCarteleraTest extends TestCase
         self::assertSame([], $this->todas(new FiltrosDeCartelera(salaId: $this->salaIds['Sala de Baja'])));
         self::assertSame([], $this->todas(new FiltrosDeCartelera(salaId: Uuid::nuevo())));
         self::assertSame(['zama'], $this->nombres($this->todas(new FiltrosDeCartelera(fecha: new DateTimeImmutable('2026-10-13'), salaId: $this->salaIds['Cine Club El Galpón']))));
+    }
+
+    public function testFiltraPorRangoDePrecioIncluyendoLasGratuitas(): void
+    {
+        // «cien» pasa a ser gratuita (a la gorra, $0), «carroza» cuesta $2000 y las demás $3500.
+        $this->base->ejecutar('UPDATE funcion SET precio_base = 0 WHERE id = ?', [$this->enCartelera['cien']]);
+
+        self::assertSame(['cien'], $this->nombres($this->pagina(new FiltrosDeCartelera(precioMaximo: 0.0))));
+        self::assertSame(['cien'], $this->nombres($this->pagina(new FiltrosDeCartelera(precioMinimo: 0.0, precioMaximo: 0.0))));
+        self::assertSame(['carroza', 'cien'], $this->nombres($this->pagina(new FiltrosDeCartelera(precioMaximo: 2000.0))));
+        self::assertSame(['carroza', 'cien'], $this->nombres($this->pagina(new FiltrosDeCartelera(precioMinimo: 0.0, precioMaximo: 2000.0))));
+        self::assertSame(['carroza'], $this->nombres($this->pagina(new FiltrosDeCartelera(precioMinimo: 1.0, precioMaximo: 2000.0))));
+        self::assertSame(['cienaga', 'zama', 'acuerdo', 'votacion'], $this->nombres($this->pagina(new FiltrosDeCartelera(precioMinimo: 3500.0))));
+        self::assertSame(['cienaga', 'carroza', 'zama', 'cien', 'acuerdo', 'votacion'], $this->nombres($this->pagina(new FiltrosDeCartelera(precioMinimo: 0.0))));
+        self::assertSame([], $this->nombres($this->pagina(new FiltrosDeCartelera(precioMinimo: 5000.0))));
+        self::assertSame(['carroza', 'cien'], $this->nombres($this->todas(new FiltrosDeCartelera(precioMinimo: 0.0, precioMaximo: 2000.0))));
     }
 
     public function testLosFiltrosSeCumplenTodosALaVez(): void

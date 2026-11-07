@@ -45,11 +45,11 @@ backend-indiecinema/
 ├── docs/guion-de-prueba.md  el recorrido de punta a punta en el sitio publicado, con cada rol
 ├── nucleo/                MVC común: ruteo, middleware, base de datos, vistas y errores
 ├── cuentas/               /cuenta/   registro, ingreso, sesión, roles y usuarios del administrador
-├── programacion/          /          obras, salas, funciones, cartelera y solicitudes de sala
-└── funciones/             /funcion/  la reserva de lugares, con el cupo de cada función
+├── programacion/          /          obras, salas, funciones, cartelera, votación de títulos y solicitudes de sala
+└── funciones/             /funcion/  las reservas con el cupo de cada función, sus paneles y el acuerdo de fecha
 ```
 
-Lo que todavía no está (las votaciones y el cobro) se suma con la misma forma.
+Lo que todavía no está (el cobro, la moderación y los beneficios) se suma con la misma forma.
 
 Cada subsistema tiene la misma estructura por dentro:
 
@@ -119,7 +119,7 @@ todo el sitio se vea igual aunque lo sirvan subsistemas distintos.
   subsistema instala `../../frontend-indiecinema` como paquete. Los dos paquetes `path` se
   declaran como `dev-main`: si no, Composer anota en el `composer.lock` la rama en la que está
   cada uno, y el lock cambiaría (y chocaría) en cada rama. Para cada entrega, los dos se
-  etiquetan (`entrega-N`) y se despliegan en esa etiqueta.
+  etiquetan (`entrega-N`) sobre lo que está publicado desde `main`.
 - **Cada contenedor monta sólo lo suyo**: su carpeta, el núcleo y el front. Ningún subsistema ve
   el `config.ini` de otro, así que si uno queda comprometido no se lleva los secretos de los
   demás; cuando se sume Mercado Pago, su credencial va a estar sólo en funciones.
@@ -197,8 +197,9 @@ todo el sitio se vea igual aunque lo sirvan subsistemas distintos.
   estado, la fecha, el precio, el cupo, los títulos, la sala y el organizador de una función;
   `GET /interno/funciones?ids=…` da lo mismo de hasta 20 juntas, para una página de «Mis
   reservas».
-  Cuentas tiene `GET /interno/usuarios/{id}` y `POST /interno/usuarios/{id}/roles`, que llama
-  programación desde la bandeja de solicitudes de sala.
+  Cuentas tiene `GET /interno/usuarios/{id}` (el nombre y el correo, para programación y para los
+  correos de funciones) y `POST /interno/usuarios/{id}/roles`, que llama programación desde la
+  bandeja de solicitudes de sala.
   Funciones tiene `GET /interno/funciones/{id}/ocupacion` y `GET /interno/ocupacion?funciones=…`
   (una página de tarjetas en un solo pedido): los lugares ocupados, con los que programación
   muestra los libres. Si funciones no responde, la cartelera y la ficha se muestran sin ese dato.
@@ -206,6 +207,11 @@ todo el sitio se vea igual aunque lo sirvan subsistemas distintos.
   /interno/funciones/{id}/cancelar-reservas` de funciones, que cancela sus reservas y les avisa por
   correo a los espectadores (la dirección se la pide a cuentas). Cada cambio de estado de una
   reserva queda en la tabla `cambio_reserva`, con quién lo hizo.
+  El acuerdo de fecha (las franjas, el mínimo y los «Me sirve») se guarda en funciones, que es
+  la que después cuenta los lugares, pero sus pantallas están en la ficha y en «Mis funciones»,
+  que sirve programación: programación lo maneja con `/interno/acuerdos` de funciones (proponer,
+  votar, quitar el voto, confirmar y cerrar sin mínimo). La votación de títulos, en cambio, es
+  toda de programación (tabla `voto`).
 - **Pedir ser organizador es pedir una sala**, como el recorrido de la E2 (sección 7): la
   solicitud de sala (`/solicitar-sala`) guarda la sala sin publicar y le avisa al equipo por
   correo; aprobarla la publica y programación le pide a cuentas el rol de organizador. Primero el
@@ -222,9 +228,10 @@ todo el sitio se vea igual aunque lo sirvan subsistemas distintos.
   compose (`COMPOSE_PROFILES=buzon` en `.env`), que en el VPS sólo escucha en la máquina y se ve
   con `ssh -L 8025:127.0.0.1:8025 …`. Con un proveedor de verdad, un servidor con usuario exige
   `smtps://` o STARTTLS para no mandar la clave sin cifrar.
-- **Las tareas programadas, cuando las haya** (cerrar votaciones, liberar reservas vencidas), las
-  va a disparar el cron del servidor con `docker compose exec -T <subsistema> php bin/<tarea>.php`,
-  en lugar de sumar un contenedor sólo para eso.
+- **Las tareas programadas, cuando las haya**, las va a disparar el cron del servidor con
+  `docker compose exec -T <subsistema> php bin/<tarea>.php`, en lugar de sumar un contenedor sólo
+  para eso. Por ahora no hace falta ninguna: la votación y el acuerdo los cierra el organizador
+  desde la ficha.
 - **Las rutas dentro del contenedor copian las del disco** (`/src/backend-indiecinema/<subsistema>`
   y `/src/frontend-indiecinema`), así los repositorios `path` de Composer funcionan igual si se
   instala desde afuera o desde adentro del contenedor.
@@ -279,12 +286,13 @@ docker run --rm -u "$(id -u):$(id -g)" -v "$PWD/..:/app" -w /app/backend-indieci
 
 | URL | Qué es |
 |---|---|
-| http://localhost:8080/ | la portada, con las próximas funciones y algunas salas |
+| http://localhost:8080/ | la portada, con el carrusel de destacadas, las próximas funciones y algunas salas |
 | http://localhost:8080/cartelera | la cartelera pública, con filtros, paginado y descarga en CSV; con `Accept: application/json`, la misma consulta en JSON |
+| http://localhost:8080/cartelera/{id} | la ficha de una función: con sesión de espectador, votar el título, marcar las franjas que le sirven o reservar, según su estado; los lugares libres se actualizan solos |
 | http://localhost:8080/acerca-de | «Acerca de IndieCinema»: quiénes somos y cómo funciona |
 | http://localhost:8080/salas | el listado público de salas habilitadas |
 | http://localhost:8080/organizador/salas | «Mis salas», con sesión de organizador |
-| http://localhost:8080/organizador/funciones | «Mis funciones»: las de sus salas, en cualquier estado y con su fecha |
+| http://localhost:8080/organizador/funciones | «Mis funciones»: las de sus salas, en cualquier estado y con su fecha; desde ahí se programa una función o se la abre a votación de títulos, y se proponen las franjas del acuerdo |
 | http://localhost:8080/cuenta/ | cuentas (`/cuenta/ingresar` y `/cuenta/registro`) |
 | http://localhost:8080/solicitar-sala | la solicitud de sala, con sesión: se guarda la sala sin publicar y le llega al equipo por correo |
 | http://localhost:8080/administracion/solicitudes | la bandeja de solicitudes de sala, para aprobarlas (publica la sala y da el rol de organizador) o rechazarlas con un motivo, y el historial; sólo el administrador |
@@ -389,7 +397,8 @@ Después, programación, todo a nombre de Omar Organizador (el detalle está en
 - doce obras de dominio público, cada una con su afiche;
 - quince funciones programadas, entre una semana y un mes después del día en que se cargan.
 
-Las fotos de las salas y los afiches (imágenes hechas para el proyecto, con licencia CC0) se copian
+Las fotos de las salas (ilustraciones con licencia CC0) y los afiches (los de las películas, de
+dominio público) se copian
 al volumen de archivos de programación. Pasan por los mismos repositorios que la web, y correrlo de
 nuevo agrega sólo lo que falte, buscando cada cosa por su id: lo que ya estaba no se toca, aunque
 se haya cambiado a mano. Por eso una función que ya estaba conserva su fecha, y pasado un mes queda
@@ -411,9 +420,7 @@ La segunda vez, todo sale en «ya estaban». Para comprobar la carga en el naveg
 - Con la sesión de `organizador@indiecinema.test` (contraseña `organizador2026`, en
   http://localhost:8080/cuenta/ingresar), http://localhost:8080/organizador/salas muestra las
   cuatro como `PUBLICADA`, y cada una se puede editar.
-
-Las obras y las funciones todavía no tienen pantalla: se ven cuando estén el catálogo y la
-cartelera.
+- http://localhost:8080/cartelera muestra las quince funciones, cada una con su afiche.
 
 En producción (cualquier `entorno` que no sea `"desarrollo"`) no hace nada sin la confirmación
 explícita, para que los datos inventados no lleguen al sitio real por un comando copiado de acá.
@@ -543,8 +550,7 @@ descartable (`mysql-pruebas`) que queda andando para la próxima, también en `1
 apaga con `docker stop mysql-pruebas`). Más abajo, cómo correrlas con el PHP de la máquina.
 
 El núcleo y los tres subsistemas tienen las suyas (las de los subsistemas necesitan el
-`composer install` de arriba, que trae PHPUnit). Funciones, por ahora, prueba que arranca y que
-lee una función de programación por la API interna:
+`composer install` de arriba, que trae PHPUnit):
 
 ```
 composer install -d nucleo
@@ -565,8 +571,10 @@ la ve, sus próximas funciones y el camino de la función a su sala y de vuelta,
 listado de salas, la solicitud de sala con las mismas validaciones en el navegador y en el
 servidor, la foto y el correo al equipo, la bandeja del administrador contra una cuentas de
 mentira (aprobar pide el rol y publica la sala, rechazar exige motivo, el historial y retirar la
-sala, y quién entra), la tabla de solicitudes con una pendiente por sala, la portada
-con las próximas funciones, «Acerca de», con los enlaces del encabezado y del pie, las opciones del
+sala, y quién entra), la tabla de solicitudes con una pendiente por sala, la votación de títulos
+(votar, cambiar el voto y cerrarla con la más votada), el acuerdo de fecha visto desde
+programación, los lugares libres de la ficha y de las tarjetas, la cancelación de una función con
+reservas, la portada con las destacadas y las próximas funciones, «Acerca de», con los enlaces del encabezado y del pie, las opciones del
 menú y del pie que ve cada rol, y la página de error, que vuelve a la portada); en cuentas, el
 registro de punta a punta, la API interna de usuarios (quién es y el rol de organizador, sólo para
 programación), el listado de usuarios del administrador con su buscador, su paginado, dar y quitar
@@ -577,8 +585,10 @@ usuario y rol (correo único, y roles sin repetir y sólo de un usuario que exis
 restricciones de la tabla reserva (código único, cantidad positiva y total no negativo) y el cupo de
 la reserva, con varios procesos a la vez por el último lugar, sus cambios de estado, y la reserva de punta a punta (sesión,
 token CSRF, cantidad inválida, sin lugares, la reserva de otro y la cancelación), el correo de la
-reserva confirmada (también sin cuentas, sin servidor de correo o sin `[sitio] url`) y «Mis
-reservas» (el orden, el paginado, sólo las propias y programación caída). Para correrlas con el PHP
+reserva confirmada (también sin cuentas, sin servidor de correo o sin `[sitio] url`), «Mis
+reservas» (el orden, el paginado, sólo las propias y programación caída), los paneles de reservas
+del organizador y del administrador (la asistencia, el CSV y la anulación), la ocupación que lee
+programación y la API interna del acuerdo de fecha. Para correrlas con el PHP
 de la máquina (8.4 o superior, con `pdo_mysql`), contra un MySQL descartable:
 
 ```
@@ -612,7 +622,7 @@ En cada PR y en cada push a `main` o a `dev`, GitHub Actions (`.github/workflows
 - **El análisis estático** de cada paquete con PHPStan (`composer analisis`, nivel 5): lo que ya
   estaba antes de sumarlo queda en su `phpstan-baseline.neon`, y marca sólo lo nuevo. Al arreglar
   algo de la lista, se regenera con `composer analisis -- --generate-baseline`.
-- **Las pruebas** del núcleo, cuentas y programación contra un MySQL 8.4, con el front al lado: el
+- **Las pruebas** del núcleo, cuentas, programación y funciones contra un MySQL 8.4, con el front al lado: el
   de la rama del mismo nombre si existe en el front, y si no el de la base del PR (`dev` o `main`). Un cambio que toca los
   dos repositorios va en ramas que se llaman igual, y sus dos PR pasan sin esperar al otro.
 - **`composer audit`** sobre el `composer.lock` de cada subsistema y del núcleo.

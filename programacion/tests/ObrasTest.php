@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace IndieCinema\Programacion\Pruebas;
 
+use DateTimeImmutable;
 use IndieCinema\Nucleo\Aplicacion;
 use IndieCinema\Nucleo\BaseDeDatos;
 use IndieCinema\Nucleo\Configuracion;
@@ -12,10 +13,13 @@ use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Log;
 use IndieCinema\Nucleo\Uuid;
 use IndieCinema\Programacion\Modelo\DatosDeObra;
+use IndieCinema\Programacion\Modelo\DatosDeSala;
 use IndieCinema\Programacion\Modelo\Obra;
 use IndieCinema\Programacion\Modelo\OrigenCopia;
+use IndieCinema\Programacion\Modelo\Sala;
 use IndieCinema\Programacion\Modelo\TipoObra;
 use IndieCinema\Programacion\Repositorios\RepositorioDeObras;
+use IndieCinema\Programacion\Repositorios\RepositorioDeSalas;
 use PHPUnit\Framework\TestCase;
 
 final class ObrasTest extends TestCase
@@ -187,5 +191,96 @@ final class ObrasTest extends TestCase
         self::assertArrayHasKey('filtros', $datos);
         self::assertArrayHasKey('avisos', $datos);
         self::assertCount(2, $datos['obras']);
+    }
+
+    /**
+     * Criterio de aceptación E4-08.3: «Listo cuando: El enlace del encabezado deja de dar 404.»
+     */
+    public function testMostrarFichaPublicaDeObraConProximasFunciones(): void
+    {
+        [$generoId] = $this->genero('Drama');
+        $obra = Obra::crear(
+            self::ORGANIZADORA,
+            new DatosDeObra('La flor', 'Seis episodios independientes', 2018, 'Mariano Llinás', 840, TipoObra::Pelicula, OrigenCopia::ObraPropia, [$generoId]),
+        );
+        $this->repositorio->agregar($obra);
+
+        // Agregamos una sala y una función programada para la obra
+        $sala = Sala::nueva(self::ORGANIZADORA, new DatosDeSala('Cine Tita', 'Descripción', 'Calle 123', 'Luján', 50, 1, 120, 15), '00000000000000000000000000000001.jpg');
+        (new RepositorioDeSalas($this->base))->agregar($sala);
+        $this->base->ejecutar('UPDATE sala SET habilitada = TRUE WHERE id = ?', [$sala->id]);
+
+        $funcionId = Uuid::nuevo();
+        $this->base->ejecutar(
+            'INSERT INTO funcion (id, sala_id, estado, fecha_hora, precio_base, cupo) VALUES (?, ?, ?, ?, ?, ?)',
+            [$funcionId, $sala->id, 'programada', (new DateTimeImmutable('+2 days'))->format('Y-m-d H:i:s'), 1500, 50],
+        );
+        $this->base->ejecutar(
+            'INSERT INTO funcion_obra (funcion_id, obra_id, estado) VALUES (?, ?, ?)',
+            [$funcionId, $obra->id, 'elegida'],
+        );
+
+        $respuesta = $this->pedir("/obras/{$obra->id}");
+        self::assertSame(200, $respuesta->estado());
+        self::assertStringContainsString('La flor', $respuesta->cuerpo());
+        self::assertStringContainsString('Mariano Llinás', $respuesta->cuerpo());
+        self::assertStringContainsString('Cine Tita', $respuesta->cuerpo());
+
+        // En JSON
+        $respuestaJson = $this->pedir("/obras/{$obra->id}", [], ['Accept' => 'application/json']);
+        self::assertSame(200, $respuestaJson->estado());
+        $datos = json_decode($respuestaJson->cuerpo(), true);
+        self::assertIsArray($datos);
+        self::assertSame('La flor', $datos['obra']['titulo']);
+        self::assertCount(1, $datos['funciones']);
+        self::assertSame($funcionId, $datos['funciones'][0]['id']);
+    }
+
+    public function testMostrarObraInexistenteDevuelve404(): void
+    {
+        $noUuid = $this->pedir('/obras/no-es-un-uuid');
+        self::assertSame(404, $noUuid->estado());
+
+        $uuidInexistente = $this->pedir('/obras/' . Uuid::nuevo());
+        self::assertSame(404, $uuidInexistente->estado());
+    }
+
+    public function testMostrarObraDadaDeBajaDevuelve404(): void
+    {
+        [$generoId] = $this->genero('Drama');
+        $obra = Obra::crear(
+            self::ORGANIZADORA,
+            new DatosDeObra('Obra Dada de Baja', 'Sinopsis', 2020, 'Director X', 100, TipoObra::Pelicula, OrigenCopia::ObraPropia, [$generoId]),
+        );
+        $this->repositorio->agregar($obra);
+        $this->repositorio->darDeBaja($obra->id);
+
+        $respuesta = $this->pedir("/obras/{$obra->id}");
+        self::assertSame(404, $respuesta->estado());
+    }
+
+    public function testFichaDeObraEsEditableParaSuOrganizador(): void
+    {
+        [$generoId] = $this->genero('Drama');
+        $obra = Obra::crear(
+            self::ORGANIZADORA,
+            new DatosDeObra('Obra Propia', 'Sinopsis', 2021, 'Director Y', 90, TipoObra::Pelicula, OrigenCopia::ObraPropia, [$generoId]),
+        );
+        $this->repositorio->agregar($obra);
+
+        // Sin sesión
+        $publica = $this->pedir("/obras/{$obra->id}", [], ['Accept' => 'application/json']);
+        $datosPublica = json_decode($publica->cuerpo(), true);
+        self::assertFalse($datosPublica['obra']['editable']);
+
+        // Con sesión del dueño
+        $dueno = $this->pedir("/obras/{$obra->id}", [], [
+            'Accept' => 'application/json',
+            'X-Usuario-Id' => self::ORGANIZADORA,
+            'X-Rol' => 'organizador',
+        ]);
+        $datosDueno = json_decode($dueno->cuerpo(), true);
+        self::assertTrue($datosDueno['obra']['editable']);
+        self::assertSame("/organizador/obras/{$obra->id}/editar", $datosDueno['obra']['url_editar']);
     }
 }

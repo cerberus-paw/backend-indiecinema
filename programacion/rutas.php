@@ -56,6 +56,7 @@ return static function (Router $router): void {
     $router->post('/organizador/obras/nueva', [ObrasDelOrganizador::class, 'crear'], Rol::Organizador);
     $router->get('/organizador/obras/{id}/editar', [ObrasDelOrganizador::class, 'editar'], Rol::Organizador);
     $router->post('/organizador/obras/{id}/editar', [ObrasDelOrganizador::class, 'actualizar'], Rol::Organizador);
+    $router->post('/organizador/obras/{id}/baja', [ObrasDelOrganizador::class, 'darDeBaja'], Rol::Organizador);
 
     // «Mis funciones»: las de las salas propias, en cualquier estado. Que sean las suyas lo
     // controla el servicio, con el id del que pide.
@@ -93,6 +94,8 @@ return static function (Router $router): void {
     $router->get('/salas/{id}/imagen', [ImagenDeSala::class, 'mostrar']);
     // El listado público de obras: sólo las que no se dieron de baja, sin sesión.
     $router->get('/obras', [Obras::class, 'listar']);
+    // La ficha pública de una obra con sus datos y sus próximas funciones en cartelera (E4-08.3).
+    $router->get('/obras/{id}', [Obras::class, 'mostrar']);
     // El afiche de una obra, para las tarjetas de sus funciones: público como el catálogo.
     $router->get('/obras/{id}/afiche', [AficheDeObra::class, 'mostrar']);
 

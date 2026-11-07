@@ -109,17 +109,21 @@ final class ParametrosDeCartelera
 
     /**
      * El orden aplicado, como lo muestra el resumen de la cartelera (E4-10.9): el valor, vacío
-     * para el de siempre como en las opciones del desplegable, y cómo se lee.
+     * para el de siempre como en las opciones del desplegable; la etiqueta del desplegable; y
+     * cómo se lee después de «ordenadas por», en minúscula. Lo arma sólo el back, así la plantilla
+     * y el buscador muestran lo mismo.
      *
-     * @return array{valor: string, etiqueta: string}
+     * @return array{valor: string, etiqueta: string, leida: string}
      */
     public function ordenAplicado(): array
     {
         $orden = $this->filtros->orden;
+        $etiqueta = $orden->etiqueta();
 
         return [
             'valor' => $orden === OrdenDeCartelera::FechaAscendente ? '' : $orden->value,
-            'etiqueta' => $orden->etiqueta(),
+            'etiqueta' => $etiqueta,
+            'leida' => mb_strtolower(mb_substr($etiqueta, 0, 1)) . mb_substr($etiqueta, 1),
         ];
     }
 

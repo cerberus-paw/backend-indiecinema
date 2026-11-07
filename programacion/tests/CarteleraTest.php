@@ -844,8 +844,8 @@ final class CarteleraTest extends TestCase
         $deSiempre = self::json($this->pedirJson('/cartelera'));
         $porPrecio = self::json($this->pedirJson('/cartelera?orden=precio_asc'));
 
-        self::assertSame(['valor' => '', 'etiqueta' => 'Fecha: más próxima'], $deSiempre['orden']);
-        self::assertSame(['valor' => 'precio_asc', 'etiqueta' => 'Precio: menor a mayor'], $porPrecio['orden']);
+        self::assertSame(['valor' => '', 'etiqueta' => 'Fecha: más próxima', 'leida' => 'fecha: más próxima'], $deSiempre['orden']);
+        self::assertSame(['valor' => 'precio_asc', 'etiqueta' => 'Precio: menor a mayor', 'leida' => 'precio: menor a mayor'], $porPrecio['orden']);
     }
 
     /**

@@ -344,6 +344,94 @@ final class CarteleraTest extends TestCase
         self::assertNull(self::json($this->pedirJson('/cartelera'))['busqueda']);
     }
 
+    /**
+     * Las etiquetas de los filtros activos (E4-10.9): una por filtro, con su nombre, y el link a
+     * la cartelera sin ese filtro, que conserva los demás y el orden y vuelve a la primera página.
+     */
+    public function testElJsonTraeUnaEtiquetaPorFiltroConElLinkQueLoQuita(): void
+    {
+        $this->cargarDatosDePrueba();
+
+        $json = self::json($this->pedirJson('/cartelera?q=keaton&localidad=Luj%C3%A1n&fecha=2030-01-02&genero=Comedia&precio_min=500&precio_max=2000&orden=precio_asc'));
+
+        $resto = 'orden=precio_asc';
+        self::assertSame(
+            [
+                ['texto' => 'Buscar: keaton', 'url' => "/cartelera?localidad=Luj%C3%A1n&fecha=2030-01-02&genero=Comedia&precio_min=500&precio_max=2000&{$resto}"],
+                ['texto' => 'Localidad: Luján', 'url' => "/cartelera?q=keaton&fecha=2030-01-02&genero=Comedia&precio_min=500&precio_max=2000&{$resto}"],
+                ['texto' => 'Fecha: 02/01/2030', 'url' => "/cartelera?q=keaton&localidad=Luj%C3%A1n&genero=Comedia&precio_min=500&precio_max=2000&{$resto}"],
+                ['texto' => 'Género: Comedia', 'url' => "/cartelera?q=keaton&localidad=Luj%C3%A1n&fecha=2030-01-02&precio_min=500&precio_max=2000&{$resto}"],
+                ['texto' => 'Desde $ 500', 'url' => "/cartelera?q=keaton&localidad=Luj%C3%A1n&fecha=2030-01-02&genero=Comedia&precio_max=2000&{$resto}"],
+                ['texto' => 'Hasta $ 2.000', 'url' => "/cartelera?q=keaton&localidad=Luj%C3%A1n&fecha=2030-01-02&genero=Comedia&precio_min=500&{$resto}"],
+            ],
+            $json['filtros_activos'],
+        );
+        // «Quitar todos» deja sólo el orden elegido.
+        self::assertSame('/cartelera?orden=precio_asc', $json['quitar_filtros']);
+    }
+
+    public function testElPrecioCeroEsALaGorraYUnFiltroInvalidoNoTieneEtiqueta(): void
+    {
+        $this->cargarDatosDePrueba();
+
+        $json = self::json($this->pedirJson('/cartelera?precio_max=0&precio_min=abc'));
+
+        self::assertSame([['texto' => 'A la gorra', 'url' => '/cartelera']], $json['filtros_activos']);
+        // El inválido sigue explicado en el aviso.
+        self::assertCount(1, $json['avisos']);
+    }
+
+    public function testSinFiltrosNoHayEtiquetasYQuitarTodosEsLaCartelera(): void
+    {
+        $this->cargarDatosDePrueba();
+
+        $json = self::json($this->pedirJson('/cartelera?orden=titulo_asc'));
+
+        // El orden solo no es un filtro.
+        self::assertSame([], $json['filtros_activos']);
+        self::assertSame('/cartelera?orden=titulo_asc', $json['quitar_filtros']);
+        self::assertSame('/cartelera', self::json($this->pedirJson('/cartelera'))['quitar_filtros']);
+    }
+
+    /**
+     * Las etiquetas en la página (E4-10.9): debajo del título, afuera de lo que redibuja el
+     * buscador, cada una un link que dice qué filtro quita; y «Filtros» dice cuántos hay.
+     */
+    public function testLaPaginaMuestraLasEtiquetasQueQuitanCadaFiltro(): void
+    {
+        $this->cargarDatosDePrueba();
+
+        $documento = HTMLDocument::createFromString($this->pedir('/cartelera?localidad=Luj%C3%A1n&precio_max=2000&orden=precio_asc')->cuerpo(), LIBXML_NOERROR);
+
+        $lista = $documento->querySelector('[data-filtros-activos]');
+        self::assertNotNull($lista);
+        self::assertNull($lista->closest('#resultados-cartelera'));
+        $etiquetas = array_map(
+            static fn ($enlace): array => [$enlace->getAttribute('aria-label'), $enlace->getAttribute('href')],
+            iterator_to_array($lista->querySelectorAll('a[data-quitar-filtro]')),
+        );
+        self::assertSame(
+            [
+                ['Quitar el filtro Localidad: Luján', '/cartelera?precio_max=2000&orden=precio_asc'],
+                ['Quitar el filtro Hasta $ 2.000', '/cartelera?localidad=Luj%C3%A1n&orden=precio_asc'],
+            ],
+            $etiquetas,
+        );
+        self::assertSame('/cartelera?orden=precio_asc', $lista->querySelector('a[data-quitar-todos]')?->getAttribute('href'));
+        self::assertSame('Filtros (2)', trim((string) $documento->querySelector('details[data-filtros-cartelera] summary')?->textContent));
+    }
+
+    public function testSinFiltrosLaPaginaNoMuestraEtiquetas(): void
+    {
+        $this->cargarDatosDePrueba();
+
+        $documento = HTMLDocument::createFromString($this->pedir('/cartelera?orden=precio_asc')->cuerpo(), LIBXML_NOERROR);
+
+        self::assertNull($documento->querySelector('a[data-quitar-filtro]'));
+        self::assertNull($documento->querySelector('a[data-quitar-todos]'));
+        self::assertSame('Filtros', trim((string) $documento->querySelector('details[data-filtros-cartelera] summary')?->textContent));
+    }
+
     public function testSinFuncionesProgramadasElOrdenNoLasHaceParecerUnaBusqueda(): void
     {
         $respuesta = $this->pedir('/cartelera?orden=precio_asc');
@@ -719,7 +807,7 @@ final class CarteleraTest extends TestCase
         self::assertSame(200, $respuesta->estado());
         self::assertSame('Accept', $respuesta->cabecera('Vary'));
         $json = self::json($respuesta);
-        self::assertSame(['funciones', 'filtros', 'avisos', 'paginado', 'csv', 'busqueda', 'orden'], array_keys($json));
+        self::assertSame(['funciones', 'filtros', 'avisos', 'paginado', 'csv', 'busqueda', 'orden', 'filtros_activos', 'quitar_filtros'], array_keys($json));
         self::assertCount(12, $json['funciones']);
         // Cada función con lo mismo que muestra la tarjeta, y el link a su ficha.
         $primera = $json['funciones'][0];

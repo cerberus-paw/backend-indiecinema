@@ -106,6 +106,22 @@ final class ParametrosDeCartelera
     }
 
     /**
+     * El orden aplicado, como lo muestra el resumen de la cartelera (E4-10.9): el valor, vacío
+     * para el de siempre como en las opciones del desplegable, y cómo se lee.
+     *
+     * @return array{valor: string, etiqueta: string}
+     */
+    public function ordenAplicado(): array
+    {
+        $orden = $this->filtros->orden;
+
+        return [
+            'valor' => $orden === OrdenDeCartelera::FechaAscendente ? '' : $orden->value,
+            'etiqueta' => $orden->etiqueta(),
+        ];
+    }
+
+    /**
      * Si se recortó la cartelera. El orden no cuenta: no saca funciones, así que con él solo no
      * hay nada que limpiar y una cartelera vacía es porque no hay funciones programadas.
      */

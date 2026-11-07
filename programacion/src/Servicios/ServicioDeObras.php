@@ -8,13 +8,10 @@ use IndieCinema\Nucleo\Http\ExcepcionHttp;
 use IndieCinema\Nucleo\Seguridad\Usuario;
 use IndieCinema\Nucleo\Uuid;
 use IndieCinema\Programacion\Modelo\DatosDeObra;
-use IndieCinema\Programacion\Modelo\FiltrosDeCartelera;
-use IndieCinema\Programacion\Modelo\FuncionEnCartelera;
 use IndieCinema\Programacion\Modelo\Genero;
 use IndieCinema\Programacion\Modelo\ImagenSubida;
 use IndieCinema\Programacion\Modelo\Obra;
 use IndieCinema\Programacion\Modelo\ReglaIncumplida;
-use IndieCinema\Programacion\Repositorios\RepositorioDeCartelera;
 use IndieCinema\Programacion\Repositorios\RepositorioDeGeneros;
 use IndieCinema\Programacion\Repositorios\RepositorioDeObras;
 use Psr\Log\LoggerInterface;
@@ -28,7 +25,6 @@ final class ServicioDeObras
         private readonly RepositorioDeObras $obras,
         private readonly RepositorioDeGeneros $generos,
         private readonly AfichesDeObras $afiches,
-        private readonly RepositorioDeCartelera $cartelera,
         private readonly LoggerInterface $log,
     ) {
     }
@@ -158,16 +154,6 @@ final class ServicioDeObras
         }
 
         return $obra->afiche;
-    }
-
-    /**
-     * Próximas funciones en cartelera donde se proyecta la obra.
-     *
-     * @return list<FuncionEnCartelera>
-     */
-    public function proximasFunciones(string $obraId): array
-    {
-        return $this->cartelera->todas(new FiltrosDeCartelera(obraId: $obraId));
     }
 
     /**

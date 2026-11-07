@@ -20,8 +20,8 @@ final class FormularioDeObraTest extends TestCase
     public static function generosDePrueba(): array
     {
         return [
-            new Genero('00000000-0000-4000-8000-000000000001', 'Drama'),
-            new Genero('00000000-0000-4000-8000-000000000002', 'Comedia'),
+            new Genero('00000000-0000-4000-8000-000000000001', 'Drama', ''),
+            new Genero('00000000-0000-4000-8000-000000000002', 'Comedia', ''),
         ];
     }
 

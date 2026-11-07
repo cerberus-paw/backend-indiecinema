@@ -86,6 +86,9 @@ final class Cartelera extends Controlador
                 'busqueda' => $parametros->busqueda(),
                 // Para el resumen de arriba: cómo están ordenadas (E4-10.9).
                 'orden' => $parametros->ordenAplicado(),
+                // Las etiquetas de los filtros activos y «Quitar todos» (E4-10.9).
+                'filtros_activos' => $parametros->filtrosActivos(),
+                'quitar_filtros' => $parametros->urlSinFiltros(),
             ])->conCabecera('Vary', 'Accept');
         }
 
@@ -102,6 +105,8 @@ final class Cartelera extends Controlador
             'paginado' => $paginado,
             'csv' => $parametros->urlDeCsv(),
             'orden' => $parametros->ordenAplicado(),
+            'filtros_activos' => $parametros->filtrosActivos(),
+            'quitar_filtros' => $parametros->urlSinFiltros(),
         ])->conCabecera('Vary', 'Accept');
     }
 

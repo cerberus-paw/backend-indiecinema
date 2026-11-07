@@ -12,6 +12,7 @@ use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Log;
 use IndieCinema\Nucleo\Pruebas\Dobles\Formularios;
+use IndieCinema\Nucleo\Pruebas\Dobles\PaginasParaValidar;
 use IndieCinema\Nucleo\Uuid;
 use PHPUnit\Framework\TestCase;
 
@@ -63,6 +64,7 @@ final class RegistroTest extends TestCase
         $respuesta = $this->pedir('GET');
 
         self::assertSame(200, $respuesta->estado());
+        PaginasParaValidar::guardar('registro', $respuesta->cuerpo());
         self::assertStringContainsString('action="/cuenta/registro"', $respuesta->cuerpo());
         self::assertStringContainsString('name="_csrf" value="' . self::CSRF . '"', $respuesta->cuerpo());
         // Sin errores ni mensajes, y con los términos sin tildar.
@@ -87,6 +89,7 @@ final class RegistroTest extends TestCase
         $cuerpo = $respuesta->cuerpo();
 
         self::assertSame(422, $respuesta->estado());
+        PaginasParaValidar::guardar('registro-con-errores', $cuerpo);
         self::assertSame('Revisá 2 campos', Formularios::resumen($cuerpo)['titulo'] ?? null);
         self::assertMatchesRegularExpression('#id="error-email"[^>]*>.*Escribí un correo válido#s', $cuerpo);
         self::assertMatchesRegularExpression('#id="error-password_confirmacion"[^>]*>.*Las contraseñas no coinciden.#s', $cuerpo);

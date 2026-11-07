@@ -271,6 +271,23 @@ final class RepositorioDeCartelera
             $condiciones[] = 'f.sala_id = ?';
             $parametros[] = $filtros->salaId;
         }
+        if ($filtros->obraId !== null) {
+            $condiciones[] = "EXISTS (
+                SELECT 1 FROM funcion_obra fo
+                WHERE fo.funcion_id = f.id
+                    AND fo.obra_id = ?
+                    AND (fo.estado = 'elegida' OR (f.estado = 'en_votacion_titulos' AND fo.estado = 'candidata'))
+            )";
+            $parametros[] = $filtros->obraId;
+        }
+        if ($filtros->precioMinimo !== null) {
+            $condiciones[] = 'f.precio_base >= ?';
+            $parametros[] = number_format($filtros->precioMinimo, 2, '.', '');
+        }
+        if ($filtros->precioMaximo !== null) {
+            $condiciones[] = 'f.precio_base <= ?';
+            $parametros[] = number_format($filtros->precioMaximo, 2, '.', '');
+        }
 
         return [implode(' AND ', $condiciones), $parametros];
     }

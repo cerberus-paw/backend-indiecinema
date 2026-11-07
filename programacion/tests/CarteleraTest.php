@@ -11,6 +11,7 @@ use IndieCinema\Nucleo\Configuracion;
 use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Log;
+use IndieCinema\Nucleo\Pruebas\Dobles\PaginasParaValidar;
 use IndieCinema\Nucleo\Uuid;
 use IndieCinema\Programacion\Controladores\Cartelera;
 use IndieCinema\Programacion\Controladores\TarjetaDeFuncion;
@@ -186,6 +187,7 @@ final class CarteleraTest extends TestCase
 
         self::assertPagina($respuesta, 12, '15 funciones');
         $cuerpo = $respuesta->cuerpo();
+        PaginasParaValidar::guardar('cartelera', $cuerpo);
         // La primera es la más próxima: Metrópolis, en una semana, a las 20.
         preg_match('#<article class="tarjeta-funcion.*?</article>#s', $cuerpo, $primera);
         self::assertStringContainsString('Metrópolis', $primera[0] ?? '');
@@ -230,6 +232,41 @@ final class CarteleraTest extends TestCase
         self::assertStringContainsString('Página 1 de 4', $respuesta->cuerpo());
     }
 
+    public function testElPaginadoNumeraLaPrimeraLaUltimaYLasDeAlrededor(): void
+    {
+        $this->cargarDatosDePrueba();
+
+        $primera = self::json($this->pedirJson('/cartelera?orden=precio_asc', ['por_pagina' => 1]));
+        self::assertSame(
+            [
+                ['numero' => 1, 'url' => '/cartelera?orden=precio_asc', 'actual' => true],
+                ['numero' => 2, 'url' => '/cartelera?orden=precio_asc&pagina=2', 'actual' => false],
+                ['numero' => 3, 'url' => '/cartelera?orden=precio_asc&pagina=3', 'actual' => false],
+                ['numero' => 4, 'url' => '/cartelera?orden=precio_asc&pagina=4', 'actual' => false],
+                ['numero' => 5, 'url' => '/cartelera?orden=precio_asc&pagina=5', 'actual' => false],
+                null,
+                ['numero' => 15, 'url' => '/cartelera?orden=precio_asc&pagina=15', 'actual' => false],
+            ],
+            $primera['paginado']['paginas'],
+        );
+
+        $delMedio = self::json($this->pedirJson('/cartelera?orden=precio_asc&pagina=8', ['por_pagina' => 1]));
+        self::assertSame(
+            [
+                ['numero' => 1, 'url' => '/cartelera?orden=precio_asc', 'actual' => false],
+                null,
+                ['numero' => 6, 'url' => '/cartelera?orden=precio_asc&pagina=6', 'actual' => false],
+                ['numero' => 7, 'url' => '/cartelera?orden=precio_asc&pagina=7', 'actual' => false],
+                ['numero' => 8, 'url' => '/cartelera?orden=precio_asc&pagina=8', 'actual' => true],
+                ['numero' => 9, 'url' => '/cartelera?orden=precio_asc&pagina=9', 'actual' => false],
+                ['numero' => 10, 'url' => '/cartelera?orden=precio_asc&pagina=10', 'actual' => false],
+                null,
+                ['numero' => 15, 'url' => '/cartelera?orden=precio_asc&pagina=15', 'actual' => false],
+            ],
+            $delMedio['paginado']['paginas'],
+        );
+    }
+
     /**
      * @return iterable<string, array{string, int, string}>
      */
@@ -271,6 +308,48 @@ final class CarteleraTest extends TestCase
         self::assertMatchesRegularExpression('#<option value="Luján" selected>#', $cuerpo);
         self::assertMatchesRegularExpression('#<option value="Comedia" selected>#', $cuerpo);
         self::assertMatchesRegularExpression('#name="fecha"\s+class="campo-control control-input"\s+value="2030-01-02"#', $cuerpo);
+    }
+
+    public function testElDesplegableMuestraElOrdenElegidoYSinJavaScriptSeAplicaConUnBoton(): void
+    {
+        $this->cargarDatosDePrueba();
+        $cuerpo = $this->pedir('/cartelera?orden=precio_desc')->cuerpo();
+
+        self::assertMatchesRegularExpression('#<select id="cartelera-orden" name="orden" form="filtros-cartelera"#', $cuerpo);
+        self::assertMatchesRegularExpression('#<option value="precio_desc" selected>Precio: mayor a menor</option>#', $cuerpo);
+        self::assertMatchesRegularExpression('#<noscript>\s*<button type="submit" form="filtros-cartelera"#', $cuerpo);
+        // El orden por defecto va con valor vacío, así no viaja en la URL.
+        self::assertMatchesRegularExpression('#<option value="" selected>Fecha: más próxima</option>#', $this->pedir('/cartelera')->cuerpo());
+    }
+
+    public function testElOrdenSoloNoEsUnFiltroQueHayaQueLimpiar(): void
+    {
+        $this->cargarDatosDePrueba();
+
+        self::assertStringNotContainsString('Limpiar', $this->pedir('/cartelera?orden=titulo_asc')->cuerpo());
+        self::assertStringContainsString('Limpiar', $this->pedir('/cartelera?orden=titulo_asc&localidad=Luj%C3%A1n')->cuerpo());
+    }
+
+    public function testElJsonTraeLaBusquedaParaLasUltimasBusquedas(): void
+    {
+        $this->cargarDatosDePrueba();
+
+        $filtrada = self::json($this->pedirJson('/cartelera?localidad=Luj%C3%A1n&orden=precio_desc&pagina=1'));
+        self::assertSame(
+            ['url' => '/cartelera?localidad=Luj%C3%A1n&orden=precio_desc', 'etiqueta' => 'Luján · Precio: mayor a menor', 'filtros' => ['localidad' => 'Luján', 'orden' => 'precio_desc']],
+            $filtrada['busqueda'],
+        );
+        self::assertNull(self::json($this->pedirJson('/cartelera?orden=precio_desc'))['busqueda']);
+        self::assertNull(self::json($this->pedirJson('/cartelera'))['busqueda']);
+    }
+
+    public function testSinFuncionesProgramadasElOrdenNoLasHaceParecerUnaBusqueda(): void
+    {
+        $respuesta = $this->pedir('/cartelera?orden=precio_asc');
+
+        self::assertPagina($respuesta, 0);
+        self::assertStringContainsString('Todavía no hay funciones programadas.', $respuesta->cuerpo());
+        self::assertStringNotContainsString('Limpiar', $respuesta->cuerpo());
     }
 
     /**
@@ -360,6 +439,38 @@ final class CarteleraTest extends TestCase
         }
     }
 
+    public function testFiltraPorRangoDePrecioIncluyendoLasGratuitasYLoConservaAlPaginar(): void
+    {
+        $this->cargarDatosDePrueba();
+
+        $gratuitas = self::json($this->pedirJson('/cartelera?precio_min=0&precio_max=0'));
+        self::assertSame(2, $gratuitas['paginado']['total_funciones']);
+        self::assertSame(['A la gorra', 'A la gorra'], array_column($gratuitas['funciones'], 'precio'));
+        self::assertSame(['precio_min' => '0', 'precio_max' => '0'], $gratuitas['filtros']);
+        self::assertSame('/cartelera.csv?precio_min=0&precio_max=0', $gratuitas['csv']);
+
+        $primera = $this->pedir('/cartelera?precio_min=0&precio_max=2000', ['por_pagina' => 2]);
+        $segunda = $this->pedir('/cartelera?precio_min=0&precio_max=2000&pagina=2', ['por_pagina' => 2]);
+        $json = self::json($this->pedirJson('/cartelera?precio_min=0&precio_max=2000', ['por_pagina' => 2]));
+
+        self::assertPagina($primera, 2, '4 funciones');
+        self::assertPagina($segunda, 2, '4 funciones');
+        // Las dos a la gorra (precio 0) entran con las de hasta $ 2.000, y el paginado las reparte.
+        self::assertSame(
+            ['Metrópolis + Viaje a la Luna', 'El acorazado Potemkin', 'El maquinista de la General', 'Sherlock Jr. + Viaje a través de lo imposible'],
+            array_column(self::filasDelCsv($this->pedir('/cartelera.csv?precio_min=0&precio_max=2000')), 2),
+        );
+        self::assertSame(
+            ['Metrópolis + Viaje a la Luna', 'El acorazado Potemkin'],
+            array_column($json['funciones'], 'titulo'),
+        );
+        self::assertSame(['precio_min' => '0', 'precio_max' => '2000'], $json['filtros']);
+        self::assertSame('/cartelera?precio_min=0&precio_max=2000&pagina=2', $json['paginado']['siguiente']);
+        self::assertStringContainsString('href="/cartelera?precio_min=0&amp;precio_max=2000&amp;pagina=2"', $primera->cuerpo());
+        self::assertStringContainsString('href="/cartelera?precio_min=0&amp;precio_max=2000" class="boton boton-secundario boton-chico" rel="prev"', $segunda->cuerpo());
+        self::assertSame('/cartelera.csv?precio_min=0&precio_max=2000', $json['csv']);
+    }
+
     /**
      * Lo que podría escribir alguien a mano en la URL: con cada uno, la página responde 200 y
      * muestra la cartelera entera con el aviso.
@@ -382,6 +493,10 @@ final class CarteleraTest extends TestCase
         yield 'un orden que no existe' => ['orden=popularidad'];
         yield 'un orden incompleto' => ['orden=precio'];
         yield 'un orden como arreglo' => ['orden[]=precio_asc'];
+        yield 'un precio mínimo negativo' => ['precio_min=-100'];
+        yield 'un precio máximo que no es un número' => ['precio_max=gratis'];
+        yield 'un precio mínimo mayor que el máximo' => ['precio_min=3000&precio_max=2000'];
+        yield 'un precio como arreglo' => ['precio_min[]=0'];
     }
 
     #[DataProvider('parametrosInvalidos')]
@@ -603,14 +718,24 @@ final class CarteleraTest extends TestCase
         self::assertSame(200, $respuesta->estado());
         self::assertSame('Accept', $respuesta->cabecera('Vary'));
         $json = self::json($respuesta);
-        self::assertSame(['funciones', 'filtros', 'avisos', 'paginado', 'csv'], array_keys($json));
+        self::assertSame(['funciones', 'filtros', 'avisos', 'paginado', 'csv', 'busqueda'], array_keys($json));
         self::assertCount(12, $json['funciones']);
         // Cada función con lo mismo que muestra la tarjeta, y el link a su ficha.
         $primera = $json['funciones'][0];
         self::assertSame(['id', 'titulo', 'afiche', 'estado', 'precio', 'sala', 'localidad', 'fecha', 'lugares_libres', 'agotada', 'url'], array_keys($primera));
         self::assertSame("/cartelera/{$primera['id']}", $primera['url']);
         self::assertSame(
-            ['numero' => 1, 'total_paginas' => 2, 'total_funciones' => 15, 'anterior' => null, 'siguiente' => '/cartelera?pagina=2'],
+            [
+                'numero' => 1,
+                'total_paginas' => 2,
+                'total_funciones' => 15,
+                'anterior' => null,
+                'siguiente' => '/cartelera?pagina=2',
+                'paginas' => [
+                    ['numero' => 1, 'url' => '/cartelera', 'actual' => true],
+                    ['numero' => 2, 'url' => '/cartelera?pagina=2', 'actual' => false],
+                ],
+            ],
             $json['paginado'],
         );
         self::assertSame([], $json['avisos']);

@@ -11,6 +11,7 @@ use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Log;
 use IndieCinema\Nucleo\Pruebas\Dobles\Formularios;
+use IndieCinema\Nucleo\Pruebas\Dobles\PaginasParaValidar;
 use IndieCinema\Nucleo\Pruebas\Dobles\ServidorSmtpDePrueba;
 use IndieCinema\Nucleo\Uuid;
 use PHPUnit\Framework\TestCase;
@@ -187,6 +188,7 @@ final class ReservasTest extends TestCase
 
         self::assertSame(200, $respuesta->estado());
         $cuerpo = $respuesta->cuerpo();
+        PaginasParaValidar::guardar('reserva', $cuerpo);
         self::assertStringContainsString('Reservá tus lugares', $cuerpo);
         self::assertStringContainsString('Cine Club El Galpón · Luján', $cuerpo);
         self::assertStringContainsString('$ 3.500 por lugar', $cuerpo);

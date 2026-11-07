@@ -4,7 +4,8 @@ Qué protege cada capa de IndieCinema (red, sistema operativo, base de datos y a
 está configurado y cómo se comprueba; al final, qué se hace en cada etapa del ciclo de vida. Red y
 sistema operativo describen el VPS de https://indiecinema.duckdns.org tal como quedó el
 18/10/2026: una instancia EC2 de AWS (t3.small) con IP elástica, donde corre el
-`docker-compose.yml` de este repositorio.
+`docker-compose.yml` de este repositorio. Desde el 03/11 hay además un servidor de desarrollo, en
+otra EC2 (README, «Ramas y entornos»); lo de abajo describe el de producción.
 
 ## Red
 
@@ -31,7 +32,7 @@ sistema operativo describen el VPS de https://indiecinema.duckdns.org tal como q
 | Bloqueo de quien prueba claves por SSH: 5 intentos en 10 minutos dejan la IP 10 minutos afuera | jaula `sshd` de fail2ban | `sudo fail2ban-client status sshd` |
 | La clave del despliegue continuo (el secreto de GitHub) sólo corre `herramientas/desplegar.sh`: no elige el comando ni abre una terminal o un túnel | `restrict,command=…` en su línea de `~/.ssh/authorized_keys` (README, «Despliegue continuo») | con esa clave, `ssh … id` despliega en vez de correr `id` |
 | Un solo usuario con acceso, `ubuntu`, que despliega con Docker sin ser root | grupo `docker` | `id ubuntu` |
-| Los secretos no están en el repositorio, sólo los lee el usuario del despliegue, y gitleaks revisa cada pull request y cada push a `main` | `.env` (600) y cada `config.ini` (640), que ignora `.gitignore`; `.gitleaks.toml` y la CI | `stat -c '%a %n' .env */config/config.ini` |
+| Los secretos no están en el repositorio, sólo los lee el usuario del despliegue, y gitleaks revisa cada pull request y cada push a `main` o a `dev` | `.env` (600) y cada `config.ini` (640), que ignora `.gitignore`; `.gitleaks.toml` y la CI | `stat -c '%a %n' .env */config/config.ini` |
 | Cada subsistema corre como `www-data`, sin ninguna capacidad de root, sin poder ganar privilegios y con el sistema de archivos de sólo lectura | `php/Dockerfile` y `x-subsistema` en `docker-compose.yml` (`cap_drop: [ALL]`, `no-new-privileges`, `read_only`) | `docker compose exec programacion id` |
 | Un subsistema comprometido no lee el código ni los secretos de los otros: cada uno monta sólo su carpeta | `volumes` de cada subsistema en `docker-compose.yml` | — |
 | Docker aísla los contenedores con AppArmor y seccomp | perfiles por defecto de Docker | `docker info` |

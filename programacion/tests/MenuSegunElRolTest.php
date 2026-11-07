@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace IndieCinema\Programacion\Pruebas;
 
+use Dom\HTMLDocument;
 use IndieCinema\Nucleo\Aplicacion;
 use IndieCinema\Nucleo\Configuracion;
 use IndieCinema\Nucleo\Http\Peticion;
@@ -23,6 +24,9 @@ use PHPUnit\Framework\TestCase;
  * como el wireframe de su panel: ve sólo el logo y sus secciones, sin la cartelera, las salas ni
  * «Mi cuenta». Se comparan los enlaces completos, así una opción de más (o una que lleva a una
  * pantalla que no existe) rompe la prueba.
+ *
+ * El menú de usuario es un desplegable de enlaces, no un menú de aplicación (IC-301): sin roles
+ * de menú, con el summary sólo con contenido de frase y una lista de enlaces por sección.
  */
 final class MenuSegunElRolTest extends TestCase
 {
@@ -106,6 +110,20 @@ final class MenuSegunElRolTest extends TestCase
     }
 
     /**
+     * Los roles que tienen el menú de usuario.
+     *
+     * @return iterable<string, array{string, list<string>}>
+     */
+    public static function conSesion(): iterable
+    {
+        foreach (self::roles() as $caso => [$rol, $propios]) {
+            if ($rol !== null) {
+                yield $caso => [$rol, $propios];
+            }
+        }
+    }
+
+    /**
      * @param list<string> $propios
      */
     #[DataProvider('roles')]
@@ -138,6 +156,83 @@ final class MenuSegunElRolTest extends TestCase
         self::assertStringContainsString('Ana Prueba', $encabezado);
         self::assertStringContainsString("rol-{$rol}", $encabezado);
         self::assertStringContainsString('action="/cuenta/salir"', $encabezado);
+    }
+
+    /**
+     * El menú de usuario es un desplegable de enlaces que se recorre con Tab, no un menú de
+     * aplicación: un lector de pantalla que oye «menú» espera moverse con las flechas.
+     *
+     * @param list<string> $propios
+     */
+    #[DataProvider('roles')]
+    public function testElMenuDeUsuarioNoSeAnunciaComoMenuDeAplicacion(?string $rol, array $propios): void
+    {
+        $encabezado = $this->pedir($rol)['encabezado'];
+
+        foreach (['role="menu"', 'role="menuitem"', 'role="separator"', 'aria-haspopup'] as $atributo) {
+            self::assertStringNotContainsString($atributo, $encabezado);
+        }
+    }
+
+    /**
+     * El botón del menú es el summary, que sólo admite contenido de frase (el validador del W3C
+     * marca un div adentro): el nombre y el rol van en span.
+     *
+     * @param list<string> $propios
+     */
+    #[DataProvider('conSesion')]
+    public function testElBotonDelMenuSoloTieneContenidoDeFrase(string $rol, array $propios): void
+    {
+        preg_match('#<summary.*?</summary>#s', $this->pedir($rol)['encabezado'], $boton);
+
+        self::assertNotEmpty($boton, 'El menú de usuario sigue siendo un details con su summary.');
+        self::assertStringContainsString('Ana Prueba', $boton[0]);
+        self::assertDoesNotMatchRegularExpression('#<(div|p|ul|ol|li|h[1-6]|section|form|table)[\s>]#', $boton[0]);
+    }
+
+    /**
+     * Las opciones del menú, como las oye un lector de pantalla: una lista de enlaces por sección,
+     * con el nombre de la sección, y «Cerrar sesión» al final de todo.
+     *
+     * @return iterable<string, array{string, array<string, list<string>>}>
+     */
+    public static function secciones(): iterable
+    {
+        $organizador = [
+            'Mi cuenta' => ['/cuenta/', '/funcion/reservas'],
+            'Panel del Organizador' => ['/organizador/salas', '/organizador/funciones', '/organizador/funciones/nueva', '/solicitar-sala'],
+        ];
+        yield 'espectador' => ['espectador', ['Mi cuenta' => ['/cuenta/', '/funcion/reservas', '/solicitar-sala']]];
+        yield 'organizador' => ['organizador', $organizador];
+        yield 'moderador' => ['moderador', $organizador];
+        yield 'administrador' => ['administrador', ['Administración' => ['/cuenta/administracion/usuarios', '/administracion/solicitudes']]];
+    }
+
+    /**
+     * @param array<string, list<string>> $esperadas
+     */
+    #[DataProvider('secciones')]
+    public function testLasOpcionesVanEnListasDeEnlacesPorSeccion(string $rol, array $esperadas): void
+    {
+        $documento = HTMLDocument::createFromString($this->pedir($rol)['encabezado'], LIBXML_NOERROR);
+        $menu = $documento->getElementById('menu-usuario');
+        self::assertNotNull($menu);
+
+        $secciones = [];
+        foreach ($menu->querySelectorAll('ul') as $lista) {
+            $titulo = $documento->getElementById((string) $lista->getAttribute('aria-labelledby'));
+            $enlaces = [];
+            foreach ($lista->querySelectorAll('li > a') as $enlace) {
+                $enlaces[] = (string) $enlace->getAttribute('href');
+            }
+            $secciones[trim((string) $titulo?->textContent)] = $enlaces;
+        }
+        self::assertSame($esperadas, $secciones);
+        // Ningún enlace suelto, fuera de las listas.
+        self::assertCount(0, $menu->querySelectorAll('a:not(li > a)'));
+        // Lo último que se recorre con Tab es la salida (el texto trae adelante el ícono decorativo).
+        $controles = $menu->querySelectorAll('a, button');
+        self::assertStringEndsWith('Cerrar sesión', trim((string) $controles->item($controles->length - 1)?->textContent));
     }
 
     /**

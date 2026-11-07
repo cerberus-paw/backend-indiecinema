@@ -13,6 +13,7 @@ use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Log;
 use IndieCinema\Nucleo\Uuid;
 use IndieCinema\Programacion\Modelo\DatosDeObra;
+use IndieCinema\Programacion\Modelo\DatosDeSala;
 use IndieCinema\Programacion\Modelo\Obra;
 use IndieCinema\Programacion\Modelo\OrigenCopia;
 use IndieCinema\Programacion\Modelo\Sala;
@@ -200,12 +201,12 @@ final class ObrasTest extends TestCase
         [$generoId] = $this->genero('Drama');
         $obra = Obra::crear(
             self::ORGANIZADORA,
-            new DatosDeObra('La flor', 'Mariano Llinás', 'Seis episodios independientes', 2018, 840, TipoObra::Pelicula, OrigenCopia::ObraPropia, [$generoId]),
+            new DatosDeObra('La flor', 'Seis episodios independientes', 2018, 'Mariano Llinás', 840, TipoObra::Pelicula, OrigenCopia::ObraPropia, [$generoId]),
         );
         $this->repositorio->agregar($obra);
 
         // Agregamos una sala y una función programada para la obra
-        $sala = Sala::nueva(self::ORGANIZADORA, 'Cine Tita', 'Descripción', 'Calle 123', 'Luján', 50, 1, 120, 15, '00000000000000000000000000000001.jpg');
+        $sala = Sala::nueva(self::ORGANIZADORA, new DatosDeSala('Cine Tita', 'Descripción', 'Calle 123', 'Luján', 50, 1, 120, 15), '00000000000000000000000000000001.jpg');
         (new RepositorioDeSalas($this->base))->agregar($sala);
         $this->base->ejecutar('UPDATE sala SET habilitada = TRUE WHERE id = ?', [$sala->id]);
 
@@ -249,7 +250,7 @@ final class ObrasTest extends TestCase
         [$generoId] = $this->genero('Drama');
         $obra = Obra::crear(
             self::ORGANIZADORA,
-            new DatosDeObra('Obra Dada de Baja', 'Director X', 'Sinopsis', 2020, 100, TipoObra::Pelicula, OrigenCopia::ObraPropia, [$generoId]),
+            new DatosDeObra('Obra Dada de Baja', 'Sinopsis', 2020, 'Director X', 100, TipoObra::Pelicula, OrigenCopia::ObraPropia, [$generoId]),
         );
         $this->repositorio->agregar($obra);
         $this->repositorio->darDeBaja($obra->id);
@@ -263,7 +264,7 @@ final class ObrasTest extends TestCase
         [$generoId] = $this->genero('Drama');
         $obra = Obra::crear(
             self::ORGANIZADORA,
-            new DatosDeObra('Obra Propia', 'Director Y', 'Sinopsis', 2021, 90, TipoObra::Pelicula, OrigenCopia::ObraPropia, [$generoId]),
+            new DatosDeObra('Obra Propia', 'Sinopsis', 2021, 'Director Y', 90, TipoObra::Pelicula, OrigenCopia::ObraPropia, [$generoId]),
         );
         $this->repositorio->agregar($obra);
 

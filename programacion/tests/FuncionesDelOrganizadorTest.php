@@ -327,6 +327,32 @@ final class FuncionesDelOrganizadorTest extends TestCase
         );
     }
 
+    /**
+     * E4-09.4: en un campo numérico Chromium descarta la coma al tipear «1500,50» y lo deja en
+     * 150050 sin decir nada, así que el organizador carga $150.050 en vez de $1.500,50. El precio
+     * va en un campo de texto, donde el navegador sí aplica el pattern que manda reglas(), con
+     * inputmode="decimal" para que el celular siga abriendo el teclado numérico.
+     */
+    public function testElPrecioEsUnCampoDeTextoDecimalConElPatronDelServidor(): void
+    {
+        $this->sala(self::ORGANIZADORA, 'El Galpón');
+
+        $cuerpo = $this->pedir('GET', '/organizador/funciones/nueva', self::ORGANIZADORA)->cuerpo();
+
+        self::assertSame(1, preg_match('#<input[^>]*name="precio"[^>]*>#', $cuerpo, $campo), 'el campo del precio');
+        self::assertStringContainsString('type="text"', $campo[0]);
+        self::assertStringContainsString('inputmode="decimal"', $campo[0]);
+        self::assertStringContainsString('pattern="[0-9]{1,8}([.,][0-9]{1,2})?"', $campo[0]);
+        // min y step no valen en un campo de texto: si volvieran, volvería el campo numérico.
+        self::assertStringNotContainsString(' min="', $campo[0]);
+        self::assertStringNotContainsString(' step="', $campo[0]);
+        // Y el texto que la validación en línea va a mostrar es el que contesta el servidor.
+        self::assertStringContainsString(
+            'data-error-patron="El precio tiene que ser un número de hasta 99.999.999,99, sin puntos de miles."',
+            $campo[0],
+        );
+    }
+
     public function testUnEspectadorNoVeElFormularioDeAltaYSinSesionPideIngresar(): void
     {
         self::assertSame(403, $this->pedir('GET', '/organizador/funciones/nueva', self::ORGANIZADORA, 'espectador')->estado());

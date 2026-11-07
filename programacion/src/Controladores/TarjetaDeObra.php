@@ -24,7 +24,7 @@ final class TarjetaDeObra
      *     tipo: string,
      *     tipo_etiqueta: string,
      *     origen_copia: string,
-     *     origen_etiqueta: string,
+     *     origen_copia_etiqueta: string,
      *     generos: list<string>,
      *     afiche: ?string,
      *     url: string
@@ -49,7 +49,7 @@ final class TarjetaDeObra
             'tipo' => $obra->tipo->value,
             'tipo_etiqueta' => $obra->tipo->etiqueta(),
             'origen_copia' => $obra->origenCopia->value,
-            'origen_etiqueta' => $obra->origenCopia->etiqueta(),
+            'origen_copia_etiqueta' => $obra->origenCopia->etiqueta(),
             'generos' => $nombresGeneros,
             'afiche' => $obra->afiche !== null ? "/obras/{$obra->id}/afiche" : null,
             'url' => "/obras/{$obra->id}",

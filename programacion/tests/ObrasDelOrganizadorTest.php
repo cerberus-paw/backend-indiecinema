@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace IndieCinema\Programacion\Pruebas;
 
+use DateTimeImmutable;
 use IndieCinema\Nucleo\Aplicacion;
 use IndieCinema\Nucleo\BaseDeDatos;
 use IndieCinema\Nucleo\Configuracion;
@@ -59,6 +60,10 @@ final class ObrasDelOrganizadorTest extends TestCase
             'archivos' => ['carpeta' => $this->carpeta],
             'base' => self::baseDePruebas(),
             'nginx' => ['secreto' => self::SECRETO],
+            'funciones' => [
+                'token' => 'token-de-programacion',
+                'url' => self::$urlFunciones,
+            ],
         ]);
         $this->base = self::baseConTablasNuevas($this->configuracion);
         $this->salidaDelLog = fopen('php://memory', 'w+');
@@ -74,6 +79,7 @@ final class ObrasDelOrganizadorTest extends TestCase
     /**
      * @param array<string, mixed> $cuerpo
      * @param array<string, mixed> $archivos
+     * @param array<string, string> $cabecerasAdicionales
      */
     private function pedir(
         string $metodo,
@@ -81,18 +87,24 @@ final class ObrasDelOrganizadorTest extends TestCase
         array $cuerpo = [],
         array $archivos = [],
         string $usuarioId = self::ORGANIZADORA,
+        array $cabecerasAdicionales = [],
     ): Respuesta {
         $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion, new Log('programacion', $this->salidaDelLog));
         $cabeceras = [
             'X-Nginx-Secreto' => self::SECRETO,
             'X-Usuario-Id' => $usuarioId,
             'X-Rol' => 'organizador',
+            ...$cabecerasAdicionales,
         ];
+
+        // La consulta, si viene en la ruta («/organizador/obras?error_baja=1»), va aparte, como la arma PHP.
+        [$camino, $consulta] = explode('?', $ruta, 2) + [1 => ''];
+        parse_str($consulta, $parametros);
 
         return $aplicacion->atender(new Peticion(
             $metodo,
-            $ruta,
-            [],
+            $camino,
+            $parametros,
             $metodo === 'POST' ? ['_csrf' => self::CSRF, ...$cuerpo] : $cuerpo,
             $cabeceras,
             ['csrf' => self::CSRF],
@@ -220,5 +232,108 @@ final class ObrasDelOrganizadorTest extends TestCase
 
         $post = $this->pedir('POST', "/organizador/obras/{$obra->id}/editar", ['titulo' => 'Hack'], usuarioId: self::OTRO_ORGANIZADOR);
         self::assertSame(404, $post->estado());
+    }
+
+    /**
+     * Criterio de aceptación E4-08.4: «Listo cuando: Con funciones futuras la baja se rechaza.»
+     */
+    public function testBajaLogicaDeObraSinFuncionesFuturasEsExitosa(): void
+    {
+        $obra = $this->testCrearObraConAficheExitoso();
+
+        $respuesta = $this->pedir('POST', "/organizador/obras/{$obra->id}/baja");
+
+        self::assertSame(303, $respuesta->estado());
+        self::assertSame('/organizador/obras?dada_de_baja=1', $respuesta->cabecera('Location'));
+
+        // Ya no aparece en las obras del dueño
+        $obras = (new RepositorioDeObras($this->base))->delDueno(self::ORGANIZADORA);
+        self::assertEmpty($obras);
+
+        // En la base tiene fecha de baja
+        $dadaDeBaja = $this->base->valor('SELECT dada_de_baja_en FROM obra WHERE id = ?', [$obra->id]);
+        self::assertNotNull($dadaDeBaja);
+    }
+
+    public function testBajaLogicaEnJsonDevuelveOk(): void
+    {
+        $obra = $this->testCrearObraConAficheExitoso();
+
+        $respuesta = $this->pedir('POST', "/organizador/obras/{$obra->id}/baja", cabecerasAdicionales: ['Accept' => 'application/json']);
+
+        self::assertSame(200, $respuesta->estado());
+        $datos = json_decode($respuesta->cuerpo(), true);
+        self::assertSame(['ok' => true], $datos);
+    }
+
+    public function testBajaLogicaSeRechazaSiLaObraTieneFuncionesFuturas(): void
+    {
+        $obra = $this->testCrearObraConAficheExitoso();
+
+        // Sala habilitada
+        $sala = Sala::nueva(self::ORGANIZADORA, new DatosDeSala('Cine Tita', 'Descripción', 'Calle 123', 'Luján', 50, 1, 120, 15), '00000000000000000000000000000001.jpg');
+        (new RepositorioDeSalas($this->base))->agregar($sala);
+        $this->base->ejecutar('UPDATE sala SET habilitada = TRUE WHERE id = ?', [$sala->id]);
+
+        // Función programada a futuro
+        $funcionId = Uuid::nuevo();
+        $this->base->ejecutar(
+            'INSERT INTO funcion (id, sala_id, estado, fecha_hora, precio_base, cupo) VALUES (?, ?, ?, ?, ?, ?)',
+            [$funcionId, $sala->id, 'programada', (new DateTimeImmutable('+5 days'))->format('Y-m-d H:i:s'), 1000, 50],
+        );
+        $this->base->ejecutar(
+            'INSERT INTO funcion_obra (funcion_id, obra_id, estado) VALUES (?, ?, ?)',
+            [$funcionId, $obra->id, 'elegida'],
+        );
+
+        // Intento de baja en HTML
+        $respuesta = $this->pedir('POST', "/organizador/obras/{$obra->id}/baja");
+        self::assertSame(303, $respuesta->estado());
+        self::assertSame('/organizador/obras?error_baja=1', $respuesta->cabecera('Location'));
+        self::assertStringContainsString('funciones futuras', $this->pedir('GET', '/organizador/obras?error_baja=1')->cuerpo());
+        self::assertStringNotContainsString('inventado', $this->pedir('GET', '/organizador/obras?error_baja=inventado')->cuerpo());
+
+        // Intento de baja en JSON
+        $respuestaJson = $this->pedir('POST', "/organizador/obras/{$obra->id}/baja", cabecerasAdicionales: ['Accept' => 'application/json']);
+        self::assertSame(422, $respuestaJson->estado());
+        $datosJson = json_decode($respuestaJson->cuerpo(), true);
+        self::assertArrayHasKey('error', $datosJson);
+
+        // La obra sigue activa (no fue dada de baja)
+        $dadaDeBaja = $this->base->valor('SELECT dada_de_baja_en FROM obra WHERE id = ?', [$obra->id]);
+        self::assertNull($dadaDeBaja);
+    }
+
+    public function testBajaLogicaSeRechazaSiLaObraEstaEnVotacionDeTitulos(): void
+    {
+        $obra = $this->testCrearObraConAficheExitoso();
+
+        $sala = Sala::nueva(self::ORGANIZADORA, new DatosDeSala('Cine Tita', 'Descripción', 'Calle 123', 'Luján', 50, 1, 120, 15), '00000000000000000000000000000001.jpg');
+        (new RepositorioDeSalas($this->base))->agregar($sala);
+        $this->base->ejecutar('UPDATE sala SET habilitada = TRUE WHERE id = ?', [$sala->id]);
+
+        $funcionId = Uuid::nuevo();
+        $this->base->ejecutar(
+            'INSERT INTO funcion (id, sala_id, estado, fecha_hora, precio_base, cupo) VALUES (?, ?, ?, ?, ?, ?)',
+            [$funcionId, $sala->id, 'en_votacion_titulos', null, 0, 50],
+        );
+        $this->base->ejecutar(
+            'INSERT INTO funcion_obra (funcion_id, obra_id, estado) VALUES (?, ?, ?)',
+            [$funcionId, $obra->id, 'candidata'],
+        );
+
+        $respuestaJson = $this->pedir('POST', "/organizador/obras/{$obra->id}/baja", cabecerasAdicionales: ['Accept' => 'application/json']);
+        self::assertSame(422, $respuestaJson->estado());
+
+        $dadaDeBaja = $this->base->valor('SELECT dada_de_baja_en FROM obra WHERE id = ?', [$obra->id]);
+        self::assertNull($dadaDeBaja);
+    }
+
+    public function testRechazaDarDeBajaObraDeOtroOrganizador(): void
+    {
+        $obra = $this->testCrearObraConAficheExitoso();
+
+        $respuesta = $this->pedir('POST', "/organizador/obras/{$obra->id}/baja", usuarioId: self::OTRO_ORGANIZADOR);
+        self::assertSame(404, $respuesta->estado());
     }
 }

@@ -56,6 +56,7 @@ return static function (Router $router): void {
     $router->post('/organizador/obras/nueva', [ObrasDelOrganizador::class, 'crear'], Rol::Organizador);
     $router->get('/organizador/obras/{id}/editar', [ObrasDelOrganizador::class, 'editar'], Rol::Organizador);
     $router->post('/organizador/obras/{id}/editar', [ObrasDelOrganizador::class, 'actualizar'], Rol::Organizador);
+    $router->post('/organizador/obras/{id}/baja', [ObrasDelOrganizador::class, 'darDeBaja'], Rol::Organizador);
 
     // «Mis funciones»: las de las salas propias, en cualquier estado. Que sean las suyas lo
     // controla el servicio, con el id del que pide.

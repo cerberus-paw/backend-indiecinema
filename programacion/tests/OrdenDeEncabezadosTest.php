@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace IndieCinema\Programacion\Pruebas;
 
 use IndieCinema\Nucleo\Aplicacion;
+use IndieCinema\Nucleo\BaseDeDatos;
 use IndieCinema\Nucleo\Configuracion;
 use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Log;
@@ -20,8 +21,8 @@ use PHPUnit\Framework\TestCase;
 /**
  * El orden de los encabezados de cada página de programación (E4-10.2): un único h1 y ningún salto
  * de nivel, como los recorre un lector de pantalla. Las páginas se dibujan con los datos de prueba
- * del sitio, así tienen tarjetas, salas y funciones. Una página nueva entra con una línea en
- * paginas().
+ * del sitio, así tienen tarjetas, salas, obras y funciones, más una función en acuerdo de fecha
+ * para proponer franjas. Una página nueva entra con una línea en paginas().
  */
 final class OrdenDeEncabezadosTest extends TestCase
 {
@@ -31,8 +32,12 @@ final class OrdenDeEncabezadosTest extends TestCase
     private const SECRETO = 'secreto-de-nginx';
     private const FUNCION = '00000003-0000-4000-8000-000000000001';
     private const SALA = '00000001-0000-4000-8000-000000000001';
+    private const OBRA = '00000002-0000-4000-8000-000000000001';
+    private const EN_ACUERDO = '00000003-0000-4000-8000-0000000000aa';
+    private const CSRF = 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
 
     private string $carpeta;
+    private BaseDeDatos $base;
 
     public static function setUpBeforeClass(): void
     {
@@ -47,14 +52,20 @@ final class OrdenDeEncabezadosTest extends TestCase
     protected function setUp(): void
     {
         $this->carpeta = sys_get_temp_dir() . '/archivos-' . bin2hex(random_bytes(4));
-        $base = self::baseConTablasNuevas($this->configuracion());
+        $this->base = self::baseConTablasNuevas($this->configuracion());
         DatosDePrueba::para(
             $this->configuracion(),
-            new RepositorioDeGeneros($base),
-            new RepositorioDeSalas($base),
-            new RepositorioDeObras($base),
-            new RepositorioDeFunciones($base),
+            new RepositorioDeGeneros($this->base),
+            new RepositorioDeSalas($this->base),
+            new RepositorioDeObras($this->base),
+            new RepositorioDeFunciones($this->base),
         )->cargar();
+        // Los datos del sitio no traen ninguna en acuerdo de fecha, que es la que admite franjas.
+        $this->base->ejecutar(
+            "INSERT INTO funcion (id, sala_id, estado, precio_base, cupo) VALUES (?, ?, 'en_acuerdo_fecha', 2000, 50)",
+            [self::EN_ACUERDO, self::SALA],
+        );
+        $this->base->ejecutar("INSERT INTO funcion_obra (funcion_id, obra_id, estado) VALUES (?, ?, 'elegida')", [self::EN_ACUERDO, self::OBRA]);
     }
 
     protected function tearDown(): void
@@ -85,35 +96,54 @@ final class OrdenDeEncabezadosTest extends TestCase
     }
 
     /**
-     * Cada página con quién la mira (null es un visitante sin sesión) y el estado que tiene que
-     * devolver.
+     * Cada página con quién la mira (null es un visitante sin sesión), el método, lo que se manda y
+     * el estado que tiene que devolver. Los formularios también cuando vuelven con errores.
      *
-     * @return iterable<string, array{string, ?string, int}>
+     * @return iterable<string, array{string, ?string, string, array<string, string>, int}>
      */
     public static function paginas(): iterable
     {
-        yield 'portada' => ['/', null, 200];
-        yield 'acerca de' => ['/acerca-de', null, 200];
-        yield 'cartelera' => ['/cartelera', null, 200];
-        yield 'cartelera sin resultados' => ['/cartelera?q=zzzz', null, 200];
-        yield 'ficha de una función' => ['/cartelera/' . self::FUNCION, null, 200];
-        yield 'ficha de una función con sesión' => ['/cartelera/' . self::FUNCION, 'espectador', 200];
-        yield 'salas' => ['/salas', null, 200];
-        yield 'ficha de una sala' => ['/salas/' . self::SALA, null, 200];
-        yield 'solicitar sala' => ['/solicitar-sala', 'espectador', 200];
-        yield 'mis salas' => ['/organizador/salas', 'organizador', 200];
-        yield 'editar una sala' => ['/organizador/salas/' . self::SALA . '/editar', 'organizador', 200];
-        yield 'mis funciones' => ['/organizador/funciones', 'organizador', 200];
-        yield 'programar una función' => ['/organizador/funciones/nueva', 'organizador', 200];
-        yield 'cancelar una función' => ['/organizador/funciones/' . self::FUNCION . '/cancelar', 'organizador', 200];
-        yield 'solicitudes del administrador' => ['/administracion/solicitudes', 'administrador', 200];
-        yield 'página que no existe' => ['/no-existe', null, 404];
-        yield 'función que no existe' => ['/cartelera/00000003-0000-4000-8000-999999999999', null, 404];
-        yield 'sin permiso' => ['/organizador/salas', 'espectador', 403];
+        yield 'portada' => ['/', null, 'GET', [], 200];
+        yield 'acerca de' => ['/acerca-de', null, 'GET', [], 200];
+        yield 'cartelera' => ['/cartelera', null, 'GET', [], 200];
+        yield 'cartelera sin resultados' => ['/cartelera?q=zzzz', null, 'GET', [], 200];
+        yield 'ficha de una función' => ['/cartelera/' . self::FUNCION, null, 'GET', [], 200];
+        yield 'ficha de una función con sesión' => ['/cartelera/' . self::FUNCION, 'espectador', 'GET', [], 200];
+        yield 'salas' => ['/salas', null, 'GET', [], 200];
+        yield 'ficha de una sala' => ['/salas/' . self::SALA, null, 'GET', [], 200];
+        yield 'obras' => ['/obras', null, 'GET', [], 200];
+        yield 'obras sin resultados' => ['/obras?q=zzzz', null, 'GET', [], 200];
+        yield 'ficha de una obra' => ['/obras/' . self::OBRA, null, 'GET', [], 200];
+        yield 'solicitar sala' => ['/solicitar-sala', 'espectador', 'GET', [], 200];
+        yield 'solicitar sala con errores' => ['/solicitar-sala', 'espectador', 'POST', [], 422];
+        yield 'mis salas' => ['/organizador/salas', 'organizador', 'GET', [], 200];
+        yield 'editar una sala' => ['/organizador/salas/' . self::SALA . '/editar', 'organizador', 'GET', [], 200];
+        yield 'editar una sala con errores' => ['/organizador/salas/' . self::SALA . '/editar', 'organizador', 'POST', [], 422];
+        yield 'mis obras' => ['/organizador/obras', 'organizador', 'GET', [], 200];
+        yield 'cargar una obra' => ['/organizador/obras/nueva', 'organizador', 'GET', [], 200];
+        yield 'cargar una obra con errores' => ['/organizador/obras/nueva', 'organizador', 'POST', [], 422];
+        yield 'editar una obra' => ['/organizador/obras/' . self::OBRA . '/editar', 'organizador', 'GET', [], 200];
+        yield 'editar una obra con errores' => ['/organizador/obras/' . self::OBRA . '/editar', 'organizador', 'POST', [], 422];
+        yield 'mis funciones' => ['/organizador/funciones', 'organizador', 'GET', [], 200];
+        yield 'programar una función' => ['/organizador/funciones/nueva', 'organizador', 'GET', [], 200];
+        yield 'programar una función con errores' => ['/organizador/funciones/nueva', 'organizador', 'POST', [], 422];
+        yield 'editar una función' => ['/organizador/funciones/' . self::FUNCION . '/editar', 'organizador', 'GET', [], 200];
+        yield 'editar una función con errores' => ['/organizador/funciones/' . self::FUNCION . '/editar', 'organizador', 'POST', [], 422];
+        yield 'proponer franjas' => ['/organizador/funciones/' . self::EN_ACUERDO . '/proponer-franjas', 'organizador', 'GET', [], 200];
+        yield 'proponer franjas con errores' => ['/organizador/funciones/' . self::EN_ACUERDO . '/proponer-franjas', 'organizador', 'POST', [], 422];
+        yield 'cancelar una función' => ['/organizador/funciones/' . self::FUNCION . '/cancelar', 'organizador', 'GET', [], 200];
+        yield 'solicitudes del administrador' => ['/administracion/solicitudes', 'administrador', 'GET', [], 200];
+        yield 'página que no existe' => ['/no-existe', null, 'GET', [], 404];
+        yield 'función que no existe' => ['/cartelera/00000003-0000-4000-8000-999999999999', null, 'GET', [], 404];
+        yield 'obra que no existe' => ['/obras/00000002-0000-4000-8000-999999999999', null, 'GET', [], 404];
+        yield 'sin permiso' => ['/organizador/salas', 'espectador', 'GET', [], 403];
     }
 
+    /**
+     * @param array<string, string> $cuerpo
+     */
     #[DataProvider('paginas')]
-    public function testUnSoloH1YSinSaltosDeNivel(string $url, ?string $rol, int $estado): void
+    public function testUnSoloH1YSinSaltosDeNivel(string $url, ?string $rol, string $metodo, array $cuerpo, int $estado): void
     {
         $cabeceras = $rol === null ? [] : [
             'X-Nginx-Secreto' => self::SECRETO,
@@ -124,7 +154,14 @@ final class OrdenDeEncabezadosTest extends TestCase
         parse_str((string) parse_url($url, PHP_URL_QUERY), $consulta);
         $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion(), new Log('programacion', fopen('php://memory', 'w')));
 
-        $respuesta = $aplicacion->atender(new Peticion('GET', (string) parse_url($url, PHP_URL_PATH), $consulta, [], $cabeceras));
+        $respuesta = $aplicacion->atender(new Peticion(
+            $metodo,
+            (string) parse_url($url, PHP_URL_PATH),
+            $consulta,
+            $metodo === 'POST' ? [...$cuerpo, '_csrf' => self::CSRF] : [],
+            $cabeceras,
+            ['csrf' => self::CSRF],
+        ));
 
         self::assertSame($estado, $respuesta->estado(), $respuesta->cuerpo());
         self::assertSame([], Encabezados::problemas($respuesta->cuerpo()));

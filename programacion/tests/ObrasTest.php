@@ -10,6 +10,7 @@ use IndieCinema\Nucleo\Configuracion;
 use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Log;
+use IndieCinema\Nucleo\Uuid;
 use IndieCinema\Programacion\Modelo\DatosDeObra;
 use IndieCinema\Programacion\Modelo\Obra;
 use IndieCinema\Programacion\Modelo\OrigenCopia;
@@ -52,7 +53,7 @@ final class ObrasTest extends TestCase
         array $consulta = [],
         array $cabecerasAdicionales = [],
     ): Respuesta {
-        $aplicacion = new Aplicacion($this->configuracion, new Log('programacion', $this->salidaDelLog));
+        $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion, new Log('programacion', $this->salidaDelLog));
         $cabeceras = [
             'X-Nginx-Secreto' => self::SECRETO,
             ...$cabecerasAdicionales,
@@ -72,12 +73,14 @@ final class ObrasTest extends TestCase
      */
     private function genero(string $nombre): array
     {
-        $fila = $this->base->fila('SELECT id, nombre FROM genero WHERE nombre = ?', [$nombre]);
-        if ($fila === null) {
-            $fila = $this->base->fila('SELECT id, nombre FROM genero ORDER BY nombre LIMIT 1');
+        // La base de prueba arranca sin géneros: se crea la primera vez que se pide.
+        $id = $this->base->valor('SELECT id FROM genero WHERE nombre = ?', [$nombre]);
+        if (!is_string($id)) {
+            $id = Uuid::nuevo();
+            $this->base->ejecutar('INSERT INTO genero (id, nombre, descripcion) VALUES (?, ?, ?)', [$id, $nombre, "Obras de {$nombre}."]);
         }
 
-        return [(string) $fila['id'], (string) $fila['nombre']];
+        return [$id, $nombre];
     }
 
     private function cargarObrasDeEjemplo(): void
@@ -87,19 +90,19 @@ final class ObrasTest extends TestCase
 
         $obra1 = Obra::crear(
             self::ORGANIZADORA,
-            new DatosDeObra('La flor', 'Mariano Llinás', 'Seis episodios independientes', 2018, 840, TipoObra::Pelicula, OrigenCopia::ObraPropia, [$genero1Id]),
+            new DatosDeObra('La flor', 'Seis episodios independientes', 2018, 'Mariano Llinás', 840, TipoObra::Pelicula, OrigenCopia::ObraPropia, [$genero1Id]),
         );
         $this->repositorio->agregar($obra1);
 
         $obra2 = Obra::crear(
             self::ORGANIZADORA,
-            new DatosDeObra('Historias extraordinarias', 'Mariano Llinás', 'Tres historias en la provincia', 2008, 245, TipoObra::Pelicula, OrigenCopia::ObraPropia, [$genero2Id]),
+            new DatosDeObra('Historias extraordinarias', 'Tres historias en la provincia', 2008, 'Mariano Llinás', 245, TipoObra::Pelicula, OrigenCopia::ObraPropia, [$genero2Id]),
         );
         $this->repositorio->agregar($obra2);
 
         $obraBaja = Obra::crear(
             self::ORGANIZADORA,
-            new DatosDeObra('Balnearios', 'Mariano Llinás', 'Documental sobre balnearios argentinos', 2002, 80, TipoObra::Pelicula, OrigenCopia::ObraPropia, [$genero1Id]),
+            new DatosDeObra('Balnearios', 'Documental sobre balnearios argentinos', 2002, 'Mariano Llinás', 80, TipoObra::Pelicula, OrigenCopia::ObraPropia, [$genero1Id]),
         );
         $this->repositorio->agregar($obraBaja);
         $this->repositorio->darDeBaja($obraBaja->id);

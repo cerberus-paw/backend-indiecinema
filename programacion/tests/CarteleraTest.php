@@ -11,6 +11,7 @@ use IndieCinema\Nucleo\Configuracion;
 use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Log;
+use IndieCinema\Nucleo\Pruebas\Dobles\PaginasParaValidar;
 use IndieCinema\Nucleo\Uuid;
 use IndieCinema\Programacion\Controladores\Cartelera;
 use IndieCinema\Programacion\Controladores\TarjetaDeFuncion;
@@ -186,6 +187,7 @@ final class CarteleraTest extends TestCase
 
         self::assertPagina($respuesta, 12, '15 funciones');
         $cuerpo = $respuesta->cuerpo();
+        PaginasParaValidar::guardar('cartelera', $cuerpo);
         // La primera es la más próxima: Metrópolis, en una semana, a las 20.
         preg_match('#<article class="tarjeta-funcion.*?</article>#s', $cuerpo, $primera);
         self::assertStringContainsString('Metrópolis', $primera[0] ?? '');

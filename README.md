@@ -549,6 +549,17 @@ imagen de los subsistemas, instala las dependencias con la de Composer si faltan
 descartable (`mysql-pruebas`) que queda andando para la próxima, también en `127.0.0.1:3307` (se
 apaga con `docker stop mysql-pruebas`). Más abajo, cómo correrlas con el PHP de la máquina.
 
+El HTML de la portada, la cartelera, la ficha de una función, la reserva, ingresar y registro pasa
+por el validador del W3C, como en el CI:
+
+```
+herramientas/validar-html.sh
+```
+
+Corre las pruebas que dibujan esas páginas, que las guardan en `.paginas-para-validar/`, y las
+valida con la imagen del validador (`ghcr.io/validator/validator`, la misma versión que el CI).
+Falla si alguna tiene un error de HTML; los avisos no la hacen fallar.
+
 El núcleo y los tres subsistemas tienen las suyas (las de los subsistemas necesitan el
 `composer install` de arriba, que trae PHPUnit):
 

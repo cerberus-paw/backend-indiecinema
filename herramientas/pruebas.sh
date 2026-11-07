@@ -86,6 +86,7 @@ en_la_imagen() {
 	shift 2
 	docker run --rm --network "$RED" --user "$(id -u):$(id -g)" \
 		--env PRUEBAS_MYSQL_HOST="$MYSQL" --env PRUEBAS_MYSQL_PUERTO=3306 --env PRUEBAS_MYSQL_CLAVE=pruebas \
+		--env PAGINAS_PARA_VALIDAR="${PAGINAS_PARA_VALIDAR:-}" \
 		--volume "$raiz:/src" --workdir "/src/backend-indiecinema/$paquete" \
 		--entrypoint php "$IMAGEN" "$@"
 }

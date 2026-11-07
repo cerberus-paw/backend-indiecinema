@@ -1,0 +1,6 @@
+# Las reglas de ZAP que el análisis del CD (trabajo zap de .github/workflows/cd.yml) da por revisadas.
+# Una por línea: id, IGNORE y, entre paréntesis, la regla y por qué se ignora; ZAP lee sólo las dos
+# primeras columnas, separadas por un tabulador. El análisis falla con cualquier alerta media o alta
+# de una regla que no esté acá. Antes de sumar una, revisarla y anotarla en docs/seguridad.md,
+# «Análisis con OWASP ZAP».
+10031	IGNORE	(User Controllable HTML Element Attribute: los filtros de la cartelera vuelven en el value del formulario, y Twig los escapa. Es informativa; se ignora para que no tape lo demás en el informe)

@@ -24,6 +24,15 @@ add_header Referrer-Policy strict-origin-when-cross-origin always;
 # y en el VPS no hace falta porque el HSTS ya obliga HTTPS. Se activó directo, sin pasar por
 # Report-Only: el servidor de desarrollo y las pruebas de punta a punta, que fallan con cualquier
 # violación, hacen de ensayo.
+# Lo que el sitio no usa, apagado: si un script se colara, tampoco podría pedir la cámara, el
+# micrófono, la ubicación, un pago ni un USB.
+add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()" always;
+# Aislamiento entre orígenes: una ventana de otro sitio abierta desde acá (o que abra ésta) no
+# tiene referencia a la otra; otro sitio no puede incrustar nuestras respuestas (las imágenes, el
+# JSON); y la página sólo carga lo que lo permite, que es todo lo propio. Las tres las marcó ZAP.
+add_header Cross-Origin-Opener-Policy same-origin always;
+add_header Cross-Origin-Resource-Policy same-origin always;
+add_header Cross-Origin-Embedder-Policy require-corp always;
 # Ojo con add_header: un location que tenga uno propio deja de heredar todos estos.
 add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'" always;
 

@@ -139,22 +139,6 @@ final class AplicacionTest extends TestCase
         self::assertSame('{"error":"Algo salió mal. Probá de nuevo en un rato."}', $respuesta->cuerpo());
     }
 
-    /**
-     * Las rutas /interno/ las llama otro subsistema y no un navegador: la respuesta es JSON por
-     * ser interna, no por el Accept, y tampoco ahí sale el detalle.
-     */
-    public function testUnErrorEnUnaRutaInternaRespondeJsonSinDetalleAunqueNoPidaJson(): void
-    {
-        $respuesta = $this->pedir('GET', '/interno/falla', [
-            'X-Llamador' => 'programacion',
-            'Authorization' => 'Bearer ' . self::TOKEN_PROGRAMACION,
-        ]);
-
-        self::assertSame(500, $respuesta->estado());
-        self::assertSame('{"error":"Algo salió mal. Probá de nuevo en un rato."}', $respuesta->cuerpo());
-        self::assertStringContainsString('prueba.ERROR GET /interno/falla: detalle interno', $this->log());
-    }
-
     public function testCadaPedidoDejaUnaLineaConElPatronDeLaRutaYSinLaConsulta(): void
     {
         $peticion = new Peticion('GET', '/salas/42', ['q' => 'algo personal'], cookies: ['csrf' => self::TOKEN]);

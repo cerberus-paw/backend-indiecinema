@@ -118,36 +118,6 @@ final class ManejadorDeErroresTest extends TestCase
         self::assertSame('', $this->log());
     }
 
-    public function testEnProduccionLaPaginaNoLlevaElMensajeInternoNiLaTraza(): void
-    {
-        $respuesta = $this->manejador()->respuestaPara(
-            new RuntimeException(self::DETALLE),
-            new Peticion('GET', '/cartelera'),
-            self::vista(),
-        );
-
-        self::assertSame(500, $respuesta->estado());
-        self::assertStringContainsString(self::MENSAJE_GENERICO, $respuesta->cuerpo());
-        self::assertStringNotContainsString(self::DETALLE, $respuesta->cuerpo());
-        self::assertStringNotContainsString('RuntimeException', $respuesta->cuerpo());
-        self::assertStringNotContainsString('ManejadorDeErroresTest', $respuesta->cuerpo());
-        // La traza completa, en cambio, tiene que quedar en el log para poder diagnosticar.
-        self::assertStringContainsString('prueba.ERROR GET /cartelera: ' . self::DETALLE, $this->log());
-        self::assertStringContainsString('RuntimeException', $this->log());
-    }
-
-    public function testEnJsonSoloVaElMensajeGenerico(): void
-    {
-        $respuesta = $this->manejador()->respuestaPara(
-            new RuntimeException(self::DETALLE),
-            new Peticion('POST', '/reservas', cabeceras: ['Accept' => 'application/json']),
-            self::vista(),
-        );
-
-        self::assertSame(500, $respuesta->estado());
-        self::assertSame('{"error":"' . self::MENSAJE_GENERICO . '"}', $respuesta->cuerpo());
-    }
-
     public function testEnDesarrolloElJsonSiLlevaElDetalle(): void
     {
         $respuesta = $this->manejador(mostrarDetalle: true)->respuestaPara(

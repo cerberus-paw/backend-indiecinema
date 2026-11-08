@@ -80,8 +80,8 @@ con `fetch` sin recargar la página. Lo que agregó esa entrega está en las fil
 | Control de dueño: un organizador sólo ve y cambia sus salas y sus funciones. Lo ajeno responde 404, como lo que no existe, así no se averigua qué hay | `ServicioDeSalas` y `ServicioDeFuncionesDelOrganizador` en `programacion/src/Servicios/` | `SalasDelOrganizadorTest::testOtroOrganizadorNoVeNiGuardaLaSalaAjena`, `FuncionesDelOrganizadorTest::testFormularioEdicionDevuelve404SiNoExisteOEsAjena` |
 | Los id de la URL se validan como UUID antes de ir a la base | `nucleo/src/Uuid.php`, en cada servicio que busca por id | `CarteleraTest::testDetalleConIdInvalidoResponde` |
 | Escape de la salida: Twig escapa todo lo que muestra y ninguna plantilla usa `raw`. El JavaScript del front arma lo que muestra sin `innerHTML`, salvo `gestor-franjas.js`, que clona la fila de su `<template>` y sólo le reemplaza números. Lo que se escapara de esto lo frena la Content-Security-Policy (ver «Red») | `nucleo/src/Vista.php` (`autoescape`) y las plantillas del front | `SolicitudDeSalaTest::testConErroresVuelveConLoCargadoYEscapado` |
-| Sesión propia en la base de cuentas: el identificador son 32 bytes al azar en una cookie `HttpOnly`, `Secure` y `SameSite=Lax`, y al ingresar siempre es uno nuevo. Se cierra con dos horas sin uso y dura como mucho siete días. Cambiar el rol de un usuario o suspenderlo cierra sus sesiones | `cuentas/src/Modelo/Sesion.php` y `ServicioDeSesiones` | `SesionTest`, `SesionInternaTest::testDosHorasSinUsoLaCierran` |
-| Token CSRF en todo pedido que cambia algo: va en una cookie y en el formulario, y tienen que coincidir. La cookie es `HttpOnly`, `Secure` y `SameSite=Lax`. Lo que el navegador manda con `fetch` sin recargar (E4) lleva el mismo token en la cabecera `X-CSRF-Token`: sin él no se reserva, y el error vuelve en JSON | `nucleo/src/Seguridad/ProteccionCsrf.php`, para todo el sitio | `AplicacionTest::testUnPostSinTokenCsrfSeRechaza`, `AplicacionTest::testElJavaScriptPuedeMandarElTokenEnUnaCabecera`, `ReservasTest::testEnJsonSinTokenElErrorVaEnJsonYNoSeReserva` y la prueba «sin el token» de cada formulario |
+| Sesión propia en la base de cuentas: el identificador son 32 bytes al azar en una cookie `HttpOnly`, `Secure` y `SameSite=Lax`, y al ingresar siempre es uno nuevo. Se cierra con dos horas sin uso y dura como mucho siete días. Cambiar el rol de un usuario o suspenderlo cierra sus sesiones | `cuentas/src/Modelo/Sesion.php` y `ServicioDeSesiones` | `SesionTest`, `SesionInternaTest::testDosHorasSinUsoLaCierran` y la cabecera del sitio publicado («Las cookies en producción», abajo) |
+| Token CSRF en todo pedido que cambia algo: va en una cookie y en el formulario, y tienen que coincidir. La cookie es `HttpOnly`, `Secure` y `SameSite=Lax`. Lo que el navegador manda con `fetch` sin recargar (E4) lleva el mismo token en la cabecera `X-CSRF-Token`: sin él no se reserva, y el error vuelve en JSON | `nucleo/src/Seguridad/ProteccionCsrf.php`, para todo el sitio | `AplicacionTest::testUnPostSinTokenCsrfSeRechaza`, `AplicacionTest::testElJavaScriptPuedeMandarElTokenEnUnaCabecera`, `ReservasTest::testEnJsonSinTokenElErrorVaEnJsonYNoSeReserva` y la prueba «sin el token» de cada formulario; la cabecera del sitio publicado («Las cookies en producción», abajo) |
 | La foto de una sala y el afiche de una obra se aceptan por su contenido, no por el nombre ni por lo que dice el navegador: JPG, PNG o WebP, hasta 5 MB y 8000 píxeles de lado. Se guardan con un nombre nuevo y se sirven con el tipo de su extensión | `FormularioDeSala`, `ArchivosDeSalas` e `ImagenDeSala`; `FormularioDeObra` y `AfichesDeObras`, en `programacion/src/` | `SolicitudDeSalaTest::testUnaSalaNuevaNecesitaUnaFotoDeVerdad`, `FormularioDeObraTest::testVerificaAfichePorContenidoReal` |
 | En el CSV de la cartelera, un texto que una planilla tomaría como fórmula va con un apóstrofo adelante | `programacion/src/Controladores/CsvDeCartelera.php` | `CsvDeCarteleraTest::testUnaFormulaSeEscribeComoTexto` |
 | El CSV de reservas del organizador (E4) no necesita ese escape: todos sus campos los arma el sistema (el código, los números, el estado y la fecha) y ninguno empieza con `=`, `+`, `-` ni `@`. Si alguna vez lleva texto cargado por una persona, hay que escaparlo como el de la cartelera | `funciones/src/Controladores/CsvDeReservas.php` | el alfabeto del código, `23456789ABCDEFGHJKMNPQRSTUVWXYZ` en `funciones/src/Modelo/Reserva.php` |
@@ -93,6 +93,43 @@ con `fetch` sin recargar la página. Lo que agregó esa entrega está en las fil
 | La API interna (`/interno/`) sólo atiende a los subsistemas que declara cada ruta, cada uno con su token; en la configuración está sólo el SHA-256 del token | `$router->interna()` en cada `rutas.php` y `[llamadores]` en cada `config.ini` | `UsuariosInternosTest::testSoloLasLlamaProgramacionConSuToken`, `FuncionesInternasTest::testSoloLaPideFuncionesConSuToken` |
 | En producción, un error responde 500 sin el detalle, que queda en el log. Con algún valor de ejemplo en `config.ini` el subsistema no arranca | `nucleo/src/Aplicacion.php` y `entorno = "produccion"` | `AplicacionTest::testUnErrorEnProduccionNoMuestraElDetalleYQuedaEnElLog` |
 | Las dependencias se revisan contra los avisos de seguridad conocidos en cada pull request | `composer audit` en `.github/workflows/ci.yml` | la CI |
+
+**Las cookies en producción**
+
+Copiadas el 08/11/2026 de https://indiecinema.duckdns.org, con el valor reemplazado por `…`. Son
+las mismas que en el servidor de desarrollo y en el compose local.
+
+```
+GET /cuenta/ingresar                                  (la de CSRF, con el primer pedido)
+set-cookie: csrf=…; path=/; secure; HttpOnly; SameSite=Lax
+
+POST /cuenta/ingresar → 303, date: Sun, 08 Nov 2026 00:23:39 GMT
+set-cookie: sesion=…; expires=Sun, 15 Nov 2026 00:23:39 GMT; Max-Age=604800; path=/; secure; HttpOnly; SameSite=Lax
+
+POST /cuenta/salir → 303
+set-cookie: sesion=…; expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0; path=/; secure; HttpOnly; SameSite=Lax
+```
+
+- Las dos son `HttpOnly`, `Secure` y `SameSite=Lax`, con `path=/` y sin `Domain`: sólo vuelven a
+  este mismo host.
+- La de sesión vence a los siete días justos del ingreso (`Max-Age=604800`), que es el tope de la
+  sesión. Las dos horas sin uso las controla cuentas, no la cookie.
+- La de CSRF no tiene `expires`: el navegador la borra al cerrarse.
+- Al salir, la de sesión vuelve vencida y el navegador la borra. La sesión del ingreso de arriba
+  quedó cerrada.
+
+Para repetirlo, ingresar con `curl` con una cuenta de prueba (`CLAVE`, su contraseña) y mirar las
+`set-cookie` de cada respuesta, con el valor tapado:
+
+```
+B=https://indiecinema.duckdns.org; F=$(mktemp)
+tapar() { grep -i set-cookie | sed -E 's/(: *[a-z]+=)[^;]*/\1…/'; }
+curl -s -o /dev/null -c $F $B/cuenta/ingresar -D - | tapar
+CSRF=$(awk '$6 == "csrf" { print $7 }' $F)
+curl -s -o /dev/null -b $F -c $F -D - $B/cuenta/ingresar --data-urlencode email=eva@indiecinema.test \
+  --data-urlencode "password=$CLAVE" --data-urlencode _csrf=$CSRF | tapar
+curl -s -o /dev/null -b $F -c $F -D - $B/cuenta/salir --data-urlencode _csrf=$CSRF | tapar
+```
 
 **Decisiones de la capa de aplicación**
 

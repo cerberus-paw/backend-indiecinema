@@ -307,13 +307,17 @@ final class FuncionTest extends TestCase
         self::assertFalse($cancela(self::finalizada(), $despuesDeLaFuncion));
     }
 
-    public function testSeReservaMientrasNoSeCanceloNiEmpezo(): void
+    /**
+     * F-01.2: sólo una programada que todavía no empezó. En votación o en acuerdo de fecha ya no:
+     * no se sabe qué se proyecta ni cuándo.
+     */
+    public function testSeReservaSoloProgramadaYAntesDeEmpezar(): void
     {
         $despuesDeLaFuncion = new DateTimeImmutable('2026-10-25 10:00:00');
         $reserva = static fn (Funcion $funcion, DateTimeImmutable $ahora): bool => Funcion::seReserva($funcion->estado, $funcion->fechaHora, $ahora);
 
-        self::assertTrue($reserva(self::enVotacion(), self::ahora()));
-        self::assertTrue($reserva(self::enAcuerdo(), self::ahora()));
+        self::assertFalse($reserva(self::enVotacion(), self::ahora()), 'en votación de títulos');
+        self::assertFalse($reserva(self::enAcuerdo(), self::ahora()), 'en acuerdo de fecha');
         self::assertTrue($reserva(self::programada(), self::ahora()));
         self::assertFalse($reserva(self::programada(), $despuesDeLaFuncion), 'programada que ya empezó');
         self::assertFalse($reserva(self::cancelada(), self::ahora()));

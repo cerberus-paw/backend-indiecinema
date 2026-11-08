@@ -169,4 +169,4 @@ jobs:
         run: |
           docker compose up -d --no-deps nginx
           for intento in $(seq 30); do curl -s -o /dev/null http://localhost:8080/_sesion && break; sleep 1; done
-          nginx/comprobar-desde-afuera.sh http://localhost:8080
+          SIN_SUBSISTEMAS=1 nginx/comprobar-desde-afuera.sh http://localhost:8080

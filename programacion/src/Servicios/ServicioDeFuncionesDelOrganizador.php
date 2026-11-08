@@ -277,17 +277,35 @@ final class ServicioDeFuncionesDelOrganizador
      * Cancela una función propia del organizador: es una baja lógica, la función queda en su panel
      * pero sale de la cartelera (E3-11.4).
      *
+     * @return Funcion la función como estaba antes de cancelarla, para deshacerCancelacion()
+     *
      * @throws ExcepcionHttp 404 si no es del organizador o no se puede cancelar
      */
-    public function cancelar(Usuario $organizador, string $id): void
+    public function cancelar(Usuario $organizador, string $id): Funcion
     {
         $funcion = $this->propia($organizador, $id);
         if (!Funcion::seCancela($funcion->estado, $funcion->fechaHora)) {
             throw ExcepcionHttp::noEncontrada();
         }
 
+        $anterior = clone $funcion;
         $funcion->cancelar();
         $this->funciones->guardar($funcion);
+
+        return $anterior;
+    }
+
+    /**
+     * Vuelve la función a como estaba antes de cancelarla, cuando no se pudieron cancelar sus
+     * reservas porque funciones no respondió (F-01.7). Se cancela primero y se deshace si hace
+     * falta, y no al revés, porque una función cancelada ya no admite reservas: si se cancelaran
+     * primero las reservas, en el medio podía entrar una nueva y quedar confirmada en una función
+     * cancelada. La máquina de estados no deja salir de «cancelada», y está bien que no lo deje
+     * ningún otro camino: esto no es un cambio de estado sino deshacer uno que no terminó.
+     */
+    public function deshacerCancelacion(Funcion $anterior): void
+    {
+        $this->funciones->guardar($anterior);
     }
 
     /**

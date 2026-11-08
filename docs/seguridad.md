@@ -3,16 +3,17 @@
 Qué protege cada capa de IndieCinema (red, sistema operativo, base de datos y aplicación), dónde
 está configurado y cómo se comprueba; después, las amenazas ordenadas por impacto y probabilidad;
 al final, qué se hace en cada etapa del ciclo de vida. Red y
-sistema operativo describen el VPS de https://indiecinema.duckdns.org tal como quedó el
-18/10/2026: una instancia EC2 de AWS (t3.small) con IP elástica, donde corre el
-`docker-compose.yml` de este repositorio. Desde el 03/11 hay además un servidor de desarrollo, en
-otra EC2 (README, «Ramas y entornos»); lo de abajo describe el de producción.
+sistema operativo describen el VPS de https://indiecinema.duckdns.org, armado el 18/10/2026 y
+verificado de nuevo el 08/11/2026: una instancia EC2 de AWS (t3.small) con IP elástica, donde corre
+el `docker-compose.yml` de este repositorio. Desde el 03/11 hay además un servidor de desarrollo,
+en otra EC2 (README, «Ramas y entornos»), con los mismos controles salvo lo que dice «El servidor
+de desarrollo», al final de «Sistema operativo».
 
 ## Red
 
 | Control | Dónde | Cómo se comprueba |
 |---|---|---|
-| Cortafuegos fuera de la máquina: sólo entran el 22 (SSH), el 80 y el 443, por IPv4. El SSH queda abierto a cualquier origen porque el despliegue continuo entra desde las máquinas de GitHub Actions, que no tienen IP fija; lo cuidan la clave, fail2ban y que la clave del despliegue sólo puede correr el script (capa de sistema operativo) | reglas de entrada del security group de la instancia en AWS (ufw no se usa) | consola de EC2 → la instancia → Security |
+| Cortafuegos fuera de la máquina: sólo entran el 22 (SSH), el 80 y el 443, por IPv4. El SSH queda abierto a cualquier origen en los dos servidores porque el despliegue continuo entra a los dos desde las máquinas de GitHub Actions, que no tienen IP fija; lo cuidan la clave, fail2ban y que la clave del despliegue sólo puede correr el script (capa de sistema operativo) | reglas de entrada del security group de la instancia en AWS (ufw no se usa) | consola de EC2 → la instancia → Security |
 | Sólo HTTPS. Por el 80 se redirige a HTTPS (301) y se atiende el desafío de Let's Encrypt | `nginx/templates/servidor-https.inc.template`, que se activa desde `.env` con `docker-compose.https.yml` | `curl -I http://indiecinema.duckdns.org/` |
 | TLS 1.2 y 1.3, sin versiones anteriores, y cifrados con secreto hacia adelante (ECDHE) | `ssl_protocols` y `ssl_ciphers` en la misma plantilla | `openssl s_client -tls1_1 …` responde `protocol version` |
 | Certificado de Let's Encrypt que se renueva solo: certbot por webroot y un hook que recarga nginx | `certbot.timer` en el servidor (README, «HTTPS en el VPS») | `sudo certbot certificates` |
@@ -31,14 +32,29 @@ otra EC2 (README, «Ramas y entornos»); lo de abajo describe el de producción.
 | Control | Dónde | Cómo se comprueba |
 |---|---|---|
 | Ubuntu 26.04 LTS con las actualizaciones de seguridad automáticas | `unattended-upgrades` activo y `/etc/apt/apt.conf.d/20auto-upgrades` | `systemctl status unattended-upgrades` |
-| SSH sólo con clave: sin contraseñas y sin entrar como root | `PasswordAuthentication no`, `KbdInteractiveAuthentication no` y `PermitRootLogin no` | `sudo sshd -T` |
-| Bloqueo de quien prueba claves por SSH: 5 intentos en 10 minutos dejan la IP 10 minutos afuera | jaula `sshd` de fail2ban | `sudo fail2ban-client status sshd` |
-| La clave del despliegue continuo (el secreto de GitHub) sólo corre `herramientas/desplegar.sh`: no elige el comando ni abre una terminal o un túnel | `restrict,command=…` en su línea de `~/.ssh/authorized_keys` (README, «Despliegue continuo») | con esa clave, `ssh … id` despliega en vez de correr `id` |
+| SSH sólo con clave: sin contraseñas y sin entrar como root | `PasswordAuthentication no` y `KbdInteractiveAuthentication no`, que trae la imagen de Ubuntu de AWS, y `PermitRootLogin no` en `/etc/ssh/sshd_config.d/10-sin-root.conf` (README, «Preparar el servidor») | `sudo sshd -T` |
+| Bloqueo de quien prueba claves por SSH: 5 intentos en 10 minutos dejan la IP 10 minutos afuera. El 08/11 llevaba 327 intentos fallidos y 47 IP bloqueadas | jaula `sshd` de fail2ban, con la unidad de SSH de Ubuntu (`ssh.service`; la del paquete mira la de Debian y no ve nada) (README, «Preparar el servidor») | `sudo fail2ban-client status sshd` |
+| Las claves del despliegue continuo, una por servidor y guardada en el environment de GitHub de cada uno (`produccion` y `desarrollo`), sólo corren `herramientas/desplegar.sh`: no eligen el comando ni abren una terminal o un túnel. La de un servidor no entra al otro | `restrict,command=…` en su línea de `~/.ssh/authorized_keys` (README, «Despliegue continuo») | con esa clave, `ssh … id` despliega en vez de correr `id` |
 | Un solo usuario con acceso, `ubuntu`, que despliega con Docker sin ser root | grupo `docker` | `id ubuntu` |
-| Los secretos no están en el repositorio, sólo los lee el usuario del despliegue, y gitleaks revisa cada pull request y cada push a `main` o a `dev` | `.env` (600) y cada `config.ini` (640), que ignora `.gitignore`; `.gitleaks.toml` y la CI | `stat -c '%a %n' .env */config/config.ini` |
+| Los secretos no están en el repositorio, sólo los lee el usuario del despliegue, y gitleaks revisa cada pull request y cada push a `main` o a `dev`. Lo que necesita GitHub Actions está en los environments: la clave de cada servidor y, en `desarrollo`, las cuentas de las pruebas de punta a punta (el espectador en `E2E_CORREO` y `E2E_CLAVE`, y el organizador y el administrador en `E2E_ORGANIZADOR_*` y `E2E_ADMINISTRADOR_*`), que sólo existen en ese servidor | `.env` (600) y cada `config.ini` (640), que ignora `.gitignore`; `.gitleaks.toml` y la CI | `stat -c '%a %n' .env */config/config.ini` |
 | Cada subsistema corre como `www-data`, sin ninguna capacidad de root, sin poder ganar privilegios y con el sistema de archivos de sólo lectura | `php/Dockerfile` y `x-subsistema` en `docker-compose.yml` (`cap_drop: [ALL]`, `no-new-privileges`, `read_only`) | `docker compose exec programacion id` |
 | Un subsistema comprometido no lee el código ni los secretos de los otros: cada uno monta sólo su carpeta | `volumes` de cada subsistema en `docker-compose.yml` | — |
 | Docker aísla los contenedores con AppArmor y seccomp | perfiles por defecto de Docker | `docker info` |
+
+**El servidor de desarrollo**
+
+Verificado el 08/11/2026 con los mismos comandos. Tiene los mismos controles que producción, con
+dos diferencias:
+
+- **Ubuntu 24.04 LTS**, no 26.04: se armó con la imagen de entonces. También recibe las
+  actualizaciones de seguridad automáticas.
+- **Es otra EC2, con otro dominio, otro certificado y otros secretos.** Su base tiene datos de
+  prueba que se pueden borrar, y ahí corren las pruebas de punta a punta y el análisis de OWASP ZAP
+  del despliegue continuo (ver «Por etapa»).
+
+Hasta el 08/11 no tenía fail2ban, dejaba entrar como root con clave y el certificado se renovaba
+con certbot `standalone`, que falla con nginx ocupando el 80. Se igualó a producción ese día, y los
+pasos quedaron en el README («Preparar el servidor» y «HTTPS en el VPS») para el próximo servidor.
 
 ## Base de datos
 

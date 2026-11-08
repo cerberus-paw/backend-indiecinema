@@ -469,6 +469,31 @@ docker compose down -v
 docker compose up -d
 ```
 
+### Preparar el servidor
+
+Lo que lleva una EC2 nueva antes de clonar los repositorios (docs/seguridad.md, «Sistema
+operativo»). En AWS: el security group sólo con el 22, el 80 y el 443 de entrada, y los metadatos
+sólo con IMDSv2 (Actions → Instance settings → Modify instance metadata options → IMDSv2
+Required). En el servidor:
+
+```
+sudo apt install unattended-upgrades fail2ban
+sudo usermod -aG docker ubuntu        # con Docker ya instalado; vale desde el próximo ingreso
+
+# Sin entrar como root. Las contraseñas ya vienen apagadas en la imagen de Ubuntu de AWS.
+echo 'PermitRootLogin no' | sudo tee /etc/ssh/sshd_config.d/10-sin-root.conf
+sudo sshd -t && sudo systemctl reload ssh
+
+# La jaula sshd del paquete mira la unidad de Debian (sshd.service); en Ubuntu es ssh.service, y
+# sin esto no ve ningún intento.
+printf '[sshd]\njournalmatch = _SYSTEMD_UNIT=ssh.service + _COMM=sshd\n' \
+  | sudo tee /etc/fail2ban/jail.d/sshd-ubuntu.local
+sudo systemctl restart fail2ban
+```
+
+Para comprobarlo: `sudo sshd -T | grep -E 'permitrootlogin|passwordauthentication'` y
+`sudo fail2ban-client status sshd`, que después de un ingreso fallido lo cuenta en «Total failed».
+
 ### HTTPS en el VPS
 
 Con un dominio que apunte al servidor y los puertos 80 y 443 abiertos. El primer certificado se

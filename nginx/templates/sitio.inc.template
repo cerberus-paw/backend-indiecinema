@@ -10,8 +10,10 @@ absolute_redirect off;
 # Lo que admite PHP (php/php.ini): una imagen de 5 MB más el resto del formulario.
 client_max_body_size 6m;
 
-# Al pasarse del límite, 429 Too Many Requests (por defecto sería 503, que dice otra cosa).
+# Al pasarse del límite, 429 Too Many Requests (por defecto sería 503, que dice otra cosa), con
+# un mensaje que diga qué hacer: en JSON o en una página, según $formato_del_429.
 limit_req_status 429;
+error_page 429 /_demasiados/$formato_del_429;
 
 add_header X-Content-Type-Options nosniff always;
 add_header X-Frame-Options DENY always;
@@ -95,6 +97,16 @@ location /cuenta/ {
 location = /funcion {
     return 301 /funcion/;
 }
+# Reservar una función: 10 por minuto por IP, sólo los POST. Pasan 6 seguidas, que alcanzan para
+# el doble clic y para las pruebas de punta a punta, y después una cada 6 segundos. Expresión
+# regular por lo mismo que ingresar y registro: con o sin la barra final.
+location ~ ^/funcion/reservar/[^/]+/?$ {
+    limit_req zone=reserva burst=5 nodelay;
+    set $subsistema funciones;
+    set $secreto "${NGINX_SECRETO_FUNCIONES}";
+    rewrite ^/funcion(/.*)$ $1 break;
+    include conf.d/subsistema.inc;
+}
 location /funcion/ {
     set $subsistema funciones;
     set $secreto "${NGINX_SECRETO_FUNCIONES}";
@@ -110,6 +122,49 @@ location ~ ^/solicitar-sala/?$ {
     set $secreto "${NGINX_SECRETO_PROGRAMACION}";
     rewrite ^(.*)$ $1 break;
     include conf.d/subsistema.inc;
+}
+
+# Los listados con búsqueda de programación: la cartelera, su CSV y las obras. 60 por minuto por
+# IP: pasan 31 seguidos y después uno por segundo. No entran la ficha de una función ni sus
+# lugares, que la ficha pide cada 15 segundos.
+location ~ ^/(cartelera(\.csv)?|obras)/?$ {
+    limit_req zone=busqueda burst=30 nodelay;
+    set $subsistema programacion;
+    set $secreto "${NGINX_SECRETO_PROGRAMACION}";
+    rewrite ^(.*)$ $1 break;
+    include conf.d/subsistema.inc;
+}
+
+# La respuesta del 429 (error_page, arriba). Sin add_header acá: con uno, este location dejaría de
+# heredar la CSP y las demás cabeceras. El texto ya dice cuánto esperar, así que va sin
+# Retry-After. «internal»: desde afuera no existen.
+location = /_demasiados/json {
+    internal;
+    default_type application/json;
+    charset utf-8;
+    return 429 '{"error": "Hiciste muchos pedidos seguidos. Probá de nuevo en un minuto."}';
+}
+location = /_demasiados/html {
+    internal;
+    default_type text/html;
+    charset utf-8;
+    return 429 '<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hiciste muchos pedidos seguidos · IndieCinema</title>
+<link rel="stylesheet" href="/estaticos/css/estilos.css">
+</head>
+<body>
+<main>
+<h1>Hiciste muchos pedidos seguidos</h1>
+<p>Hiciste muchos pedidos seguidos. Probá de nuevo en un minuto.</p>
+<p><a href="/">Ir al inicio</a></p>
+</main>
+</body>
+</html>
+';
 }
 
 location / {

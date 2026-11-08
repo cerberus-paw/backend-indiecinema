@@ -15,14 +15,42 @@ use IndieCinema\Nucleo\Uuid;
 
 /**
  * Los usuarios para los otros subsistemas, como los define la E2: quién es (GET
- * /interno/usuarios/{id}) y darle un rol (POST /interno/usuarios/{id}/roles). Los llama
- * programación desde la bandeja de solicitudes de sala: muestra quién la mandó y, al aprobarla,
- * le pide el rol de organizador. Qué subsistemas llegan lo declara cada ruta.
+ * /interno/usuarios/{id}), varios usuarios a la vez (GET /interno/usuarios?ids=…) y darle un
+ * rol (POST /interno/usuarios/{id}/roles). Los llama programación desde la bandeja de
+ * solicitudes de sala y funciones para los nombres de los espectadores en el panel y en el CSV de
+ * reservas (IC-464). Qué subsistemas llegan lo declara cada ruta.
  */
 final class UsuariosInternos extends Controlador
 {
+    /** Más que una página del listado de reservas (hasta 100): un pedido más largo es un error de quien llama. */
+    public const MAXIMO_POR_PEDIDO = 100;
+
     public function __construct(private readonly ServicioDeUsuarios $servicio)
     {
+    }
+
+    /**
+     * Varios usuarios por su id, en un solo pedido (E4-17.2 / IC-464).
+     * Devuelve un objeto JSON indexado por id con los datos públicos de cada usuario.
+     */
+    public function varios(Peticion $peticion): Respuesta
+    {
+        $lista = $peticion->consulta('ids');
+        if (!is_string($lista) || trim($lista) === '') {
+            return $this->json((object) []);
+        }
+
+        $partes = array_values(array_unique(explode(',', $lista)));
+        if (count($partes) > self::MAXIMO_POR_PEDIDO) {
+            return $this->json(['error' => 'Se piden hasta ' . self::MAXIMO_POR_PEDIDO . ' usuarios por vez.'], 400);
+        }
+
+        $ids = array_values(array_filter($partes, Uuid::esValido(...)));
+        if ($ids === []) {
+            return $this->json((object) []);
+        }
+
+        return $this->json((object) array_map(self::datos(...), $this->servicio->buscarVarios($ids)));
     }
 
     /**

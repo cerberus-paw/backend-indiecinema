@@ -76,6 +76,38 @@ final class RepositorioDeUsuarios
     }
 
     /**
+     * Varios usuarios por su id, en una sola consulta, indexados por id. Los ids que no existen no
+     * vienen en el arreglo.
+     *
+     * @param list<string> $ids UUID ya validados
+     *
+     * @return array<string, UsuarioEnListado>
+     */
+    public function buscarVariosEnListado(array $ids): array
+    {
+        if ($ids === []) {
+            return [];
+        }
+        $marcadores = implode(', ', array_fill(0, count($ids), '?'));
+        $filas = $this->base->filas(
+            "SELECT u.id, u.nombre, u.correo, u.estado, u.creado_en,
+                    GROUP_CONCAT(r.tipo ORDER BY r.tipo SEPARATOR ',') AS roles
+             FROM usuario u
+             LEFT JOIN rol r ON r.usuario_id = u.id
+             WHERE u.id IN ({$marcadores})
+             GROUP BY u.id",
+            $ids,
+        );
+        $usuarios = [];
+        foreach ($filas as $fila) {
+            $usuario = self::usuarioEnListado($fila);
+            $usuarios[$usuario->id] = $usuario;
+        }
+
+        return $usuarios;
+    }
+
+    /**
      * Una página del listado del administrador, por nombre y después por correo, que es único y
      * deja el orden fijo entre dos usuarios con el mismo nombre.
      *

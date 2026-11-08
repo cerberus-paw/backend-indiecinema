@@ -26,10 +26,11 @@ final class ReservasDeFunciones
     }
 
     /**
-     * La función ya quedó cancelada en programación cuando se llama: lo que falta es lo de
-     * funciones. Si no responde, la cancelación sigue en pie (una función cancelada no admite
-     * reservas nuevas ni registra asistencia), pero sus reservas quedan confirmadas y sin aviso: se
-     * deja en el log como error, con el id, para cancelarlas a mano, y el organizador lo ve.
+     * La función ya quedó cancelada en programación cuando se llama, así que no entra ninguna
+     * reserva nueva: lo que falta es lo de funciones. Si no responde, queda en el log y devuelve
+     * false, y quien llama deshace la cancelación (F-01.7): si no, las reservas quedarían
+     * confirmadas en una función cancelada y sin aviso. Cancelar las reservas se puede repetir: sólo
+     * toca las confirmadas.
      *
      * @param ?string $fecha ya escrita, para el correo; null si no tenía
      *

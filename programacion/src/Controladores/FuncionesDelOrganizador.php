@@ -51,8 +51,8 @@ final class FuncionesDelOrganizador extends Controlador
             // El aviso de que se acaba de programar una: sólo si lo que llega tiene forma de id.
             'programada' => is_string($programada = $peticion->consulta('programada')) && Uuid::esValido($programada),
             'cancelada' => $peticion->consulta('cancelada') === '1',
-            // Se canceló, pero funciones no respondió y sus reservas siguen confirmadas.
-            'reservas_pendientes' => $peticion->consulta('cancelada') === '1' && $peticion->consulta('reservas') === 'pendientes',
+            // No se pudo cancelar: funciones no respondió y la función quedó como estaba (F-01.7).
+            'cancelacion_fallida' => $peticion->consulta('cancelacion') === 'fallida',
             'votacion_cerrada' => $peticion->consulta('votacion_cerrada') === '1',
         ]);
     }
@@ -225,16 +225,20 @@ final class FuncionesDelOrganizador extends Controlador
 
         // Antes de cancelarla, para el aviso a los espectadores: el título y la fecha.
         $funcion = $this->servicio->paraCancelar($organizador, $id);
-        $this->servicio->cancelar($organizador, $id);
+        $anterior = $this->servicio->cancelar($organizador, $id);
 
         // Sólo una programada pudo tener reservas: en votación todavía no se reserva (E4-03.4).
+        // Si funciones no responde, sus reservas seguirían confirmadas en una función cancelada y
+        // sin aviso: la función vuelve a como estaba y el organizador lo intenta de nuevo (F-01.7).
         if ($funcion->estado === EstadoFuncion::Programada && !$this->reservas->cancelarDeLaFuncion(
             $id,
             $organizador->id,
             implode(' + ', $funcion->titulos),
             $funcion->fechaHora === null ? null : TarjetaDeFuncion::fecha($funcion->fechaHora),
         )) {
-            return $this->redirigir('/organizador/funciones?cancelada=1&reservas=pendientes');
+            $this->servicio->deshacerCancelacion($anterior);
+
+            return $this->redirigir('/organizador/funciones?cancelacion=fallida');
         }
 
         return $this->redirigir('/organizador/funciones?cancelada=1');

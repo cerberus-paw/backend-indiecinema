@@ -17,6 +17,7 @@ use IndieCinema\Programacion\Modelo\Obra;
 use IndieCinema\Programacion\Modelo\ReglaIncumplida;
 use IndieCinema\Programacion\Modelo\Sala;
 use IndieCinema\Programacion\Servicios\AcuerdosDeFunciones;
+use IndieCinema\Programacion\Servicios\AvisosDeLaFicha;
 use IndieCinema\Programacion\Servicios\ReservasDeFunciones;
 use IndieCinema\Programacion\Servicios\ServicioDeFuncionesDelOrganizador;
 use LogicException;
@@ -32,6 +33,7 @@ final class FuncionesDelOrganizador extends Controlador
     public function __construct(
         private readonly ServicioDeFuncionesDelOrganizador $servicio,
         private readonly ReservasDeFunciones $reservas,
+        private readonly AvisosDeLaFicha $avisos,
     ) {
     }
 
@@ -357,7 +359,7 @@ final class FuncionesDelOrganizador extends Controlador
             }
 
             // Un aviso propio: el de error_voto habla del voto del espectador (E3-13.F4).
-            return $this->redirigir("/cartelera/{$id}?error_acuerdo=" . rawurlencode($regla->getMessage()));
+            return $this->redirigir($this->avisos->direccion($id, AvisosDeLaFicha::ACUERDO, $regla->getMessage()));
         }
 
         if ($peticion->cabecera('Accept') === 'application/json' || $peticion->cabecera('Content-Type') === 'application/json') {
@@ -390,7 +392,7 @@ final class FuncionesDelOrganizador extends Controlador
             }
 
             // Un aviso propio: el de error_voto habla del voto del espectador (E3-13.F4).
-            return $this->redirigir("/cartelera/{$id}?error_acuerdo=" . rawurlencode($regla->getMessage()));
+            return $this->redirigir($this->avisos->direccion($id, AvisosDeLaFicha::ACUERDO, $regla->getMessage()));
         }
 
         if ($peticion->cabecera('Accept') === 'application/json' || $peticion->cabecera('Content-Type') === 'application/json') {

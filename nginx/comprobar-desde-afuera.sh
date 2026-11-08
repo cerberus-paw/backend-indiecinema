@@ -37,35 +37,50 @@ cabecera() {
 	fi
 }
 
-# rafaga <n> <método> <ruta>: n pedidos seguidos, y ninguno corta el límite de pedidos por IP.
-# Sin los subsistemas (en la CI) responden un error de nginx, pero no 429.
+# rafaga <n> <método> <ruta> <tipo> [Accept]: n + 3 pedidos a la vez. Pasan n, los que admite el
+# límite con su ráfaga, y los otros responden 429, con ese tipo, con el mensaje para el visitante y
+# con la Content-Security-Policy, como cualquier otra respuesta. A la vez y no uno detrás de otro,
+# y el 429 se mira en la misma ráfaga: contra un sitio que tarda en contestar (o en la CI, donde
+# nginx espera a los subsistemas que no están), el límite recupera lugares mientras tanto, y un
+# pedido que viniera después ya no lo superaría.
 rafaga() {
-	local i estado cortados=0
-	for ((i = 0; i < $1; i++)); do
-		estado=$(curl -s -o /dev/null -X "$2" -w '%{http_code}' "$base$3")
-		[[ $estado == 429 ]] && cortados=$((cortados + 1))
-	done
-	if ((cortados == 0)); then
-		printf '  ✔ pasan %s %s %s\n' "$1" "$2" "$3"
+	local dir pasaron cortados uno tipo csp
+	dir=$(mktemp -d)
+	seq $(($1 + 3)) | xargs -P $(($1 + 3)) -I{} curl -s -X "$2" -H "Accept: ${5:-text/html}" \
+		-o "$dir/{}" -D "$dir/{}.cabeceras" -w '%{http_code}\n' "$base$3" >"$dir/estados"
+	cortados=$(grep -c '^429$' "$dir/estados")
+	pasaron=$(grep -vc '^429$' "$dir/estados")
+	uno=$(grep -l '^HTTP/[0-9.]* 429' "$dir"/*.cabeceras | head -1)
+	tipo=$(grep -i '^content-type:' "$uno" 2>/dev/null | cut -d' ' -f2- | tr -d '\r')
+	csp=$(grep -ci '^content-security-policy:' "$uno" 2>/dev/null)
+	if ((pasaron >= $1 && cortados > 0)) && [[ $tipo == "$4"* ]] && ((csp > 0)) \
+		&& grep -q 'Hiciste muchos pedidos seguidos. Probá de nuevo en un minuto.' "${uno%.cabeceras}"; then
+		printf '  ✔ pasan %s %s %s, y los que siguen dan 429 (%s)\n' "$1" "$2" "$3" "$4"
 	else
-		printf '  ✘ de %s %s %s, %s dieron 429 (se esperaba que pasaran todos)\n' "$1" "$2" "$3" "$cortados"
+		printf '  ✘ de %s %s %s pasaron %s y %s dieron 429, «%s» (se esperaba que pasaran %s y los demás dieran 429 %s con el mensaje y la CSP)\n' \
+			$(($1 + 3)) "$2" "$3" "$pasaron" "$cortados" "$tipo" "$1" "$4"
 		fallas=$((fallas + 1))
 	fi
+	rm -rf "$dir"
 }
 
-# demasiados <método> <ruta> <tipo> [Accept]: el pedido corta el límite. Responde 429, con ese
-# tipo, con el mensaje para el visitante y con la Content-Security-Policy, como cualquier otra
-# respuesta.
+# demasiados <método> <ruta> <tipo> [Accept]: con el límite ya gastado por una ráfaga, el pedido
+# responde 429 como en rafaga. Hasta 5 intentos: si el sitio tardó, el límite pudo haber
+# recuperado algún lugar, y el que lo ocupa no es una falla. Sirve para un límite lento, como el
+# de la reserva (uno cada 6 segundos), y para probar el otro formato.
 demasiados() {
-	local respuesta estado tipo csp cuerpo
-	respuesta=$(curl -s -X "$1" -H "Accept: ${4:-text/html}" \
-		-w '\n%{http_code}\n%header{content-type}\n%header{content-security-policy}' "$base$2")
-	csp=${respuesta##*$'\n'}
-	respuesta=${respuesta%$'\n'*}
-	tipo=${respuesta##*$'\n'}
-	respuesta=${respuesta%$'\n'*}
-	estado=${respuesta##*$'\n'}
-	cuerpo=${respuesta%$'\n'*}
+	local respuesta estado tipo csp cuerpo intento
+	for intento in 1 2 3 4 5; do
+		respuesta=$(curl -s -X "$1" -H "Accept: ${4:-text/html}" \
+			-w '\n%{http_code}\n%header{content-type}\n%header{content-security-policy}' "$base$2")
+		csp=${respuesta##*$'\n'}
+		respuesta=${respuesta%$'\n'*}
+		tipo=${respuesta##*$'\n'}
+		respuesta=${respuesta%$'\n'*}
+		estado=${respuesta##*$'\n'}
+		cuerpo=${respuesta%$'\n'*}
+		[[ $estado == 429 ]] && break
+	done
 	if [[ $estado == 429 && $tipo == "$3"* && -n $csp
 		&& $cuerpo == *'Hiciste muchos pedidos seguidos. Probá de nuevo en un minuto.'* ]]; then
 		printf '  ✔ 429 %s %s (%s)\n' "$1" "$2" "$3"
@@ -106,14 +121,12 @@ echo "/funcion sin la barra va a /funcion/:"
 espera 301 /funcion /funcion/
 
 echo "Muchas búsquedas seguidas desde una IP:"
-rafaga 31 GET '/cartelera?q=x'
-demasiados GET '/cartelera?q=x' text/html
+rafaga 61 GET '/cartelera?q=x' text/html
 
 # Sin sesión: el límite corta antes que el auth_request, así que tampoco se esquiva sin ingresar.
 echo "Muchas reservas seguidas desde una IP:"
 reservar=/funcion/reservar/00000003-0000-4000-8000-000000000001
-rafaga 6 POST $reservar
-demasiados POST $reservar application/json application/json
+rafaga 6 POST $reservar application/json application/json
 demasiados POST $reservar text/html
 
 if ((fallas > 0)); then

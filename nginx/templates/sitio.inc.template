@@ -124,11 +124,11 @@ location ~ ^/solicitar-sala/?$ {
     include conf.d/subsistema.inc;
 }
 
-# Los listados con búsqueda de programación: la cartelera, su CSV y las obras. 60 por minuto por
-# IP: pasan 31 seguidos y después uno por segundo. No entran la ficha de una función ni sus
+# Los listados con búsqueda de programación: la cartelera, su CSV y las obras. 120 por minuto por
+# IP: pasan 61 seguidos y después dos por segundo (el porqué, en indiecinema.conf). No entran la ficha de una función ni sus
 # lugares, que la ficha pide cada 15 segundos.
 location ~ ^/(cartelera(\.csv)?|obras)/?$ {
-    limit_req zone=busqueda burst=30 nodelay;
+    limit_req zone=busqueda burst=60 nodelay;
     set $subsistema programacion;
     set $secreto "${NGINX_SECRETO_PROGRAMACION}";
     rewrite ^(.*)$ $1 break;

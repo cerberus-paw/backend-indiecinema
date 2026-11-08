@@ -1143,6 +1143,33 @@ final class CarteleraTest extends TestCase
     /**
      * Criterio E3-12.3: «La ficha muestra las candidatas y el voto del usuario».
      */
+    /**
+     * F-01.5: los afiches de las candidatas apuntan a la ruta que los sirve, /obras/{id}/afiche, y
+     * no al nombre del archivo, que el navegador no tiene cómo pedir. Pasaba en producción: lo
+     * arregló IC-292 en dev, sin una prueba que lo sostuviera.
+     */
+    public function testLosAfichesDeLaVotacionApuntanALaRutaQueLosSirve(): void
+    {
+        $this->cargarDatosDePrueba();
+        $salaId = (string) $this->base->valor('SELECT id FROM sala WHERE habilitada = TRUE AND dada_de_baja_en IS NULL LIMIT 1');
+        $obras = $this->base->filas('SELECT id, afiche FROM obra WHERE afiche IS NOT NULL ORDER BY id LIMIT 2');
+        self::assertCount(2, $obras, 'Los datos de prueba traen obras con afiche.');
+        $funcionId = Uuid::nuevo();
+        $this->base->ejecutar("INSERT INTO funcion (id, sala_id, estado, precio_base, cupo) VALUES (?, ?, 'en_votacion_titulos', 2000, 50)", [$funcionId, $salaId]);
+        foreach ($obras as $obra) {
+            $this->base->ejecutar("INSERT INTO funcion_obra (funcion_id, obra_id, estado) VALUES (?, ?, 'candidata')", [$funcionId, $obra['id']]);
+        }
+
+        foreach ([[], ['X-Nginx-Secreto' => self::SECRETO, 'X-Usuario-Id' => Uuid::nuevo(), 'X-Rol' => 'espectador']] as $cabeceras) {
+            $ficha = $this->pedir("/cartelera/{$funcionId}", cabeceras: $cabeceras)->cuerpo();
+            foreach ($obras as $obra) {
+                self::assertStringContainsString("src=\"/obras/{$obra['id']}/afiche\"", $ficha);
+                self::assertStringNotContainsString((string) $obra['afiche'], $ficha);
+                self::assertSame(200, $this->pedir("/obras/{$obra['id']}/afiche")->estado());
+            }
+        }
+    }
+
     public function testFichaDeFuncionEnVotacionMuestraCandidatasYVotoDelUsuario(): void
     {
         $this->cargarDatosDePrueba();

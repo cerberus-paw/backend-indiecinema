@@ -122,7 +122,7 @@ todo el sitio se vea igual aunque lo sirvan subsistemas distintos.
   etiquetan (`entrega-N`) sobre lo que está publicado desde `main`.
 - **Cada contenedor monta sólo lo suyo**: su carpeta, el núcleo y el front. Ningún subsistema ve
   el `config.ini` de otro, así que si uno queda comprometido no se lleva los secretos de los
-  demás; cuando se sume Mercado Pago, su credencial va a estar sólo en funciones.
+  demás; las credenciales de Mercado Pago (`[mercadopago]`) están sólo en funciones.
 - **Los subsistemas corren sin privilegios.** Una sola imagen para los tres (`php:8.4-apache`,
   la versión mínima que pide `composer.json`) con Apache entero como `www-data`, que por eso
   escucha en el 8080. En el compose, sin ninguna capacidad de root y con el sistema de archivos de
@@ -648,6 +648,34 @@ página (el rol se lee en cada pedido):
 ```
 docker compose exec mysql mysql -uroot -p cuentas -e "INSERT INTO rol (usuario_id, tipo) SELECT id, 'organizador' FROM usuario WHERE correo = 'vos@ejemplo.com'"
 ```
+
+### Mercado Pago
+
+El cobro de las entradas (X-01) usa Checkout Pro con la cuenta de un vendedor de prueba, y se
+prende con la sección `[mercadopago]` del `config.ini` de funciones. Con `activo = false` (como
+en el ejemplo) o sin la sección, una función paga se confirma sin cobrar, igual que una gratuita.
+
+Para tener las credenciales de prueba:
+
+1. Entrar a https://www.mercadopago.com.ar/developers/panel/app con una cuenta de Mercado Pago y
+   crear una aplicación de **Checkout Pro** (pagos online, sin plataforma de e-commerce).
+2. En la aplicación, «Cuentas de prueba»: crear un **vendedor** y un **comprador**, los dos de
+   Argentina. Con el comprador se paga en el sitio; nunca con una cuenta de verdad.
+3. Ingresar a Mercado Pago **como el vendedor de prueba** (en una ventana privada), crear ahí
+   también una aplicación de Checkout Pro y copiar sus «Credenciales de producción»: el access
+   token empieza con `APP_USR-`, pero es de una cuenta de prueba y no mueve plata de verdad. Va
+   en `access_token`.
+4. En esa misma aplicación, «Webhooks» → «Configurar notificaciones»: la URL de producción es
+   `https://<sitio>/funcion/pagos/aviso`, con el evento «Pagos». Al guardar, Mercado Pago muestra
+   la **clave secreta** con la que firma cada aviso: va en `clave_webhook`.
+5. `activo = true`, y reiniciar funciones (`docker compose restart funciones`).
+
+El aviso de pago necesita una URL pública, así que en `localhost` el pago queda pendiente hasta
+que vence: se prueba de punta a punta en el servidor de desarrollo. Para pagar con el comprador
+de prueba, las tarjetas de prueba están en la documentación de Checkout Pro («Tarjetas de
+prueba»), con el titular `APRO` para un pago aprobado y `OTHE` para uno rechazado.
+
+Las credenciales nunca van al repositorio: gitleaks frena un `APP_USR-…` o un `TEST-…` en el CI.
 
 ### Integración continua
 

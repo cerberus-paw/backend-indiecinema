@@ -151,6 +151,27 @@ final class SalasDelOrganizadorTest extends TestCase
         self::assertSame(80, $this->fila($id)['capacidad'] ?? null);
     }
 
+    /**
+     * F-01.1: la capacidad no baja del cupo de una función que todavía no se dio, porque quedarían
+     * más lugares que butacas. El de una ya dada o cancelada no cuenta.
+     */
+    public function testLaCapacidadNoBajaDelCupoDeSusFunciones(): void
+    {
+        $id = $this->crearSala(self::ORGANIZADORA);
+        $funcion = 'INSERT INTO funcion (id, sala_id, estado, fecha_hora, precio_base, cupo) VALUES (?, ?, ?, ?, 0, ?)';
+        $this->base->ejecutar($funcion, [Uuid::nuevo(), $id, 'programada', '2030-10-25 20:30:00', 50]);
+        $this->base->ejecutar($funcion, [Uuid::nuevo(), $id, 'cancelada', '2030-10-26 20:30:00', 60]);
+        $this->base->ejecutar($funcion, [Uuid::nuevo(), $id, 'programada', '2020-01-01 20:30:00', 60]);
+
+        $respuesta = $this->enviar("/organizador/salas/{$id}/editar", self::ORGANIZADORA, ['capacidad' => '40']);
+        self::assertSame(422, $respuesta->estado());
+        self::assertStringContainsString('Tenés una función con 50 lugares de cupo en esta sala: la capacidad no puede ser menor.', $respuesta->cuerpo());
+        self::assertSame(60, $this->fila($id)['capacidad'] ?? null);
+
+        self::assertSame(303, $this->enviar("/organizador/salas/{$id}/editar", self::ORGANIZADORA, ['capacidad' => '50'])->estado());
+        self::assertSame(50, $this->fila($id)['capacidad'] ?? null);
+    }
+
     public function testAlEditarUnaFotoNuevaReemplazaALaAnteriorYSinFotoQuedaLaQueEstaba(): void
     {
         $id = $this->crearSala(self::ORGANIZADORA);

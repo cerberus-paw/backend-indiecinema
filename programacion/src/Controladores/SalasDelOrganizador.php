@@ -54,13 +54,22 @@ final class SalasDelOrganizador extends Controlador
         if ($datos === null) {
             return $this->formulario($sala->id, ['formulario' => $formulario], 422);
         }
+        // Que la capacidad no quede por debajo del cupo de una función que todavía no se dio
+        // (F-01.1): la sala tendría menos butacas que lugares ofrecidos.
+        $minima = $this->servicio->capacidadMinima($sala);
+        if ($datos->capacidad < $minima) {
+            return $this->formulario($sala->id, [
+                'formulario' => $formulario,
+                'errores' => ['capacidad' => "Tenés una función con {$minima} lugares de cupo en esta sala: la capacidad no puede ser menor. Bajale el cupo primero."],
+            ], 422);
+        }
         $this->servicio->actualizar($sala, $datos, $formulario->imagen);
 
         return $this->redirigir("/organizador/salas/{$sala->id}/editar?guardada=1");
     }
 
     /**
-     * @param array{formulario?: FormularioDeSala, mensaje_exito?: ?string} $extra
+     * @param array{formulario?: FormularioDeSala, errores?: array<string, string>, mensaje_exito?: ?string} $extra
      */
     private function formulario(string $id, array $extra, int $estado = 200): Respuesta
     {
@@ -74,7 +83,7 @@ final class SalasDelOrganizador extends Controlador
             // sin una nueva queda la que estaba.
             'reglas' => FormularioDeSala::reglas(imagenObligatoria: false),
             'valores' => $formulario?->valores ?? [],
-            'errores' => $formulario?->errores ?? [],
+            'errores' => [...($formulario?->errores ?? []), ...($extra['errores'] ?? [])],
             'mensaje_exito' => $extra['mensaje_exito'] ?? null,
         ], $estado);
     }

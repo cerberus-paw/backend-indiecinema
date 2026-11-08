@@ -23,6 +23,18 @@ $franja0 = (new DateTimeImmutable('+10 days'))->format('Y-m-d');
 $franja1 = (new DateTimeImmutable('+11 days'))->format('Y-m-d');
 $metodo = strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? 'GET'));
 
+// Los lugares ocupados de una función (F-01.1), como GET /interno/funciones/{id}/ocupacion de
+// funciones: los que la prueba escribió en ocupacion_de_prueba.json (funcion_id => ocupados), y 0
+// las que no están. Sólo si la prueba dejó el archivo: las que no lo dejan siguen viendo una
+// funciones que no contesta la ocupación, como hasta ahora.
+$archivoDeOcupacion = sys_get_temp_dir() . '/ocupacion_de_prueba.json';
+if ($metodo === 'GET' && is_file($archivoDeOcupacion) && preg_match('#^/interno/funciones/([0-9a-f-]{36})/ocupacion$#', $ruta, $partes) === 1) {
+    $ocupados = json_decode((string) file_get_contents($archivoDeOcupacion), true);
+    echo json_encode(['funcion_id' => $partes[1], 'lugares_ocupados' => (int) ($ocupados[$partes[1]] ?? 0)]);
+
+    return;
+}
+
 if ($metodo === 'POST' && $ruta === '/interno/acuerdos') {
     $cuerpo = json_decode((string) file_get_contents('php://input'), true);
     if (!is_array($cuerpo) || empty($cuerpo['funcion_id']) || empty($cuerpo['minimo_asistentes']) || empty($cuerpo['franjas'])) {

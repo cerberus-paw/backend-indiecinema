@@ -67,6 +67,9 @@ final class FuncionesDelOrganizadorTest extends TestCase
     protected function setUp(): void
     {
         @unlink(sys_get_temp_dir() . '/acuerdo_estado_global.txt');
+        // Funciones contesta la ocupación: ninguna función tiene reservas salvo que la prueba las
+        // ponga con ocupados() (F-01.1).
+        file_put_contents(sys_get_temp_dir() . '/ocupacion_de_prueba.json', '{}');
         $this->configuracion = new Configuracion([
             'app' => ['subsistema' => 'programacion', 'entorno' => 'desarrollo'],
             'base' => self::baseDePruebas(),
@@ -95,6 +98,22 @@ final class FuncionesDelOrganizadorTest extends TestCase
     protected function tearDown(): void
     {
         @unlink(sys_get_temp_dir() . '/acuerdo_estado_global.txt');
+        @unlink(sys_get_temp_dir() . '/ocupacion_de_prueba.json');
+    }
+
+    /**
+     * Los lugares que funciones dice que están reservados en la función; sin archivo, funciones
+     * no contesta la ocupación, como si estuviera caído.
+     */
+    private static function ocupados(string $funcionId, ?int $ocupados): void
+    {
+        $archivo = sys_get_temp_dir() . '/ocupacion_de_prueba.json';
+        if ($ocupados === null) {
+            @unlink($archivo);
+
+            return;
+        }
+        file_put_contents($archivo, json_encode([$funcionId => $ocupados]));
     }
 
     private function pedir(
@@ -1107,6 +1126,64 @@ final class FuncionesDelOrganizadorTest extends TestCase
 
         self::assertSame(422, $respuesta->estado());
         self::assertStringContainsString('Se pisa con otra función de la sala', $respuesta->cuerpo());
+    }
+
+    /**
+     * F-01.1: el cupo no baja de los lugares reservados. Hasta ahí, sí.
+     */
+    public function testElCupoNoBajaDeLoReservado(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $funcion = $this->programada($sala, '2030-10-25 20:30:00');
+        self::ocupados($funcion->id, 30);
+
+        $respuesta = $this->actualizar($funcion->id, $sala, ['cupo' => '20']);
+        self::assertSame(422, $respuesta->estado());
+        self::assertStringContainsString('Ya hay 30 lugares reservados: el cupo no puede ser menor.', $respuesta->cuerpo());
+        self::assertSame(40, (int) $this->base->valor('SELECT cupo FROM funcion WHERE id = ?', [$funcion->id]));
+
+        self::assertSame(303, $this->actualizar($funcion->id, $sala, ['cupo' => '30'])->estado());
+        self::assertSame(30, (int) $this->base->valor('SELECT cupo FROM funcion WHERE id = ?', [$funcion->id]));
+    }
+
+    /**
+     * F-01.1: con una reserva, la función no cambia de sala, de películas ni de fecha: quien
+     * reservó lo hizo para eso. El precio y el cupo para arriba, sí.
+     */
+    public function testConReservasNoCambiaLaSalaNiLasPeliculasNiLaFecha(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $otraSala = $this->sala(self::ORGANIZADORA, 'Sala Alternativa', capacidad: 80);
+        $funcion = $this->programada($sala, '2030-10-25 20:30:00');
+        self::ocupados($funcion->id, 1);
+
+        foreach ([
+            'la sala' => [$otraSala, []],
+            'las películas' => [$sala, ['obras' => [$this->obras['La ciénaga']]]],
+            'la fecha' => [$sala, ['fecha' => '2030-10-26']],
+        ] as $que => [$salaNueva, $campos]) {
+            $respuesta = $this->actualizar($funcion->id, $salaNueva, $campos);
+            self::assertSame(422, $respuesta->estado(), "Cambió {$que} con reservas.");
+            self::assertStringContainsString('La función ya tiene reservas: no se le puede cambiar la sala, las películas ni la fecha.', $respuesta->cuerpo());
+        }
+
+        self::assertSame(303, $this->actualizar($funcion->id, $sala, ['precio' => '3000', 'cupo' => '45'])->estado());
+    }
+
+    /**
+     * F-01.1: si funciones no contesta, lo que podría pisar una reserva no se guarda; lo demás, sí.
+     */
+    public function testSinRespuestaDeFuncionesNoSeArriesgaAPisarReservas(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $funcion = $this->programada($sala, '2030-10-25 20:30:00');
+        self::ocupados($funcion->id, null);
+
+        $respuesta = $this->actualizar($funcion->id, $sala, ['cupo' => '10']);
+        self::assertSame(422, $respuesta->estado());
+        self::assertStringContainsString('No pudimos comprobar las reservas de la función', $respuesta->cuerpo());
+
+        self::assertSame(303, $this->actualizar($funcion->id, $sala, ['precio' => '3000'])->estado());
     }
 
     public function testEdicionDePuntaAPuntaYCambiosSeVenEnLaFicha(): void

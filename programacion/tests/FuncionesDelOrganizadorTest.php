@@ -2165,19 +2165,18 @@ final class FuncionesDelOrganizadorTest extends TestCase
         self::assertSame('en_acuerdo_fecha', $fila['estado']);
         self::assertNull($fila['fecha_hora']);
 
-        // Ficha muestra el estado sin quórum y las opciones de decisión para el organizador
+        // Ficha muestra el estado sin quórum y las opciones de decisión para el organizador. Iban
+        // dentro de un if sobre un texto que la ficha ya no tiene, así que no comprobaban nada
+        // (F-01.3): ahora sí.
         $fichaOrganizador = $this->pedir('GET', "/cartelera/{$funcion->id}")->cuerpo();
-        if (str_contains($fichaOrganizador, 'No se alcanzó el quórum')) {
-            self::assertStringContainsString('No se alcanzó el quórum de asistentes requerido', $fichaOrganizador);
-            self::assertStringContainsString('Proponer nuevas franjas horarias', $fichaOrganizador);
-            self::assertStringContainsString('Cancelar función', $fichaOrganizador);
-        }
+        self::assertStringContainsString('La función no se programa por falta de quórum', $fichaOrganizador);
+        self::assertStringContainsString('Proponer nuevas franjas horarias', $fichaOrganizador);
+        self::assertStringContainsString('Cancelar función', $fichaOrganizador);
 
         // Ficha pública para espectadores explica que no se programó
         $fichaEspectador = $this->pedir('GET', "/cartelera/{$funcion->id}", usuario: null)->cuerpo();
-        if (str_contains($fichaEspectador, 'falta de quórum')) {
-            self::assertStringContainsString('La función no se programa por falta de quórum', $fichaEspectador);
-        }
+        self::assertStringContainsString('La función no se programa por falta de quórum', $fichaEspectador);
+        self::assertStringNotContainsString('Proponer nuevas franjas horarias', $fichaEspectador);
 
         // El organizador decide cancelar la función
         $cancelacion = $this->enviar("/organizador/funciones/{$funcion->id}/cancelar", []);
@@ -2274,6 +2273,35 @@ final class FuncionesDelOrganizadorTest extends TestCase
         $confirmacion = $this->pedir('GET', "/organizador/funciones/{$funcion->id}/cancelar");
         self::assertSame(200, $confirmacion->estado());
         self::assertStringContainsString('Confirmar cancelación', $confirmacion->cuerpo());
+    }
+
+    /**
+     * F-01.3: después de cerrar sin mínimo, la función no queda trabada. Las dos salidas que le da
+     * el sitio al organizador funcionan hasta el final: proponer otras fechas abre un acuerdo nuevo,
+     * y cancelarla la cancela. Hasta ahora sólo se probaba que se ofrecieran.
+     */
+    public function testDespuesDeCerrarSinMinimoSeProponenOtrasFechasOSeCancela(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        [$otrasFechas, $cancelada] = [$this->funcion($sala), $this->funcion($sala)];
+        foreach ([$otrasFechas, $cancelada] as $funcion) {
+            $this->enviar("/organizador/funciones/{$funcion->id}/cerrar-votacion", []);
+            self::acuerdoEnFunciones('abierto');
+            self::assertSame(303, $this->enviar("/organizador/funciones/{$funcion->id}/cerrar-sin-minimo", [])->estado());
+        }
+
+        $propuesta = $this->enviar("/organizador/funciones/{$otrasFechas->id}/acuerdo", [
+            'minimo_asistentes' => '10',
+            'franja_inicio' => [self::dentroDe(20, '20:00:00'), self::dentroDe(21, '21:00:00')],
+            'franja_fin' => [self::dentroDe(20, '22:30:00'), ''],
+        ]);
+        self::assertSame(303, $propuesta->estado());
+        self::assertSame("/cartelera/{$otrasFechas->id}?acuerdo_propuesto=1", $propuesta->cabecera('Location'));
+        self::assertSame('en_acuerdo_fecha', $this->base->valor('SELECT estado FROM funcion WHERE id = ?', [$otrasFechas->id]));
+
+        self::acuerdoEnFunciones('sin_minimo');
+        self::assertSame(303, $this->enviar("/organizador/funciones/{$cancelada->id}/cancelar", [])->estado());
+        self::assertSame('cancelada', $this->base->valor('SELECT estado FROM funcion WHERE id = ?', [$cancelada->id]));
     }
 
     public function testCerrarAcuerdoSinMinimoRechazaOrganizadorAjeno(): void

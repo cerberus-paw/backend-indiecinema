@@ -159,12 +159,12 @@ final class ReservasTest extends TestCase
     /**
      * Ocupa lugares de una función sin pasar por la página, como si los hubieran reservado otros.
      */
-    private function ocupar(string $funcion, int $cantidad, string $usuario = self::ELIAS): string
+    private function ocupar(string $funcion, int $cantidad, ?string $usuario = null): string
     {
         $id = Uuid::nuevo();
         $this->base->ejecutar(
             'INSERT INTO reserva (id, funcion_id, usuario_id, codigo, cantidad, total, creada_en) VALUES (?, ?, ?, ?, ?, ?, ?)',
-            [$id, $funcion, $usuario, strtoupper(substr(bin2hex(random_bytes(4)), 0, 8)), $cantidad, '0.00', '2026-10-19 10:00:00'],
+            [$id, $funcion, $usuario ?? Uuid::nuevo(), strtoupper(substr(bin2hex(random_bytes(4)), 0, 8)), $cantidad, '0.00', '2026-10-19 10:00:00'],
         );
 
         return $id;
@@ -195,7 +195,20 @@ final class ReservasTest extends TestCase
         self::assertStringContainsString('href="/cartelera/' . self::PROXIMA . '"', $cuerpo);
         self::assertStringContainsString('action="/funcion/reservar/' . self::PROXIMA . '" method="POST"', $cuerpo);
         self::assertStringContainsString('value="' . self::CSRF . '"', $cuerpo);
-        self::assertMatchesRegularExpression('/name="cantidad"[^>]*min="1"[^>]*max="40"/s', $cuerpo);
+        self::assertMatchesRegularExpression('/name="cantidad"[^>]*min="1"[^>]*max="6"/s', $cuerpo);
+    }
+
+    public function testElFormularioBajaElMaximoALoQueLeQuedaAlEspectador(): void
+    {
+        $this->reservar('2');
+
+        $cuerpo = $this->pedir('GET', '/reservar/' . self::PROXIMA, self::EVA)->cuerpo();
+        self::assertMatchesRegularExpression('/name="cantidad"[^>]*min="1"[^>]*max="4"/s', $cuerpo);
+
+        $this->reservar('4');
+        $cuerpoLleno = $this->pedir('GET', '/reservar/' . self::PROXIMA, self::EVA)->cuerpo();
+        self::assertStringContainsString('Ya tenés reservados los 6 lugares máximos por persona para esta función.', $cuerpoLleno);
+        self::assertStringNotContainsString('Reservar mis lugares', $cuerpoLleno);
     }
 
     public function testReservarLlevaALaConfirmacionConElCodigo(): void
@@ -771,6 +784,19 @@ final class ReservasTest extends TestCase
         // Con el número de verdad, así la ficha corrige el máximo del campo.
         self::assertSame(1, $json['lugares_libres']);
         self::assertSame(1, $this->reservas());
+    }
+
+    public function testSuperarElMaximoPorPersonaEnJsonDevuelve422(): void
+    {
+        $respuesta = $this->reservarEnJson('7');
+        $json = self::json($respuesta);
+
+        self::assertSame(422, $respuesta->estado());
+        self::assertSame('Se pueden reservar hasta 6 lugares por persona en cada función.', $json['error']);
+        self::assertSame(40, $json['lugares_libres']);
+        self::assertSame(6, $json['lugares_restantes_usuario']);
+        self::assertSame(6, $json['maximo_reserva']);
+        self::assertSame(6, $json['maximo_por_persona']);
     }
 
     public function testCancelarEnJsonDevuelveLaCanceladaYElLugarQueVolvio(): void

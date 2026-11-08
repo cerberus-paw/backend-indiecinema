@@ -12,6 +12,8 @@ use DateTimeImmutable;
  */
 final readonly class CupoDeFuncion
 {
+    public const MAXIMO_POR_PERSONA = Funcion::MAXIMO_POR_PERSONA;
+
     public function __construct(
         public string $id,
         public EstadoFuncion $estado,

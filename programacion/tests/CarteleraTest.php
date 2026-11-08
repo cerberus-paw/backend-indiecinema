@@ -1076,7 +1076,7 @@ final class CarteleraTest extends TestCase
         // Al subsistema funciones, que sí lleva el prefijo: la ficha es de programación.
         self::assertStringContainsString('action="/funcion/reservar/' . $id . '" method="POST"', $cuerpo);
         self::assertMatchesRegularExpression('/name="_csrf" value="[0-9a-f]{64}"/', $cuerpo);
-        self::assertMatchesRegularExpression('/name="cantidad"[^>]*min="1"[^>]*max="' . $cupo . '"/s', $cuerpo);
+        self::assertMatchesRegularExpression('/name="cantidad"[^>]*min="1"[^>]*max="6"/s', $cuerpo);
     }
 
     public function testUnaFuncionCanceladaOQueYaEmpezoNoOfreceReservar(): void

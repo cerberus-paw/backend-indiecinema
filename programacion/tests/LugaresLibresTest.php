@@ -305,7 +305,12 @@ final class LugaresLibresTest extends TestCase
         self::assertSame($conLugar['cupo'], $json['cupo']);
         self::assertTrue($json['reservable']);
         // Es para consultar cada pocos segundos: no trae la ficha entera.
-        self::assertSame(['lugares_libres', 'agotada', 'cupo', 'reservable'], array_keys($json));
+        self::assertSame(
+            ['lugares_libres', 'agotada', 'cupo', 'reservable', 'maximo_por_persona', 'lugares_restantes_usuario', 'maximo_reserva'],
+            array_keys($json),
+        );
+        self::assertSame(6, $json['maximo_por_persona']);
+        self::assertSame(5, $json['maximo_reserva']);
     }
 
     public function testLosLugaresEnJsonDicenAgotadaYQueNoSeReserva(): void

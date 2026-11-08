@@ -89,6 +89,24 @@ final class OcupacionInternaTest extends TestCase
         );
     }
 
+    public function testDeUnaFuncionConUsuarioDevuelveTambienLugaresDelUsuario(): void
+    {
+        $usuario = Uuid::nuevo();
+        $this->base->ejecutar(
+            'INSERT INTO reserva (id, funcion_id, usuario_id, codigo, cantidad, total, estado, creada_en) VALUES (?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())',
+            [Uuid::nuevo(), self::FUNCION, $usuario, 'ABCD1234', 2, 7000, 'confirmada'],
+        );
+        $this->base->ejecutar(
+            'INSERT INTO reserva (id, funcion_id, usuario_id, codigo, cantidad, total, estado, creada_en) VALUES (?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())',
+            [Uuid::nuevo(), self::FUNCION, $usuario, 'ABCD5678', 1, 3500, 'cancelada'],
+        );
+
+        $json = self::json($this->pedir('/interno/funciones/' . self::FUNCION . '/ocupacion', ['usuario' => $usuario]));
+        self::assertSame(self::FUNCION, $json['funcion_id']);
+        self::assertSame(7, $json['lugares_ocupados']);
+        self::assertSame(2, $json['lugares_del_usuario']);
+    }
+
     public function testUnaFuncionSinReservasTieneCeroLugaresOcupados(): void
     {
         self::assertSame(0, self::json($this->pedir('/interno/funciones/' . self::SIN_RESERVAS . '/ocupacion'))['lugares_ocupados']);

@@ -20,6 +20,14 @@ use IndieCinema\Nucleo\Uuid;
  */
 final class Funcion
 {
+    /**
+     * Lo más que puede tener reservado una misma persona en una función, sumando todas sus
+     * reservas confirmadas: alcanza para ir en grupo o en familia a una sala independiente sin
+     * que una sola cuenta ocupe todo el cupo y después cancele. Si algún día lo fija el
+     * organizador por función, pasa a ser un campo de programación.
+     */
+    public const MAXIMO_POR_PERSONA = 6;
+
     /** Lo más que entra en la columna funcion.precio_base, DECIMAL(10, 2). */
     public const PRECIO_MAXIMO = 99_999_999.99;
 

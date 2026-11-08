@@ -29,7 +29,8 @@ final class OcupacionInterna extends Controlador
     }
 
     /**
-     * GET /interno/funciones/{id}/ocupacion, para la ficha.
+     * GET /interno/funciones/{id}/ocupacion, para la ficha. Si viene el usuario, devuelve además
+     * cuántos lugares ya tiene reservados él (IC-463).
      *
      * @throws ExcepcionHttp 404 si el id no es un UUID
      */
@@ -40,7 +41,13 @@ final class OcupacionInterna extends Controlador
             throw ExcepcionHttp::noEncontrada();
         }
 
-        return $this->json(['funcion_id' => $id, 'lugares_ocupados' => $this->reservas->lugaresOcupados($id)]);
+        $datos = ['funcion_id' => $id, 'lugares_ocupados' => $this->reservas->lugaresOcupados($id)];
+        $usuario = $peticion->consulta('usuario');
+        if (is_string($usuario) && Uuid::esValido($usuario)) {
+            $datos['lugares_del_usuario'] = $this->reservas->lugaresOcupadosPorUsuario($id, $usuario);
+        }
+
+        return $this->json($datos);
     }
 
     /**

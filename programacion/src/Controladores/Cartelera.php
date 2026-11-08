@@ -132,11 +132,11 @@ final class Cartelera extends Controlador
     {
         $id = (string) $peticion->parametro('id');
         $detalle = $this->servicio->detalle($id);
+        $usuario = $peticion->usuario();
         $cupo = new CupoDeFuncion($detalle->id, $detalle->estado, $detalle->fechaHora, $detalle->cupo);
-        $lugares = $this->lugaresDe($cupo);
+        $lugares = $this->lugaresDe($cupo, $usuario?->id);
         $reservable = self::seReservaConLugares($cupo, $lugares['agotada']);
 
-        $usuario = $peticion->usuario();
         $esPropia = $usuario !== null
             && $usuario->alcanza(Rol::Organizador)
             && $detalle->sala->organizadorId !== null
@@ -270,30 +270,48 @@ final class Cartelera extends Controlador
      */
     public function lugares(Peticion $peticion): Respuesta
     {
+        $usuario = $peticion->usuario();
         $cupo = $this->servicio->cupo((string) $peticion->parametro('id'));
-        $lugares = $this->lugaresDe($cupo);
+        $lugares = $this->lugaresDe($cupo, $usuario?->id);
 
         return $this->json([
-            ...$lugares,
+            'lugares_libres' => $lugares['lugares_libres'],
+            'agotada' => $lugares['agotada'],
             'cupo' => $cupo->cupo,
             'reservable' => self::seReservaConLugares($cupo, $lugares['agotada']),
+            'maximo_por_persona' => $lugares['maximo_por_persona'],
+            'lugares_restantes_usuario' => $lugares['lugares_restantes_usuario'],
+            'maximo_reserva' => $lugares['maximo_reserva'],
         ]);
     }
 
     /**
-     * Los lugares libres de una función y si está agotada. Sólo de una programada por darse se
-     * pregunta: en otro estado no hay reservas que contar, y una que ya pasó no está «agotada»
-     * aunque se hayan tomado todos los lugares. Sin el dato de funciones, null.
+     * Los lugares libres de una función, si está agotada y el máximo que puede reservar el espectador.
      *
-     * @return array{lugares_libres: ?int, agotada: bool}
+     * @return array{lugares_libres: ?int, agotada: bool, maximo_por_persona: int, lugares_restantes_usuario: int, maximo_reserva: int}
      */
-    private function lugaresDe(CupoDeFuncion $funcion): array
+    private function lugaresDe(CupoDeFuncion $funcion, ?string $usuarioId = null): array
     {
-        $libres = TarjetaDeFuncion::muestraLugares($funcion->estado, $funcion->fechaHora)
-            ? TarjetaDeFuncion::lugaresLibres($funcion->estado, $funcion->fechaHora, $funcion->cupo, $this->ocupacion->deUna($funcion->id))
+        $maximoPorPersona = min(Funcion::MAXIMO_POR_PERSONA, $funcion->cupo);
+        $ocupacion = TarjetaDeFuncion::muestraLugares($funcion->estado, $funcion->fechaHora)
+            ? $this->ocupacion->deUnaParaUsuario($funcion->id, $usuarioId)
             : null;
 
-        return ['lugares_libres' => $libres, 'agotada' => $libres === 0];
+        $libres = $ocupacion !== null
+            ? TarjetaDeFuncion::lugaresLibres($funcion->estado, $funcion->fechaHora, $funcion->cupo, $ocupacion['ocupados'])
+            : null;
+
+        $delUsuario = $ocupacion['del_usuario'] ?? 0;
+        $restantesUsuario = max(0, $maximoPorPersona - $delUsuario);
+        $maximoReserva = $libres !== null ? min($libres, $restantesUsuario) : $restantesUsuario;
+
+        return [
+            'lugares_libres' => $libres,
+            'agotada' => $libres === 0,
+            'maximo_por_persona' => $maximoPorPersona,
+            'lugares_restantes_usuario' => $restantesUsuario,
+            'maximo_reserva' => $maximoReserva,
+        ];
     }
 
     /**

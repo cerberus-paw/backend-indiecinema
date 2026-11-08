@@ -168,13 +168,87 @@ final class ServicioDeReservasTest extends TestCase
         self::assertSame('confirmada', $this->resultado($proceso));
     }
 
+    public function testNoSeSuperaElMaximoPorPersonaEnUnaReserva(): void
+    {
+        $espectador = new Usuario(Uuid::nuevo(), Rol::Espectador);
+
+        try {
+            $this->servicio()->reservar($espectador, self::PROGRAMADA, Reserva::MAXIMO_POR_PERSONA + 1, new DateTimeImmutable('2026-10-20 12:00:00'));
+            self::fail('Permitió reservar más del máximo por persona.');
+        } catch (ReglaIncumplida $error) {
+            self::assertSame('Se pueden reservar hasta 6 lugares por persona en cada función.', $error->getMessage());
+        }
+
+        self::assertSame(0, (int) $this->base->valor('SELECT COUNT(*) FROM reserva WHERE usuario_id = ?', [$espectador->id]));
+    }
+
+    public function testNoSeSuperaElMaximoPorPersonaEnDosReservasSeguidas(): void
+    {
+        $espectador = new Usuario(Uuid::nuevo(), Rol::Espectador);
+        $servicio = $this->servicio();
+        $ahora = new DateTimeImmutable('2026-10-20 12:00:00');
+
+        $primera = $servicio->reservar($espectador, self::PROGRAMADA, 4, $ahora);
+        self::assertSame(4, $primera->cantidad);
+
+        try {
+            $servicio->reservar($espectador, self::PROGRAMADA, 3, $ahora);
+            self::fail('Permitió superar el máximo en una segunda reserva.');
+        } catch (ReglaIncumplida $error) {
+            self::assertSame('Ya tenés 4 lugares reservados: podés sumar hasta 2 lugares más (máximo 6 por persona).', $error->getMessage());
+        }
+
+        $segunda = $servicio->reservar($espectador, self::PROGRAMADA, 2, $ahora);
+        self::assertSame(2, $segunda->cantidad);
+
+        try {
+            $servicio->reservar($espectador, self::PROGRAMADA, 1, $ahora);
+            self::fail('Permitió reservar teniendo ya 6 lugares.');
+        } catch (ReglaIncumplida $error) {
+            self::assertSame('Ya tenés reservados los 6 lugares máximos por persona para esta función.', $error->getMessage());
+        }
+
+        $servicio->cancelar($espectador, $segunda->id, $ahora);
+        $recuperada = $servicio->reservar($espectador, self::PROGRAMADA, 2, $ahora);
+        self::assertSame(2, $recuperada->cantidad);
+
+        $otro = new Usuario(Uuid::nuevo(), Rol::Espectador);
+        $reservaOtro = $servicio->reservar($otro, self::PROGRAMADA, 6, $ahora);
+        self::assertSame(6, $reservaOtro->cantidad);
+    }
+
+    public function testDosReservasALaVezDelMismoEspectadorNoSuperanElMaximoPorPersona(): void
+    {
+        $espectadorId = Uuid::nuevo();
+        $this->base->ejecutar(
+            'INSERT INTO reserva (id, funcion_id, usuario_id, codigo, cantidad, total, estado, creada_en) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            [Uuid::nuevo(), self::PROGRAMADA, $espectadorId, 'AAAA1111', 5, '0.00', 'confirmada', '2026-10-19 10:00:00'],
+        );
+
+        $arranque = microtime(true) + 0.5;
+        $procesos = [];
+        for ($i = 0; $i < 4; ++$i) {
+            $procesos[] = $this->lanzarReserva($arranque, $espectadorId);
+        }
+        $resultados = array_map($this->resultado(...), $procesos);
+
+        sort($resultados);
+        self::assertSame([
+            'Ya tenés reservados los 6 lugares máximos por persona para esta función.',
+            'Ya tenés reservados los 6 lugares máximos por persona para esta función.',
+            'Ya tenés reservados los 6 lugares máximos por persona para esta función.',
+            'confirmada',
+        ], $resultados);
+        self::assertSame(6, (int) $this->base->valor('SELECT SUM(cantidad) FROM reserva WHERE funcion_id = ? AND usuario_id = ?', [self::PROGRAMADA, $espectadorId]));
+    }
+
     /**
      * @return array{proceso: resource, salida: resource, errores: resource}
      */
-    private function lanzarReserva(float $arranque): array
+    private function lanzarReserva(float $arranque, ?string $espectadorId = null): array
     {
         $proceso = proc_open(
-            [PHP_BINARY, dirname(__DIR__) . '/Dobles/reservar.php', self::$url, self::PROGRAMADA, Uuid::nuevo(), (string) $arranque],
+            [PHP_BINARY, dirname(__DIR__) . '/Dobles/reservar.php', self::$url, self::PROGRAMADA, $espectadorId ?? Uuid::nuevo(), (string) $arranque],
             [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']],
             $tuberias,
         );

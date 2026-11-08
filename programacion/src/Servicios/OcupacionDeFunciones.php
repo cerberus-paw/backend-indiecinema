@@ -66,25 +66,47 @@ final class OcupacionDeFunciones
     }
 
     /**
+     * Los lugares ocupados de una función y, si se pasa usuario, los que ya tiene reservados ese
+     * espectador en ella (IC-463).
+     *
+     * @return ?array{ocupados: int, del_usuario: int} null si funciones no responde
+     */
+    public function deUnaParaUsuario(string $funcionId, ?string $usuarioId = null): ?array
+    {
+        if (!Uuid::esValido($funcionId)) {
+            return null;
+        }
+
+        $parametros = [];
+        if ($usuarioId !== null && Uuid::esValido($usuarioId)) {
+            $parametros['usuario'] = $usuarioId;
+        }
+
+        return $this->pedir(function (ClienteInterno $cliente) use ($funcionId, $parametros): array {
+            $datos = $cliente->get('funciones', "/interno/funciones/{$funcionId}/ocupacion", $parametros);
+            $ocupados = is_array($datos) ? ($datos['lugares_ocupados'] ?? null) : null;
+            if (!is_int($ocupados)) {
+                throw new RuntimeException('funciones no respondió los lugares ocupados a GET /interno/funciones/{id}/ocupacion.');
+            }
+            $delUsuario = $datos['lugares_del_usuario'] ?? 0;
+
+            return [
+                'ocupados' => $ocupados,
+                'del_usuario' => is_int($delUsuario) ? $delUsuario : 0,
+            ];
+        });
+    }
+
+    /**
      * Los de una función, para su ficha.
      *
      * @return ?int null si funciones no responde
      */
     public function deUna(string $funcionId): ?int
     {
-        if (!Uuid::esValido($funcionId)) {
-            return null;
-        }
+        $ocupacion = $this->deUnaParaUsuario($funcionId);
 
-        return $this->pedir(function (ClienteInterno $cliente) use ($funcionId): int {
-            $datos = $cliente->get('funciones', "/interno/funciones/{$funcionId}/ocupacion");
-            $ocupados = is_array($datos) ? ($datos['lugares_ocupados'] ?? null) : null;
-            if (!is_int($ocupados)) {
-                throw new RuntimeException('funciones no respondió los lugares ocupados a GET /interno/funciones/{id}/ocupacion.');
-            }
-
-            return $ocupados;
-        });
+        return $ocupacion !== null ? $ocupacion['ocupados'] : null;
     }
 
     /**

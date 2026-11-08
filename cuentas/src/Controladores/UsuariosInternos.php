@@ -40,7 +40,10 @@ final class UsuariosInternos extends Controlador
             return $this->json((object) []);
         }
 
-        $partes = array_values(array_unique(explode(',', $lista)));
+        $partes = array_values(array_unique(array_filter(
+            array_map(trim(...), explode(',', $lista)),
+            static fn (string $id): bool => $id !== '',
+        )));
         if (count($partes) > self::MAXIMO_POR_PEDIDO) {
             return $this->json(['error' => 'Se piden hasta ' . self::MAXIMO_POR_PEDIDO . ' usuarios por vez.'], 400);
         }

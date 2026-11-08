@@ -247,7 +247,7 @@ final class UsuariosInternosTest extends TestCase
     public function testVariosUsuariosIgnoraIdsInexistentesOQueNoSonUuid(): void
     {
         $inexistente = Uuid::nuevo();
-        $respuesta = $this->pedir('GET', '/interno/usuarios', consulta: ['ids' => "{$this->eva},{$inexistente},no-es-uuid"]);
+        $respuesta = $this->pedir('GET', '/interno/usuarios', consulta: ['ids' => " {$this->eva} , , {$inexistente}, no-es-uuid "]);
 
         self::assertSame(200, $respuesta->estado());
         $datos = self::json($respuesta);

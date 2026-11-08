@@ -39,6 +39,10 @@ final class FormularioDeFuncion
     private const PRECIO_NEGATIVO = 'El precio no puede ser negativo.';
     private const PRECIO_INVALIDO = 'El precio tiene que ser un número de hasta 99.999.999,99, sin puntos de miles.';
     private const CUPO_INVALIDO = 'El cupo tiene que ser de al menos un lugar.';
+    private const MODO_DESCONOCIDO = 'Elegí si la función se programa con fecha o se abre a votación de títulos.';
+    /** Con una sola candidata no hay nada que votar (F-01.6). */
+    private const CANDIDATAS_MINIMAS = 2;
+    private const POCAS_CANDIDATAS = 'Para abrir una votación elegí al menos dos obras candidatas.';
 
     /** @var array<string, mixed> lo que mandó, para volver a mostrarlo si hay errores */
     public private(set) array $valores = [];
@@ -97,9 +101,14 @@ final class FormularioDeFuncion
         array $obrasDisponibles,
         DateTimeImmutable $ahora,
     ): void {
-        // 0. Modo de alta
+        // 0. Modo de alta. Sin modo es programada: la edición no lo manda, porque sólo se edita una
+        // programada. Uno que no es ninguno de los dos es un error y no una programada callada: si
+        // no, un pedido armado a mano publicaba sin avisar algo que no pidió (F-01.6).
         $modo = self::texto($campos['modo'] ?? null);
-        if (!in_array($modo, [self::MODO_PROGRAMADA, self::MODO_EN_VOTACION_TITULOS], true)) {
+        if ($modo === '') {
+            $modo = self::MODO_PROGRAMADA;
+        } elseif (!in_array($modo, [self::MODO_PROGRAMADA, self::MODO_EN_VOTACION_TITULOS], true)) {
+            $this->errores['modo'] = self::MODO_DESCONOCIDO;
             $modo = self::MODO_PROGRAMADA;
         }
         $this->modo = $modo;
@@ -144,6 +153,8 @@ final class FormularioDeFuncion
             $duracion = array_sum(array_intersect_key($duraciones, array_flip($obrasIds)));
             if (array_diff($obrasIds, $idsCatalogo) !== []) {
                 $this->errores['obras'] = 'Una de las obras seleccionadas no existe en el catálogo.';
+            } elseif (!$this->esProgramada() && count($obrasIds) < self::CANDIDATAS_MINIMAS) {
+                $this->errores['obras'] = self::POCAS_CANDIDATAS;
             } elseif ($this->esProgramada() && $salaElegida !== null && count($obrasIds) > $salaElegida->datos->peliculasPorFuncion) {
                 // Los parámetros que la función hereda de la sala, como dice el panel del costado.
                 $this->errores['obras'] = "En esta sala entran hasta {$salaElegida->datos->peliculasPorFuncion} películas por función.";
@@ -244,6 +255,12 @@ final class FormularioDeFuncion
                     'requerido' => self::FALTA_PRECIO,
                     'patron' => self::PRECIO_INVALIDO,
                 ],
+            ],
+            // Las casillas de las obras no las revisa la validación en línea: el mínimo de candidatas
+            // lo controla ModoFuncion, que es el que sabe si el formulario abre una votación.
+            'obras' => [
+                'candidatas_minimas' => self::CANDIDATAS_MINIMAS,
+                'mensajes' => ['candidatas' => self::POCAS_CANDIDATAS],
             ],
             'cupo' => [
                 'requerido' => true,

@@ -645,6 +645,50 @@ final class FuncionesDelOrganizadorTest extends TestCase
         self::assertCount(2, $candidatas);
     }
 
+    /**
+     * F-01.6: con una sola candidata no hay nada que votar. Vuelve el formulario con el motivo y no
+     * se crea ninguna función.
+     */
+    public function testUnaVotacionNecesitaAlMenosDosCandidatas(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+
+        $respuesta = $this->enviar('/organizador/funciones/nueva', [
+            'modo' => FormularioDeFuncion::MODO_EN_VOTACION_TITULOS,
+            'sala_id' => $sala->id,
+            'obras' => [$this->obras['Zama']],
+            'precio' => '2500',
+            'cupo' => '40',
+        ]);
+
+        self::assertSame(422, $respuesta->estado());
+        self::assertStringContainsString('Para abrir una votación elegí al menos dos obras candidatas.', $respuesta->cuerpo());
+        self::assertSame(0, (int) $this->base->valor('SELECT COUNT(*) FROM funcion WHERE sala_id = ?', [$sala->id]));
+    }
+
+    /**
+     * F-01.6: un modo que no es ninguno de los dos vuelve con el error, y no se publica como
+     * programada sin avisar, aunque el resto esté bien.
+     */
+    public function testUnModoDesconocidoNoSePublica(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+
+        $respuesta = $this->enviar('/organizador/funciones/nueva', [
+            'modo' => 'sorpresa',
+            'sala_id' => $sala->id,
+            'obras' => [$this->obras['Zama']],
+            'fecha' => '2030-10-25',
+            'hora' => '20:30',
+            'precio' => '2500',
+            'cupo' => '40',
+        ]);
+
+        self::assertSame(422, $respuesta->estado());
+        self::assertStringContainsString('Elegí si la función se programa con fecha o se abre a votación de títulos.', $respuesta->cuerpo());
+        self::assertSame(0, (int) $this->base->valor('SELECT COUNT(*) FROM funcion WHERE sala_id = ?', [$sala->id]));
+    }
+
     public function testRechazaCupoMayorQueCapacidad(): void
     {
         $sala = $this->sala(self::ORGANIZADORA, 'El Galpón', capacidad: 50);

@@ -1458,6 +1458,31 @@ final class CarteleraTest extends TestCase
     }
 
     /**
+     * F-01.4: el aviso del voto vuelve a la ficha firmado, y la ficha lo muestra. La misma dirección
+     * con otro texto, sin la firma o en otra función no muestra nada: si no, cualquiera armaría un
+     * link del sitio con el mensaje que quisiera.
+     */
+    public function testElAvisoDeLaFichaSoloSeMuestraConSuFirma(): void
+    {
+        [$funcionId, $organizadorId] = $this->funcionEnAcuerdo();
+        $organizador = ['X-Nginx-Secreto' => self::SECRETO, 'X-Usuario-Id' => $organizadorId, 'X-Rol' => 'organizador'];
+        $voto = $this->post("/cartelera/{$funcionId}/votar", ['franja_id' => 'franja-mock-0'], $organizadorId, 'organizador');
+        $direccion = $voto->cabecera('Location') ?? self::fail('El voto rechazado vuelve a la ficha.');
+        self::assertStringContainsString('firma=', $direccion);
+
+        self::assertStringContainsString('Sos el organizador de esta función', $this->pedir($direccion, [], $organizador)->cuerpo());
+
+        $inventado = "/cartelera/{$funcionId}?error_voto=" . rawurlencode('Tu cuenta fue suspendida: escribí a soporte@ejemplo.com');
+        self::assertStringNotContainsString('soporte@ejemplo.com', $this->pedir($inventado)->cuerpo());
+        $conFirmaAjena = $inventado . '&' . (string) parse_url($direccion, PHP_URL_QUERY);
+        self::assertStringNotContainsString('soporte@ejemplo.com', $this->pedir($conFirmaAjena)->cuerpo());
+
+        $otraFuncion = $this->base->fila('SELECT id FROM funcion WHERE id <> ? LIMIT 1', [$funcionId]) ?? self::fail();
+        $mismoAvisoEnOtra = str_replace($funcionId, (string) $otraFuncion['id'], $direccion);
+        self::assertStringNotContainsString('Sos el organizador de esta función', $this->pedir($mismoAvisoEnOtra, [], $organizador)->cuerpo());
+    }
+
+    /**
      * E3-13.F7: una franja que no es del acuerdo se rechaza en programación, con el motivo: el 422
      * de funciones habría llegado como una página 500.
      */

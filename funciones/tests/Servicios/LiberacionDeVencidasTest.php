@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace IndieCinema\Funciones\Pruebas\Servicios;
 
 use DateTimeImmutable;
+use DateTimeZone;
 use IndieCinema\Funciones\Modelo\FuncionDeProgramacion;
 use IndieCinema\Funciones\Modelo\Reserva;
 use IndieCinema\Funciones\Pruebas\ConBaseDePruebas;
@@ -43,11 +44,20 @@ final class LiberacionDeVencidasTest extends TestCase
     }
 
     /**
+     * Un momento en la hora del sitio, sin depender de la zona de PHP: el contenedor la tiene en
+     * php.ini, pero la CI corre en UTC, y la base guarda en UTC (12:15 acá son las 15:15 de allá).
+     */
+    private static function enArgentina(string $momento): DateTimeImmutable
+    {
+        return new DateTimeImmutable($momento, new DateTimeZone('America/Argentina/Buenos_Aires'));
+    }
+
+    /**
      * Una reserva hecha a esa hora: pendiente de pago, con 15 minutos para pagar, o confirmada.
      */
     private function reservada(string $hora, int $cantidad = 2, bool $pendiente = true): Reserva
     {
-        $reserva = Reserva::nueva(self::funcion(), self::ESPECTADOR, $cantidad, new DateTimeImmutable("2026-10-20 {$hora}"), $pendiente ? 15 : null);
+        $reserva = Reserva::nueva(self::funcion(), self::ESPECTADOR, $cantidad, self::enArgentina("2026-10-20 {$hora}"), $pendiente ? 15 : null);
         self::assertTrue($this->reservas->agregar($reserva));
 
         return $reserva;
@@ -65,7 +75,7 @@ final class LiberacionDeVencidasTest extends TestCase
         $aTiempo = $this->reservada('12:30');
         $confirmada = $this->reservada('11:00', pendiente: false);
 
-        $canceladas = (new LiberacionDeVencidas($this->reservas))->liberar(new DateTimeImmutable('2026-10-20 12:40:00'));
+        $canceladas = (new LiberacionDeVencidas($this->reservas))->liberar(self::enArgentina('2026-10-20 12:40:00'));
 
         self::assertSame(2, $canceladas);
         self::assertSame('cancelada', $this->estado($vencida));
@@ -81,7 +91,7 @@ final class LiberacionDeVencidasTest extends TestCase
     {
         $vencida = $this->reservada('12:00');
 
-        (new LiberacionDeVencidas($this->reservas))->liberar(new DateTimeImmutable('2026-10-20 12:15:00'));
+        (new LiberacionDeVencidas($this->reservas))->liberar(self::enArgentina('2026-10-20 12:15:00'));
 
         self::assertSame(
             ['pendiente_pago', 'cancelada', self::ESPECTADOR, 'espectador', LiberacionDeVencidas::MOTIVO, '2026-10-20 15:15:00'],
@@ -97,8 +107,8 @@ final class LiberacionDeVencidasTest extends TestCase
         $this->reservada('12:00');
         $liberacion = new LiberacionDeVencidas($this->reservas);
 
-        self::assertSame(1, $liberacion->liberar(new DateTimeImmutable('2026-10-20 13:00:00')));
-        self::assertSame(0, $liberacion->liberar(new DateTimeImmutable('2026-10-20 13:05:00')));
+        self::assertSame(1, $liberacion->liberar(self::enArgentina('2026-10-20 13:00:00')));
+        self::assertSame(0, $liberacion->liberar(self::enArgentina('2026-10-20 13:05:00')));
         self::assertSame(1, $this->base->valor('SELECT COUNT(*) FROM cambio_reserva'));
     }
 
@@ -108,11 +118,11 @@ final class LiberacionDeVencidasTest extends TestCase
     public function testUnaQueSePagoMientrasTantoNoSeCancela(): void
     {
         $vencida = $this->reservada('12:00');
-        self::assertCount(1, $this->reservas->vencidas(new DateTimeImmutable('2026-10-20 12:20:00'), 10));
+        self::assertCount(1, $this->reservas->vencidas(self::enArgentina('2026-10-20 12:20:00'), 10));
         $this->base->ejecutar("UPDATE reserva SET estado = 'confirmada', pago_id = '1324567890' WHERE id = ?", [$vencida->id]);
 
-        self::assertSame([], $this->reservas->vencidas(new DateTimeImmutable('2026-10-20 12:20:00'), 10));
-        self::assertSame(0, (new LiberacionDeVencidas($this->reservas))->liberar(new DateTimeImmutable('2026-10-20 12:20:00')));
+        self::assertSame([], $this->reservas->vencidas(self::enArgentina('2026-10-20 12:20:00'), 10));
+        self::assertSame(0, (new LiberacionDeVencidas($this->reservas))->liberar(self::enArgentina('2026-10-20 12:20:00')));
         self::assertSame('confirmada', $this->estado($vencida));
     }
 
@@ -121,9 +131,9 @@ final class LiberacionDeVencidasTest extends TestCase
         $this->reservada('12:00', 3);
         $this->reservada('12:00', 4, pendiente: false);
 
-        self::assertSame(7, $this->reservas->lugaresOcupados(self::funcion()->id, new DateTimeImmutable('2026-10-20 12:14:59')));
-        self::assertSame(4, $this->reservas->lugaresOcupados(self::funcion()->id, new DateTimeImmutable('2026-10-20 12:15:00')));
-        self::assertSame([self::funcion()->id => 4], $this->reservas->lugaresOcupadosDe([self::funcion()->id], new DateTimeImmutable('2026-10-20 12:15:00')));
+        self::assertSame(7, $this->reservas->lugaresOcupados(self::funcion()->id, self::enArgentina('2026-10-20 12:14:59')));
+        self::assertSame(4, $this->reservas->lugaresOcupados(self::funcion()->id, self::enArgentina('2026-10-20 12:15:00')));
+        self::assertSame([self::funcion()->id => 4], $this->reservas->lugaresOcupadosDe([self::funcion()->id], self::enArgentina('2026-10-20 12:15:00')));
     }
 
     /**
@@ -136,7 +146,7 @@ final class LiberacionDeVencidasTest extends TestCase
         $this->reservada('12:20', 2);
         $this->reservada('11:00', 4, pendiente: false);
 
-        $resumen = ServicioDePanelDeReservas::resumen(self::funcion(), $this->reservas->deLaFuncion(self::funcion()->id), new DateTimeImmutable('2026-10-20 12:25:00'));
+        $resumen = ServicioDePanelDeReservas::resumen(self::funcion(), $this->reservas->deLaFuncion(self::funcion()->id), self::enArgentina('2026-10-20 12:25:00'));
 
         self::assertSame(6, $resumen['reservados']);
         self::assertSame(34, $resumen['libres']);

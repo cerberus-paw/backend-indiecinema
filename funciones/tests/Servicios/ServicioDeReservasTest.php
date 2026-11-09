@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace IndieCinema\Funciones\Pruebas\Servicios;
 
 use DateTimeImmutable;
+use DateTimeZone;
 use IndieCinema\Funciones\Modelo\ReglaIncumplida;
 use IndieCinema\Funciones\Modelo\Reserva;
 use IndieCinema\Funciones\Pruebas\ConBaseDePruebas;
@@ -61,16 +62,19 @@ final class ServicioDeReservasTest extends TestCase
             [Uuid::nuevo(), self::PROGRAMADA, Uuid::nuevo(), self::CUPO],
         );
         $espectador = new Usuario(Uuid::nuevo(), Rol::Espectador);
+        // Con la zona explícita: la CI corre PHP en UTC, y el contenedor, en la hora de acá.
+        $argentina = new DateTimeZone('America/Argentina/Buenos_Aires');
 
         try {
-            $this->servicio()->reservar($espectador, self::PROGRAMADA, 1, new DateTimeImmutable('2026-10-20 12:14:00'));
+            $this->servicio()->reservar($espectador, self::PROGRAMADA, 1, new DateTimeImmutable('2026-10-20 12:14:00', $argentina));
             self::fail('Reservó un lugar que todavía se estaba pagando.');
         } catch (ReglaIncumplida $error) {
             self::assertSame('La función está agotada.', $error->getMessage());
         }
-        $reserva = $this->servicio()->reservar($espectador, self::PROGRAMADA, self::CUPO, new DateTimeImmutable('2026-10-20 12:15:00'));
+        // Lo más que puede pedir una persona (IC-463): con los 40 ocupados, no habría ni uno.
+        $reserva = $this->servicio()->reservar($espectador, self::PROGRAMADA, Reserva::MAXIMO_POR_PERSONA, new DateTimeImmutable('2026-10-20 12:15:00', $argentina));
 
-        self::assertSame(self::CUPO, $reserva->cantidad);
+        self::assertSame(Reserva::MAXIMO_POR_PERSONA, $reserva->cantidad);
         // La vencida sigue pendiente hasta que pase la tarea: lo que cambió es que ya no cuenta.
         self::assertSame(1, $this->base->valor("SELECT COUNT(*) FROM reserva WHERE estado = 'pendiente_pago'"));
     }

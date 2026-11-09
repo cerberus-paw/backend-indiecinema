@@ -186,6 +186,24 @@ final class MigracionesTest extends TestCase
         self::assertSame('pendiente_pago', $this->base->valor('SELECT estado FROM reserva WHERE id = ?', [$datos['id']]));
     }
 
+    /**
+     * Un pago confirma una sola reserva (X-01.4); las que no se cobraron lo tienen en NULL, y esas
+     * sí se repiten.
+     */
+    public function testUnMismoPagoNoConfirmaDosReservas(): void
+    {
+        $una = $this->reservaValida();
+        $otra = ['id' => Uuid::nuevo(), 'codigo' => 'P9QX2M7K'] + $una;
+        $sinPago = ['id' => Uuid::nuevo(), 'codigo' => 'H4J6N8R2'] + $una;
+        foreach ([$una, $otra, $sinPago] as $datos) {
+            $this->insertarReserva($datos);
+        }
+
+        $this->base->ejecutar('UPDATE reserva SET pago_id = ? WHERE id = ?', ['1324567890', $una['id']]);
+        $this->assertRechaza(self::REPETIDO, fn () => $this->base->ejecutar('UPDATE reserva SET pago_id = ? WHERE id = ?', ['1324567890', $otra['id']]));
+        self::assertSame(2, $this->base->valor('SELECT COUNT(*) FROM reserva WHERE pago_id IS NULL'));
+    }
+
     public function testElHistorialAnotaLosCambiosDeUnaPendienteDePago(): void
     {
         $datos = $this->reservaValida();

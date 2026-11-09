@@ -3,11 +3,13 @@
 declare(strict_types=1);
 
 use IndieCinema\Funciones\Controladores\AcuerdosInternos;
+use IndieCinema\Funciones\Controladores\AvisosDePago;
 use IndieCinema\Funciones\Controladores\OcupacionInterna;
 use IndieCinema\Funciones\Controladores\Reservas;
 use IndieCinema\Funciones\Controladores\ReservasDeLaFuncion;
 use IndieCinema\Funciones\Controladores\ReservasDelAdministrador;
 use IndieCinema\Funciones\Controladores\ReservasInternas;
+use IndieCinema\Funciones\Servicios\PagosDeReservas;
 use IndieCinema\Nucleo\Http\EstadoInterno;
 use IndieCinema\Nucleo\Ruteo\Router;
 use IndieCinema\Nucleo\Seguridad\Rol;
@@ -29,6 +31,9 @@ return static function (Router $router): void {
     $router->get('/reservas/{id}', [Reservas::class, 'confirmada'], Rol::Espectador);
     // Adónde vuelve el espectador desde Mercado Pago (X-01.3): sólo muestra en qué quedó.
     $router->get('/reservas/{id}/regreso', [Reservas::class, 'regreso'], Rol::Espectador);
+    // El aviso de Mercado Pago cuando se acredita un pago (X-01.4): lo único que confirma una
+    // reserva paga. Sin sesión ni CSRF: lo autentica su firma, en el controlador.
+    $router->webhook(PagosDeReservas::RUTA_DEL_AVISO, [AvisosDePago::class, 'recibir']);
     // La cancelación del espectador, con una pantalla que la confirma antes (E4-01.5).
     $router->get('/reservas/{id}/cancelar', [Reservas::class, 'confirmarCancelacion'], Rol::Espectador);
     $router->post('/reservas/{id}/cancelar', [Reservas::class, 'cancelar'], Rol::Espectador);

@@ -105,4 +105,57 @@ trait ConMercadoPagoDePrueba
     {
         touch(self::$carpetaMercadoPago . '/caida');
     }
+
+    /**
+     * El pago que va a devolver GET /v1/payments/{id}, aprobado por el total de la reserva salvo
+     * que $cambios diga otra cosa.
+     *
+     * @param array<string, mixed> $cambios
+     */
+    private static function pagoEnMercadoPago(string $id, string $reservaId, string $monto, array $cambios = []): void
+    {
+        file_put_contents(self::$carpetaMercadoPago . "/pago-{$id}.json", json_encode([
+            'id' => (int) $id,
+            'status' => 'approved',
+            'status_detail' => 'accredited',
+            'external_reference' => $reservaId,
+            'transaction_amount' => (float) $monto,
+            'currency_id' => 'ARS',
+            ...$cambios,
+        ]));
+    }
+
+    /**
+     * Los reembolsos que se pidieron, por id de pago.
+     *
+     * @return list<string>
+     */
+    private static function reembolsosPedidos(): array
+    {
+        $reembolsos = [];
+        foreach (self::pedidosAMercadoPago() as $pedido) {
+            if (preg_match('#^/v1/payments/(\d+)/refunds$#', $pedido['ruta'], $coincidencia) === 1) {
+                $reembolsos[] = $coincidencia[1];
+            }
+        }
+
+        return $reembolsos;
+    }
+
+    /**
+     * Las cabeceras de un aviso firmado como lo firma Mercado Pago (FirmaDeMercadoPago).
+     *
+     * @return array<string, string>
+     */
+    private static function cabecerasFirmadas(string $pagoId, string $clave = self::CLAVE_WEBHOOK): array
+    {
+        $pedido = bin2hex(random_bytes(8));
+        $ts = (string) time();
+
+        return [
+            'x-request-id' => $pedido,
+            'x-signature' => "ts={$ts},v1=" . hash_hmac('sha256', "id:{$pagoId};request-id:{$pedido};ts:{$ts};", $clave),
+            'Content-Type' => 'application/json',
+        ];
+    }
 }

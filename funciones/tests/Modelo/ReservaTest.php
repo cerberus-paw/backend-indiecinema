@@ -214,6 +214,29 @@ final class ReservaTest extends TestCase
         }
     }
 
+    /**
+     * La confirma el pago aprobado (X-01.4), que queda anotado.
+     */
+    public function testElPagoConfirmaUnaPendienteYQuedaAnotado(): void
+    {
+        $reserva = Reserva::nueva($this->funcion(), self::ESPECTADOR, 1, $this->antes(), 15)->conPreferencia('pref-1', 'https://mp.test/pagar');
+
+        $pagada = $reserva->confirmarPago('1324567890');
+
+        self::assertSame(EstadoReserva::Confirmada, $pagada->estado);
+        self::assertSame('1324567890', $pagada->pagoId);
+        self::assertSame([$reserva->id, $reserva->codigo, 'pref-1'], [$pagada->id, $pagada->codigo, $pagada->preferenciaId]);
+        self::assertSame('1324567890', $pagada->cancelar()->pagoId);
+    }
+
+    public function testUnaQueNoEsperaElPagoNoSeConfirmaConUno(): void
+    {
+        $this->expectException(ReglaIncumplida::class);
+        $this->expectExceptionMessage('Una reserva confirmada no espera ningún pago.');
+
+        Reserva::nueva($this->funcion(), self::ESPECTADOR, 1, $this->antes())->confirmarPago('1324567890');
+    }
+
     public function testLaCanceladaEsLaUnicaQueNoOcupaLugares(): void
     {
         self::assertTrue(EstadoReserva::PendientePago->ocupaLugares());

@@ -122,7 +122,24 @@ final class RepositorioDeReservas
             $fila['total'],
             EstadoReserva::from($fila['estado']),
             new DateTimeImmutable($fila['creada_en'], new DateTimeZone('UTC')),
+            $fila['vence_en'] === null ? null : new DateTimeImmutable($fila['vence_en'], new DateTimeZone('UTC')),
+            $fila['preferencia_id'],
+            $fila['enlace_de_pago'],
         );
+    }
+
+    /**
+     * Anota la preferencia de Checkout Pro de una reserva que todavía espera el pago. Si mientras
+     * tanto se canceló, no anota nada: ya no hay qué cobrar.
+     *
+     * @return bool false si ya no estaba pendiente de pago
+     */
+    public function guardarPreferencia(Reserva $reserva): bool
+    {
+        return $this->base->ejecutar(
+            'UPDATE reserva SET preferencia_id = ?, enlace_de_pago = ? WHERE id = ? AND estado = ?',
+            [$reserva->preferenciaId, $reserva->enlaceDePago, $reserva->id, EstadoReserva::PendientePago],
+        ) === 1;
     }
 
     /**
@@ -220,8 +237,8 @@ final class RepositorioDeReservas
     {
         try {
             $this->base->ejecutar(
-                'INSERT INTO reserva (id, funcion_id, usuario_id, codigo, cantidad, total, estado, creada_en) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-                [$reserva->id, $reserva->funcionId, $reserva->usuarioId, $reserva->codigo, $reserva->cantidad, $reserva->total, $reserva->estado, $reserva->creadaEn],
+                'INSERT INTO reserva (id, funcion_id, usuario_id, codigo, cantidad, total, estado, creada_en, vence_en) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                [$reserva->id, $reserva->funcionId, $reserva->usuarioId, $reserva->codigo, $reserva->cantidad, $reserva->total, $reserva->estado, $reserva->creadaEn, $reserva->venceEn],
             );
 
             return true;

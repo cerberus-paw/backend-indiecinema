@@ -160,11 +160,44 @@ final class MigracionesTest extends TestCase
         $datos = $this->reservaValida();
         $this->insertarReserva($datos);
 
-        // pendiente_pago llega con el extra de Mercado Pago, en una migración nueva.
         $this->assertRechaza(self::VALOR_INVALIDO, fn () => $this->base->ejecutar(
+            'UPDATE reserva SET estado = ? WHERE id = ?',
+            ['reembolsada', $datos['id']],
+        ));
+    }
+
+    /**
+     * La que espera el pago (X-01.2) tiene hasta cuándo pagar: sin vencimiento, retendría sus
+     * lugares para siempre.
+     */
+    public function testUnaPendienteDePagoNecesitaSuVencimiento(): void
+    {
+        $datos = $this->reservaValida();
+        $this->insertarReserva($datos);
+
+        $this->assertRechaza(self::RESTRICCION_CHECK, fn () => $this->base->ejecutar(
             'UPDATE reserva SET estado = ? WHERE id = ?',
             ['pendiente_pago', $datos['id']],
         ));
+        $this->base->ejecutar(
+            'UPDATE reserva SET estado = ?, vence_en = ?, preferencia_id = ?, enlace_de_pago = ? WHERE id = ?',
+            ['pendiente_pago', '2026-10-21 18:45:00', '123-abc', 'https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=123-abc', $datos['id']],
+        );
+        self::assertSame('pendiente_pago', $this->base->valor('SELECT estado FROM reserva WHERE id = ?', [$datos['id']]));
+    }
+
+    public function testElHistorialAnotaLosCambiosDeUnaPendienteDePago(): void
+    {
+        $datos = $this->reservaValida();
+        $this->insertarReserva($datos);
+
+        foreach ([['pendiente_pago', 'confirmada'], ['pendiente_pago', 'cancelada']] as [$anterior, $nuevo]) {
+            $this->base->ejecutar(
+                'INSERT INTO cambio_reserva (reserva_id, estado_anterior, estado_nuevo, autor_id, autor_rol, hecho_en) VALUES (?, ?, ?, ?, ?, ?)',
+                [$datos['id'], $anterior, $nuevo, $datos['usuario_id'], 'espectador', '2026-10-21 18:40:00'],
+            );
+        }
+        self::assertSame(2, $this->base->valor('SELECT COUNT(*) FROM cambio_reserva WHERE reserva_id = ?', [$datos['id']]));
     }
 
     public function testLaBaseRechazaLaFaltaDeCamposObligatorios(): void

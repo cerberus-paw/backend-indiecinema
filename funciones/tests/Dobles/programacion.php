@@ -18,6 +18,7 @@ const SIN_PUBLICAR = '99999999-9999-4999-8999-999999999999';
 const PROXIMA = '12121212-1212-4212-8212-121212121212';
 const EMPEZADA = '34343434-3434-4434-8434-343434343434';
 const CANCELADA = '56565656-5656-4656-8656-565656565656';
+const A_LA_GORRA = '78787878-7878-4878-8878-787878787878';
 
 header('Content-Type: application/json');
 $cabeceras = getallheaders();
@@ -28,11 +29,11 @@ if (($cabeceras['X-Llamador'] ?? null) !== 'funciones' || ($cabeceras['Authoriza
     return;
 }
 
-$funcion = static fn (string $id, string $estado, ?string $fecha, array $titulos, bool $elegidos, bool $publicada = true): array => [
+$funcion = static fn (string $id, string $estado, ?string $fecha, array $titulos, bool $elegidos, bool $publicada = true, int $precio = 3500): array => [
     'id' => $id,
     'estado' => $estado,
     'fecha_hora' => $fecha,
-    'precio_base' => 3500,
+    'precio_base' => $precio,
     'cupo' => 40,
     'titulos' => $titulos,
     'titulos_elegidos' => $elegidos,
@@ -52,6 +53,8 @@ $responder = static function (string $id) use ($funcion): ?array {
         // hace una hora.
         PROXIMA => $funcion($id, 'programada', date('Y-m-d\\TH:i:s', strtotime('+30 days')), ['Zama'], true),
         EMPEZADA => $funcion($id, 'programada', date('Y-m-d\\TH:i:s', strtotime('-1 hour')), ['Zama'], true),
+        // Sin precio: no hay nada que cobrar (X-01).
+        A_LA_GORRA => $funcion($id, 'programada', date('Y-m-d\\TH:i:s', strtotime('+30 days')), ['Zama'], true, precio: 0),
         // El organizador la canceló: el panel de sus reservas no registra asistencia.
         CANCELADA => $funcion($id, 'cancelada', date('Y-m-d\\TH:i:s', strtotime('+30 days')), ['Zama'], true),
         // Su sala todavía no se aprobó, o se retiró de la cartelera.

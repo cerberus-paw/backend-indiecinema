@@ -17,6 +17,7 @@ use IndieCinema\Nucleo\Seguridad\Usuario;
 use IndieCinema\Nucleo\Uuid;
 use LogicException;
 use RuntimeException;
+use Throwable;
 
 /**
  * Las reservas de los espectadores (E4-01): que nunca se confirmen más lugares que el cupo,
@@ -30,9 +31,14 @@ final class ServicioDeReservas
     /** Las reservas por página de «Mis reservas»: las funciones de una página van en un pedido. */
     public const POR_PAGINA = 20;
 
+    /**
+     * @param ?PagosDeReservas $pagos el cobro con Mercado Pago; sin él, como con el cobro apagado,
+     *                                toda reserva nace confirmada
+     */
     public function __construct(
         private readonly FuncionesDeProgramacion $funciones,
         private readonly RepositorioDeReservas $reservas,
+        private readonly ?PagosDeReservas $pagos = null,
     ) {
     }
 
@@ -127,7 +133,8 @@ final class ServicioDeReservas
         match ($reserva->estado) {
             EstadoReserva::Cancelada => throw new ReglaIncumplida('La reserva ya está cancelada.'),
             EstadoReserva::Asistio => throw new ReglaIncumplida('Ya registraron tu asistencia: la reserva no se puede cancelar.'),
-            EstadoReserva::Confirmada => null,
+            // Una pendiente se cancela igual: suelta los lugares sin esperar a que venza.
+            EstadoReserva::Confirmada, EstadoReserva::PendientePago => null,
         };
         if (!self::seCancela($reserva, $funcion, $ahora)) {
             throw new ReglaIncumplida('La función ya empezó: la reserva ya no se puede cancelar.');
@@ -158,10 +165,17 @@ final class ServicioDeReservas
      * El cupo se pide a programación antes de bloquear: así la espera por la API interna no
      * frena a las otras reservas de la función.
      *
-     * @throws ExcepcionHttp   404 si la función no existe o su sala no está publicada; 503 si
-     *                         programación no responde o la función queda bloqueada demasiado
-     * @throws ReglaIncumplida si la cantidad no es válida, la función ya no admite reservas o no
-     *                         quedan tantos lugares
+     * Si es paga y el cobro está prendido, la reserva queda pendiente de pago con su preferencia de
+     * Checkout Pro (X-01.2), que se crea después de soltar la función: la espera por Mercado Pago
+     * tampoco frena a las otras. Si Mercado Pago no la crea, la reserva se cancela, para que no
+     * retenga lugares que nadie puede pagar.
+     *
+     * @throws ExcepcionHttp    404 si la función no existe o su sala no está publicada; 503 si
+     *                          programación o Mercado Pago no responden, o la función queda
+     *                          bloqueada demasiado
+     * @throws ReglaIncumplida  si la cantidad no es válida, la función ya no admite reservas o no
+     *                          quedan tantos lugares
+     * @throws RuntimeException si Mercado Pago rechaza la preferencia: es un error nuestro
      */
     public function reservar(
         Usuario $espectador,
@@ -170,8 +184,36 @@ final class ServicioDeReservas
         DateTimeImmutable $ahora = new DateTimeImmutable(),
     ): Reserva {
         $funcion = $this->funcion($funcionId);
-        $reserva = Reserva::nueva($funcion, $espectador->id, $cantidad, $ahora);
+        $reserva = Reserva::nueva($funcion, $espectador->id, $cantidad, $ahora, $this->pagos?->minutosParaPagar());
+        $reserva = $this->agregar($funcion, $reserva);
+        if ($reserva->estado !== EstadoReserva::PendientePago || $this->pagos === null) {
+            return $reserva;
+        }
 
+        try {
+            $conPreferencia = $this->pagos->crearPreferencia($reserva, $funcion);
+        } catch (Throwable $error) {
+            $this->reservas->guardarEstado($reserva->cancelar(), $reserva->estado, AutorDelCambio::de($espectador, Rol::Espectador, 'No se pudo iniciar el pago.'), $ahora);
+
+            throw $error;
+        }
+        // Si el espectador ya la canceló desde otra pestaña, no hay nada que cobrar: queda como
+        // la dejó, y el comprobante lo muestra.
+        if (!$this->reservas->guardarPreferencia($conPreferencia)) {
+            return $this->reservas->buscar($reserva->id) ?? $reserva;
+        }
+
+        return $conPreferencia;
+    }
+
+    /**
+     * Guarda la reserva si quedan lugares, con la función bloqueada. Si no quedan tantos, el
+     * trabajo bloqueado lanza la ReglaIncumplida con cuántos quedan.
+     *
+     * @throws ExcepcionHttp 503 si la función queda bloqueada demasiado
+     */
+    private function agregar(FuncionDeProgramacion $funcion, Reserva $reserva): Reserva
+    {
         return $this->reservas->conLaFuncionBloqueada($funcion->id, function () use ($funcion, $reserva): Reserva {
             $libres = $this->lugaresLibres($funcion);
             if ($reserva->cantidad > $libres) {

@@ -74,6 +74,40 @@ final class RepositorioDeReservasTest extends TestCase
         self::assertNull($this->reservas->buscar('cccccccc-cccc-4ccc-8ccc-cccccccccccc'));
     }
 
+    private function pendiente(): Reserva
+    {
+        $funcion = new FuncionDeProgramacion(
+            'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'programada', new DateTimeImmutable('2026-10-24 20:30:00'), 3500, 40,
+            ['Zama'], true, 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', 'Cine Club El Galpón', 'Luján', true, 'ffffffff-ffff-4fff-8fff-ffffffffffff',
+        );
+        $reserva = Reserva::nueva($funcion, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 2, new DateTimeImmutable('2026-10-20 12:00:00'), 15);
+        self::assertTrue($this->reservas->agregar($reserva));
+
+        return $reserva;
+    }
+
+    public function testUnaPendienteSeLeeConSuVencimientoYSuPreferencia(): void
+    {
+        $reserva = $this->pendiente()->conPreferencia('123-abc', 'https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=123-abc');
+
+        self::assertTrue($this->reservas->guardarPreferencia($reserva));
+        self::assertEquals($reserva, $this->reservas->buscar($reserva->id));
+        // Mientras espera el pago ocupa sus lugares.
+        self::assertSame(2, $this->reservas->lugaresOcupados($reserva->funcionId));
+    }
+
+    /**
+     * Si el espectador la canceló mientras se creaba la preferencia, ya no hay qué cobrar.
+     */
+    public function testLaPreferenciaNoSeAnotaEnUnaQueYaNoEsperaElPago(): void
+    {
+        $reserva = $this->pendiente();
+        self::assertTrue($this->reservas->guardarEstado($reserva->cancelar(), EstadoReserva::PendientePago, self::espectador()));
+
+        self::assertFalse($this->reservas->guardarPreferencia($reserva->conPreferencia('123-abc', 'https://mp.test')));
+        self::assertNull($this->reservas->buscar($reserva->id)?->preferenciaId);
+    }
+
     public function testElEstadoNuevoQuedaGuardadoYLaCanceladaSueltaSusLugares(): void
     {
         $reserva = $this->guardada(3);

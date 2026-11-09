@@ -4,11 +4,14 @@ declare(strict_types=1);
 
 namespace IndieCinema\Funciones\Controladores;
 
+use DateTimeImmutable;
+use DateTimeZone;
 use IndieCinema\Funciones\Modelo\EstadoReserva;
 use IndieCinema\Funciones\Modelo\FuncionDeProgramacion;
 use IndieCinema\Funciones\Modelo\ReglaIncumplida;
 use IndieCinema\Funciones\Modelo\Reserva;
 use IndieCinema\Funciones\Servicios\AvisosDeReservas;
+use IndieCinema\Funciones\Servicios\PagosDeReservas;
 use IndieCinema\Funciones\Servicios\ServicioDeReservas;
 use IndieCinema\Nucleo\Controlador;
 use IndieCinema\Nucleo\Http\ExcepcionHttp;
@@ -20,8 +23,11 @@ use Psr\Log\LoggerInterface;
 use RuntimeException;
 
 /**
- * La reserva de una función, como el wireframe de la E2 (reserva-pago-comprobante) sin el paso del
- * pago: la reserva se confirma sin cobrar.
+ * La reserva de una función, como el wireframe de la E2 (reserva-pago-comprobante). Con el cobro
+ * prendido (X-01), la de una función paga pasa por el paso «Pago»: la reserva queda pendiente y el
+ * comprobante muestra el enlace a Mercado Pago. Es un enlace y no una redirección después del POST
+ * porque la CSP del sitio (form-action 'self') no deja que un formulario termine en otro sitio.
+ * Con el cobro apagado, o a la gorra, se confirma sin cobrar.
  *
  * El formulario está en la ficha de la función, que es de programación, y llega acá por POST con
  * el token CSRF de la cookie del sitio. La página de GET /reservar/{id} es la misma con los
@@ -32,6 +38,7 @@ final class Reservas extends Controlador
     public function __construct(
         private readonly ServicioDeReservas $servicio,
         private readonly AvisosDeReservas $avisos,
+        private readonly PagosDeReservas $pagos,
         private readonly LoggerInterface $log,
     ) {
     }
@@ -130,6 +137,7 @@ final class Reservas extends Controlador
 
         // Un error de configuración, antes de guardar nada.
         $this->avisos->comprobarConfiguracion();
+        $this->pagos->comprobarConfiguracion();
         try {
             $reserva = $this->servicio->reservar($usuario, $funcion->id, $cantidad);
         } catch (ReglaIncumplida $error) {
@@ -137,6 +145,18 @@ final class Reservas extends Controlador
             return $enJson
                 ? $this->json(['error' => $error->getMessage(), ...$this->lugaresDe($funcion, $usuario)], 422)
                 : $this->pantalla($funcion, ['cantidad' => $valor], error: $error->getMessage(), usuario: $usuario, estado: 422);
+        }
+
+        // Pendiente de pago: al paso «Pago», en el comprobante. El correo sale recién cuando llega
+        // el pago verificado (X-01.4).
+        if ($reserva->estado === EstadoReserva::PendientePago) {
+            return $enJson
+                ? $this->json([
+                    'reserva' => self::datosDeReserva($reserva, $funcion),
+                    'url' => $this->ruta("/reservas/{$reserva->id}"),
+                    ...$this->lugaresDe($funcion),
+                ], 201)
+                : $this->redirigir("/reservas/{$reserva->id}");
         }
 
         // 201 con el link al comprobante: lo mismo que la redirección, sin recargar (E4-05.1). El
@@ -163,6 +183,8 @@ final class Reservas extends Controlador
         return $this->vista('reserva_confirmada.html.twig', [
             'reserva' => self::datosDeReserva($reserva, $funcion),
             'funcion' => $funcion === null ? null : self::datosDeFuncion($funcion),
+            // Los tres pasos sólo si esta reserva se cobra; las demás siguen con dos.
+            'con_pago' => $reserva->preferenciaId !== null,
             // El aviso al volver de cancelarla: sólo si de verdad quedó cancelada.
             'cancelada' => $peticion->consulta('cancelada') === '1' && $reserva->estado === EstadoReserva::Cancelada,
         ]);
@@ -248,10 +270,15 @@ final class Reservas extends Controlador
     }
 
     /**
-     * @return array{id: string, codigo: string, cantidad: int, total: string, estado: string, cancelable: bool}
+     * enlace_de_pago y vence sólo en una pendiente de pago que todavía está a tiempo: después ya
+     * no hay qué pagar.
+     *
+     * @return array{id: string, codigo: string, cantidad: int, total: string, estado: string, cancelable: bool, enlace_de_pago: ?string, vence: ?string}
      */
     private static function datosDeReserva(Reserva $reserva, ?FuncionDeProgramacion $funcion): array
     {
+        $aTiempo = $reserva->estado === EstadoReserva::PendientePago && !$reserva->vencida();
+
         return [
             'id' => $reserva->id,
             'codigo' => $reserva->codigo,
@@ -259,7 +286,17 @@ final class Reservas extends Controlador
             'total' => TextoParaMostrar::monto((float) $reserva->total),
             'estado' => $reserva->estado->value,
             'cancelable' => ServicioDeReservas::seCancela($reserva, $funcion),
+            'enlace_de_pago' => $aTiempo ? $reserva->enlaceDePago : null,
+            'vence' => $aTiempo && $reserva->venceEn !== null ? self::hora($reserva->venceEn) : null,
         ];
+    }
+
+    /**
+     * «21:15», en la hora del sitio: la base la guarda en UTC.
+     */
+    private static function hora(DateTimeImmutable $momento): string
+    {
+        return $momento->setTimezone(new DateTimeZone(date_default_timezone_get()))->format('H:i');
     }
 
     /**
@@ -286,6 +323,8 @@ final class Reservas extends Controlador
 
         $datos = [
             'funcion' => self::datosDeFuncion($funcion),
+            // Los tres pasos sólo si esta función se cobra.
+            'con_pago' => $this->pagos->activos() && $funcion->precioBase > 0,
             // Si ya no se puede, la página lo dice en lugar del formulario.
             'motivo' => $motivo,
             'reglas' => [

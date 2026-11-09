@@ -123,13 +123,7 @@ final class AvisosDeReservas
      */
     private function urlDelSitio(): string
     {
-        $url = rtrim((string) $this->configuracion->requerir('sitio.url'), '/');
-        $esquema = parse_url($url, PHP_URL_SCHEME);
-        if (!in_array($esquema, ['http', 'https'], true) || parse_url($url, PHP_URL_HOST) === null) {
-            throw new RuntimeException('«sitio.url» de config.ini tiene que ser una dirección http(s).');
-        }
-
-        return $url;
+        return DireccionDelSitio::de($this->configuracion);
     }
 
     private static function textoDeConfirmada(Reserva $reserva, FuncionDeProgramacion $funcion, string $nombre, string $comprobante): string

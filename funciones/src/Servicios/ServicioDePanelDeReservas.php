@@ -85,6 +85,8 @@ final class ServicioDePanelDeReservas
         match ($reserva->estado) {
             EstadoReserva::Asistio => throw new ReglaIncumplida("La reserva {$codigo} ya tiene la asistencia registrada."),
             EstadoReserva::Cancelada => throw new ReglaIncumplida("La reserva {$codigo} está cancelada: sus lugares se liberaron."),
+            // Sin el pago acreditado no hay entrada: el espectador todavía la puede pagar.
+            EstadoReserva::PendientePago => throw new ReglaIncumplida("La reserva {$codigo} todavía no se pagó."),
             EstadoReserva::Confirmada => null,
         };
         $conAsistencia = $reserva->registrarAsistencia();
@@ -129,9 +131,10 @@ final class ServicioDePanelDeReservas
     }
 
     /**
-     * Cancela las reservas confirmadas de una función que se canceló (E4-03.4). Las que ya tienen
-     * la asistencia o ya estaban canceladas quedan como están. Llamarla dos veces no cambia nada:
-     * la segunda no encuentra confirmadas.
+     * Cancela las reservas confirmadas de una función que se canceló (E4-03.4), y las que esperaban
+     * el pago, que ya no tienen para qué pagarse. Las que ya tienen la asistencia o ya estaban
+     * canceladas quedan como están. Llamarla dos veces no cambia nada: la segunda no encuentra
+     * ninguna que cancelar.
      *
      * @param string $organizadorId quién canceló la función, para el historial
      *
@@ -142,11 +145,12 @@ final class ServicioDePanelDeReservas
         $autor = new AutorDelCambio($organizadorId, Rol::Organizador, 'Se canceló la función.');
         $canceladas = [];
         foreach ($this->reservas->deLaFuncion($funcionId) as $reserva) {
-            if ($reserva->estado !== EstadoReserva::Confirmada) {
+            if (!in_array($reserva->estado, [EstadoReserva::Confirmada, EstadoReserva::PendientePago], true)) {
                 continue;
             }
             $cancelada = $reserva->cancelar();
-            // Si el espectador la canceló justo antes, ya no está confirmada y no se toca.
+            // Si el espectador la canceló justo antes (o se acreditó el pago), ya no está como se
+            // leyó y no se toca.
             if ($this->reservas->guardarEstado($cancelada, $reserva->estado, $autor, $ahora)) {
                 $canceladas[] = $cancelada;
             }
@@ -157,7 +161,8 @@ final class ServicioDePanelDeReservas
 
     /**
      * Los números del panel del organizador: cuántos lugares están reservados y cuántos quedan,
-     * cuántos ya entraron y cuánto suman las reservas que siguen en pie.
+     * cuántos ya entraron y cuánto suman las reservas que siguen en pie. Las pendientes de pago
+     * ocupan sus lugares pero todavía no suman a lo recaudado.
      *
      * @param list<Reserva> $reservas las de la función
      *
@@ -175,7 +180,10 @@ final class ServicioDePanelDeReservas
                 static fn (Reserva $reserva): int => $reserva->estado === EstadoReserva::Asistio ? $reserva->cantidad : 0,
                 $reservas,
             )),
-            'recaudado' => array_sum(array_map(static fn (Reserva $reserva): float => (float) $reserva->total, $enPie)),
+            'recaudado' => array_sum(array_map(
+                static fn (Reserva $reserva): float => $reserva->estado === EstadoReserva::PendientePago ? 0.0 : (float) $reserva->total,
+                $enPie,
+            )),
             'reservas' => count($enPie),
         ];
     }

@@ -47,14 +47,7 @@ if ($ruta === '/interno/usuarios') {
             str_starts_with($id, '99999999') => "\tTabulado",
             default => 'Eva',
         };
-        $usuarios[$id] = [
-            'id' => $id,
-            'nombre' => $nombre,
-            'correo' => "{$id}@ejemplo.test",
-            'estado' => 'activa',
-            'roles' => ['espectador'],
-            'creado_en' => '2026-09-01T12:00:00',
-        ];
+        $usuarios[$id] = ['id' => $id, 'nombre' => $nombre];
     }
     echo json_encode((object) $usuarios);
 

@@ -30,8 +30,9 @@ final class UsuariosInternos extends Controlador
     }
 
     /**
-     * Varios usuarios por su id, en un solo pedido (E4-17.2 / IC-464).
-     * Devuelve un objeto JSON indexado por id con los datos públicos de cada usuario.
+     * Varios usuarios por su id, en un solo pedido (E4-17.2 / IC-464): un objeto JSON indexado por
+     * id con el nombre de cada uno. Sólo el nombre, que es lo que muestran el panel y el CSV de
+     * reservas: el correo y los roles no le hacen falta a quien llama, y no salen de cuentas.
      */
     public function varios(Peticion $peticion): Respuesta
     {
@@ -53,7 +54,10 @@ final class UsuariosInternos extends Controlador
             return $this->json((object) []);
         }
 
-        return $this->json((object) array_map(self::datos(...), $this->servicio->buscarVarios($ids)));
+        return $this->json((object) array_map(
+            static fn (UsuarioEnListado $usuario): array => ['id' => $usuario->id, 'nombre' => $usuario->nombre],
+            $this->servicio->buscarVarios($ids),
+        ));
     }
 
     /**

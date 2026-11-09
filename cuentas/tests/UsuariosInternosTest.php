@@ -209,7 +209,6 @@ final class UsuariosInternosTest extends TestCase
     {
         $elias = Usuario::nuevo('Elías Gómez', 'elias@ejemplo.com', 'sin uso');
         $this->usuarios->agregar($elias);
-        $this->base->ejecutar("UPDATE usuario SET creado_en = '2025-03-09 10:00:00' WHERE id = ?", [$elias->id]);
 
         $ids = "{$this->eva},{$elias->id}";
 
@@ -224,23 +223,9 @@ final class UsuariosInternosTest extends TestCase
             self::assertArrayHasKey($this->eva, $datos);
             self::assertArrayHasKey($elias->id, $datos);
 
-            self::assertSame([
-                'id' => $this->eva,
-                'nombre' => 'Eva Núñez',
-                'correo' => 'eva@ejemplo.com',
-                'estado' => 'activa',
-                'roles' => ['espectador'],
-                'creado_en' => '2025-03-08T15:00:00',
-            ], $datos[$this->eva]);
-
-            self::assertSame([
-                'id' => $elias->id,
-                'nombre' => 'Elías Gómez',
-                'correo' => 'elias@ejemplo.com',
-                'estado' => 'activa',
-                'roles' => ['espectador'],
-                'creado_en' => '2025-03-09T10:00:00',
-            ], $datos[$elias->id]);
+            // Sólo el nombre: el correo y los roles no salen de cuentas.
+            self::assertSame(['id' => $this->eva, 'nombre' => 'Eva Núñez'], $datos[$this->eva]);
+            self::assertSame(['id' => $elias->id, 'nombre' => 'Elías Gómez'], $datos[$elias->id]);
         }
     }
 

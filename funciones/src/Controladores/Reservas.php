@@ -105,35 +105,38 @@ final class Reservas extends Controlador
     {
         $funcion = $this->servicio->funcion((string) $peticion->parametro('id'));
 
-        return $this->pantalla($funcion, ['cantidad' => '1']);
+        return $this->pantalla($funcion, ['cantidad' => '1'], usuario: self::usuario($peticion));
     }
 
     public function reservar(Peticion $peticion): Respuesta
     {
         $funcion = $this->servicio->funcion((string) $peticion->parametro('id'));
+        $usuario = self::usuario($peticion);
         $enJson = $peticion->aceptaJson();
         $valor = $peticion->campo('cantidad');
         $valor = is_string($valor) ? trim($valor) : '';
 
         // Entero y dentro del cupo, como el min y el max del campo: el navegador controla lo mismo.
+        // El mensaje nombra el tope por persona y no el cupo: es lo más que se puede pedir, y si
+        // pide de más, el servicio le dice cuánto le queda (IC-463).
         $cantidad = filter_var($valor, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1, 'max_range' => $funcion->cupo]]);
         if ($cantidad === false) {
-            $mensaje = "Ingresá entre 1 y {$funcion->cupo} lugares.";
+            $mensaje = 'Ingresá entre 1 y ' . ServicioDeReservas::maximoPorPersona($funcion) . ' lugares.';
 
             return $enJson
-                ? $this->json(['errores' => ['cantidad' => $mensaje], ...$this->lugaresDe($funcion)], 422)
-                : $this->pantalla($funcion, ['cantidad' => $valor], ['cantidad' => $mensaje], estado: 422);
+                ? $this->json(['errores' => ['cantidad' => $mensaje], ...$this->lugaresDe($funcion, $usuario)], 422)
+                : $this->pantalla($funcion, ['cantidad' => $valor], ['cantidad' => $mensaje], usuario: $usuario, estado: 422);
         }
 
         // Un error de configuración, antes de guardar nada.
         $this->avisos->comprobarConfiguracion();
         try {
-            $reserva = $this->servicio->reservar(self::usuario($peticion), $funcion->id, $cantidad);
+            $reserva = $this->servicio->reservar($usuario, $funcion->id, $cantidad);
         } catch (ReglaIncumplida $error) {
             // El mensaje de la regla es para el espectador («Quedan 2 lugares.»), no interno.
             return $enJson
-                ? $this->json(['error' => $error->getMessage(), ...$this->lugaresDe($funcion)], 422)
-                : $this->pantalla($funcion, ['cantidad' => $valor], error: $error->getMessage(), estado: 422);
+                ? $this->json(['error' => $error->getMessage(), ...$this->lugaresDe($funcion, $usuario)], 422)
+                : $this->pantalla($funcion, ['cantidad' => $valor], error: $error->getMessage(), usuario: $usuario, estado: 422);
         }
 
         // 201 con el link al comprobante: lo mismo que la redirección, sin recargar (E4-05.1). El
@@ -143,7 +146,7 @@ final class Reservas extends Controlador
             return $this->json([
                 'reserva' => self::datosDeReserva($reserva, $funcion),
                 'url' => $this->ruta("/reservas/{$reserva->id}"),
-                ...$this->lugaresDe($funcion),
+                ...$this->lugaresDe($funcion, $usuario),
             ], 201)->alTerminar(fn (): bool => $this->avisos->reservaConfirmada($reserva, $funcion));
         }
         // Ya confirmada: si el correo no sale, la reserva queda igual y el aviso queda en el log.
@@ -212,13 +215,22 @@ final class Reservas extends Controlador
 
     /**
      * Los lugares que quedan después de reservar, para que la ficha actualice el número sin
-     * volver a preguntar (E4-05.1).
+     * volver a preguntar (E4-05.1), y lo que le queda al espectador según el tope por persona.
      *
-     * @return array{lugares_libres: int}
+     * @return array{lugares_libres: int, lugares_restantes_usuario?: int, maximo_reserva?: int, maximo_por_persona?: int}
      */
-    private function lugaresDe(FuncionDeProgramacion $funcion): array
+    private function lugaresDe(FuncionDeProgramacion $funcion, ?Usuario $usuario = null): array
     {
-        return ['lugares_libres' => $this->servicio->lugaresLibres($funcion)];
+        $libres = $this->servicio->lugaresLibres($funcion);
+        $datos = ['lugares_libres' => $libres];
+        if ($usuario !== null) {
+            $restantes = $this->servicio->lugaresRestantesPara($funcion, $usuario->id);
+            $datos['lugares_restantes_usuario'] = $restantes;
+            $datos['maximo_reserva'] = min($libres, $restantes);
+            $datos['maximo_por_persona'] = ServicioDeReservas::maximoPorPersona($funcion);
+        }
+
+        return $datos;
     }
 
     private function pantallaDeCancelacion(Reserva $reserva, ?FuncionDeProgramacion $funcion, ?string $error = null, int $estado = 200): Respuesta
@@ -254,13 +266,35 @@ final class Reservas extends Controlador
      * @param array<string, string> $valores
      * @param array<string, string> $errores
      */
-    private function pantalla(FuncionDeProgramacion $funcion, array $valores, array $errores = [], ?string $error = null, int $estado = 200): Respuesta
-    {
+    private function pantalla(
+        FuncionDeProgramacion $funcion,
+        array $valores,
+        array $errores = [],
+        ?string $error = null,
+        ?Usuario $usuario = null,
+        int $estado = 200,
+    ): Respuesta {
+        $motivo = $funcion->motivoParaNoReservar();
+        $maximoPorPersona = ServicioDeReservas::maximoPorPersona($funcion);
+        $restantesUsuario = $usuario !== null ? $this->servicio->lugaresRestantesPara($funcion, $usuario->id) : $maximoPorPersona;
+        $libres = $this->servicio->lugaresLibres($funcion);
+        $maximoCampo = min($libres, $restantesUsuario);
+
+        if ($error === null && $motivo === null && $usuario !== null && $restantesUsuario === 0) {
+            $motivo = "Ya tenés reservados los {$maximoPorPersona} lugares máximos por persona para esta función.";
+        }
+
         $datos = [
             'funcion' => self::datosDeFuncion($funcion),
             // Si ya no se puede, la página lo dice en lugar del formulario.
-            'motivo' => $funcion->motivoParaNoReservar(),
-            'reglas' => ['cantidad' => ['minimo' => 1, 'maximo' => $funcion->cupo]],
+            'motivo' => $motivo,
+            'reglas' => [
+                'cantidad' => [
+                    'minimo' => 1,
+                    'maximo' => max(1, $maximoCampo),
+                    'maximo_por_persona' => $maximoPorPersona,
+                ],
+            ],
             'valores' => $valores,
             'errores' => $errores,
         ];

@@ -30,7 +30,7 @@ $metodo = strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? 'GET'));
 $archivoDeOcupacion = sys_get_temp_dir() . '/ocupacion_de_prueba.json';
 if ($metodo === 'GET' && is_file($archivoDeOcupacion) && preg_match('#^/interno/funciones/([0-9a-f-]{36})/ocupacion$#', $ruta, $partes) === 1) {
     $ocupados = json_decode((string) file_get_contents($archivoDeOcupacion), true);
-    echo json_encode(['funcion_id' => $partes[1], 'lugares_ocupados' => (int) ($ocupados[$partes[1]] ?? 0)]);
+    echo json_encode(['funcion_id' => $partes[1], 'lugares_ocupados' => (int) ($ocupados[$partes[1]] ?? 0), 'maximo_por_persona' => 6]);
 
     return;
 }

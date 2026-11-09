@@ -17,6 +17,7 @@ use IndieCinema\Nucleo\Seguridad\Rol;
 use IndieCinema\Nucleo\Uuid;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use IndieCinema\Nucleo\Pruebas\Dobles\PaginasParaValidar;
 
 /**
  * «Mi cuenta» (/cuenta/) de punta a punta: la aplicación entera con las rutas de cuentas, la
@@ -71,7 +72,7 @@ final class MiCuentaTest extends TestCase
         ];
         $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion, new Log('cuentas', fopen('php://memory', 'w')));
 
-        return $aplicacion->atender(new Peticion('GET', '/', [], [], $cabeceras, [], []));
+        return PaginasParaValidar::anotar('GET', '/cuenta/', $aplicacion->atender(new Peticion('GET', '/', [], [], $cabeceras, [], [])));
     }
 
     /**

@@ -292,9 +292,13 @@ docker run --rm -u "$(id -u):$(id -g)" -v "$PWD/..:/app" -w /app/backend-indieci
 | http://localhost:8080/cartelera/{id} | la ficha de una función: con sesión de espectador, votar el título, marcar las franjas que le sirven o reservar, según su estado; los lugares libres se actualizan solos |
 | http://localhost:8080/acerca-de | «Acerca de IndieCinema»: quiénes somos y cómo funciona |
 | http://localhost:8080/salas | el listado público de salas habilitadas |
+| http://localhost:8080/salas/{id} | la ficha de una sala: su foto, la dirección, sus parámetros y sus próximas funciones |
+| http://localhost:8080/obras | «Películas»: el catálogo de obras con su afiche y un buscador |
+| http://localhost:8080/obras/{id} | la ficha de una película: el afiche, la dirección, la duración, los géneros, la sinopsis y sus próximas funciones |
 | http://localhost:8080/organizador/salas | «Mis salas», con sesión de organizador |
+| http://localhost:8080/organizador/obras | las obras del catálogo, con sesión de organizador: el alta y la edición con el afiche, y la baja de una obra sin funciones futuras |
 | http://localhost:8080/organizador/funciones | «Mis funciones»: las de sus salas, en cualquier estado y con su fecha; desde ahí se programa una función o se la abre a votación de títulos, y se proponen las franjas del acuerdo |
-| http://localhost:8080/cuenta/ | cuentas (`/cuenta/ingresar` y `/cuenta/registro`) |
+| http://localhost:8080/cuenta/ | «Mi cuenta», con sesión: el nombre, el correo y los roles, y el enlace a «Mis reservas». Sin sesión, `/cuenta/ingresar` y `/cuenta/registro` |
 | http://localhost:8080/solicitar-sala | la solicitud de sala, con sesión: se guarda la sala sin publicar y le llega al equipo por correo |
 | http://localhost:8080/administracion/solicitudes | la bandeja de solicitudes de sala, para aprobarlas (publica la sala y da el rol de organizador) o rechazarlas con un motivo, y el historial; sólo el administrador |
 | http://localhost:8025 | el buzón de prueba (Mailpit): los correos que mandan los subsistemas, sin que salgan a nadie |

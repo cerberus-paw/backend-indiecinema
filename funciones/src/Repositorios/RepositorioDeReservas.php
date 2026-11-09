@@ -79,6 +79,21 @@ final class RepositorioDeReservas
     }
 
     /**
+     * Los lugares que ya tiene esa persona en la función, con la misma regla que lugaresOcupados():
+     * las confirmadas, las de quien ya entró y las pendientes de pago que siguen a tiempo. Una
+     * pendiente vencida ya no le cuenta para el tope, aunque el cron todavía no la haya cancelado.
+     */
+    public function lugaresOcupadosPorUsuario(string $funcionId, string $usuarioId, DateTimeImmutable $ahora = new DateTimeImmutable()): int
+    {
+        [$condicion, $parametros] = self::queOcupan($ahora);
+
+        return (int) $this->base->valor(
+            "SELECT COALESCE(SUM(cantidad), 0) FROM reserva WHERE funcion_id = ? AND usuario_id = ? AND {$condicion}",
+            [$funcionId, $usuarioId, ...$parametros],
+        );
+    }
+
+    /**
      * La condición de las reservas que ocupan lugares ahora, con sus parámetros.
      *
      * @return array{string, list<mixed>}

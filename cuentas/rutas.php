@@ -40,6 +40,8 @@ return static function (Router $router): void {
     // rol de organizador (pedir ser organizador es pedir una sala, como en la E2). Funciones lee
     // el usuario para avisarle por correo que se canceló la función que reservó (E4-03.4), pero
     // no da roles.
+    // Varios usuarios en un solo pedido, para el listado y el CSV de reservas de funciones (IC-464).
+    $router->interna('GET', '/interno/usuarios', [UsuariosInternos::class, 'varios'], ['programacion', 'funciones']);
     $router->interna('GET', '/interno/usuarios/{id}', [UsuariosInternos::class, 'mostrar'], ['programacion', 'funciones']);
     $router->interna('POST', '/interno/usuarios/{id}/roles', [UsuariosInternos::class, 'darRol'], ['programacion']);
 

@@ -27,7 +27,8 @@ add_header Referrer-Policy strict-origin-when-cross-origin always;
 # este mismo origen, y nada en línea. Si un texto se escapara del escapado de Twig, el script que
 # trajera no corre. El front no usa nada de afuera (la fuente se sirve desde /estaticos/fuentes/)
 # ni código o estilos en línea. data: en img-src, por el SVG de la flecha de los <select> de
-# estilos.css. Sin upgrade-insecure-requests: en el compose local, que va por HTTP, rompería todo,
+# estilos.css, y blob:, por la vista previa de la foto o el afiche que se elige para subir
+# (zona-de-imagen.js): la arma el navegador con el archivo, sin pedir nada afuera. Sin upgrade-insecure-requests: en el compose local, que va por HTTP, rompería todo,
 # y en el VPS no hace falta porque el HSTS ya obliga HTTPS. Se activó directo, sin pasar por
 # Report-Only: el servidor de desarrollo y las pruebas de punta a punta, que fallan con cualquier
 # violación, hacen de ensayo.
@@ -41,7 +42,7 @@ add_header Cross-Origin-Opener-Policy same-origin always;
 add_header Cross-Origin-Resource-Policy same-origin always;
 add_header Cross-Origin-Embedder-Policy require-corp always;
 # Ojo con add_header: un location que tenga uno propio deja de heredar todos estos.
-add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'" always;
+add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'" always;
 
 # Las rutas /interno/ son para la red del compose: desde afuera no existen, con o sin prefijo.
 # Es una expresión regular para que gane sobre los prefijos de abajo (que no llevan ^~).

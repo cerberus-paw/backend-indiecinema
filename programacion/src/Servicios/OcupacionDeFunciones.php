@@ -66,7 +66,44 @@ final class OcupacionDeFunciones
     }
 
     /**
-     * Los de una función, para su ficha.
+     * Los lugares ocupados de una función, el tope de lugares por persona y, si se pasa usuario,
+     * los que ya tiene reservados ese espectador en ella (IC-463). El tope viene de funciones, que
+     * es quien lo hace cumplir: programación no tiene su propia copia del número.
+     *
+     * @return ?array{ocupados: int, maximo_por_persona: int, del_usuario: int} null si funciones no responde
+     */
+    public function deUnaParaUsuario(string $funcionId, ?string $usuarioId = null): ?array
+    {
+        if (!Uuid::esValido($funcionId)) {
+            return null;
+        }
+
+        $parametros = [];
+        if ($usuarioId !== null && Uuid::esValido($usuarioId)) {
+            $parametros['usuario'] = $usuarioId;
+        }
+
+        return $this->pedir(function (ClienteInterno $cliente) use ($funcionId, $parametros): array {
+            $datos = $cliente->get('funciones', "/interno/funciones/{$funcionId}/ocupacion", $parametros);
+            $ocupados = is_array($datos) ? ($datos['lugares_ocupados'] ?? null) : null;
+            $maximo = is_array($datos) ? ($datos['maximo_por_persona'] ?? null) : null;
+            if (!is_int($ocupados) || !is_int($maximo)) {
+                throw new RuntimeException('funciones no respondió los lugares ocupados a GET /interno/funciones/{id}/ocupacion.');
+            }
+            $delUsuario = $datos['lugares_del_usuario'] ?? 0;
+
+            return [
+                'ocupados' => $ocupados,
+                'maximo_por_persona' => $maximo,
+                'del_usuario' => is_int($delUsuario) ? $delUsuario : 0,
+            ];
+        });
+    }
+
+    /**
+     * Sólo los lugares ocupados de una función, para lo que no mira el tope: editarla (F-01.1).
+     * No pasa por deUnaParaUsuario() a propósito: así editar no depende de que funciones mande
+     * también el tope por persona (IC-463).
      *
      * @return ?int null si funciones no responde
      */

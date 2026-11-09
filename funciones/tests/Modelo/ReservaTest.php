@@ -67,11 +67,19 @@ final class ReservaTest extends TestCase
         self::assertSame('0.00', Reserva::nueva($this->funcion(precio: 0), self::ESPECTADOR, 2, $this->antes())->total);
     }
 
-    public function testSeReservaMientrasLaFuncionTodaviaNoTieneFecha(): void
+    /**
+     * F-01.2: mientras se votan los títulos o se acuerda la fecha no se reserva, porque todavía no
+     * se sabe qué se proyecta ni cuándo. Hasta la E4-01 se podía.
+     */
+    public function testNoSeReservaMientrasLaFuncionTodaviaNoTieneFecha(): void
     {
         foreach (['en_votacion_titulos', 'en_acuerdo_fecha'] as $estado) {
-            $reserva = Reserva::nueva($this->funcion($estado, null), self::ESPECTADOR, 1, $this->antes());
-            self::assertSame(EstadoReserva::Confirmada, $reserva->estado);
+            try {
+                Reserva::nueva($this->funcion($estado, null), self::ESPECTADOR, 1, $this->antes());
+                self::fail("Reservó una función {$estado}.");
+            } catch (ReglaIncumplida $error) {
+                self::assertSame('La función todavía no tiene fecha confirmada: se va a poder reservar cuando se programe.', $error->getMessage());
+            }
         }
     }
 

@@ -21,6 +21,7 @@ use IndieCinema\Programacion\Modelo\TipoObra;
 use IndieCinema\Programacion\Repositorios\RepositorioDeObras;
 use IndieCinema\Programacion\Repositorios\RepositorioDeSalas;
 use PHPUnit\Framework\TestCase;
+use IndieCinema\Nucleo\Pruebas\Dobles\PaginasParaValidar;
 
 final class ObrasTest extends TestCase
 {
@@ -63,13 +64,13 @@ final class ObrasTest extends TestCase
             ...$cabecerasAdicionales,
         ];
 
-        return $aplicacion->atender(new Peticion(
+        return PaginasParaValidar::anotar('GET', $ruta, $aplicacion->atender(new Peticion(
             'GET',
             $ruta,
             $consulta,
             [],
             $cabeceras,
-        ));
+        )));
     }
 
     /**

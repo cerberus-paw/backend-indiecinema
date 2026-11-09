@@ -54,8 +54,10 @@ final class FormularioDeSalaTest extends TestCase
     {
         $reglas = FormularioDeFuncion::reglas();
 
-        // Los que el navegador puede revisar solo; los que dependen de la sala no están.
-        self::assertSame(['sala_id', 'fecha', 'hora', 'precio', 'cupo'], array_keys($reglas));
+        // Los que el navegador puede revisar solo, más el mínimo de candidatas de la votación
+        // (F-01.6), que lo revisa ModoFuncion; los que dependen de la sala no están.
+        self::assertSame(['sala_id', 'fecha', 'hora', 'precio', 'obras', 'cupo'], array_keys($reglas));
+        self::assertSame(2, $reglas['obras']['candidatas_minimas']);
         self::assertSame('Falta seleccionar la sala.', $reglas['sala_id']['mensajes']['requerido']);
         self::assertSame('Falta el precio de la entrada.', $reglas['precio']['mensajes']['requerido']);
         self::assertSame('El cupo tiene que ser de al menos un lugar.', $reglas['cupo']['mensajes']['valor_minimo']);

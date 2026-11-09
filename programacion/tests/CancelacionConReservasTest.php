@@ -183,7 +183,12 @@ final class CancelacionConReservasTest extends TestCase
         self::assertSame([], self::pedidosAFunciones());
     }
 
-    public function testSiFuncionesNoRespondeLaFuncionQuedaCanceladaYSeAvisaAlOrganizador(): void
+    /**
+     * F-01.7: si funciones no responde, no se pueden cancelar las reservas, y la función no queda
+     * cancelada con reservas confirmadas: vuelve a como estaba, y el panel le dice al organizador
+     * que lo intente de nuevo. Hasta ahora quedaba cancelada, con las reservas en pie y sin aviso.
+     */
+    public function testSiFuncionesNoRespondeLaFuncionQuedaComoEstabaYSeAvisaAlOrganizador(): void
     {
         $funcion = $this->programada();
 
@@ -191,15 +196,19 @@ final class CancelacionConReservasTest extends TestCase
         $respuesta = $this->cancelar($funcion->id, 'http://127.0.0.1:9');
 
         self::assertSame(303, $respuesta->estado());
-        self::assertSame('/organizador/funciones?cancelada=1&reservas=pendientes', $respuesta->cabecera('Location'));
-        self::assertSame('cancelada', $this->base->valor('SELECT estado FROM funcion WHERE id = ?', [$funcion->id]));
+        self::assertSame('/organizador/funciones?cancelacion=fallida', $respuesta->cabecera('Location'));
+        self::assertSame('programada', $this->base->valor('SELECT estado FROM funcion WHERE id = ?', [$funcion->id]));
 
         $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion(), new Log('programacion', fopen('php://memory', 'w')));
-        $panel = $aplicacion->atender(new Peticion('GET', '/organizador/funciones', ['cancelada' => '1', 'reservas' => 'pendientes'], [], [
+        $panel = $aplicacion->atender(new Peticion('GET', '/organizador/funciones', ['cancelacion' => 'fallida'], [], [
             'X-Nginx-Secreto' => self::SECRETO,
             'X-Usuario-Id' => self::ORGANIZADORA,
             'X-Rol' => 'organizador',
         ], []));
-        self::assertStringContainsString('Las reservas de la función no se cancelaron', $panel->cuerpo());
+        self::assertStringContainsString('No se pudo cancelar la función', $panel->cuerpo());
+
+        // Con funciones de vuelta, se cancela.
+        self::assertSame('/organizador/funciones?cancelada=1', $this->cancelar($funcion->id)->cabecera('Location'));
+        self::assertSame('cancelada', $this->base->valor('SELECT estado FROM funcion WHERE id = ?', [$funcion->id]));
     }
 }

@@ -11,9 +11,14 @@ absolute_redirect off;
 client_max_body_size 6m;
 
 # Al pasarse del límite, 429 Too Many Requests (por defecto sería 503, que dice otra cosa), con
-# un mensaje que diga qué hacer: en JSON o en una página, según $formato_del_429.
+# un mensaje que diga qué hacer: en JSON o en una página, según $formato_de_error.
 limit_req_status 429;
-error_page 429 /_demasiados/$formato_del_429;
+error_page 429 /_demasiados/$formato_de_error;
+# Un subsistema que no contesta (caído, o que tarda demasiado) o el auth_request sin respuesta de
+# cuentas: nginx mostraba su página por defecto, en inglés y sin nada del sitio (F-01.7). Sólo los
+# errores que arma nginx: los que manda un subsistema pasan como están, con su propio mensaje,
+# porque proxy_intercept_errors sigue apagado (subsistema.inc).
+error_page 500 502 503 504 =503 /_sin_servicio/$formato_de_error;
 
 add_header X-Content-Type-Options nosniff always;
 add_header X-Frame-Options DENY always;
@@ -160,6 +165,39 @@ location = /_demasiados/html {
 <main>
 <h1>Hiciste muchos pedidos seguidos</h1>
 <p>Hiciste muchos pedidos seguidos. Probá de nuevo en un minuto.</p>
+<p><a href="/">Ir al inicio</a></p>
+</main>
+</body>
+</html>
+';
+}
+
+# La respuesta de un subsistema que no contesta (error_page, arriba). Como las del 429: sin
+# add_header, para que hereden la CSP y las demás cabeceras, e «internal». Siempre 503 Service
+# Unavailable, aunque nginx haya visto un 502 o un 504: para quien la recibe es lo mismo, y dice
+# que es pasajero.
+location = /_sin_servicio/json {
+    internal;
+    default_type application/json;
+    charset utf-8;
+    return 503 '{"error": "El sitio no está respondiendo como debería. Probá de nuevo en unos minutos."}';
+}
+location = /_sin_servicio/html {
+    internal;
+    default_type text/html;
+    charset utf-8;
+    return 503 '<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>El sitio no está respondiendo · IndieCinema</title>
+<link rel="stylesheet" href="/estaticos/css/estilos.css">
+</head>
+<body>
+<main>
+<h1>El sitio no está respondiendo</h1>
+<p>El sitio no está respondiendo como debería. Probá de nuevo en unos minutos.</p>
 <p><a href="/">Ir al inicio</a></p>
 </main>
 </body>

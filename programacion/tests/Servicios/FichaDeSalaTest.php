@@ -57,7 +57,7 @@ final class FichaDeSalaTest extends TestCase
         $this->base = self::baseConTablasNuevas($configuracion);
         $salas = new RepositorioDeSalas($this->base);
         $this->cartelera = new RepositorioDeCartelera($this->base);
-        $this->servicio = new ServicioDeSalas($salas, new ArchivosDeSalas($configuracion), new Log('programacion', fopen('php://memory', 'w')), $this->cartelera);
+        $this->servicio = new ServicioDeSalas($salas, new ArchivosDeSalas($configuracion), new Log('programacion', fopen('php://memory', 'w')), $this->cartelera, new RepositorioDeFunciones($this->base));
 
         DatosDePrueba::para(
             $configuracion,

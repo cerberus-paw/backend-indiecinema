@@ -18,6 +18,7 @@ use IndieCinema\Programacion\Repositorios\RepositorioDeSalas;
 use IndieCinema\Programacion\Repositorios\RepositorioDeSolicitudes;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use IndieCinema\Nucleo\Pruebas\Dobles\PaginasParaValidar;
 
 /**
  * La bandeja de solicitudes de sala de punta a punta: la aplicación entera con las rutas de
@@ -122,7 +123,7 @@ final class AdministracionDeSolicitudesTest extends TestCase
         parse_str((string) parse_url($url, PHP_URL_QUERY), $consulta);
         $aplicacion = new Aplicacion(dirname(__DIR__), $configuracion ?? $this->configuracion(), new Log('programacion', $this->salidaDelLog));
 
-        return $aplicacion->atender(new Peticion($metodo, (string) parse_url($url, PHP_URL_PATH), $consulta, $cuerpo, $cabeceras, ['csrf' => self::CSRF]));
+        return PaginasParaValidar::anotar($metodo, $url, $aplicacion->atender(new Peticion($metodo, (string) parse_url($url, PHP_URL_PATH), $consulta, $cuerpo, $cabeceras, ['csrf' => self::CSRF])));
     }
 
     /**

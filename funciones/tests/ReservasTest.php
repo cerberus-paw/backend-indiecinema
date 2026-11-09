@@ -104,7 +104,7 @@ final class ReservasTest extends TestCase
 
         parse_str((string) parse_url($ruta, PHP_URL_QUERY), $consulta);
 
-        return $aplicacion->atender(new Peticion($metodo, (string) parse_url($ruta, PHP_URL_PATH), $consulta, $cuerpo, $cabeceras, ['csrf' => self::CSRF], []));
+        return PaginasParaValidar::anotar($metodo, $ruta, $aplicacion->atender(new Peticion($metodo, (string) parse_url($ruta, PHP_URL_PATH), $consulta, $cuerpo, $cabeceras, ['csrf' => self::CSRF], [])));
     }
 
     private function reservar(string $cantidad, string $funcion = self::PROXIMA, ?string $usuario = self::EVA): Respuesta

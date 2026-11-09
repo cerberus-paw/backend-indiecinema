@@ -114,7 +114,7 @@ final class CarteleraTest extends TestCase
         parse_str((string) parse_url($url, PHP_URL_QUERY), $consulta);
         $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion($cartelera), new Log('programacion', $this->salidaDelLog));
 
-        return $aplicacion->atender(new Peticion('GET', (string) parse_url($url, PHP_URL_PATH), $consulta, [], $cabeceras));
+        return PaginasParaValidar::anotar('GET', $url, $aplicacion->atender(new Peticion('GET', (string) parse_url($url, PHP_URL_PATH), $consulta, [], $cabeceras)));
     }
 
     /**
@@ -133,14 +133,14 @@ final class CarteleraTest extends TestCase
         parse_str((string) parse_url($ruta, PHP_URL_QUERY), $consulta);
         $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion(), new Log('programacion', $this->salidaDelLog));
 
-        return $aplicacion->atender(new Peticion(
+        return PaginasParaValidar::anotar('POST', $ruta, $aplicacion->atender(new Peticion(
             'POST',
             (string) parse_url($ruta, PHP_URL_PATH),
             $consulta,
             ['_csrf' => self::CSRF, ...$cuerpo],
             $cabeceras,
             ['csrf' => self::CSRF],
-        ));
+        )));
     }
 
     /**
@@ -1076,6 +1076,8 @@ final class CarteleraTest extends TestCase
         // Al subsistema funciones, que sí lleva el prefijo: la ficha es de programación.
         self::assertStringContainsString('action="/funcion/reservar/' . $id . '" method="POST"', $cuerpo);
         self::assertMatchesRegularExpression('/name="_csrf" value="[0-9a-f]{64}"/', $cuerpo);
+        // Sin funciones que responda, no hay tope por persona que mostrar (lo sabe sólo funciones,
+        // IC-463): el campo llega hasta el cupo y la reserva la controla funciones igual.
         self::assertMatchesRegularExpression('/name="cantidad"[^>]*min="1"[^>]*max="' . $cupo . '"/s', $cuerpo);
     }
 

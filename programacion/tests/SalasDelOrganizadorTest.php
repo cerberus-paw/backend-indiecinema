@@ -20,6 +20,7 @@ use IndieCinema\Programacion\Repositorios\RepositorioDeSalas;
 use IndieCinema\Programacion\Servicios\ArchivosDeSalas;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use IndieCinema\Nucleo\Pruebas\Dobles\PaginasParaValidar;
 
 /**
  * «Mis salas», la edición, la foto, la ficha y el listado público de punta a punta: la aplicación
@@ -94,7 +95,7 @@ final class SalasDelOrganizadorTest extends TestCase
         parse_str((string) parse_url($url, PHP_URL_QUERY), $consulta);
         $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion, new Log('programacion', $this->salidaDelLog));
 
-        return $aplicacion->atender(new Peticion(
+        return PaginasParaValidar::anotar($metodo, $url, $aplicacion->atender(new Peticion(
             $metodo,
             (string) parse_url($url, PHP_URL_PATH),
             $consulta,
@@ -102,7 +103,7 @@ final class SalasDelOrganizadorTest extends TestCase
             $cabeceras,
             ['csrf' => self::CSRF],
             $archivos,
-        ));
+        )));
     }
 
     /**

@@ -29,6 +29,7 @@ use IndieCinema\Programacion\Repositorios\RepositorioDeObras;
 use IndieCinema\Programacion\Repositorios\RepositorioDeSalas;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use IndieCinema\Nucleo\Pruebas\Dobles\PaginasParaValidar;
 
 /**
  * «Mis funciones» y alta para programar una función (E3-11.2) del organizador, de punta a punta.
@@ -129,14 +130,14 @@ final class FuncionesDelOrganizadorTest extends TestCase
         parse_str((string) parse_url($ruta, PHP_URL_QUERY), $consulta);
         $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion, new Log('programacion', $this->salidaDelLog));
 
-        return $aplicacion->atender(new Peticion(
+        return PaginasParaValidar::anotar($metodo, $ruta, $aplicacion->atender(new Peticion(
             $metodo,
             (string) parse_url($ruta, PHP_URL_PATH),
             $consulta,
             $cuerpo,
             $cabeceras,
             ['csrf' => self::CSRF],
-        ));
+        )));
     }
 
     private function enviar(string $ruta, array $cuerpo, ?string $usuario = self::ORGANIZADORA, string $rol = 'organizador'): Respuesta

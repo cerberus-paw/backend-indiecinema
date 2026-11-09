@@ -13,6 +13,7 @@ use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Log;
 use IndieCinema\Nucleo\Seguridad\Rol;
+use IndieCinema\Nucleo\Uuid;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
@@ -59,16 +60,17 @@ final class UsuariosInternosTest extends TestCase
     }
 
     /**
-     * @param array<string, mixed> $cuerpo el JSON, ya decodificado
+     * @param array<string, mixed> $cuerpo   el JSON, ya decodificado
+     * @param array<string, mixed> $consulta los parámetros de la URL
      */
-    private function pedir(string $metodo, string $ruta, array $cuerpo = [], string $llamador = 'programacion', string $token = self::TOKEN_DE_PROGRAMACION): Respuesta
+    private function pedir(string $metodo, string $ruta, array $cuerpo = [], string $llamador = 'programacion', string $token = self::TOKEN_DE_PROGRAMACION, array $consulta = []): Respuesta
     {
         $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion, new Log('cuentas', $this->salidaDelLog));
 
         return $aplicacion->atender(new Peticion(
             $metodo,
             $ruta,
-            [],
+            $consulta,
             $cuerpo,
             ['X-Llamador' => $llamador, 'Authorization' => "Bearer {$token}", 'Accept' => 'application/json'],
             [],
@@ -199,5 +201,67 @@ final class UsuariosInternosTest extends TestCase
         // Un rol mayor ya incluye el de organizador: no se agrega.
         self::assertSame(['espectador', 'administrador'], $this->roles());
         self::assertSame(200, $respuesta->estado());
+    }
+
+    // ---- Varios usuarios en lote (E4-17.2 / IC-464) -----------------------------------------
+
+    public function testProgramacionYFuncionesPuedenPedirVariosUsuariosConSuToken(): void
+    {
+        $elias = Usuario::nuevo('Elías Gómez', 'elias@ejemplo.com', 'sin uso');
+        $this->usuarios->agregar($elias);
+
+        $ids = "{$this->eva},{$elias->id}";
+
+        foreach ([
+            ['programacion', self::TOKEN_DE_PROGRAMACION],
+            ['funciones', self::TOKEN_DE_FUNCIONES],
+        ] as [$llamador, $token]) {
+            $respuesta = $this->pedir('GET', '/interno/usuarios', llamador: $llamador, token: $token, consulta: ['ids' => $ids]);
+            self::assertSame(200, $respuesta->estado());
+
+            $datos = self::json($respuesta);
+            self::assertArrayHasKey($this->eva, $datos);
+            self::assertArrayHasKey($elias->id, $datos);
+
+            // Sólo el nombre: el correo y los roles no salen de cuentas.
+            self::assertSame(['id' => $this->eva, 'nombre' => 'Eva Núñez'], $datos[$this->eva]);
+            self::assertSame(['id' => $elias->id, 'nombre' => 'Elías Gómez'], $datos[$elias->id]);
+        }
+    }
+
+    public function testVariosUsuariosIgnoraIdsInexistentesOQueNoSonUuid(): void
+    {
+        $inexistente = Uuid::nuevo();
+        $respuesta = $this->pedir('GET', '/interno/usuarios', consulta: ['ids' => " {$this->eva} , , {$inexistente}, no-es-uuid "]);
+
+        self::assertSame(200, $respuesta->estado());
+        $datos = self::json($respuesta);
+        self::assertSame([$this->eva], array_keys($datos));
+    }
+
+    public function testVariosUsuariosSinIdsDevuelveObjetoVacio(): void
+    {
+        $vacio = $this->pedir('GET', '/interno/usuarios', consulta: ['ids' => '']);
+        self::assertSame(200, $vacio->estado());
+        self::assertSame('{}', $vacio->cuerpo());
+
+        $sinParametro = $this->pedir('GET', '/interno/usuarios');
+        self::assertSame(200, $sinParametro->estado());
+        self::assertSame('{}', $sinParametro->cuerpo());
+    }
+
+    public function testVariosUsuariosConMasDe100IdsDevuelve400(): void
+    {
+        $ids = implode(',', array_map(static fn (): string => Uuid::nuevo(), range(1, 101)));
+        $respuesta = $this->pedir('GET', '/interno/usuarios', consulta: ['ids' => $ids]);
+
+        self::assertSame(400, $respuesta->estado());
+        self::assertSame(['error' => 'Se piden hasta 100 usuarios por vez.'], self::json($respuesta));
+    }
+
+    public function testVariosUsuariosSinTokenOConTokenInvalidoDevuelve403(): void
+    {
+        self::assertSame(403, $this->pedir('GET', '/interno/usuarios', token: 'token-invalido', consulta: ['ids' => $this->eva])->estado());
+        self::assertSame(403, $this->pedir('GET', '/interno/usuarios', llamador: 'desconocido', consulta: ['ids' => $this->eva])->estado());
     }
 }

@@ -16,6 +16,14 @@ use IndieCinema\Nucleo\Uuid;
 final readonly class Reserva
 {
     /**
+     * Lo más que puede tener reservado una misma persona en una función, sumando todas sus
+     * reservas confirmadas: alcanza para ir en grupo o en familia a una sala independiente sin
+     * que una sola cuenta ocupe todo el cupo y después cancele. Si algún día lo fija el
+     * organizador por función, pasa a ser un campo de programación.
+     */
+    public const MAXIMO_POR_PERSONA = 6;
+
+    /**
      * Sin 0/O ni 1/I/L, que se confunden al dictar el código en la puerta o al tipearlo.
      */
     private const ALFABETO = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';

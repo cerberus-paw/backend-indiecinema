@@ -27,6 +27,8 @@ return static function (Router $router): void {
     // «Mis reservas» (E4-04.1): las del espectador, con el enlace a cada comprobante.
     $router->get('/reservas', [Reservas::class, 'mias'], Rol::Espectador);
     $router->get('/reservas/{id}', [Reservas::class, 'confirmada'], Rol::Espectador);
+    // Adónde vuelve el espectador desde Mercado Pago (X-01.3): sólo muestra en qué quedó.
+    $router->get('/reservas/{id}/regreso', [Reservas::class, 'regreso'], Rol::Espectador);
     // La cancelación del espectador, con una pantalla que la confirma antes (E4-01.5).
     $router->get('/reservas/{id}/cancelar', [Reservas::class, 'confirmarCancelacion'], Rol::Espectador);
     $router->post('/reservas/{id}/cancelar', [Reservas::class, 'cancelar'], Rol::Espectador);

@@ -33,6 +33,7 @@ final class PagoConMercadoPagoTest extends TestCase
     private const ACEPTA_JSON = 'application/json, text/plain, */*';
     private const CSRF = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
     private const EVA = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    private const ELIAS = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
     private const PROXIMA = '12121212-1212-4212-8212-121212121212';
     private const A_LA_GORRA = '78787878-7878-4878-8878-787878787878';
 
@@ -88,9 +89,9 @@ final class PagoConMercadoPagoTest extends TestCase
     /**
      * @param array<string, string> $cuerpo
      */
-    private function pedir(string $metodo, string $ruta, array $cuerpo = [], ?string $acepta = null): Respuesta
+    private function pedir(string $metodo, string $ruta, array $cuerpo = [], ?string $acepta = null, string $usuario = self::EVA): Respuesta
     {
-        $cabeceras = ['X-Nginx-Secreto' => self::SECRETO, 'X-Usuario-Id' => self::EVA, 'X-Rol' => 'espectador'];
+        $cabeceras = ['X-Nginx-Secreto' => self::SECRETO, 'X-Usuario-Id' => $usuario, 'X-Rol' => 'espectador'];
         if ($acepta !== null) {
             $cabeceras['Accept'] = $acepta;
         }
@@ -164,7 +165,9 @@ final class PagoConMercadoPagoTest extends TestCase
         self::assertSame(strtotime((string) $reserva['vence_en'] . ' UTC'), strtotime($preferencia['expiration_date_to']));
         self::assertSame(self::SITIO . '/funcion/pagos/aviso', $preferencia['notification_url']);
         self::assertSame('approved', $preferencia['auto_return']);
-        self::assertSame(self::SITIO . "/funcion/reservas/{$reserva['id']}", $preferencia['back_urls']['success']);
+        // Los tres resultados vuelven a la misma página, que muestra lo que dice la base (X-01.3).
+        $regreso = self::SITIO . "/funcion/reservas/{$reserva['id']}/regreso";
+        self::assertSame(['success' => $regreso, 'pending' => $regreso, 'failure' => $regreso], $preferencia['back_urls']);
     }
 
     /**
@@ -190,7 +193,7 @@ final class PagoConMercadoPagoTest extends TestCase
         $preferencia = self::preferencia();
         self::assertArrayNotHasKey('notification_url', $preferencia);
         self::assertArrayNotHasKey('auto_return', $preferencia);
-        self::assertSame('http://localhost:8080/funcion/reservas/' . $this->ultimaReserva()['id'], $preferencia['back_urls']['success']);
+        self::assertSame('http://localhost:8080/funcion/reservas/' . $this->ultimaReserva()['id'] . '/regreso', $preferencia['back_urls']['success']);
     }
 
     /**
@@ -315,5 +318,85 @@ final class PagoConMercadoPagoTest extends TestCase
 
         self::assertSame(303, $respuesta->estado(), $respuesta->cuerpo());
         self::assertSame('cancelada', $this->ultimaReserva()['estado']);
+    }
+
+    /**
+     * Lo que Mercado Pago agrega a la dirección de regreso: cualquiera lo puede escribir a mano.
+     */
+    private const REGRESO_APROBADO = '?collection_status=approved&status=approved&payment_id=123456789&payment_type=credit_card&preference_id=pref&external_reference=';
+
+    /**
+     * Volver de Mercado Pago con «approved» en la dirección no confirma nada (X-01.3): sólo el
+     * aviso del pago verificado.
+     */
+    public function testVolverConElPagoAprobadoEnLaDireccionNoConfirmaLaReserva(): void
+    {
+        $this->reservar();
+        $id = (string) $this->ultimaReserva()['id'];
+
+        $respuesta = $this->pedir('GET', "/reservas/{$id}/regreso" . self::REGRESO_APROBADO . $id);
+
+        $cuerpo = $respuesta->cuerpo();
+        self::assertSame(200, $respuesta->estado(), $cuerpo);
+        PaginasParaValidar::guardar('regreso-de-mercado-pago', $cuerpo);
+        self::assertSame('pendiente_pago', $this->ultimaReserva()['estado']);
+        self::assertSame(0, (int) $this->base->valor('SELECT COUNT(*) FROM cambio_reserva'));
+        self::assertStringContainsString('Estamos esperando la confirmación de Mercado Pago', $cuerpo);
+        self::assertStringContainsString('Pagar con Mercado Pago', $cuerpo);
+        self::assertStringNotContainsString('Pago acreditado', $cuerpo);
+        self::assertSame([], self::$correo->correos());
+    }
+
+    /**
+     * La página dice lo que dice la base, aunque la dirección diga lo contrario.
+     */
+    public function testSiElPagoYaSeAcreditoLoDiceAunqueLaDireccionDigaQueFallo(): void
+    {
+        $this->reservar();
+        $id = (string) $this->ultimaReserva()['id'];
+        $this->base->ejecutar("UPDATE reserva SET estado = 'confirmada' WHERE id = ?", [$id]);
+
+        $cuerpo = $this->pedir('GET', "/reservas/{$id}/regreso?collection_status=rejected&status=rejected")->cuerpo();
+
+        self::assertStringContainsString('Pago acreditado', $cuerpo);
+        self::assertStringContainsString('Reserva confirmada', $cuerpo);
+    }
+
+    public function testSiLaReservaSeCanceloLoDice(): void
+    {
+        $this->reservar();
+        $id = (string) $this->ultimaReserva()['id'];
+        $this->pedir('POST', "/reservas/{$id}/cancelar", ['_csrf' => self::CSRF]);
+
+        $cuerpo = $this->pedir('GET', "/reservas/{$id}/regreso" . self::REGRESO_APROBADO . $id)->cuerpo();
+
+        self::assertStringContainsString('La reserva está cancelada', $cuerpo);
+        self::assertSame('cancelada', $this->ultimaReserva()['estado']);
+    }
+
+    /**
+     * Pasado el plazo, ya no hay enlace para pagar.
+     */
+    public function testSiVencioElPlazoNoOfreceElPago(): void
+    {
+        $this->reservar();
+        $id = (string) $this->ultimaReserva()['id'];
+        $this->base->ejecutar('UPDATE reserva SET vence_en = ? WHERE id = ?', [gmdate('Y-m-d H:i:s', time() - 60), $id]);
+
+        $cuerpo = $this->pedir('GET', "/reservas/{$id}/regreso")->cuerpo();
+
+        self::assertStringContainsString('Venció el plazo para pagar', $cuerpo);
+        self::assertStringNotContainsString('Pagar con Mercado Pago', $cuerpo);
+    }
+
+    /**
+     * La de otro espectador no existe, como el comprobante.
+     */
+    public function testElRegresoDeLaReservaDeOtroEs404(): void
+    {
+        $this->reservar();
+        $id = (string) $this->ultimaReserva()['id'];
+
+        self::assertSame(404, $this->pedir('GET', "/reservas/{$id}/regreso", usuario: self::ELIAS)->estado());
     }
 }

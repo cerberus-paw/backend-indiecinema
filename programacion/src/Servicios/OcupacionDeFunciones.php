@@ -102,12 +102,26 @@ final class OcupacionDeFunciones
 
     /**
      * Sólo los lugares ocupados de una función, para lo que no mira el tope: editarla (F-01.1).
+     * No pasa por deUnaParaUsuario() a propósito: así editar no depende de que funciones mande
+     * también el tope por persona (IC-463).
      *
      * @return ?int null si funciones no responde
      */
     public function deUna(string $funcionId): ?int
     {
-        return $this->deUnaParaUsuario($funcionId)['ocupados'] ?? null;
+        if (!Uuid::esValido($funcionId)) {
+            return null;
+        }
+
+        return $this->pedir(function (ClienteInterno $cliente) use ($funcionId): int {
+            $datos = $cliente->get('funciones', "/interno/funciones/{$funcionId}/ocupacion");
+            $ocupados = is_array($datos) ? ($datos['lugares_ocupados'] ?? null) : null;
+            if (!is_int($ocupados)) {
+                throw new RuntimeException('funciones no respondió los lugares ocupados a GET /interno/funciones/{id}/ocupacion.');
+            }
+
+            return $ocupados;
+        });
     }
 
     /**

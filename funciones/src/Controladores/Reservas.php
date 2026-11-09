@@ -191,6 +191,31 @@ final class Reservas extends Controlador
     }
 
     /**
+     * GET /reservas/{id}/regreso: adónde vuelve el espectador desde Mercado Pago (X-01.3). Es el
+     * mismo comprobante, con un aviso según en qué quedó la reserva **en la base**.
+     *
+     * Sólo informa: no cambia nada, y no lee lo que trae la dirección (?status=approved,
+     * ?payment_id=…), porque cualquiera la puede escribir a mano. La reserva la confirma sólo el
+     * aviso del pago verificado (X-01.4), que suele llegar antes que el espectador; si todavía no
+     * llegó, la página lo dice y la reserva sigue pendiente.
+     */
+    public function regreso(Peticion $peticion): Respuesta
+    {
+        [$reserva, $funcion] = $this->servicio->delEspectador(self::usuario($peticion), (string) $peticion->parametro('id'));
+
+        return $this->vista('reserva_confirmada.html.twig', [
+            'reserva' => self::datosDeReserva($reserva, $funcion),
+            'funcion' => $funcion === null ? null : self::datosDeFuncion($funcion),
+            'con_pago' => $reserva->preferenciaId !== null,
+            'regreso' => match ($reserva->estado) {
+                EstadoReserva::Confirmada, EstadoReserva::Asistio => 'acreditado',
+                EstadoReserva::PendientePago => $reserva->vencida() ? 'vencido' : 'esperando',
+                EstadoReserva::Cancelada => 'cancelada',
+            },
+        ]);
+    }
+
+    /**
      * La pantalla que confirma la cancelación (E4-01.5). Si ya no se puede cancelar es 404, como
      * la de cancelar una función: el comprobante no muestra el botón, así que sólo se llega
      * escribiendo la dirección.

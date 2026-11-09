@@ -95,7 +95,9 @@ final class PagosDeReservas
      */
     public function preferencia(Reserva $reserva, FuncionDeProgramacion $funcion): array
     {
-        $regreso = DireccionDelSitio::deFunciones($this->configuracion, "/reservas/{$reserva->id}");
+        // La misma página para los tres resultados: muestra lo que dice la base, no lo que trae
+        // la dirección (X-01.3).
+        $regreso = DireccionDelSitio::deFunciones($this->configuracion, "/reservas/{$reserva->id}/regreso");
         $preferencia = [
             'items' => [[
                 'id' => $funcion->id,

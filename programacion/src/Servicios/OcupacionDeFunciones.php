@@ -101,6 +101,16 @@ final class OcupacionDeFunciones
     }
 
     /**
+     * Sólo los lugares ocupados de una función, para lo que no mira el tope: editarla (F-01.1).
+     *
+     * @return ?int null si funciones no responde
+     */
+    public function deUna(string $funcionId): ?int
+    {
+        return $this->deUnaParaUsuario($funcionId)['ocupados'] ?? null;
+    }
+
+    /**
      * @template T
      *
      * @param callable(ClienteInterno): T $pedido

@@ -48,6 +48,24 @@ final class Router
         $this->agregar(new Ruta(strtoupper($metodo), $patron, $accion, Rol::Visitante, $llamadores));
     }
 
+    /**
+     * Un aviso que manda un servicio de afuera, como el de los pagos de Mercado Pago (X-01.4): un
+     * POST sin sesión ni token CSRF, porque no lo manda un navegador. Por eso no lo cuida el
+     * middleware: el controlador tiene que autenticarlo, con la firma que trae, antes de creerle
+     * nada.
+     *
+     * No puede ser /interno/: nginx no deja pasar esas rutas desde afuera.
+     *
+     * @param array{0: class-string, 1: string} $accion
+     */
+    public function webhook(string $patron, array $accion): void
+    {
+        if (str_starts_with($patron, '/interno/')) {
+            throw new LogicException("El webhook {$patron} lo llama un servicio de afuera: no puede ser /interno/.");
+        }
+        $this->agregar(new Ruta('POST', $patron, $accion, Rol::Visitante, webhook: true));
+    }
+
     public function agregar(Ruta $ruta): void
     {
         if (!str_starts_with($ruta->patron, '/')) {

@@ -17,6 +17,8 @@ final readonly class Ruta
      * @param string                       $patron     con parámetros entre llaves: «/salas/{id}»
      * @param array{0: class-string, 1: string} $accion controlador y método
      * @param list<string>                 $llamadores para las rutas /interno/: los subsistemas que pueden llamarla
+     * @param bool                         $webhook    si la llama un servicio de afuera (Router::webhook()):
+     *                                                 entonces no pide el token CSRF
      */
     public function __construct(
         public string $metodo,
@@ -24,6 +26,7 @@ final readonly class Ruta
         public array $accion,
         public Rol $rolMinimo = Rol::Visitante,
         public array $llamadores = [],
+        public bool $webhook = false,
     ) {
         $segmentos = array_map(
             static fn (string $segmento): string => preg_match('/^\{(\w+)\}$/', $segmento, $coincidencia) === 1

@@ -17,13 +17,20 @@ final class CsvDeReservas
 {
     private const BOM = "\u{FEFF}";
     private const SEPARADOR = ';';
-    private const ENCABEZADOS = ['Código', 'Lugares', 'Total', 'Estado', 'Reservada el', 'Hora'];
+    private const ENCABEZADOS = ['Código', 'Espectador', 'Lugares', 'Total', 'Estado', 'Reservada el', 'Hora'];
 
     /**
-     * @param list<Reserva> $reservas
-     * @param DateTimeZone  $zona     la de la sala: la base guarda en UTC, y el organizador lee su hora
+     * Si una celda empieza con uno de estos caracteres, una planilla (Excel, Calc, Google Sheets) la
+     * interpreta como fórmula al abrir el archivo. Adelante va un apóstrofo para que quede como texto.
      */
-    public static function armar(array $reservas, DateTimeZone $zona): string
+    private const FORMULAS = ['=', '+', '-', '@', "\t", "\r"];
+
+    /**
+     * @param list<Reserva>         $reservas
+     * @param DateTimeZone          $zona     la de la sala: la base guarda en UTC, y el organizador lee su hora
+     * @param array<string, string> $nombres  usuario_id => nombre del espectador
+     */
+    public static function armar(array $reservas, DateTimeZone $zona, array $nombres = []): string
     {
         $archivo = fopen('php://memory', 'w+');
         self::fila($archivo, self::ENCABEZADOS);
@@ -31,6 +38,7 @@ final class CsvDeReservas
             $creada = $reserva->creadaEn->setTimezone($zona);
             self::fila($archivo, [
                 $reserva->codigo,
+                self::sinFormulas($nombres[$reserva->usuarioId] ?? ''),
                 (string) $reserva->cantidad,
                 // Un número que la planilla puede sumar: coma decimal y sin separador de miles.
                 str_replace('.', ',', $reserva->total),
@@ -47,9 +55,15 @@ final class CsvDeReservas
         return self::BOM . $csv;
     }
 
+    private static function sinFormulas(string $valor): string
+    {
+        return $valor !== '' && in_array($valor[0], self::FORMULAS, true) ? "'{$valor}" : $valor;
+    }
+
     /**
-     * Todos los campos los arma el sistema (el código, los números, el estado y la fecha): no hay
-     * texto de un usuario que pueda empezar como una fórmula de la planilla.
+     * Salvo el nombre del espectador, que carga una persona al registrarse y se escapa con
+     * sinFormulas(), todos los campos los arma el sistema: no hay texto que pueda empezar como una
+     * fórmula de la planilla.
      *
      * @param resource     $archivo
      * @param list<string> $campos

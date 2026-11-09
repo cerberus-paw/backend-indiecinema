@@ -86,11 +86,30 @@ final class ServicioDeUsuarios
     }
 
     /**
-     * El usuario como lo ve el administrador, o null si no existe.
+     * El usuario como lo ve el administrador, o null si no existe. También es lo que ve cada uno
+     * de su cuenta en «Mi cuenta»: el nombre, el correo, los roles y la fecha de alta.
      */
     public function buscarEnListado(string $id): ?UsuarioEnListado
     {
         return Uuid::esValido($id) ? $this->usuarios->buscarEnListado($id) : null;
+    }
+
+    /**
+     * Varios usuarios como los ve el administrador o los otros subsistemas, indexados por id. Los
+     * que no existen o no son un UUID válido se ignoran.
+     *
+     * @param list<string> $ids
+     *
+     * @return array<string, UsuarioEnListado>
+     */
+    public function buscarVarios(array $ids): array
+    {
+        $validos = array_values(array_unique(array_filter($ids, Uuid::esValido(...))));
+        if ($validos === []) {
+            return [];
+        }
+
+        return $this->usuarios->buscarVariosEnListado($validos);
     }
 
     /**

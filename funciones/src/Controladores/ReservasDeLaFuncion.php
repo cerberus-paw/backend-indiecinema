@@ -10,6 +10,7 @@ use IndieCinema\Funciones\Modelo\FuncionDeProgramacion;
 use IndieCinema\Funciones\Modelo\ReglaIncumplida;
 use IndieCinema\Funciones\Modelo\Reserva;
 use IndieCinema\Funciones\Servicios\ServicioDePanelDeReservas;
+use IndieCinema\Funciones\Servicios\UsuariosDeCuentas;
 use IndieCinema\Nucleo\Controlador;
 use IndieCinema\Nucleo\Http\ExcepcionHttp;
 use IndieCinema\Nucleo\Http\Peticion;
@@ -32,8 +33,10 @@ final class ReservasDeLaFuncion extends Controlador
      */
     private const ZONA = 'America/Argentina/Buenos_Aires';
 
-    public function __construct(private readonly ServicioDePanelDeReservas $servicio)
-    {
+    public function __construct(
+        private readonly ServicioDePanelDeReservas $servicio,
+        private readonly UsuariosDeCuentas $usuarios,
+    ) {
     }
 
     /** GET /organizador/funciones/{id}/reservas */
@@ -69,10 +72,11 @@ final class ReservasDeLaFuncion extends Controlador
 
         if ($enJson) {
             [$funcion, $reservas] = $this->servicio->deLaFuncion(self::usuario($peticion), $id);
+            $nombres = $this->usuarios->nombresDe([$reserva->usuarioId]);
             $resumen = ServicioDePanelDeReservas::resumen($funcion, $reservas);
 
             return $this->json([
-                'reserva' => self::fila($reserva),
+                'reserva' => self::fila($reserva, $nombres[$reserva->usuarioId] ?? null),
                 'resumen' => [...$resumen, 'recaudado' => TextoParaMostrar::monto($resumen['recaudado'])],
             ]);
         }
@@ -84,8 +88,9 @@ final class ReservasDeLaFuncion extends Controlador
     public function descargar(Peticion $peticion): Respuesta
     {
         [$funcion, $reservas] = $this->servicio->deLaFuncion(self::usuario($peticion), (string) $peticion->parametro('id'));
+        $nombres = $this->usuarios->nombresDe(array_map(static fn (Reserva $r): string => $r->usuarioId, $reservas));
 
-        return (new Respuesta(CsvDeReservas::armar($reservas, new DateTimeZone(self::ZONA))))
+        return (new Respuesta(CsvDeReservas::armar($reservas, new DateTimeZone(self::ZONA), $nombres)))
             ->conCabecera('Content-Type', 'text/csv; charset=utf-8')
             ->conCabecera('Content-Disposition', "attachment; filename=\"reservas-{$funcion->id}.csv\"");
     }
@@ -93,11 +98,12 @@ final class ReservasDeLaFuncion extends Controlador
     private function pantalla(Peticion $peticion, ?string $registrada = null, ?string $error = null, string $codigo = '', int $estado = 200): Respuesta
     {
         [$funcion, $reservas] = $this->servicio->deLaFuncion(self::usuario($peticion), (string) $peticion->parametro('id'));
+        $nombres = $this->usuarios->nombresDe(array_map(static fn (Reserva $r): string => $r->usuarioId, $reservas));
         $resumen = ServicioDePanelDeReservas::resumen($funcion, $reservas);
         $datos = [
             'funcion' => self::datosDeFuncion($funcion),
             'resumen' => [...$resumen, 'recaudado' => TextoParaMostrar::monto($resumen['recaudado'])],
-            'reservas' => array_map(self::fila(...), $reservas),
+            'reservas' => array_map(fn (Reserva $r): array => self::fila($r, $nombres[$r->usuarioId] ?? null), $reservas),
             // Sólo se registra la asistencia de una función que sigue en pie.
             'registra_asistencia' => $funcion->estado !== 'cancelada',
             'codigo' => $codigo,
@@ -130,13 +136,14 @@ final class ReservasDeLaFuncion extends Controlador
     }
 
     /**
-     * @return array{id: string, codigo: string, cantidad: int, total: string, estado: string, estado_etiqueta: string, creada: string, registrable: bool}
+     * @return array{id: string, codigo: string, espectador: ?string, cantidad: int, total: string, estado: string, estado_etiqueta: string, creada: string, registrable: bool}
      */
-    private static function fila(Reserva $reserva): array
+    private static function fila(Reserva $reserva, ?string $espectador = null): array
     {
         return [
             'id' => $reserva->id,
             'codigo' => $reserva->codigo,
+            'espectador' => $espectador,
             'cantidad' => $reserva->cantidad,
             'total' => TextoParaMostrar::monto((float) $reserva->total),
             'estado' => $reserva->estado->value,

@@ -27,6 +27,30 @@ limit_req_zone $ip_si_es_post zone=registro:10m rate=5r/m;
 # La solicitud de sala le manda un correo al equipo: pasan menos, para que no sirva para
 # llenarle el buzón.
 limit_req_zone $ip_si_es_post zone=solicitud:10m rate=2r/m;
+# La reserva de una función: nadie reserva diez veces por minuto, y un script que reserva sin parar
+# le pega a funciones y a programación en cada una.
+limit_req_zone $ip_si_es_post zone=reserva:10m rate=10r/m;
+
+# Contra el abuso de la búsqueda: muchos listados seguidos desde una IP, cada uno una consulta a la
+# base. Cuentan las lecturas, con o sin texto y filtros, porque la cartelera sin filtros también
+# consulta. Dos por segundo, con una ráfaga de 60 (sitio.inc): la búsqueda en vivo, el paginado y
+# los filtros piden la cartelera muchas veces, y las pruebas de punta a punta, que corren desde una
+# sola IP, llegaron a 7 en un segundo y a 89 en 42 segundos. Con la mitad (una por segundo y 30 de
+# ráfaga) dos de esas pruebas recibían 429; así usan 9 de los 60.
+map $request_method $ip_si_es_lectura {
+    GET $binary_remote_addr;
+    HEAD $binary_remote_addr;
+    default "";
+}
+limit_req_zone $ip_si_es_lectura zone=busqueda:10m rate=120r/m;
+
+# Con qué responde nginx cuando el error es suyo (sitio.inc): quien se pasa de un límite o un
+# subsistema que no contesta. JSON al JavaScript que lo pide, como el formulario de reserva, y una
+# página al navegador.
+map $http_accept $formato_de_error {
+    ~application/json json;
+    default html;
+}
 
 # Quién escucha: en desarrollo, HTTP en el 80; en el VPS, HTTPS en el 443 y el 80 sólo redirige
 # (docker-compose.https.yml pone NGINX_SERVIDOR en https). Las dos variantes quedan en conf.d,

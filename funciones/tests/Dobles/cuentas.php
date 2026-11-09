@@ -22,7 +22,39 @@ if (($cabeceras['X-Llamador'] ?? null) !== 'funciones' || ($cabeceras['Authoriza
     return;
 }
 
-$id = (string) preg_replace('#^/interno/usuarios/#', '', (string) parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH));
+$ruta = (string) parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+
+if ($ruta === '/interno/usuarios') {
+    $idsParam = (string) ($_GET['ids'] ?? '');
+    $ids = $idsParam !== '' ? array_values(array_unique(explode(',', $idsParam))) : [];
+    if (count($ids) > 100) {
+        http_response_code(400);
+        echo '{"error":"Se piden hasta 100 usuarios por vez."}';
+
+        return;
+    }
+    $usuarios = [];
+    foreach ($ids as $id) {
+        if ($id === BORRADO || preg_match('/^[0-9a-f-]{36}$/', $id) !== 1) {
+            continue;
+        }
+        $nombre = match (true) {
+            str_starts_with($id, 'ffffffff') => '=HYPERLINK("http://malo.test")',
+            str_starts_with($id, 'eeeeeeee') => '+12345',
+            str_starts_with($id, 'dddddddd') => '-100',
+            str_starts_with($id, 'cccccccc') => '@admin',
+            str_starts_with($id, 'bbbbbbbb') => 'Elías',
+            str_starts_with($id, '99999999') => "\tTabulado",
+            default => 'Eva',
+        };
+        $usuarios[$id] = ['id' => $id, 'nombre' => $nombre];
+    }
+    echo json_encode((object) $usuarios);
+
+    return;
+}
+
+$id = (string) preg_replace('#^/interno/usuarios/#', '', $ruta);
 if ($id === BORRADO || preg_match('/^[0-9a-f-]{36}$/', $id) !== 1) {
     http_response_code(404);
 

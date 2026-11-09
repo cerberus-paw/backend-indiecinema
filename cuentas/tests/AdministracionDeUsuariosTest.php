@@ -17,6 +17,7 @@ use IndieCinema\Nucleo\Seguridad\Rol;
 use IndieCinema\Nucleo\Uuid;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use IndieCinema\Nucleo\Pruebas\Dobles\PaginasParaValidar;
 
 /**
  * El listado de usuarios del administrador de punta a punta: la aplicación entera con las rutas
@@ -71,7 +72,7 @@ final class AdministracionDeUsuariosTest extends TestCase
         $cabeceras = $rol === null ? [] : ['X-Nginx-Secreto' => self::SECRETO, 'X-Usuario-Id' => self::ADMINISTRADOR, 'X-Rol' => $rol];
         $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion($usuarios), new Log('cuentas', $this->salidaDelLog));
 
-        return $aplicacion->atender(new Peticion($metodo, (string) parse_url($url, PHP_URL_PATH), $consulta, $cuerpo, $cabeceras, ['csrf' => self::CSRF]));
+        return PaginasParaValidar::anotar($metodo, $url, $aplicacion->atender(new Peticion($metodo, (string) parse_url($url, PHP_URL_PATH), $consulta, $cuerpo, $cabeceras, ['csrf' => self::CSRF])));
     }
 
     /**
@@ -514,7 +515,7 @@ final class AdministracionDeUsuariosTest extends TestCase
         // Con una búsqueda, los números siguen siendo de todas las cuentas.
         $cuerpo = $this->pedir(self::URL . '?q=ana')->cuerpo();
 
-        preg_match_all('#<dd class="panel-admin-dato-valor">([^<]*)</dd>\s*<dd class="panel-admin-dato-nota">([^<]*)</dd>#', $cuerpo, $datos);
+        preg_match_all('#<dd class="panel-dato-valor">([^<]*)</dd>\s*<dd class="panel-dato-nota">([^<]*)</dd>#', $cuerpo, $datos);
         self::assertSame(['7', '2'], $datos[1], $cuerpo);
         self::assertSame(['+6 este mes', 'con la cuenta activa'], $datos[2]);
     }

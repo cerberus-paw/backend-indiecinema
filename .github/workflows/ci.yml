@@ -101,7 +101,22 @@ jobs:
         run: composer analisis
       - name: Correr las pruebas
         working-directory: backend-indiecinema/${{ matrix.paquete }}
+        # Las pruebas guardan ahí la página que dibujan, para el paso que sigue (PaginasParaValidar):
+        # la portada, la cartelera, la ficha, la reserva, ingresar y registro, y desde F-01.8 todas
+        # las que piden los helpers del panel del organizador, Mis reservas y la administración.
+        env:
+          PAGINAS_PARA_VALIDAR: ${{ runner.temp }}/paginas
         run: composer pruebas
+      # El validador del W3C (E4-10.7) sobre esas páginas: un error de HTML no pasa; los avisos, sí.
+      # Fijado por digest, como gitleaks, para que una versión nueva no rompa el CI sin aviso. El
+      # núcleo no dibuja páginas; en los otros tres, que no haya ninguna también es un error.
+      - name: Validar el HTML (W3C)
+        if: matrix.paquete != 'nucleo'
+        run: |
+          ls "$RUNNER_TEMP"/paginas/*.html
+          docker run --rm --volume "$RUNNER_TEMP/paginas:/paginas:ro" \
+            ghcr.io/validator/validator@sha256:0af71abb9e40083cc0e8b3fcbe51a55a45889c662a3f507fbf1f9f013a109842 \
+            java -jar /vnu.jar --errors-only --format gnu /paginas
 
   dependencias:
     name: Dependencias (composer audit)
@@ -155,4 +170,4 @@ jobs:
         run: |
           docker compose up -d --no-deps nginx
           for intento in $(seq 30); do curl -s -o /dev/null http://localhost:8080/_sesion && break; sleep 1; done
-          nginx/comprobar-desde-afuera.sh http://localhost:8080
+          SIN_SUBSISTEMAS=1 nginx/comprobar-desde-afuera.sh http://localhost:8080

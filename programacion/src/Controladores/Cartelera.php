@@ -18,7 +18,9 @@ use IndieCinema\Programacion\Modelo\Funcion;
 use IndieCinema\Programacion\Modelo\FuncionEnCartelera;
 use IndieCinema\Programacion\Modelo\Genero;
 use IndieCinema\Programacion\Modelo\ObraEnDetalle;
+use IndieCinema\Programacion\Modelo\OrdenDeCartelera;
 use IndieCinema\Programacion\Modelo\ReglaIncumplida;
+use IndieCinema\Programacion\Servicios\AvisosDeLaFicha;
 use IndieCinema\Programacion\Servicios\OcupacionDeFunciones;
 use IndieCinema\Programacion\Servicios\ServicioDeCartelera;
 
@@ -32,9 +34,13 @@ use IndieCinema\Programacion\Servicios\ServicioDeCartelera;
  */
 final class Cartelera extends Controlador
 {
+    /** Cuántas páginas se numeran a cada lado de la actual antes de los puntos suspensivos. */
+    private const PAGINAS_ALREDEDOR = 2;
+
     public function __construct(
         private readonly ServicioDeCartelera $servicio,
         private readonly OcupacionDeFunciones $ocupacion,
+        private readonly AvisosDeLaFicha $avisos,
     ) {
     }
 
@@ -61,6 +67,7 @@ final class Cartelera extends Controlador
             'total_funciones' => $pagina->total,
             'anterior' => $pagina->numero > 1 ? $parametros->urlDePagina($pagina->numero - 1) : null,
             'siguiente' => $pagina->numero < $total ? $parametros->urlDePagina($pagina->numero + 1) : null,
+            'paginas' => self::paginas($pagina->numero, $total, $parametros),
         ];
 
         $tarjetas = $this->tarjetas($pagina->funciones);
@@ -77,18 +84,31 @@ final class Cartelera extends Controlador
                 'avisos' => $parametros->avisos,
                 'paginado' => $paginado,
                 'csv' => $parametros->urlDeCsv(),
+                // Para las últimas búsquedas del navegador: la URL y cómo se lee, o null.
+                'busqueda' => $parametros->busqueda(),
+                // Para el resumen de arriba: cómo están ordenadas (E4-10.9).
+                'orden' => $parametros->ordenAplicado(),
+                // Las etiquetas de los filtros activos y «Quitar todos» (E4-10.9).
+                'filtros_activos' => $parametros->filtrosActivos(),
+                'quitar_filtros' => $parametros->urlSinFiltros(),
             ])->conCabecera('Vary', 'Accept');
         }
 
         return $this->vista('cartelera.html.twig', [
             'funciones' => $tarjetas,
             'filtros' => $parametros->valores,
-            'filtrada' => $parametros->valores !== [],
+            'filtrada' => $parametros->filtrada(),
             'avisos' => $parametros->avisos,
             'localidades' => $this->servicio->localidades(),
             'generos' => array_map(static fn (Genero $genero): array => ['id' => $genero->id, 'nombre' => $genero->nombre], $this->servicio->generos()),
+            'ordenes' => OrdenDeCartelera::opciones(),
+            'busqueda' => $parametros->busqueda(),
+            'max_ultimas_busquedas' => ServicioDeCartelera::ULTIMAS_BUSQUEDAS,
             'paginado' => $paginado,
             'csv' => $parametros->urlDeCsv(),
+            'orden' => $parametros->ordenAplicado(),
+            'filtros_activos' => $parametros->filtrosActivos(),
+            'quitar_filtros' => $parametros->urlSinFiltros(),
         ])->conCabecera('Vary', 'Accept');
     }
 
@@ -114,11 +134,11 @@ final class Cartelera extends Controlador
     {
         $id = (string) $peticion->parametro('id');
         $detalle = $this->servicio->detalle($id);
+        $usuario = $peticion->usuario();
         $cupo = new CupoDeFuncion($detalle->id, $detalle->estado, $detalle->fechaHora, $detalle->cupo);
-        $lugares = $this->lugaresDe($cupo);
+        $lugares = $this->lugaresDe($cupo, $usuario?->id);
         $reservable = self::seReservaConLugares($cupo, $lugares['agotada']);
 
-        $usuario = $peticion->usuario();
         $esPropia = $usuario !== null
             && $usuario->alcanza(Rol::Organizador)
             && $detalle->sala->organizadorId !== null
@@ -228,10 +248,12 @@ final class Cartelera extends Controlador
             'votado' => $peticion->consulta('votado') === '1',
             'franja_votada' => $peticion->consulta('votado') === '1',
             'franja_quitada' => $peticion->consulta('quitado') === '1',
-            'error_voto' => $peticion->consulta('error_voto'),
-            'error_franja' => $peticion->consulta('error_voto'),
+            // Los avisos de error, sólo si la firma es la de ese texto para esta función: si no,
+            // cualquiera armaría un link con el mensaje que quisiera (F-01.4).
+            'error_voto' => $this->avisos->leer($peticion, $detalle->id, AvisosDeLaFicha::VOTO),
+            'error_franja' => $this->avisos->leer($peticion, $detalle->id, AvisosDeLaFicha::VOTO),
             // Lo que no salió al confirmar o cerrar el acuerdo: sólo se le muestra al organizador.
-            'error_acuerdo' => $esPropia ? $peticion->consulta('error_acuerdo') : null,
+            'error_acuerdo' => $esPropia ? $this->avisos->leer($peticion, $detalle->id, AvisosDeLaFicha::ACUERDO) : null,
             'votacion_cerrada' => $esPropia && $peticion->consulta('votacion_cerrada') === '1',
             // El aviso de que se acaba de guardar: sólo para el organizador que la editó. La ficha
             // es pública, y si no, lo vería cualquiera que abra el enlace con el parámetro puesto.
@@ -252,30 +274,51 @@ final class Cartelera extends Controlador
      */
     public function lugares(Peticion $peticion): Respuesta
     {
+        $usuario = $peticion->usuario();
         $cupo = $this->servicio->cupo((string) $peticion->parametro('id'));
-        $lugares = $this->lugaresDe($cupo);
+        $lugares = $this->lugaresDe($cupo, $usuario?->id);
 
         return $this->json([
-            ...$lugares,
+            'lugares_libres' => $lugares['lugares_libres'],
+            'agotada' => $lugares['agotada'],
             'cupo' => $cupo->cupo,
             'reservable' => self::seReservaConLugares($cupo, $lugares['agotada']),
+            'maximo_por_persona' => $lugares['maximo_por_persona'],
+            'lugares_restantes_usuario' => $lugares['lugares_restantes_usuario'],
+            'maximo_reserva' => $lugares['maximo_reserva'],
         ]);
     }
 
     /**
-     * Los lugares libres de una función y si está agotada. Sólo de una programada por darse se
-     * pregunta: en otro estado no hay reservas que contar, y una que ya pasó no está «agotada»
-     * aunque se hayan tomado todos los lugares. Sin el dato de funciones, null.
+     * Los lugares libres de una función, si está agotada y lo que puede reservar el espectador.
+     * Sólo de una programada por darse se pregunta: en otro estado no hay reservas que contar, y
+     * una que ya pasó no está «agotada» aunque se hayan tomado todos los lugares. El tope por
+     * persona lo manda funciones con la ocupación, así el número está en un solo lugar (IC-463).
+     * Sin el dato de funciones, todo null: la ficha deja el campo hasta el cupo y la reserva la
+     * controla funciones igual.
      *
-     * @return array{lugares_libres: ?int, agotada: bool}
+     * @return array{lugares_libres: ?int, agotada: bool, maximo_por_persona: ?int, lugares_restantes_usuario: ?int, maximo_reserva: ?int}
      */
-    private function lugaresDe(CupoDeFuncion $funcion): array
+    private function lugaresDe(CupoDeFuncion $funcion, ?string $usuarioId = null): array
     {
-        $libres = TarjetaDeFuncion::muestraLugares($funcion->estado, $funcion->fechaHora)
-            ? TarjetaDeFuncion::lugaresLibres($funcion->estado, $funcion->fechaHora, $funcion->cupo, $this->ocupacion->deUna($funcion->id))
+        $ocupacion = TarjetaDeFuncion::muestraLugares($funcion->estado, $funcion->fechaHora)
+            ? $this->ocupacion->deUnaParaUsuario($funcion->id, $usuarioId)
             : null;
+        $libres = TarjetaDeFuncion::lugaresLibres($funcion->estado, $funcion->fechaHora, $funcion->cupo, $ocupacion['ocupados'] ?? null);
+        if ($ocupacion === null || $libres === null) {
+            return ['lugares_libres' => null, 'agotada' => false, 'maximo_por_persona' => null, 'lugares_restantes_usuario' => null, 'maximo_reserva' => null];
+        }
 
-        return ['lugares_libres' => $libres, 'agotada' => $libres === 0];
+        $maximoPorPersona = min($ocupacion['maximo_por_persona'], $funcion->cupo);
+        $restantesUsuario = max(0, $maximoPorPersona - $ocupacion['del_usuario']);
+
+        return [
+            'lugares_libres' => $libres,
+            'agotada' => $libres === 0,
+            'maximo_por_persona' => $maximoPorPersona,
+            'lugares_restantes_usuario' => $restantesUsuario,
+            'maximo_reserva' => min($libres, $restantesUsuario),
+        ];
     }
 
     /**
@@ -319,7 +362,7 @@ final class Cartelera extends Controlador
                 return $this->json(['error' => $regla->getMessage()], 422);
             }
 
-            return $this->redirigir("/cartelera/{$id}?error_voto=" . rawurlencode($regla->getMessage()));
+            return $this->redirigir($this->avisos->direccion($id, AvisosDeLaFicha::VOTO, $regla->getMessage()));
         }
 
         if ($peticion->cabecera('Accept') === 'application/json' || $peticion->cabecera('Content-Type') === 'application/json') {
@@ -355,13 +398,50 @@ final class Cartelera extends Controlador
             'localidad' => $peticion->consulta('localidad'),
             'fecha' => $peticion->consulta('fecha'),
             'genero' => $peticion->consulta('genero'),
+            'precio_min' => $peticion->consulta('precio_min'),
+            'precio_max' => $peticion->consulta('precio_max'),
+            'orden' => $peticion->consulta('orden'),
             'pagina' => $peticion->consulta('pagina'),
         ], $this->servicio->generoPorNombre(...));
     }
 
     /**
+     * Los números de página que muestra la barra: la primera, la última y una ventana de ancho fijo
+     * alrededor de la actual, con null donde quedan páginas salteadas. Con el mismo ancho en los
+     * bordes, la barra no se achica en las puntas.
+     *
+     * @return list<?array{numero: int, url: string, actual: bool}>
+     */
+    private static function paginas(int $actual, int $total, ParametrosDeCartelera $parametros): array
+    {
+        $ancho = 2 * self::PAGINAS_ALREDEDOR + 1;
+        $desde = max(1, min($actual - self::PAGINAS_ALREDEDOR, $total - $ancho + 1));
+        $hasta = min($total, $desde + $ancho - 1);
+        $numeros = array_values(array_unique([1, ...range($desde, $hasta), $total]));
+        sort($numeros);
+
+        $paginas = [];
+        $anterior = 0;
+        foreach ($numeros as $numero) {
+            if ($anterior > 0 && $numero > $anterior + 1) {
+                $paginas[] = null;
+            }
+            $paginas[] = [
+                'numero' => $numero,
+                'url' => $parametros->urlDePagina($numero),
+                'actual' => $numero === $actual,
+            ];
+            $anterior = $numero;
+        }
+
+        return $paginas;
+    }
+
+    /**
      * Lo que muestra programacion/ficha_funcion del paquete front, con la fecha y el precio ya
-     * escritos como en la tarjeta.
+     * escritos como en la tarjeta. La fecha llega entera («Sáb 19 sep · 20:30») y también en los
+     * recuadros del wireframe «funcion-programada» (E4-10.10): el día solo, el horario de inicio a
+     * fin y la duración total, la suma de las de sus obras elegidas.
      *
      * @return array{
      *     id: string,
@@ -372,12 +452,15 @@ final class Cartelera extends Controlador
      *     precio: string,
      *     cupo: int,
      *     fecha: ?string,
+     *     dia: ?string,
+     *     horario: ?string,
+     *     duracion_total: ?int,
      *     obras_elegidas: bool,
      *     editable: bool,
      *     cancelable: bool,
      *     cerrable: bool,
      *     sala: array{url: string, nombre: string, descripcion: string, direccion: string, localidad: string, capacidad: int, imagen: ?string},
-     *     obras: list<array{id: string, titulo: string, sinopsis: string, anio: int, director: string, duracion: int, generos: list<string>, afiche: ?string}>
+     *     obras: list<array{id: string, titulo: string, sinopsis: string, anio: int, director: string, duracion: int, generos: list<string>, afiche: ?string, url: string}>
      * }
      */
     private static function datosDeDetalle(
@@ -386,6 +469,14 @@ final class Cartelera extends Controlador
         bool $cancelable = false,
         bool $cerrable = false,
     ): array {
+        // Una función tiene siempre alguna obra (DetalleDeFuncion), pero mientras los títulos
+        // están en votación ésas son las candidatas y no lo que se va a proyectar: sumarlas daría
+        // la duración de todo lo que compite. Hasta que la votación cierre no hay duración, y sin
+        // duración tampoco hay horario de fin.
+        $duracion = $detalle->obrasElegidas
+            ? array_sum(array_map(static fn (ObraEnDetalle $obra): int => $obra->duracionMinutos, $detalle->obras))
+            : null;
+
         return [
             'id' => $detalle->id,
             'titulo' => implode(' + ', array_map(static fn (ObraEnDetalle $obra): string => $obra->titulo, $detalle->obras)),
@@ -395,6 +486,12 @@ final class Cartelera extends Controlador
             'precio' => TarjetaDeFuncion::precio($detalle->precioBase),
             'cupo' => $detalle->cupo,
             'fecha' => $detalle->fechaHora !== null ? TarjetaDeFuncion::fecha($detalle->fechaHora) : null,
+            'dia' => $detalle->fechaHora !== null ? TarjetaDeFuncion::dia($detalle->fechaHora) : null,
+            // «20:30 a 23:30»: termina cuando termina la última de sus obras.
+            'horario' => $detalle->fechaHora !== null && $duracion !== null
+                ? $detalle->fechaHora->format('H:i') . ' a ' . $detalle->fechaHora->modify("+{$duracion} minutes")->format('H:i')
+                : null,
+            'duracion_total' => $duracion,
             'obras_elegidas' => $detalle->obrasElegidas,
             'editable' => $editable,
             'cancelable' => $cancelable,
@@ -416,7 +513,9 @@ final class Cartelera extends Controlador
                 'director' => $obra->director,
                 'duracion' => $obra->duracionMinutos,
                 'generos' => $obra->generos,
-                'afiche' => $obra->afiche,
+                // La URL que lo sirve, como en las tarjetas: el nombre del archivo no le sirve al navegador.
+                'afiche' => $obra->afiche !== null ? "/obras/{$obra->id}/afiche" : null,
+                'url' => "/obras/{$obra->id}",
             ], $detalle->obras),
         ];
     }

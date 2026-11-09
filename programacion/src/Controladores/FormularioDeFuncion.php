@@ -21,6 +21,29 @@ final class FormularioDeFuncion
     /** Hasta ocho cifras y dos decimales, lo que entra en funcion.precio_base (Funcion::PRECIO_MAXIMO). */
     private const PRECIO = '/^[0-9]{1,8}([.,][0-9]{1,2})?$/D';
 
+    /**
+     * La misma regla del precio para el atributo pattern, que ancla solo y no lleva barras. El campo
+     * del precio es de texto y no numérico (E4-09.4), así que el navegador sí lo aplica.
+     */
+    private const PRECIO_PARA_EL_NAVEGADOR = '[0-9]{1,8}([.,][0-9]{1,2})?';
+
+    /**
+     * Los mensajes que el navegador también puede dar, acá para que reglas() y validar() digan lo
+     * mismo. Los que dependen de la sala elegida —cuántas películas entran, la capacidad, que la
+     * fecha sea futura— no están: ésos sólo los sabe el servidor y llegan al mandar.
+     */
+    private const FALTA_SALA = 'Falta seleccionar la sala.';
+    private const FALTA_FECHA = 'Falta la fecha de la función.';
+    private const FALTA_HORA = 'Falta el horario de la función.';
+    private const FALTA_PRECIO = 'Falta el precio de la entrada.';
+    private const PRECIO_NEGATIVO = 'El precio no puede ser negativo.';
+    private const PRECIO_INVALIDO = 'El precio tiene que ser un número de hasta 99.999.999,99, sin puntos de miles.';
+    private const CUPO_INVALIDO = 'El cupo tiene que ser de al menos un lugar.';
+    private const MODO_DESCONOCIDO = 'Elegí si la función se programa con fecha o se abre a votación de títulos.';
+    /** Con una sola candidata no hay nada que votar (F-01.6). */
+    private const CANDIDATAS_MINIMAS = 2;
+    private const POCAS_CANDIDATAS = 'Para abrir una votación elegí al menos dos obras candidatas.';
+
     /** @var array<string, mixed> lo que mandó, para volver a mostrarlo si hay errores */
     public private(set) array $valores = [];
 
@@ -78,9 +101,14 @@ final class FormularioDeFuncion
         array $obrasDisponibles,
         DateTimeImmutable $ahora,
     ): void {
-        // 0. Modo de alta
+        // 0. Modo de alta. Sin modo es programada: la edición no lo manda, porque sólo se edita una
+        // programada. Uno que no es ninguno de los dos es un error y no una programada callada: si
+        // no, un pedido armado a mano publicaba sin avisar algo que no pidió (F-01.6).
         $modo = self::texto($campos['modo'] ?? null);
-        if (!in_array($modo, [self::MODO_PROGRAMADA, self::MODO_EN_VOTACION_TITULOS], true)) {
+        if ($modo === '') {
+            $modo = self::MODO_PROGRAMADA;
+        } elseif (!in_array($modo, [self::MODO_PROGRAMADA, self::MODO_EN_VOTACION_TITULOS], true)) {
+            $this->errores['modo'] = self::MODO_DESCONOCIDO;
             $modo = self::MODO_PROGRAMADA;
         }
         $this->modo = $modo;
@@ -91,7 +119,7 @@ final class FormularioDeFuncion
         $this->valores['sala_id'] = $salaIdRaw;
         $salaElegida = null;
         if ($salaIdRaw === '') {
-            $this->errores['sala_id'] = 'Falta seleccionar la sala.';
+            $this->errores['sala_id'] = self::FALTA_SALA;
         } else {
             foreach ($salasHabilitadas as $s) {
                 if ($s->id === $salaIdRaw) {
@@ -125,6 +153,8 @@ final class FormularioDeFuncion
             $duracion = array_sum(array_intersect_key($duraciones, array_flip($obrasIds)));
             if (array_diff($obrasIds, $idsCatalogo) !== []) {
                 $this->errores['obras'] = 'Una de las obras seleccionadas no existe en el catálogo.';
+            } elseif (!$this->esProgramada() && count($obrasIds) < self::CANDIDATAS_MINIMAS) {
+                $this->errores['obras'] = self::POCAS_CANDIDATAS;
             } elseif ($this->esProgramada() && $salaElegida !== null && count($obrasIds) > $salaElegida->datos->peliculasPorFuncion) {
                 // Los parámetros que la función hereda de la sala, como dice el panel del costado.
                 $this->errores['obras'] = "En esta sala entran hasta {$salaElegida->datos->peliculasPorFuncion} películas por función.";
@@ -143,10 +173,10 @@ final class FormularioDeFuncion
 
         if ($this->esProgramada()) {
             if ($fecha === '') {
-                $this->errores['fecha'] = 'Falta la fecha de la función.';
+                $this->errores['fecha'] = self::FALTA_FECHA;
             }
             if ($hora === '') {
-                $this->errores['hora'] = 'Falta el horario de la función.';
+                $this->errores['hora'] = self::FALTA_HORA;
             }
 
             if ($fecha !== '' && $hora !== '') {
@@ -167,13 +197,13 @@ final class FormularioDeFuncion
         $precioRaw = self::texto($campos['precio'] ?? null);
         $this->valores['precio'] = $precioRaw;
         if ($precioRaw === '') {
-            $this->errores['precio'] = 'Falta el precio de la entrada.';
+            $this->errores['precio'] = self::FALTA_PRECIO;
         } elseif (preg_match('/^-/', $precioRaw) === 1 && is_numeric($precioRaw)) {
-            $this->errores['precio'] = 'El precio no puede ser negativo.';
+            $this->errores['precio'] = self::PRECIO_NEGATIVO;
         } elseif (preg_match(self::PRECIO, $precioRaw) !== 1) {
             // Sólo cifras y hasta dos decimales: «1e12» también es un número para PHP, y no entra
             // en la columna.
-            $this->errores['precio'] = 'El precio tiene que ser un número de hasta 99.999.999,99, sin puntos de miles.';
+            $this->errores['precio'] = self::PRECIO_INVALIDO;
         } else {
             $this->precio = (float) str_replace(',', '.', $precioRaw);
         }
@@ -183,7 +213,7 @@ final class FormularioDeFuncion
         $this->valores['cupo'] = $cupoRaw;
         $cupoInt = filter_var($cupoRaw, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
         if ($cupoRaw === '' || $cupoInt === false) {
-            $this->errores['cupo'] = 'El cupo tiene que ser de al menos un lugar.';
+            $this->errores['cupo'] = self::CUPO_INVALIDO;
         } else {
             $cupo = (int) $cupoInt;
             if ($salaElegida !== null && $cupo > $salaElegida->datos->capacidad) {
@@ -192,6 +222,53 @@ final class FormularioDeFuncion
                 $this->cupo = $cupo;
             }
         }
+    }
+
+    /**
+     * Las reglas que el navegador puede revisar solo, con los mensajes que contesta este mismo
+     * formulario (E4-09.1): campo => las claves que espera el parcial de campo del paquete front.
+     * Así el texto que ve el organizador mientras carga es el mismo que si mandara, y es el mismo
+     * en cualquier navegador.
+     *
+     * Lo que depende de la sala elegida —cuántas películas entran, la duración, la capacidad— y
+     * que la fecha sea futura no están acá: ésos sólo los sabe el servidor, y llegan al mandar.
+     * El servidor igual valida todo: el navegador se puede saltear.
+     *
+     * @return array<string, array<string, mixed>>
+     */
+    public static function reglas(): array
+    {
+        return [
+            'sala_id' => ['requerido' => true, 'mensajes' => ['requerido' => self::FALTA_SALA]],
+            'fecha' => ['requerido' => true, 'mensajes' => ['requerido' => self::FALTA_FECHA]],
+            'hora' => ['requerido' => true, 'mensajes' => ['requerido' => self::FALTA_HORA]],
+            // El precio va en un campo de texto con inputmode="decimal" (E4-09.4): en uno numérico
+            // Chromium descarta la coma de 1500,50 sin avisar y además no aplica el pattern. Por eso
+            // no van min ni step, que sólo valen en un campo numérico, ni sus mensajes: acá el
+            // navegador puede revisar que esté y que cumpla el patrón, nada más. El signo menos lo
+            // rechaza el patrón, así que en línea se lee el mensaje del formato; al mandar, validar()
+            // sigue contestando que el precio no puede ser negativo.
+            'precio' => [
+                'requerido' => true,
+                'patron' => self::PRECIO_PARA_EL_NAVEGADOR,
+                'mensajes' => [
+                    'requerido' => self::FALTA_PRECIO,
+                    'patron' => self::PRECIO_INVALIDO,
+                ],
+            ],
+            // Las casillas de las obras no las revisa la validación en línea: el mínimo de candidatas
+            // lo controla ModoFuncion, que es el que sabe si el formulario abre una votación.
+            'obras' => [
+                'candidatas_minimas' => self::CANDIDATAS_MINIMAS,
+                'mensajes' => ['candidatas' => self::POCAS_CANDIDATAS],
+            ],
+            'cupo' => [
+                'requerido' => true,
+                'valor_minimo' => 1,
+                // El servidor contesta lo mismo para el vacío, lo que no es entero y el cero.
+                'mensajes' => ['requerido' => self::CUPO_INVALIDO, 'valor_minimo' => self::CUPO_INVALIDO, 'tipo' => self::CUPO_INVALIDO],
+            ],
+        ];
     }
 
     private static function texto(mixed $valor): string

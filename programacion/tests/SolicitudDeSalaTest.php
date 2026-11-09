@@ -11,12 +11,14 @@ use IndieCinema\Nucleo\Configuracion;
 use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Log;
+use IndieCinema\Nucleo\Pruebas\Dobles\Formularios;
 use IndieCinema\Nucleo\Pruebas\Dobles\ServidorSmtpDePrueba;
 use IndieCinema\Programacion\Controladores\FormularioDeSolicitud;
 use IndieCinema\Programacion\Pruebas\Controladores\FormularioDeSalaTest;
 use IndieCinema\Programacion\Pruebas\Dobles\Imagenes;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use IndieCinema\Nucleo\Pruebas\Dobles\PaginasParaValidar;
 
 /**
  * La solicitud de sala de punta a punta: la aplicación entera con las rutas de programación, las
@@ -104,7 +106,7 @@ final class SolicitudDeSalaTest extends TestCase
         ];
         $aplicacion = new Aplicacion(dirname(__DIR__), $configuracion ?? $this->configuracion(), new Log('programacion', $this->salidaDelLog));
 
-        return $aplicacion->atender(new Peticion($metodo, (string) parse_url($url, PHP_URL_PATH), $consulta, $cuerpo, $cabeceras, ['csrf' => self::CSRF], $archivos));
+        return PaginasParaValidar::anotar($metodo, $url, $aplicacion->atender(new Peticion($metodo, (string) parse_url($url, PHP_URL_PATH), $consulta, $cuerpo, $cabeceras, ['csrf' => self::CSRF], $archivos)));
     }
 
     /**
@@ -157,7 +159,9 @@ final class SolicitudDeSalaTest extends TestCase
         $respuesta = $this->pedir();
 
         self::assertSame(200, $respuesta->estado());
-        self::assertStringContainsString('<form action="/solicitar-sala" method="post" enctype="multipart/form-data">', $respuesta->cuerpo());
+        // Sin el > del final: al formulario se le pueden agregar atributos (el enganche de la
+        // validación en línea, por ejemplo) y lo que importa es que mande multipart a esta ruta.
+        self::assertStringContainsString('<form action="/solicitar-sala" method="post" enctype="multipart/form-data"', $respuesta->cuerpo());
         self::assertStringContainsString('name="_csrf" value="' . self::CSRF . '"', $respuesta->cuerpo());
         self::assertStringNotContainsString('No se pudo enviar la solicitud', $respuesta->cuerpo());
     }
@@ -208,7 +212,8 @@ final class SolicitudDeSalaTest extends TestCase
         $respuesta = $this->enviar($cambios);
 
         self::assertSame(422, $respuesta->estado());
-        self::assertStringContainsString('Revisá los campos marcados.', $respuesta->cuerpo());
+        // Arriba, el resumen con un link al campo y el mismo mensaje (E4-10.5).
+        self::assertSame(["#{$campo}" => $mensaje], Formularios::resumen($respuesta->cuerpo())['enlaces'] ?? null);
         self::assertMatchesRegularExpression('#id="error-' . $campo . '"[^>]*>.*' . preg_quote($mensaje, '#') . '#s', $respuesta->cuerpo());
         self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM sala'));
         self::assertSame([], $this->imagenesGuardadas());

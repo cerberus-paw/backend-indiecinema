@@ -18,6 +18,7 @@ use IndieCinema\Programacion\Repositorios\RepositorioDeSalas;
 use IndieCinema\Programacion\Repositorios\RepositorioDeSolicitudes;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use IndieCinema\Nucleo\Pruebas\Dobles\PaginasParaValidar;
 
 /**
  * La bandeja de solicitudes de sala de punta a punta: la aplicación entera con las rutas de
@@ -28,6 +29,7 @@ use PHPUnit\Framework\TestCase;
 final class AdministracionDeSolicitudesTest extends TestCase
 {
     use ConBaseDePruebas;
+    use ConSaltoAlContenido;
 
     private const SECRETO = 'secreto-de-nginx';
     private const CSRF = 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc';
@@ -121,7 +123,7 @@ final class AdministracionDeSolicitudesTest extends TestCase
         parse_str((string) parse_url($url, PHP_URL_QUERY), $consulta);
         $aplicacion = new Aplicacion(dirname(__DIR__), $configuracion ?? $this->configuracion(), new Log('programacion', $this->salidaDelLog));
 
-        return $aplicacion->atender(new Peticion($metodo, (string) parse_url($url, PHP_URL_PATH), $consulta, $cuerpo, $cabeceras, ['csrf' => self::CSRF]));
+        return PaginasParaValidar::anotar($metodo, $url, $aplicacion->atender(new Peticion($metodo, (string) parse_url($url, PHP_URL_PATH), $consulta, $cuerpo, $cabeceras, ['csrf' => self::CSRF])));
     }
 
     /**
@@ -194,6 +196,16 @@ final class AdministracionDeSolicitudesTest extends TestCase
         self::assertStringContainsString("action=\"/administracion/solicitudes/{$vieja}/resolver\"", $respuesta->cuerpo());
         // La pestaña dice cuántas esperan.
         self::assertMatchesRegularExpression('#Solicitudes de sala <span class="bandeja-cuenta">2</span>#', $respuesta->cuerpo());
+    }
+
+    /**
+     * El panel saca el encabezado del sitio, pero no el enlace: pasa de largo la barra lateral.
+     */
+    public function testElPanelTambienEmpiezaConSaltarAlContenido(): void
+    {
+        $this->solicitar(self::ESPECTADORA, 'El Galpón');
+
+        self::assertSaltaAlContenido($this->pedir('GET', '/administracion/solicitudes')->cuerpo());
     }
 
     public function testLaElegidaMuestraLaSalaYLoQueCuentaCuentasDeQuienLaMando(): void

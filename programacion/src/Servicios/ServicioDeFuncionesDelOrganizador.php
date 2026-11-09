@@ -35,6 +35,7 @@ final class ServicioDeFuncionesDelOrganizador
         private readonly RepositorioDeObras $obras,
         private readonly RepositorioDeVotos $votos,
         private readonly ?AcuerdosDeFunciones $acuerdos = null,
+        private readonly ?OcupacionDeFunciones $ocupacion = null,
     ) {
     }
 
@@ -201,6 +202,7 @@ final class ServicioDeFuncionesDelOrganizador
         DateTimeImmutable $fechaHora,
     ): Funcion {
         $funcion = $this->paraEditar($organizador, $funcionId);
+        $this->respetarLoReservado($funcion, $nuevaSalaId, $obrasIds, $cupo, $fechaHora);
 
         $sala = $this->salas->buscar($nuevaSalaId);
         if ($sala === null || !$sala->esDe($organizador->id)) {
@@ -218,6 +220,40 @@ final class ServicioDeFuncionesDelOrganizador
         $this->funciones->actualizar($funcion);
 
         return $funcion;
+    }
+
+    /**
+     * Lo que ya reservaron limita lo que se puede cambiar (F-01.1): el cupo no baja de los lugares
+     * reservados, y con alguna reserva la función no cambia de sala, de películas ni de fecha.
+     * Quien reservó lo hizo para esa sala, esas películas y ese día; si hace falta cambiarlas, se
+     * cancela la función, que les avisa a todos. Antes nada lo controlaba: la función quedaba
+     * sobrevendida, o con otra película, sin que nadie se enterara.
+     *
+     * Las reservas son de funciones, que se lo pregunta por la API interna. Si no responde y el
+     * cambio puede pisar alguna reserva, no se guarda: mejor pedir que se intente de nuevo que
+     * arriesgarse. Bajar el precio, subir el cupo o no tocar nada de eso no lo necesita.
+     *
+     * @param list<string> $obrasIds
+     *
+     * @throws ReglaIncumplida
+     */
+    private function respetarLoReservado(Funcion $funcion, string $salaId, array $obrasIds, int $cupo, DateTimeImmutable $fechaHora): void
+    {
+        $cambiaLoReservado = $salaId !== $funcion->salaId
+            || array_diff($obrasIds, $funcion->obrasIds) !== [] || array_diff($funcion->obrasIds, $obrasIds) !== []
+            || $fechaHora->getTimestamp() !== $funcion->fechaHora?->getTimestamp();
+        if ($this->ocupacion === null || (!$cambiaLoReservado && $cupo >= $funcion->cupo)) {
+            return;
+        }
+
+        $ocupados = $this->ocupacion->deUna($funcion->id)
+            ?? throw new ReglaIncumplida('No pudimos comprobar las reservas de la función: probá de nuevo en unos minutos.');
+        if ($cupo < $ocupados) {
+            throw new ReglaIncumplida("Ya hay {$ocupados} " . ($ocupados === 1 ? 'lugar reservado' : 'lugares reservados') . ': el cupo no puede ser menor.');
+        }
+        if ($ocupados > 0 && $cambiaLoReservado) {
+            throw new ReglaIncumplida('La función ya tiene reservas: no se le puede cambiar la sala, las películas ni la fecha. Si hace falta, cancelala, así les llega el aviso a quienes reservaron.');
+        }
     }
 
     /**
@@ -241,17 +277,35 @@ final class ServicioDeFuncionesDelOrganizador
      * Cancela una función propia del organizador: es una baja lógica, la función queda en su panel
      * pero sale de la cartelera (E3-11.4).
      *
+     * @return Funcion la función como estaba antes de cancelarla, para deshacerCancelacion()
+     *
      * @throws ExcepcionHttp 404 si no es del organizador o no se puede cancelar
      */
-    public function cancelar(Usuario $organizador, string $id): void
+    public function cancelar(Usuario $organizador, string $id): Funcion
     {
         $funcion = $this->propia($organizador, $id);
         if (!Funcion::seCancela($funcion->estado, $funcion->fechaHora)) {
             throw ExcepcionHttp::noEncontrada();
         }
 
+        $anterior = clone $funcion;
         $funcion->cancelar();
         $this->funciones->guardar($funcion);
+
+        return $anterior;
+    }
+
+    /**
+     * Vuelve la función a como estaba antes de cancelarla, cuando no se pudieron cancelar sus
+     * reservas porque funciones no respondió (F-01.7). Se cancela primero y se deshace si hace
+     * falta, y no al revés, porque una función cancelada ya no admite reservas: si se cancelaran
+     * primero las reservas, en el medio podía entrar una nueva y quedar confirmada en una función
+     * cancelada. La máquina de estados no deja salir de «cancelada», y está bien que no lo deje
+     * ningún otro camino: esto no es un cambio de estado sino deshacer uno que no terminó.
+     */
+    public function deshacerCancelacion(Funcion $anterior): void
+    {
+        $this->funciones->guardar($anterior);
     }
 
     /**

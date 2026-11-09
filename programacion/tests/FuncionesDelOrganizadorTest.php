@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace IndieCinema\Programacion\Pruebas;
 
 use DateTimeImmutable;
+use Dom\HTMLDocument;
+use IndieCinema\Nucleo\Pruebas\Dobles\Formularios;
 use IndieCinema\Nucleo\Uuid;
 use IndieCinema\Nucleo\Aplicacion;
 use IndieCinema\Nucleo\BaseDeDatos;
@@ -27,6 +29,7 @@ use IndieCinema\Programacion\Repositorios\RepositorioDeObras;
 use IndieCinema\Programacion\Repositorios\RepositorioDeSalas;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use IndieCinema\Nucleo\Pruebas\Dobles\PaginasParaValidar;
 
 /**
  * «Mis funciones» y alta para programar una función (E3-11.2) del organizador, de punta a punta.
@@ -65,6 +68,9 @@ final class FuncionesDelOrganizadorTest extends TestCase
     protected function setUp(): void
     {
         @unlink(sys_get_temp_dir() . '/acuerdo_estado_global.txt');
+        // Funciones contesta la ocupación: ninguna función tiene reservas salvo que la prueba las
+        // ponga con ocupados() (F-01.1).
+        file_put_contents(sys_get_temp_dir() . '/ocupacion_de_prueba.json', '{}');
         $this->configuracion = new Configuracion([
             'app' => ['subsistema' => 'programacion', 'entorno' => 'desarrollo'],
             'base' => self::baseDePruebas(),
@@ -93,6 +99,22 @@ final class FuncionesDelOrganizadorTest extends TestCase
     protected function tearDown(): void
     {
         @unlink(sys_get_temp_dir() . '/acuerdo_estado_global.txt');
+        @unlink(sys_get_temp_dir() . '/ocupacion_de_prueba.json');
+    }
+
+    /**
+     * Los lugares que funciones dice que están reservados en la función; sin archivo, funciones
+     * no contesta la ocupación, como si estuviera caído.
+     */
+    private static function ocupados(string $funcionId, ?int $ocupados): void
+    {
+        $archivo = sys_get_temp_dir() . '/ocupacion_de_prueba.json';
+        if ($ocupados === null) {
+            @unlink($archivo);
+
+            return;
+        }
+        file_put_contents($archivo, json_encode([$funcionId => $ocupados]));
     }
 
     private function pedir(
@@ -108,14 +130,14 @@ final class FuncionesDelOrganizadorTest extends TestCase
         parse_str((string) parse_url($ruta, PHP_URL_QUERY), $consulta);
         $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion, new Log('programacion', $this->salidaDelLog));
 
-        return $aplicacion->atender(new Peticion(
+        return PaginasParaValidar::anotar($metodo, $ruta, $aplicacion->atender(new Peticion(
             $metodo,
             (string) parse_url($ruta, PHP_URL_PATH),
             $consulta,
             $cuerpo,
             $cabeceras,
             ['csrf' => self::CSRF],
-        ));
+        )));
     }
 
     private function enviar(string $ruta, array $cuerpo, ?string $usuario = self::ORGANIZADORA, string $rol = 'organizador'): Respuesta
@@ -326,6 +348,55 @@ final class FuncionesDelOrganizadorTest extends TestCase
         );
     }
 
+    /**
+     * El navegador no sugiere fechas de otras funciones (E4-10.5); y si el envío vuelve vacío, el
+     * resumen lleva a cada campo, también a los grupos sin un control propio, como las obras.
+     */
+    public function testLaFechaNoSeAutocompletaYElResumenLlevaACadaCampo(): void
+    {
+        $this->sala(self::ORGANIZADORA, 'El Galpón Habilitado');
+
+        $campos = Formularios::autocompletado($this->pedir('GET', '/organizador/funciones/nueva', self::ORGANIZADORA)->cuerpo());
+        $respuesta = $this->enviar('/organizador/funciones/nueva', [], self::ORGANIZADORA);
+
+        self::assertSame('off', $campos['fecha']);
+        self::assertSame(422, $respuesta->estado());
+        $resumen = Formularios::resumen($respuesta->cuerpo());
+        self::assertNotNull($resumen);
+        self::assertContains('#obras', array_keys($resumen['enlaces']));
+        self::assertContains('#sala_id', array_keys($resumen['enlaces']));
+        self::assertSame('Revisá ' . count($resumen['enlaces']) . ' campos', $resumen['titulo']);
+        foreach (array_keys($resumen['enlaces']) as $enlace) {
+            self::assertStringContainsString('id="' . substr($enlace, 1) . '"', $respuesta->cuerpo(), "El link {$enlace} no lleva a ningún lado.");
+        }
+    }
+
+    /**
+     * E4-09.4: en un campo numérico Chromium descarta la coma al tipear «1500,50» y lo deja en
+     * 150050 sin decir nada, así que el organizador carga $150.050 en vez de $1.500,50. El precio
+     * va en un campo de texto, donde el navegador sí aplica el pattern que manda reglas(), con
+     * inputmode="decimal" para que el celular siga abriendo el teclado numérico.
+     */
+    public function testElPrecioEsUnCampoDeTextoDecimalConElPatronDelServidor(): void
+    {
+        $this->sala(self::ORGANIZADORA, 'El Galpón');
+
+        $cuerpo = $this->pedir('GET', '/organizador/funciones/nueva', self::ORGANIZADORA)->cuerpo();
+
+        self::assertSame(1, preg_match('#<input[^>]*name="precio"[^>]*>#', $cuerpo, $campo), 'el campo del precio');
+        self::assertStringContainsString('type="text"', $campo[0]);
+        self::assertStringContainsString('inputmode="decimal"', $campo[0]);
+        self::assertStringContainsString('pattern="[0-9]{1,8}([.,][0-9]{1,2})?"', $campo[0]);
+        // min y step no valen en un campo de texto: si volvieran, volvería el campo numérico.
+        self::assertStringNotContainsString(' min="', $campo[0]);
+        self::assertStringNotContainsString(' step="', $campo[0]);
+        // Y el texto que la validación en línea va a mostrar es el que contesta el servidor.
+        self::assertStringContainsString(
+            'data-error-patron="El precio tiene que ser un número de hasta 99.999.999,99, sin puntos de miles."',
+            $campo[0],
+        );
+    }
+
     public function testUnEspectadorNoVeElFormularioDeAltaYSinSesionPideIngresar(): void
     {
         self::assertSame(403, $this->pedir('GET', '/organizador/funciones/nueva', self::ORGANIZADORA, 'espectador')->estado());
@@ -505,6 +576,34 @@ final class FuncionesDelOrganizadorTest extends TestCase
         self::assertStringContainsString('Tenés que elegir al menos una obra del catálogo.', $respuesta->cuerpo());
     }
 
+    /**
+     * E4-09.3: el error de las obras está escrito fuera del parcial de campo; cada casilla lo
+     * apunta con aria-describedby, así el lector de pantalla lo lee al pararse en una obra y no
+     * sólo cuando aparece.
+     */
+    public function testSinObrasCadaCasillaDescribeElError(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+
+        $respuesta = $this->enviar('/organizador/funciones/nueva', [
+            'sala_id' => $sala->id,
+            'obras' => [],
+            'fecha' => '2030-10-25',
+            'hora' => '20:30',
+            'precio' => '2500',
+            'cupo' => '40',
+        ]);
+
+        $documento = HTMLDocument::createFromString($respuesta->cuerpo(), LIBXML_NOERROR);
+        self::assertStringContainsString('Tenés que elegir al menos una obra del catálogo.', (string) $documento->getElementById('error-obras')?->textContent);
+        $casillas = $documento->querySelectorAll('input[name="obras[]"]');
+        self::assertGreaterThan(0, $casillas->length);
+        foreach ($casillas as $casilla) {
+            self::assertSame('error-obras', $casilla->getAttribute('aria-describedby'));
+            self::assertSame('true', $casilla->getAttribute('aria-invalid'));
+        }
+    }
+
     public function testRechazaFechaPasada(): void
     {
         $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
@@ -564,6 +663,50 @@ final class FuncionesDelOrganizadorTest extends TestCase
             'obra_id',
         );
         self::assertCount(2, $candidatas);
+    }
+
+    /**
+     * F-01.6: con una sola candidata no hay nada que votar. Vuelve el formulario con el motivo y no
+     * se crea ninguna función.
+     */
+    public function testUnaVotacionNecesitaAlMenosDosCandidatas(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+
+        $respuesta = $this->enviar('/organizador/funciones/nueva', [
+            'modo' => FormularioDeFuncion::MODO_EN_VOTACION_TITULOS,
+            'sala_id' => $sala->id,
+            'obras' => [$this->obras['Zama']],
+            'precio' => '2500',
+            'cupo' => '40',
+        ]);
+
+        self::assertSame(422, $respuesta->estado());
+        self::assertStringContainsString('Para abrir una votación elegí al menos dos obras candidatas.', $respuesta->cuerpo());
+        self::assertSame(0, (int) $this->base->valor('SELECT COUNT(*) FROM funcion WHERE sala_id = ?', [$sala->id]));
+    }
+
+    /**
+     * F-01.6: un modo que no es ninguno de los dos vuelve con el error, y no se publica como
+     * programada sin avisar, aunque el resto esté bien.
+     */
+    public function testUnModoDesconocidoNoSePublica(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+
+        $respuesta = $this->enviar('/organizador/funciones/nueva', [
+            'modo' => 'sorpresa',
+            'sala_id' => $sala->id,
+            'obras' => [$this->obras['Zama']],
+            'fecha' => '2030-10-25',
+            'hora' => '20:30',
+            'precio' => '2500',
+            'cupo' => '40',
+        ]);
+
+        self::assertSame(422, $respuesta->estado());
+        self::assertStringContainsString('Elegí si la función se programa con fecha o se abre a votación de títulos.', $respuesta->cuerpo());
+        self::assertSame(0, (int) $this->base->valor('SELECT COUNT(*) FROM funcion WHERE sala_id = ?', [$sala->id]));
     }
 
     public function testRechazaCupoMayorQueCapacidad(): void
@@ -984,6 +1127,64 @@ final class FuncionesDelOrganizadorTest extends TestCase
 
         self::assertSame(422, $respuesta->estado());
         self::assertStringContainsString('Se pisa con otra función de la sala', $respuesta->cuerpo());
+    }
+
+    /**
+     * F-01.1: el cupo no baja de los lugares reservados. Hasta ahí, sí.
+     */
+    public function testElCupoNoBajaDeLoReservado(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $funcion = $this->programada($sala, '2030-10-25 20:30:00');
+        self::ocupados($funcion->id, 30);
+
+        $respuesta = $this->actualizar($funcion->id, $sala, ['cupo' => '20']);
+        self::assertSame(422, $respuesta->estado());
+        self::assertStringContainsString('Ya hay 30 lugares reservados: el cupo no puede ser menor.', $respuesta->cuerpo());
+        self::assertSame(40, (int) $this->base->valor('SELECT cupo FROM funcion WHERE id = ?', [$funcion->id]));
+
+        self::assertSame(303, $this->actualizar($funcion->id, $sala, ['cupo' => '30'])->estado());
+        self::assertSame(30, (int) $this->base->valor('SELECT cupo FROM funcion WHERE id = ?', [$funcion->id]));
+    }
+
+    /**
+     * F-01.1: con una reserva, la función no cambia de sala, de películas ni de fecha: quien
+     * reservó lo hizo para eso. El precio y el cupo para arriba, sí.
+     */
+    public function testConReservasNoCambiaLaSalaNiLasPeliculasNiLaFecha(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $otraSala = $this->sala(self::ORGANIZADORA, 'Sala Alternativa', capacidad: 80);
+        $funcion = $this->programada($sala, '2030-10-25 20:30:00');
+        self::ocupados($funcion->id, 1);
+
+        foreach ([
+            'la sala' => [$otraSala, []],
+            'las películas' => [$sala, ['obras' => [$this->obras['La ciénaga']]]],
+            'la fecha' => [$sala, ['fecha' => '2030-10-26']],
+        ] as $que => [$salaNueva, $campos]) {
+            $respuesta = $this->actualizar($funcion->id, $salaNueva, $campos);
+            self::assertSame(422, $respuesta->estado(), "Cambió {$que} con reservas.");
+            self::assertStringContainsString('La función ya tiene reservas: no se le puede cambiar la sala, las películas ni la fecha.', $respuesta->cuerpo());
+        }
+
+        self::assertSame(303, $this->actualizar($funcion->id, $sala, ['precio' => '3000', 'cupo' => '45'])->estado());
+    }
+
+    /**
+     * F-01.1: si funciones no contesta, lo que podría pisar una reserva no se guarda; lo demás, sí.
+     */
+    public function testSinRespuestaDeFuncionesNoSeArriesgaAPisarReservas(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $funcion = $this->programada($sala, '2030-10-25 20:30:00');
+        self::ocupados($funcion->id, null);
+
+        $respuesta = $this->actualizar($funcion->id, $sala, ['cupo' => '10']);
+        self::assertSame(422, $respuesta->estado());
+        self::assertStringContainsString('No pudimos comprobar las reservas de la función', $respuesta->cuerpo());
+
+        self::assertSame(303, $this->actualizar($funcion->id, $sala, ['precio' => '3000'])->estado());
     }
 
     public function testEdicionDePuntaAPuntaYCambiosSeVenEnLaFicha(): void
@@ -1796,6 +1997,17 @@ final class FuncionesDelOrganizadorTest extends TestCase
         ]);
         self::assertSame(422, $una->estado());
         self::assertStringContainsString('Proponé al menos 2 franjas', $una->cuerpo());
+        // E4-09.3: el error del conjunto lo describen la lista y la fecha y el inicio de cada opción,
+        // así se lee al tabular por ellas. El fin no: su aria-describedby lo maneja el gestor de
+        // franjas, para el aviso del rango.
+        $documento = HTMLDocument::createFromString($una->cuerpo(), LIBXML_NOERROR);
+        self::assertStringContainsString('Proponé al menos 2 franjas', (string) $documento->getElementById('error-franjas')?->textContent);
+        self::assertSame('error-franjas', $documento->querySelector('[data-contenedor-franjas]')?->getAttribute('aria-describedby'));
+        foreach ($documento->querySelectorAll('[data-contenedor-franjas] .fila-franja-horaria') as $fila) {
+            self::assertSame('error-franjas', $fila->querySelector('[data-campo-fecha]')?->getAttribute('aria-describedby'));
+            self::assertSame('error-franjas', $fila->querySelector('[data-campo-inicio]')?->getAttribute('aria-describedby'));
+            self::assertNull($fila->querySelector('[data-campo-fin]')?->getAttribute('aria-describedby'));
+        }
 
         // Bien cargadas, se proponen.
         $bien = $this->enviar($ruta, [
@@ -1954,19 +2166,18 @@ final class FuncionesDelOrganizadorTest extends TestCase
         self::assertSame('en_acuerdo_fecha', $fila['estado']);
         self::assertNull($fila['fecha_hora']);
 
-        // Ficha muestra el estado sin quórum y las opciones de decisión para el organizador
+        // Ficha muestra el estado sin quórum y las opciones de decisión para el organizador. Iban
+        // dentro de un if sobre un texto que la ficha ya no tiene, así que no comprobaban nada
+        // (F-01.3): ahora sí.
         $fichaOrganizador = $this->pedir('GET', "/cartelera/{$funcion->id}")->cuerpo();
-        if (str_contains($fichaOrganizador, 'No se alcanzó el quórum')) {
-            self::assertStringContainsString('No se alcanzó el quórum de asistentes requerido', $fichaOrganizador);
-            self::assertStringContainsString('Proponer nuevas franjas horarias', $fichaOrganizador);
-            self::assertStringContainsString('Cancelar función', $fichaOrganizador);
-        }
+        self::assertStringContainsString('La función no se programa por falta de quórum', $fichaOrganizador);
+        self::assertStringContainsString('Proponer nuevas franjas horarias', $fichaOrganizador);
+        self::assertStringContainsString('Cancelar función', $fichaOrganizador);
 
         // Ficha pública para espectadores explica que no se programó
         $fichaEspectador = $this->pedir('GET', "/cartelera/{$funcion->id}", usuario: null)->cuerpo();
-        if (str_contains($fichaEspectador, 'falta de quórum')) {
-            self::assertStringContainsString('La función no se programa por falta de quórum', $fichaEspectador);
-        }
+        self::assertStringContainsString('La función no se programa por falta de quórum', $fichaEspectador);
+        self::assertStringNotContainsString('Proponer nuevas franjas horarias', $fichaEspectador);
 
         // El organizador decide cancelar la función
         $cancelacion = $this->enviar("/organizador/funciones/{$funcion->id}/cancelar", []);
@@ -2063,6 +2274,35 @@ final class FuncionesDelOrganizadorTest extends TestCase
         $confirmacion = $this->pedir('GET', "/organizador/funciones/{$funcion->id}/cancelar");
         self::assertSame(200, $confirmacion->estado());
         self::assertStringContainsString('Confirmar cancelación', $confirmacion->cuerpo());
+    }
+
+    /**
+     * F-01.3: después de cerrar sin mínimo, la función no queda trabada. Las dos salidas que le da
+     * el sitio al organizador funcionan hasta el final: proponer otras fechas abre un acuerdo nuevo,
+     * y cancelarla la cancela. Hasta ahora sólo se probaba que se ofrecieran.
+     */
+    public function testDespuesDeCerrarSinMinimoSeProponenOtrasFechasOSeCancela(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        [$otrasFechas, $cancelada] = [$this->funcion($sala), $this->funcion($sala)];
+        foreach ([$otrasFechas, $cancelada] as $funcion) {
+            $this->enviar("/organizador/funciones/{$funcion->id}/cerrar-votacion", []);
+            self::acuerdoEnFunciones('abierto');
+            self::assertSame(303, $this->enviar("/organizador/funciones/{$funcion->id}/cerrar-sin-minimo", [])->estado());
+        }
+
+        $propuesta = $this->enviar("/organizador/funciones/{$otrasFechas->id}/acuerdo", [
+            'minimo_asistentes' => '10',
+            'franja_inicio' => [self::dentroDe(20, '20:00:00'), self::dentroDe(21, '21:00:00')],
+            'franja_fin' => [self::dentroDe(20, '22:30:00'), ''],
+        ]);
+        self::assertSame(303, $propuesta->estado());
+        self::assertSame("/cartelera/{$otrasFechas->id}?acuerdo_propuesto=1", $propuesta->cabecera('Location'));
+        self::assertSame('en_acuerdo_fecha', $this->base->valor('SELECT estado FROM funcion WHERE id = ?', [$otrasFechas->id]));
+
+        self::acuerdoEnFunciones('sin_minimo');
+        self::assertSame(303, $this->enviar("/organizador/funciones/{$cancelada->id}/cancelar", [])->estado());
+        self::assertSame('cancelada', $this->base->valor('SELECT estado FROM funcion WHERE id = ?', [$cancelada->id]));
     }
 
     public function testCerrarAcuerdoSinMinimoRechazaOrganizadorAjeno(): void

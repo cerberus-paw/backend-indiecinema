@@ -17,7 +17,8 @@ use IndieCinema\Nucleo\Seguridad\Rol;
  * middleware del núcleo lo controla antes de llegar al controlador.
  */
 return static function (Router $router): void {
-    $router->get('/', [Inicio::class, 'mostrar']);
+    // «Mi cuenta»: los datos de quien está en sesión.
+    $router->get('/', [Inicio::class, 'mostrar'], Rol::Espectador);
 
     // Sin sesión: es para el visitante que todavía no tiene cuenta.
     $router->get('/registro', [Registro::class, 'mostrar']);
@@ -39,6 +40,8 @@ return static function (Router $router): void {
     // rol de organizador (pedir ser organizador es pedir una sala, como en la E2). Funciones lee
     // el usuario para avisarle por correo que se canceló la función que reservó (E4-03.4), pero
     // no da roles.
+    // Varios usuarios en un solo pedido, para el listado y el CSV de reservas de funciones (IC-464).
+    $router->interna('GET', '/interno/usuarios', [UsuariosInternos::class, 'varios'], ['programacion', 'funciones']);
     $router->interna('GET', '/interno/usuarios/{id}', [UsuariosInternos::class, 'mostrar'], ['programacion', 'funciones']);
     $router->interna('POST', '/interno/usuarios/{id}/roles', [UsuariosInternos::class, 'darRol'], ['programacion']);
 

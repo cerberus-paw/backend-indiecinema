@@ -10,12 +10,39 @@ absolute_redirect off;
 # Lo que admite PHP (php/php.ini): una imagen de 5 MB más el resto del formulario.
 client_max_body_size 6m;
 
-# Al pasarse del límite, 429 Too Many Requests (por defecto sería 503, que dice otra cosa).
+# Al pasarse del límite, 429 Too Many Requests (por defecto sería 503, que dice otra cosa), con
+# un mensaje que diga qué hacer: en JSON o en una página, según $formato_de_error.
 limit_req_status 429;
+error_page 429 /_demasiados/$formato_de_error;
+# Un subsistema que no contesta (caído, o que tarda demasiado) o el auth_request sin respuesta de
+# cuentas: nginx mostraba su página por defecto, en inglés y sin nada del sitio (F-01.7). Sólo los
+# errores que arma nginx: los que manda un subsistema pasan como están, con su propio mensaje,
+# porque proxy_intercept_errors sigue apagado (subsistema.inc).
+error_page 500 502 503 504 =503 /_sin_servicio/$formato_de_error;
 
 add_header X-Content-Type-Options nosniff always;
 add_header X-Frame-Options DENY always;
 add_header Referrer-Policy strict-origin-when-cross-origin always;
+# Content-Security-Policy: el navegador sólo carga scripts, estilos, fuentes, imágenes y pedidos de
+# este mismo origen, y nada en línea. Si un texto se escapara del escapado de Twig, el script que
+# trajera no corre. El front no usa nada de afuera (la fuente se sirve desde /estaticos/fuentes/)
+# ni código o estilos en línea. data: en img-src, por el SVG de la flecha de los <select> de
+# estilos.css, y blob:, por la vista previa de la foto o el afiche que se elige para subir
+# (zona-de-imagen.js): la arma el navegador con el archivo, sin pedir nada afuera. Sin upgrade-insecure-requests: en el compose local, que va por HTTP, rompería todo,
+# y en el VPS no hace falta porque el HSTS ya obliga HTTPS. Se activó directo, sin pasar por
+# Report-Only: el servidor de desarrollo y las pruebas de punta a punta, que fallan con cualquier
+# violación, hacen de ensayo.
+# Lo que el sitio no usa, apagado: si un script se colara, tampoco podría pedir la cámara, el
+# micrófono, la ubicación, un pago ni un USB.
+add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()" always;
+# Aislamiento entre orígenes: una ventana de otro sitio abierta desde acá (o que abra ésta) no
+# tiene referencia a la otra; otro sitio no puede incrustar nuestras respuestas (las imágenes, el
+# JSON); y la página sólo carga lo que lo permite, que es todo lo propio. Las tres las marcó ZAP.
+add_header Cross-Origin-Opener-Policy same-origin always;
+add_header Cross-Origin-Resource-Policy same-origin always;
+add_header Cross-Origin-Embedder-Policy require-corp always;
+# Ojo con add_header: un location que tenga uno propio deja de heredar todos estos.
+add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'" always;
 
 # Las rutas /interno/ son para la red del compose: desde afuera no existen, con o sin prefijo.
 # Es una expresión regular para que gane sobre los prefijos de abajo (que no llevan ^~).
@@ -76,6 +103,16 @@ location /cuenta/ {
 location = /funcion {
     return 301 /funcion/;
 }
+# Reservar una función: 10 por minuto por IP, sólo los POST. Pasan 6 seguidas, que alcanzan para
+# el doble clic y para las pruebas de punta a punta, y después una cada 6 segundos. Expresión
+# regular por lo mismo que ingresar y registro: con o sin la barra final.
+location ~ ^/funcion/reservar/[^/]+/?$ {
+    limit_req zone=reserva burst=5 nodelay;
+    set $subsistema funciones;
+    set $secreto "${NGINX_SECRETO_FUNCIONES}";
+    rewrite ^/funcion(/.*)$ $1 break;
+    include conf.d/subsistema.inc;
+}
 location /funcion/ {
     set $subsistema funciones;
     set $secreto "${NGINX_SECRETO_FUNCIONES}";
@@ -91,6 +128,82 @@ location ~ ^/solicitar-sala/?$ {
     set $secreto "${NGINX_SECRETO_PROGRAMACION}";
     rewrite ^(.*)$ $1 break;
     include conf.d/subsistema.inc;
+}
+
+# Los listados con búsqueda de programación: la cartelera, su CSV y las obras. 120 por minuto por
+# IP: pasan 61 seguidos y después dos por segundo (el porqué, en indiecinema.conf). No entran la ficha de una función ni sus
+# lugares, que la ficha pide cada 15 segundos.
+location ~ ^/(cartelera(\.csv)?|obras)/?$ {
+    limit_req zone=busqueda burst=60 nodelay;
+    set $subsistema programacion;
+    set $secreto "${NGINX_SECRETO_PROGRAMACION}";
+    rewrite ^(.*)$ $1 break;
+    include conf.d/subsistema.inc;
+}
+
+# La respuesta del 429 (error_page, arriba). Sin add_header acá: con uno, este location dejaría de
+# heredar la CSP y las demás cabeceras. El texto ya dice cuánto esperar, así que va sin
+# Retry-After. «internal»: desde afuera no existen.
+location = /_demasiados/json {
+    internal;
+    default_type application/json;
+    charset utf-8;
+    return 429 '{"error": "Hiciste muchos pedidos seguidos. Probá de nuevo en un minuto."}';
+}
+location = /_demasiados/html {
+    internal;
+    default_type text/html;
+    charset utf-8;
+    return 429 '<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hiciste muchos pedidos seguidos · IndieCinema</title>
+<link rel="stylesheet" href="/estaticos/css/estilos.css">
+</head>
+<body>
+<main>
+<h1>Hiciste muchos pedidos seguidos</h1>
+<p>Hiciste muchos pedidos seguidos. Probá de nuevo en un minuto.</p>
+<p><a href="/">Ir al inicio</a></p>
+</main>
+</body>
+</html>
+';
+}
+
+# La respuesta de un subsistema que no contesta (error_page, arriba). Como las del 429: sin
+# add_header, para que hereden la CSP y las demás cabeceras, e «internal». Siempre 503 Service
+# Unavailable, aunque nginx haya visto un 502 o un 504: para quien la recibe es lo mismo, y dice
+# que es pasajero.
+location = /_sin_servicio/json {
+    internal;
+    default_type application/json;
+    charset utf-8;
+    return 503 '{"error": "El sitio no está respondiendo como debería. Probá de nuevo en unos minutos."}';
+}
+location = /_sin_servicio/html {
+    internal;
+    default_type text/html;
+    charset utf-8;
+    return 503 '<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>El sitio no está respondiendo · IndieCinema</title>
+<link rel="stylesheet" href="/estaticos/css/estilos.css">
+</head>
+<body>
+<main>
+<h1>El sitio no está respondiendo</h1>
+<p>El sitio no está respondiendo como debería. Probá de nuevo en unos minutos.</p>
+<p><a href="/">Ir al inicio</a></p>
+</main>
+</body>
+</html>
+';
 }
 
 location / {

@@ -7,15 +7,17 @@ namespace IndieCinema\Funciones\Modelo;
 /**
  * El ciclo de vida de una reserva: los mismos valores que el ENUM de la tabla.
  *
- * Nace confirmada; el espectador la puede cancelar, y en la puerta el organizador registra la
+ * La de una función paga nace pendiente de pago (X-01): ocupa sus lugares mientras el espectador
+ * paga, y se confirma sólo con el aviso de Mercado Pago, o se cancela si vence o si él la cancela.
+ * La de una función a la gorra, o con el cobro apagado, nace confirmada.
+ *
+ * Confirmada, el espectador la puede cancelar, y en la puerta el organizador registra la
  * asistencia. Cancelada y asistió no salen a ningún lado: una cancelada ya soltó sus lugares y
  * quizás los tomó otro, así que se reserva de nuevo; y quien entró ya usó la entrada.
- *
- * Sin pendiente de pago: la reserva se confirma sin cobrar, y el estado que espera el pago llega
- * con el extra de Mercado Pago.
  */
 enum EstadoReserva: string
 {
+    case PendientePago = 'pendiente_pago';
     case Confirmada = 'confirmada';
     case Cancelada = 'cancelada';
     case Asistio = 'asistio';
@@ -31,6 +33,7 @@ enum EstadoReserva: string
     public function etiqueta(): string
     {
         return match ($this) {
+            self::PendientePago => 'pendiente de pago',
             self::Confirmada => 'confirmada',
             self::Cancelada => 'cancelada',
             self::Asistio => 'con asistencia',
@@ -43,7 +46,8 @@ enum EstadoReserva: string
     }
 
     /**
-     * Si cuenta para el cupo: quien ya entró sigue ocupando su lugar.
+     * Si cuenta para el cupo: quien ya entró sigue ocupando su lugar, y quien está pagando
+     * también, así nadie le gana el lugar a mitad del pago.
      */
     public function ocupaLugares(): bool
     {
@@ -56,6 +60,7 @@ enum EstadoReserva: string
     private function siguientes(): array
     {
         return match ($this) {
+            self::PendientePago => [self::Confirmada, self::Cancelada],
             self::Confirmada => [self::Cancelada, self::Asistio],
             self::Cancelada, self::Asistio => [],
         };

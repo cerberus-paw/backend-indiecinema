@@ -30,7 +30,10 @@ final readonly class Reserva
     private const LARGO_DEL_CODIGO = 8;
 
     /**
-     * @param string $total con dos decimales, como lo guarda la base: sin pasar por float
+     * @param string             $total         con dos decimales, como lo guarda la base: sin pasar por float
+     * @param ?DateTimeImmutable $venceEn       hasta cuándo se puede pagar, en UTC; sólo las pendientes de pago
+     * @param ?string            $preferenciaId la preferencia de Checkout Pro, una vez creada
+     * @param ?string            $enlaceDePago  adónde va el espectador a pagarla (su init_point)
      */
     public function __construct(
         public string $id,
@@ -41,12 +44,19 @@ final readonly class Reserva
         public string $total,
         public EstadoReserva $estado,
         public DateTimeImmutable $creadaEn,
+        public ?DateTimeImmutable $venceEn = null,
+        public ?string $preferenciaId = null,
+        public ?string $enlaceDePago = null,
     ) {
     }
 
     /**
-     * Una reserva confirmada, si la función todavía admite reservas. El total queda fijo con el
-     * precio de ahora: si el organizador lo cambia después, la reserva no cambia.
+     * Una reserva nueva, si la función todavía admite reservas. El total queda fijo con el precio
+     * de ahora: si el organizador lo cambia después, la reserva no cambia.
+     *
+     * Con $minutosParaPagar (el cobro con Mercado Pago prendido), la de una función paga nace
+     * pendiente de pago y vence en esos minutos; la de una a la gorra no tiene nada que pagar y
+     * nace confirmada, como todas con el cobro apagado.
      *
      * @throws ReglaIncumplida si la cantidad no es positiva, o la función se canceló o ya empezó
      */
@@ -55,6 +65,7 @@ final readonly class Reserva
         string $usuarioId,
         int $cantidad,
         DateTimeImmutable $ahora = new DateTimeImmutable(),
+        ?int $minutosParaPagar = null,
     ): self {
         if ($cantidad < 1) {
             throw new ReglaIncumplida('Reservá al menos un lugar.');
@@ -64,24 +75,46 @@ final readonly class Reserva
             throw new ReglaIncumplida($motivo);
         }
 
+        $total = number_format(round($funcion->precioBase * $cantidad, 2), 2, '.', '');
+        // La base guarda las fechas en UTC (ver la migración).
+        $creadaEn = $ahora->setTimezone(new DateTimeZone('UTC'));
+        $sePaga = $minutosParaPagar !== null && $total !== '0.00';
+
         return new self(
             Uuid::nuevo(),
             $funcion->id,
             $usuarioId,
             self::nuevoCodigo(),
             $cantidad,
-            number_format(round($funcion->precioBase * $cantidad, 2), 2, '.', ''),
-            EstadoReserva::Confirmada,
-            // La base guarda las fechas en UTC (ver la migración).
-            $ahora->setTimezone(new DateTimeZone('UTC')),
+            $total,
+            $sePaga ? EstadoReserva::PendientePago : EstadoReserva::Confirmada,
+            $creadaEn,
+            $sePaga ? $creadaEn->modify("+{$minutosParaPagar} minutes") : null,
         );
+    }
+
+    /**
+     * Si el plazo para pagarla ya pasó: entonces ya no retiene sus lugares, aunque todavía no se
+     * haya marcado como cancelada.
+     */
+    public function vencida(DateTimeImmutable $ahora = new DateTimeImmutable()): bool
+    {
+        return $this->estado === EstadoReserva::PendientePago && $this->venceEn !== null && $this->venceEn <= $ahora;
+    }
+
+    /**
+     * La misma reserva con la preferencia de Checkout Pro que la cobra.
+     */
+    public function conPreferencia(string $preferenciaId, string $enlaceDePago): self
+    {
+        return new self($this->id, $this->funcionId, $this->usuarioId, $this->codigo, $this->cantidad, $this->total, $this->estado, $this->creadaEn, $this->venceEn, $preferenciaId, $enlaceDePago);
     }
 
     /**
      * La reserva cancelada, que suelta sus lugares. La entidad no cambia: el repositorio guarda el
      * cambio sólo si nadie la cambió antes (RepositorioDeReservas::guardarEstado()).
      *
-     * @throws ReglaIncumplida si no está confirmada
+     * @throws ReglaIncumplida si no está confirmada ni pendiente de pago
      */
     public function cancelar(): self
     {
@@ -103,7 +136,7 @@ final readonly class Reserva
      */
     public function conOtroCodigo(): self
     {
-        return new self($this->id, $this->funcionId, $this->usuarioId, self::nuevoCodigo(), $this->cantidad, $this->total, $this->estado, $this->creadaEn);
+        return new self($this->id, $this->funcionId, $this->usuarioId, self::nuevoCodigo(), $this->cantidad, $this->total, $this->estado, $this->creadaEn, $this->venceEn, $this->preferenciaId, $this->enlaceDePago);
     }
 
     /**
@@ -115,7 +148,7 @@ final readonly class Reserva
             throw new ReglaIncumplida("Una reserva {$this->estado->etiqueta()} no puede quedar {$siguiente->etiqueta()}.");
         }
 
-        return new self($this->id, $this->funcionId, $this->usuarioId, $this->codigo, $this->cantidad, $this->total, $siguiente, $this->creadaEn);
+        return new self($this->id, $this->funcionId, $this->usuarioId, $this->codigo, $this->cantidad, $this->total, $siguiente, $this->creadaEn, $this->venceEn, $this->preferenciaId, $this->enlaceDePago);
     }
 
     /**

@@ -76,6 +76,36 @@ final class ClienteMercadoPago
     }
 
     /**
+     * Un pago, como lo tiene Mercado Pago ahora: lo que se le cree, y no lo que dice el aviso.
+     *
+     * @return array<string, mixed>|null null si no existe
+     *
+     * @throws ExcepcionHttp    503 si Mercado Pago no responde o falla
+     * @throws RuntimeException si responde otro error, o algo que no es un pago
+     */
+    public function pago(string $id): ?array
+    {
+        $pago = $this->pedir('GET', '/v1/payments/' . rawurlencode($id), null);
+        if ($pago !== null && !is_array($pago)) {
+            throw new RuntimeException('Mercado Pago no devolvió un pago.');
+        }
+
+        return $pago;
+    }
+
+    /**
+     * Devuelve el pago entero al comprador. Con el pago como clave de idempotencia: pedirlo dos
+     * veces no lo devuelve dos veces.
+     *
+     * @throws ExcepcionHttp    503 si Mercado Pago no responde o falla
+     * @throws RuntimeException si lo rechaza, por ejemplo porque ya se devolvió
+     */
+    public function reembolsar(string $pagoId): void
+    {
+        $this->pedir('POST', '/v1/payments/' . rawurlencode($pagoId) . '/refunds', [], "reembolso-{$pagoId}");
+    }
+
+    /**
      * @param array<string, mixed>|null $datos se mandan como JSON
      *
      * @return mixed el JSON de la respuesta ya decodificado, o null si no existe (404)
@@ -108,7 +138,8 @@ final class ClienteMercadoPago
             CURLOPT_TIMEOUT_MS => $this->esperaMaximaMs,
         ]);
         if ($datos !== null) {
-            curl_setopt($curl, CURLOPT_POSTFIELDS, json_encode($datos, JSON_THROW_ON_ERROR));
+            // Vacío va como objeto ({}), no como lista ([]): un reembolso total no lleva campos.
+            curl_setopt($curl, CURLOPT_POSTFIELDS, json_encode($datos === [] ? new \stdClass() : $datos, JSON_THROW_ON_ERROR));
         }
         $cuerpo = curl_exec($curl);
         $estado = (int) curl_getinfo($curl, CURLINFO_RESPONSE_CODE);

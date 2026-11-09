@@ -44,11 +44,16 @@ final class ProteccionCsrf
     }
 
     /**
+     * Ni las rutas /interno/ ni los webhooks lo piden: no los manda un navegador, así que no hay
+     * cookie que otro sitio pueda aprovechar. A cada uno lo autentica otra cosa: el token del
+     * subsistema que llama, o la firma del servicio de afuera.
+     *
      * @throws ExcepcionHttp 403 si un pedido que cambia algo no trae el mismo token que la cookie
      */
     public function verificar(Peticion $peticion): void
     {
-        if (in_array($peticion->metodo(), self::METODOS_SEGUROS, true) || $peticion->rutaResuelta()?->esInterna()) {
+        $ruta = $peticion->rutaResuelta();
+        if (in_array($peticion->metodo(), self::METODOS_SEGUROS, true) || $ruta?->esInterna() || $ruta?->webhook) {
             return;
         }
 

@@ -66,12 +66,34 @@ final class RepositorioDeReservas
      */
     public function lugaresOcupados(string $funcionId): int
     {
-        $ocupan = array_values(array_filter(EstadoReserva::cases(), static fn (EstadoReserva $estado): bool => $estado->ocupaLugares()));
+        $ocupan = self::ocupanLugares();
 
         return (int) $this->base->valor(
             'SELECT COALESCE(SUM(cantidad), 0) FROM reserva WHERE funcion_id = ? AND estado IN (' . implode(', ', array_fill(0, count($ocupan), '?')) . ')',
             [$funcionId, ...$ocupan],
         );
+    }
+
+    /**
+     * Los lugares que ya tiene esa persona en la función, sumando las reservas que ocupan lugar
+     * (confirmadas y con asistencia). Las canceladas no cuentan.
+     */
+    public function lugaresOcupadosPorUsuario(string $funcionId, string $usuarioId): int
+    {
+        $ocupan = self::ocupanLugares();
+
+        return (int) $this->base->valor(
+            'SELECT COALESCE(SUM(cantidad), 0) FROM reserva WHERE funcion_id = ? AND usuario_id = ? AND estado IN (' . implode(', ', array_fill(0, count($ocupan), '?')) . ')',
+            [$funcionId, $usuarioId, ...$ocupan],
+        );
+    }
+
+    /**
+     * @return list<EstadoReserva>
+     */
+    private static function ocupanLugares(): array
+    {
+        return array_values(array_filter(EstadoReserva::cases(), static fn (EstadoReserva $estado): bool => $estado->ocupaLugares()));
     }
 
     /**
@@ -87,7 +109,7 @@ final class RepositorioDeReservas
         if ($funcionesIds === []) {
             return [];
         }
-        $ocupan = array_values(array_filter(EstadoReserva::cases(), static fn (EstadoReserva $estado): bool => $estado->ocupaLugares()));
+        $ocupan = self::ocupanLugares();
         $ocupados = array_fill_keys($funcionesIds, 0);
         foreach ($this->base->filas(
             'SELECT funcion_id, SUM(cantidad) AS ocupados FROM reserva WHERE funcion_id IN ('

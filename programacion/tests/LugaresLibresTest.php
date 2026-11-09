@@ -114,11 +114,30 @@ final class LugaresLibresTest extends TestCase
         ]);
     }
 
-    private function pedir(string $ruta, ?string $funciones = null): Respuesta
+    /**
+     * @param array<string, string> $cabeceras las del pedido, por ejemplo las de la sesión que pone nginx
+     */
+    private function pedir(string $ruta, ?string $funciones = null, array $cabeceras = []): Respuesta
     {
         $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion($funciones), new Log('programacion', fopen('php://memory', 'w')));
 
-        return $aplicacion->atender(new Peticion('GET', $ruta, [], [], [], [], []));
+        return $aplicacion->atender(new Peticion('GET', $ruta, [], [], $cabeceras, [], []));
+    }
+
+    /**
+     * La ficha como la ve un espectador con sesión que ya reservó $propios lugares de la función.
+     */
+    private function fichaConReservasPropias(string $funcionId, int $propios): string
+    {
+        $ocupacion = json_decode((string) file_get_contents(self::$ocupacion), true);
+        $ocupacion[$funcionId . ':usuario'] = $propios;
+        file_put_contents(self::$ocupacion, json_encode($ocupacion));
+
+        return $this->pedir("/cartelera/{$funcionId}", null, [
+            'X-Nginx-Secreto' => 'secreto-de-nginx',
+            'X-Usuario-Id' => 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+            'X-Rol' => 'espectador',
+        ])->cuerpo();
     }
 
     /**
@@ -189,6 +208,32 @@ final class LugaresLibresTest extends TestCase
         self::assertStringContainsString('5 lugares libres', $cuerpo);
         self::assertStringContainsString('<progress class="ficha-reserva-barra" max="' . $conLugar['cupo'] . '" value="' . ($conLugar['cupo'] - 5) . '"', $cuerpo);
         self::assertStringContainsString('de ' . $conLugar['cupo'], $cuerpo);
+    }
+
+    public function testElCampoDeLaFichaLlegaHastaLoQueLeQuedaAlEspectador(): void
+    {
+        [, $conLugar] = $this->ocuparDosFunciones();
+
+        // 5 libres, pero con 4 ya reservados del tope de 6 le quedan 2 (IC-463).
+        $cuerpo = $this->fichaConReservasPropias($conLugar['id'], 4);
+
+        self::assertStringContainsString('data-maximo-por-persona="6" data-restantes-usuario="2"', $cuerpo);
+        self::assertMatchesRegularExpression('/name="cantidad"[^>]*min="1"[^>]*max="2"/s', $cuerpo);
+        self::assertStringContainsString('Máximo 6 lugares por persona.', $cuerpo);
+        self::assertDoesNotMatchRegularExpression('/name="cantidad"[^>]*disabled/s', $cuerpo);
+    }
+
+    public function testConElTopeAlcanzadoLaFichaDeshabilitaLaReserva(): void
+    {
+        [, $conLugar] = $this->ocuparDosFunciones();
+
+        $cuerpo = $this->fichaConReservasPropias($conLugar['id'], 6);
+
+        self::assertStringContainsString('data-restantes-usuario="0"', $cuerpo);
+        // max 1 y no 0: un max por debajo del min no tiene sentido, y el campo va deshabilitado.
+        self::assertMatchesRegularExpression('/name="cantidad"[^>]*\\sdisabled\\s/s', $cuerpo);
+        self::assertMatchesRegularExpression('/name="cantidad"[^>]*max="1"/s', $cuerpo);
+        self::assertMatchesRegularExpression('/<button[^>]*\\sdisabled\\s[^>]*>(?:(?!<\\/button>).)*Reservar mis lugares/s', $cuerpo);
     }
 
     public function testUnaFichaAgotadaNoOfreceReservar(): void
@@ -305,7 +350,12 @@ final class LugaresLibresTest extends TestCase
         self::assertSame($conLugar['cupo'], $json['cupo']);
         self::assertTrue($json['reservable']);
         // Es para consultar cada pocos segundos: no trae la ficha entera.
-        self::assertSame(['lugares_libres', 'agotada', 'cupo', 'reservable'], array_keys($json));
+        self::assertSame(
+            ['lugares_libres', 'agotada', 'cupo', 'reservable', 'maximo_por_persona', 'lugares_restantes_usuario', 'maximo_reserva'],
+            array_keys($json),
+        );
+        self::assertSame(6, $json['maximo_por_persona']);
+        self::assertSame(5, $json['maximo_reserva']);
     }
 
     public function testLosLugaresEnJsonDicenAgotadaYQueNoSeReserva(): void

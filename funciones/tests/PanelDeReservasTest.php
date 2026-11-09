@@ -14,6 +14,7 @@ use IndieCinema\Nucleo\Pruebas\Dobles\ServidorSmtpDePrueba;
 use IndieCinema\Nucleo\Uuid;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use IndieCinema\Nucleo\Pruebas\Dobles\PaginasParaValidar;
 
 /**
  * El seguimiento de las reservas de punta a punta (E4-03): el panel del organizador con la
@@ -93,7 +94,7 @@ final class PanelDeReservasTest extends TestCase
         parse_str((string) parse_url($ruta, PHP_URL_QUERY), $consulta);
         $cuerpo = $metodo === 'POST' ? ['_csrf' => self::CSRF, ...$cuerpo] : $cuerpo;
 
-        return $aplicacion->atender(new Peticion($metodo, (string) parse_url($ruta, PHP_URL_PATH), $consulta, $cuerpo, $cabeceras, ['csrf' => self::CSRF], []));
+        return PaginasParaValidar::anotar($metodo, $ruta, $aplicacion->atender(new Peticion($metodo, (string) parse_url($ruta, PHP_URL_PATH), $consulta, $cuerpo, $cabeceras, ['csrf' => self::CSRF], [])));
     }
 
     private function deProgramacion(string $funcion, array $cuerpo, string $token = self::TOKEN_DE_PROGRAMACION): Respuesta

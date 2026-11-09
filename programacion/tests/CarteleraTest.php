@@ -114,7 +114,7 @@ final class CarteleraTest extends TestCase
         parse_str((string) parse_url($url, PHP_URL_QUERY), $consulta);
         $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion($cartelera), new Log('programacion', $this->salidaDelLog));
 
-        return $aplicacion->atender(new Peticion('GET', (string) parse_url($url, PHP_URL_PATH), $consulta, [], $cabeceras));
+        return PaginasParaValidar::anotar('GET', $url, $aplicacion->atender(new Peticion('GET', (string) parse_url($url, PHP_URL_PATH), $consulta, [], $cabeceras)));
     }
 
     /**
@@ -133,14 +133,14 @@ final class CarteleraTest extends TestCase
         parse_str((string) parse_url($ruta, PHP_URL_QUERY), $consulta);
         $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion(), new Log('programacion', $this->salidaDelLog));
 
-        return $aplicacion->atender(new Peticion(
+        return PaginasParaValidar::anotar('POST', $ruta, $aplicacion->atender(new Peticion(
             'POST',
             (string) parse_url($ruta, PHP_URL_PATH),
             $consulta,
             ['_csrf' => self::CSRF, ...$cuerpo],
             $cabeceras,
             ['csrf' => self::CSRF],
-        ));
+        )));
     }
 
     /**
@@ -1143,6 +1143,33 @@ final class CarteleraTest extends TestCase
     /**
      * Criterio E3-12.3: «La ficha muestra las candidatas y el voto del usuario».
      */
+    /**
+     * F-01.5: los afiches de las candidatas apuntan a la ruta que los sirve, /obras/{id}/afiche, y
+     * no al nombre del archivo, que el navegador no tiene cómo pedir. Pasaba en producción: lo
+     * arregló IC-292 en dev, sin una prueba que lo sostuviera.
+     */
+    public function testLosAfichesDeLaVotacionApuntanALaRutaQueLosSirve(): void
+    {
+        $this->cargarDatosDePrueba();
+        $salaId = (string) $this->base->valor('SELECT id FROM sala WHERE habilitada = TRUE AND dada_de_baja_en IS NULL LIMIT 1');
+        $obras = $this->base->filas('SELECT id, afiche FROM obra WHERE afiche IS NOT NULL ORDER BY id LIMIT 2');
+        self::assertCount(2, $obras, 'Los datos de prueba traen obras con afiche.');
+        $funcionId = Uuid::nuevo();
+        $this->base->ejecutar("INSERT INTO funcion (id, sala_id, estado, precio_base, cupo) VALUES (?, ?, 'en_votacion_titulos', 2000, 50)", [$funcionId, $salaId]);
+        foreach ($obras as $obra) {
+            $this->base->ejecutar("INSERT INTO funcion_obra (funcion_id, obra_id, estado) VALUES (?, ?, 'candidata')", [$funcionId, $obra['id']]);
+        }
+
+        foreach ([[], ['X-Nginx-Secreto' => self::SECRETO, 'X-Usuario-Id' => Uuid::nuevo(), 'X-Rol' => 'espectador']] as $cabeceras) {
+            $ficha = $this->pedir("/cartelera/{$funcionId}", cabeceras: $cabeceras)->cuerpo();
+            foreach ($obras as $obra) {
+                self::assertStringContainsString("src=\"/obras/{$obra['id']}/afiche\"", $ficha);
+                self::assertStringNotContainsString((string) $obra['afiche'], $ficha);
+                self::assertSame(200, $this->pedir("/obras/{$obra['id']}/afiche")->estado());
+            }
+        }
+    }
+
     public function testFichaDeFuncionEnVotacionMuestraCandidatasYVotoDelUsuario(): void
     {
         $this->cargarDatosDePrueba();
@@ -1455,6 +1482,31 @@ final class CarteleraTest extends TestCase
 
         $ficha = $this->pedir("/cartelera/{$funcionId}", [], ['X-Nginx-Secreto' => self::SECRETO, 'X-Usuario-Id' => $organizadorId, 'X-Rol' => 'organizador']);
         self::assertStringNotContainsString('data-formulario-votar-franja', $ficha->cuerpo());
+    }
+
+    /**
+     * F-01.4: el aviso del voto vuelve a la ficha firmado, y la ficha lo muestra. La misma dirección
+     * con otro texto, sin la firma o en otra función no muestra nada: si no, cualquiera armaría un
+     * link del sitio con el mensaje que quisiera.
+     */
+    public function testElAvisoDeLaFichaSoloSeMuestraConSuFirma(): void
+    {
+        [$funcionId, $organizadorId] = $this->funcionEnAcuerdo();
+        $organizador = ['X-Nginx-Secreto' => self::SECRETO, 'X-Usuario-Id' => $organizadorId, 'X-Rol' => 'organizador'];
+        $voto = $this->post("/cartelera/{$funcionId}/votar", ['franja_id' => 'franja-mock-0'], $organizadorId, 'organizador');
+        $direccion = $voto->cabecera('Location') ?? self::fail('El voto rechazado vuelve a la ficha.');
+        self::assertStringContainsString('firma=', $direccion);
+
+        self::assertStringContainsString('Sos el organizador de esta función', $this->pedir($direccion, [], $organizador)->cuerpo());
+
+        $inventado = "/cartelera/{$funcionId}?error_voto=" . rawurlencode('Tu cuenta fue suspendida: escribí a soporte@ejemplo.com');
+        self::assertStringNotContainsString('soporte@ejemplo.com', $this->pedir($inventado)->cuerpo());
+        $conFirmaAjena = $inventado . '&' . (string) parse_url($direccion, PHP_URL_QUERY);
+        self::assertStringNotContainsString('soporte@ejemplo.com', $this->pedir($conFirmaAjena)->cuerpo());
+
+        $otraFuncion = $this->base->fila('SELECT id FROM funcion WHERE id <> ? LIMIT 1', [$funcionId]) ?? self::fail();
+        $mismoAvisoEnOtra = str_replace($funcionId, (string) $otraFuncion['id'], $direccion);
+        self::assertStringNotContainsString('Sos el organizador de esta función', $this->pedir($mismoAvisoEnOtra, [], $organizador)->cuerpo());
     }
 
     /**

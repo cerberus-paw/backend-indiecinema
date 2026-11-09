@@ -17,6 +17,7 @@ use IndieCinema\Programacion\Modelo\Obra;
 use IndieCinema\Programacion\Modelo\ReglaIncumplida;
 use IndieCinema\Programacion\Modelo\Sala;
 use IndieCinema\Programacion\Servicios\AcuerdosDeFunciones;
+use IndieCinema\Programacion\Servicios\AvisosDeLaFicha;
 use IndieCinema\Programacion\Servicios\ReservasDeFunciones;
 use IndieCinema\Programacion\Servicios\ServicioDeFuncionesDelOrganizador;
 use LogicException;
@@ -32,6 +33,7 @@ final class FuncionesDelOrganizador extends Controlador
     public function __construct(
         private readonly ServicioDeFuncionesDelOrganizador $servicio,
         private readonly ReservasDeFunciones $reservas,
+        private readonly AvisosDeLaFicha $avisos,
     ) {
     }
 
@@ -51,8 +53,8 @@ final class FuncionesDelOrganizador extends Controlador
             // El aviso de que se acaba de programar una: sólo si lo que llega tiene forma de id.
             'programada' => is_string($programada = $peticion->consulta('programada')) && Uuid::esValido($programada),
             'cancelada' => $peticion->consulta('cancelada') === '1',
-            // Se canceló, pero funciones no respondió y sus reservas siguen confirmadas.
-            'reservas_pendientes' => $peticion->consulta('cancelada') === '1' && $peticion->consulta('reservas') === 'pendientes',
+            // No se pudo cancelar: funciones no respondió y la función quedó como estaba (F-01.7).
+            'cancelacion_fallida' => $peticion->consulta('cancelacion') === 'fallida',
             'votacion_cerrada' => $peticion->consulta('votacion_cerrada') === '1',
         ]);
     }
@@ -225,16 +227,20 @@ final class FuncionesDelOrganizador extends Controlador
 
         // Antes de cancelarla, para el aviso a los espectadores: el título y la fecha.
         $funcion = $this->servicio->paraCancelar($organizador, $id);
-        $this->servicio->cancelar($organizador, $id);
+        $anterior = $this->servicio->cancelar($organizador, $id);
 
         // Sólo una programada pudo tener reservas: en votación todavía no se reserva (E4-03.4).
+        // Si funciones no responde, sus reservas seguirían confirmadas en una función cancelada y
+        // sin aviso: la función vuelve a como estaba y el organizador lo intenta de nuevo (F-01.7).
         if ($funcion->estado === EstadoFuncion::Programada && !$this->reservas->cancelarDeLaFuncion(
             $id,
             $organizador->id,
             implode(' + ', $funcion->titulos),
             $funcion->fechaHora === null ? null : TarjetaDeFuncion::fecha($funcion->fechaHora),
         )) {
-            return $this->redirigir('/organizador/funciones?cancelada=1&reservas=pendientes');
+            $this->servicio->deshacerCancelacion($anterior);
+
+            return $this->redirigir('/organizador/funciones?cancelacion=fallida');
         }
 
         return $this->redirigir('/organizador/funciones?cancelada=1');
@@ -357,7 +363,7 @@ final class FuncionesDelOrganizador extends Controlador
             }
 
             // Un aviso propio: el de error_voto habla del voto del espectador (E3-13.F4).
-            return $this->redirigir("/cartelera/{$id}?error_acuerdo=" . rawurlencode($regla->getMessage()));
+            return $this->redirigir($this->avisos->direccion($id, AvisosDeLaFicha::ACUERDO, $regla->getMessage()));
         }
 
         if ($peticion->cabecera('Accept') === 'application/json' || $peticion->cabecera('Content-Type') === 'application/json') {
@@ -390,7 +396,7 @@ final class FuncionesDelOrganizador extends Controlador
             }
 
             // Un aviso propio: el de error_voto habla del voto del espectador (E3-13.F4).
-            return $this->redirigir("/cartelera/{$id}?error_acuerdo=" . rawurlencode($regla->getMessage()));
+            return $this->redirigir($this->avisos->direccion($id, AvisosDeLaFicha::ACUERDO, $regla->getMessage()));
         }
 
         if ($peticion->cabecera('Accept') === 'application/json' || $peticion->cabecera('Content-Type') === 'application/json') {

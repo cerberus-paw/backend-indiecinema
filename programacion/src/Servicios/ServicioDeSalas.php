@@ -14,6 +14,7 @@ use IndieCinema\Programacion\Modelo\FiltrosDeCartelera;
 use IndieCinema\Programacion\Modelo\ImagenSubida;
 use IndieCinema\Programacion\Modelo\Sala;
 use IndieCinema\Programacion\Repositorios\RepositorioDeCartelera;
+use IndieCinema\Programacion\Repositorios\RepositorioDeFunciones;
 use IndieCinema\Programacion\Repositorios\RepositorioDeSalas;
 use Psr\Log\LoggerInterface;
 use Throwable;
@@ -29,7 +30,17 @@ final class ServicioDeSalas
         private readonly ArchivosDeSalas $archivos,
         private readonly LoggerInterface $log,
         private readonly RepositorioDeCartelera $cartelera,
+        private readonly RepositorioDeFunciones $funciones,
     ) {
+    }
+
+    /**
+     * Lo menos que puede tener de capacidad la sala: el mayor cupo de sus funciones que siguen
+     * abiertas (F-01.1). Si no, una función quedaba con más lugares que butacas.
+     */
+    public function capacidadMinima(Sala $sala): int
+    {
+        return $this->funciones->mayorCupoAbierto($sala->id);
     }
 
     /**

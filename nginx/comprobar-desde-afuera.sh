@@ -6,7 +6,10 @@
 # y que muchas búsquedas o reservas seguidas den 429. Esas pruebas gastan el límite de la IP que
 # corre el script: si se repite antes de un minuto, las ráfagas encuentran el límite ya gastado.
 #
-# Uso: nginx/comprobar-desde-afuera.sh [http://localhost:8080]
+# Con SIN_SUBSISTEMAS=1, como en la CI, donde corre nginx solo, comprueba además que un subsistema
+# que no contesta da la página propia y no la de nginx.
+#
+# Uso: [SIN_SUBSISTEMAS=1] nginx/comprobar-desde-afuera.sh [http://localhost:8080]
 set -u
 
 base=${1:-http://localhost:8080}
@@ -112,10 +115,34 @@ espera 404 /funcion/./interno/estado
 espera 404 /funcion/x/../interno/estado
 espera 404 /cuenta/%2e/interno/sesion
 
-echo "El auth_request y la respuesta del 429 tampoco se pueden pedir directo:"
+echo "El auth_request y las respuestas de error de nginx tampoco se pueden pedir directo:"
 espera 404 /_sesion
 espera 404 /_demasiados/json
 espera 404 /_demasiados/html
+espera 404 /_sin_servicio/json
+espera 404 /_sin_servicio/html
+
+# sin_servicio <tipo> [Accept]: con los subsistemas apagados, la portada responde 503 con ese
+# tipo, el mensaje para el visitante y la Content-Security-Policy, y no la página de nginx (F-01.7).
+sin_servicio() {
+	local dir estado tipo
+	dir=$(mktemp -d)
+	estado=$(curl -s -H "Accept: ${2:-text/html}" -o "$dir/cuerpo" -D "$dir/cabeceras" -w '%{http_code}' "$base/")
+	tipo=$(grep -i '^content-type:' "$dir/cabeceras" | cut -d' ' -f2- | tr -d '\r')
+	if [[ $estado == 503 && $tipo == "$1"* ]] && grep -qi '^content-security-policy:' "$dir/cabeceras" \
+		&& grep -q 'El sitio no está respondiendo como debería. Probá de nuevo en unos minutos.' "$dir/cuerpo"; then
+		printf '  ✔ 503 / (%s)\n' "$1"
+	else
+		printf '  ✘ %s / «%s» (se esperaba 503 %s con el mensaje y la CSP)\n' "$estado" "$tipo" "$1"
+		fallas=$((fallas + 1))
+	fi
+	rm -rf "$dir"
+}
+if [[ -n ${SIN_SUBSISTEMAS:-} ]]; then
+	echo "Sin los subsistemas, la página propia y no la de nginx:"
+	sin_servicio text/html
+	sin_servicio application/json application/json
+fi
 
 echo "/funcion sin la barra va a /funcion/:"
 espera 301 /funcion /funcion/

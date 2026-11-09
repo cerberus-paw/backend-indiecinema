@@ -20,6 +20,7 @@ use IndieCinema\Programacion\Modelo\Genero;
 use IndieCinema\Programacion\Modelo\ObraEnDetalle;
 use IndieCinema\Programacion\Modelo\OrdenDeCartelera;
 use IndieCinema\Programacion\Modelo\ReglaIncumplida;
+use IndieCinema\Programacion\Servicios\AvisosDeLaFicha;
 use IndieCinema\Programacion\Servicios\OcupacionDeFunciones;
 use IndieCinema\Programacion\Servicios\ServicioDeCartelera;
 
@@ -39,6 +40,7 @@ final class Cartelera extends Controlador
     public function __construct(
         private readonly ServicioDeCartelera $servicio,
         private readonly OcupacionDeFunciones $ocupacion,
+        private readonly AvisosDeLaFicha $avisos,
     ) {
     }
 
@@ -246,10 +248,12 @@ final class Cartelera extends Controlador
             'votado' => $peticion->consulta('votado') === '1',
             'franja_votada' => $peticion->consulta('votado') === '1',
             'franja_quitada' => $peticion->consulta('quitado') === '1',
-            'error_voto' => $peticion->consulta('error_voto'),
-            'error_franja' => $peticion->consulta('error_voto'),
+            // Los avisos de error, sólo si la firma es la de ese texto para esta función: si no,
+            // cualquiera armaría un link con el mensaje que quisiera (F-01.4).
+            'error_voto' => $this->avisos->leer($peticion, $detalle->id, AvisosDeLaFicha::VOTO),
+            'error_franja' => $this->avisos->leer($peticion, $detalle->id, AvisosDeLaFicha::VOTO),
             // Lo que no salió al confirmar o cerrar el acuerdo: sólo se le muestra al organizador.
-            'error_acuerdo' => $esPropia ? $peticion->consulta('error_acuerdo') : null,
+            'error_acuerdo' => $esPropia ? $this->avisos->leer($peticion, $detalle->id, AvisosDeLaFicha::ACUERDO) : null,
             'votacion_cerrada' => $esPropia && $peticion->consulta('votacion_cerrada') === '1',
             // El aviso de que se acaba de guardar: sólo para el organizador que la editó. La ficha
             // es pública, y si no, lo vería cualquiera que abra el enlace con el parámetro puesto.
@@ -358,7 +362,7 @@ final class Cartelera extends Controlador
                 return $this->json(['error' => $regla->getMessage()], 422);
             }
 
-            return $this->redirigir("/cartelera/{$id}?error_voto=" . rawurlencode($regla->getMessage()));
+            return $this->redirigir($this->avisos->direccion($id, AvisosDeLaFicha::VOTO, $regla->getMessage()));
         }
 
         if ($peticion->cabecera('Accept') === 'application/json' || $peticion->cabecera('Content-Type') === 'application/json') {

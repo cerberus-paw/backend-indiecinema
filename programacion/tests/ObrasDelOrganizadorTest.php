@@ -25,6 +25,7 @@ use IndieCinema\Programacion\Pruebas\Dobles\Imagenes;
 use IndieCinema\Programacion\Repositorios\RepositorioDeObras;
 use IndieCinema\Programacion\Repositorios\RepositorioDeSalas;
 use PHPUnit\Framework\TestCase;
+use IndieCinema\Nucleo\Pruebas\Dobles\PaginasParaValidar;
 
 final class ObrasDelOrganizadorTest extends TestCase
 {
@@ -102,7 +103,7 @@ final class ObrasDelOrganizadorTest extends TestCase
         [$camino, $consulta] = explode('?', $ruta, 2) + [1 => ''];
         parse_str($consulta, $parametros);
 
-        return $aplicacion->atender(new Peticion(
+        return PaginasParaValidar::anotar($metodo, $ruta, $aplicacion->atender(new Peticion(
             $metodo,
             $camino,
             $parametros,
@@ -110,7 +111,7 @@ final class ObrasDelOrganizadorTest extends TestCase
             $cabeceras,
             ['csrf' => self::CSRF],
             $archivos,
-        ));
+        )));
     }
 
     /** La base de prueba arranca sin géneros: se crea «Drama» la primera vez que se pide. */

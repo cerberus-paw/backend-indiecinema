@@ -102,20 +102,18 @@ final class Funcion
     }
 
     /**
-     * Si la ficha ofrece reservar (E4-01): mientras no se canceló ni se dio, aunque todavía no
-     * tenga fecha. La que decide es la reserva, en funciones, con la misma regla; esto sólo evita
-     * mostrar un formulario que no va a andar. Es estático por lo mismo que seEdita().
+     * Si la ficha ofrece reservar: sólo una programada que todavía no empezó, la misma regla que
+     * seEdita() (F-01.2). Hasta la E4-01 también en votación o en acuerdo de fecha, aunque no
+     * tuviera fecha, y se reservaba algo que quizás no se daba. La que decide es la reserva, en
+     * funciones, con la misma regla (FuncionDeProgramacion::motivoParaNoReservar()); esto sólo
+     * evita mostrar un formulario que no va a andar. Es estático por lo mismo que seEdita().
      */
     public static function seReserva(
         EstadoFuncion $estado,
         ?DateTimeImmutable $fechaHora,
         DateTimeImmutable $ahora = new DateTimeImmutable(),
     ): bool {
-        if (!in_array($estado, [EstadoFuncion::EnVotacionTitulos, EstadoFuncion::EnAcuerdoFecha, EstadoFuncion::Programada], true)) {
-            return false;
-        }
-
-        return $fechaHora === null || $fechaHora > $ahora;
+        return $estado === EstadoFuncion::Programada && $fechaHora !== null && $fechaHora > $ahora;
     }
 
     /**

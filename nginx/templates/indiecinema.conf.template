@@ -44,9 +44,10 @@ map $request_method $ip_si_es_lectura {
 }
 limit_req_zone $ip_si_es_lectura zone=busqueda:10m rate=120r/m;
 
-# Con qué responde quien se pasa de un límite (sitio.inc): JSON al JavaScript que lo pide, como el
-# formulario de reserva, y una página al navegador.
-map $http_accept $formato_del_429 {
+# Con qué responde nginx cuando el error es suyo (sitio.inc): quien se pasa de un límite o un
+# subsistema que no contesta. JSON al JavaScript que lo pide, como el formulario de reserva, y una
+# página al navegador.
+map $http_accept $formato_de_error {
     ~application/json json;
     default html;
 }

@@ -104,7 +104,7 @@ final class ReservasTest extends TestCase
 
         parse_str((string) parse_url($ruta, PHP_URL_QUERY), $consulta);
 
-        return $aplicacion->atender(new Peticion($metodo, (string) parse_url($ruta, PHP_URL_PATH), $consulta, $cuerpo, $cabeceras, ['csrf' => self::CSRF], []));
+        return PaginasParaValidar::anotar($metodo, $ruta, $aplicacion->atender(new Peticion($metodo, (string) parse_url($ruta, PHP_URL_PATH), $consulta, $cuerpo, $cabeceras, ['csrf' => self::CSRF], [])));
     }
 
     private function reservar(string $cantidad, string $funcion = self::PROXIMA, ?string $usuario = self::EVA): Respuesta
@@ -521,16 +521,17 @@ final class ReservasTest extends TestCase
     }
 
     /**
-     * Mientras se votan los títulos la función no tiene fecha, y ya se puede reservar.
+     * F-01.2: mientras se votan los títulos la función no tiene fecha, y no se reserva, tampoco
+     * con un POST directo: vuelve el motivo, no se guarda nada y no sale ningún correo.
      */
-    public function testSinFechaElCorreoLaDaAConfirmarYNombraLasCandidatas(): void
+    public function testSinFechaNoSeReservaNiPorLaApi(): void
     {
-        self::assertSame(303, $this->reservar('1', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb')->estado());
+        $respuesta = $this->reservar('1', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb');
 
-        $correo = $this->correos()[0];
-        self::assertSame('Reserva confirmada: «La ciénaga + Zama»', $correo['asunto']);
-        self::assertStringContainsString("Fecha: a confirmar\n", $correo['texto']);
-        self::assertStringContainsString("Lugares: 1 lugar\n", $correo['texto']);
+        self::assertSame(422, $respuesta->estado());
+        self::assertStringContainsString('La función todavía no tiene fecha confirmada', $respuesta->cuerpo());
+        self::assertSame(0, (int) $this->base->valor("SELECT COUNT(*) FROM reserva WHERE funcion_id = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'"));
+        self::assertSame([], $this->correos());
     }
 
     // ---- «Mis reservas» (E4-04.1) -----------------------------------------------------------

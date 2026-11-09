@@ -18,6 +18,7 @@ use IndieCinema\Programacion\Pruebas\Controladores\FormularioDeSalaTest;
 use IndieCinema\Programacion\Pruebas\Dobles\Imagenes;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use IndieCinema\Nucleo\Pruebas\Dobles\PaginasParaValidar;
 
 /**
  * La solicitud de sala de punta a punta: la aplicación entera con las rutas de programación, las
@@ -105,7 +106,7 @@ final class SolicitudDeSalaTest extends TestCase
         ];
         $aplicacion = new Aplicacion(dirname(__DIR__), $configuracion ?? $this->configuracion(), new Log('programacion', $this->salidaDelLog));
 
-        return $aplicacion->atender(new Peticion($metodo, (string) parse_url($url, PHP_URL_PATH), $consulta, $cuerpo, $cabeceras, ['csrf' => self::CSRF], $archivos));
+        return PaginasParaValidar::anotar($metodo, $url, $aplicacion->atender(new Peticion($metodo, (string) parse_url($url, PHP_URL_PATH), $consulta, $cuerpo, $cabeceras, ['csrf' => self::CSRF], $archivos)));
     }
 
     /**

@@ -13,7 +13,7 @@ use DateTimeImmutable;
  */
 final readonly class FuncionDeProgramacion
 {
-    /** Los estados de programación en los que todavía se puede reservar o acordar la fecha. */
+    /** Los estados de programación en los que la función sigue abierta: en votación, en acuerdo o programada. */
     private const EN_CURSO = ['en_votacion_titulos', 'en_acuerdo_fecha', 'programada'];
 
     /**
@@ -49,16 +49,22 @@ final readonly class FuncionDeProgramacion
     }
 
     /**
-     * Por qué ya no se puede reservar, para decírselo al espectador; null si se puede. Se puede
-     * mientras no se canceló ni empezó, aunque todavía no tenga fecha.
+     * Por qué no se puede reservar, para decírselo al espectador; null si se puede. Se puede sólo una
+     * programada que todavía no empezó (F-01.2). Hasta la E4-01 también se podía en votación de
+     * títulos o en acuerdo de fecha, «aunque todavía no tenga fecha»: se reservaba una función que
+     * quizás nunca se daba, o se daba con otra película o en otro horario, y por la API quedaba
+     * abierto aunque la ficha no lo ofreciera.
      */
     public function motivoParaNoReservar(DateTimeImmutable $ahora = new DateTimeImmutable()): ?string
     {
         if ($this->estado === 'cancelada') {
             return 'La función se canceló: ya no se puede reservar.';
         }
+        if ($this->salaHabilitada && in_array($this->estado, ['en_votacion_titulos', 'en_acuerdo_fecha'], true)) {
+            return 'La función todavía no tiene fecha confirmada: se va a poder reservar cuando se programe.';
+        }
         // Una programada cuya hora ya pasó ya empezó, aunque nada la haya pasado a finalizada.
-        if (!$this->estaEnCurso() || ($this->fechaHora !== null && $this->fechaHora <= $ahora)) {
+        if ($this->estado !== 'programada' || !$this->salaHabilitada || $this->fechaHora === null || $this->fechaHora <= $ahora) {
             return 'La función ya empezó: ya no se puede reservar.';
         }
 

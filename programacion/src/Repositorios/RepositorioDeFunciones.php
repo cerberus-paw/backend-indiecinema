@@ -143,6 +143,20 @@ final class RepositorioDeFunciones
     }
 
     /**
+     * El mayor cupo entre las funciones de la sala que siguen abiertas (en votación, en acuerdo de
+     * fecha o programadas que todavía no se dieron): la capacidad de la sala no puede bajar de ahí,
+     * porque el cupo de una función nunca supera la capacidad de su sala (F-01.1). 0 si no tiene.
+     */
+    public function mayorCupoAbierto(string $salaId, DateTimeImmutable $ahora = new DateTimeImmutable()): int
+    {
+        return (int) $this->base->valor(
+            'SELECT COALESCE(MAX(cupo), 0) FROM funcion
+             WHERE sala_id = ? AND estado IN (?, ?, ?) AND (fecha_hora IS NULL OR fecha_hora > ?)',
+            [$salaId, EstadoFuncion::EnVotacionTitulos, EstadoFuncion::EnAcuerdoFecha, EstadoFuncion::Programada, $ahora],
+        );
+    }
+
+    /**
      * Desde y hasta cuándo va cada función programada de la sala: lo que duran sus obras elegidas.
      * Las canceladas no ocupan la sala, y las que todavía no tienen fecha tampoco.
      *

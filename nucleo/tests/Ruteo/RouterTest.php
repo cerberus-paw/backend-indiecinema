@@ -91,6 +91,37 @@ final class RouterTest extends TestCase
         $this->router->interna('GET', '/sesion', [ControladorDePrueba::class, 'hola'], ['nginx']);
     }
 
+    /**
+     * Lo llama un servicio de afuera (X-01.4): un POST sin rol, marcado para que no pida el token
+     * CSRF.
+     */
+    public function testUnWebhookEsUnPostDeVisitante(): void
+    {
+        $this->router->webhook('/pagos/aviso', [ControladorDePrueba::class, 'hola']);
+
+        [$ruta] = $this->router->resolver('POST', '/pagos/aviso');
+
+        self::assertTrue($ruta->webhook);
+        self::assertSame(Rol::Visitante, $ruta->rolMinimo);
+        self::assertFalse($ruta->esInterna());
+        $this->expectException(ExcepcionHttp::class);
+        $this->router->resolver('GET', '/pagos/aviso');
+    }
+
+    public function testUnaRutaComunNoEsWebhook(): void
+    {
+        [$ruta] = $this->router->resolver('POST', '/salas');
+
+        self::assertFalse($ruta->webhook);
+    }
+
+    public function testUnWebhookNoPuedeSerInterno(): void
+    {
+        $this->expectException(LogicException::class);
+
+        $this->router->webhook('/interno/pagos', [ControladorDePrueba::class, 'hola']);
+    }
+
     public function testInternaGuardaSusLlamadores(): void
     {
         $this->router->interna('get', '/interno/sesion', [ControladorDePrueba::class, 'hola'], ['nginx']);

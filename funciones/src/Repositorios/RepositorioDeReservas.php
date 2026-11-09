@@ -147,6 +147,7 @@ final class RepositorioDeReservas
             $fila['vence_en'] === null ? null : new DateTimeImmutable($fila['vence_en'], new DateTimeZone('UTC')),
             $fila['preferencia_id'],
             $fila['enlace_de_pago'],
+            $fila['pago_id'],
         );
     }
 
@@ -180,14 +181,50 @@ final class RepositorioDeReservas
                 [$reserva->estado, $reserva->id, $anterior],
             ) === 1;
             if ($cambio) {
-                $this->base->ejecutar(
-                    'INSERT INTO cambio_reserva (reserva_id, estado_anterior, estado_nuevo, autor_id, autor_rol, motivo, hecho_en) VALUES (?, ?, ?, ?, ?, ?, ?)',
-                    [$reserva->id, $anterior, $reserva->estado, $autor->id, $autor->rol->value, $autor->motivo, $ahora->setTimezone(new DateTimeZone('UTC'))],
-                );
+                $this->anotarCambio($reserva, $anterior, $autor, $ahora);
             }
 
             return $cambio;
         });
+    }
+
+    /**
+     * Confirma la reserva con el pago que la pagó (X-01.4), si todavía está pendiente: es
+     * guardarEstado() con el pago. Si llegan dos avisos del mismo pago a la vez, el primero la
+     * confirma y el segundo no encuentra nada pendiente; y como pago_id es único, un pago no
+     * confirma dos reservas.
+     *
+     * @return bool false si ya no estaba pendiente o el pago ya confirmó otra, y entonces no
+     *              guardó nada
+     */
+    public function guardarPago(Reserva $confirmada, AutorDelCambio $autor, DateTimeImmutable $ahora = new DateTimeImmutable()): bool
+    {
+        try {
+            return $this->base->enTransaccion(function () use ($confirmada, $autor, $ahora): bool {
+                $cambio = $this->base->ejecutar(
+                    'UPDATE reserva SET estado = ?, pago_id = ? WHERE id = ? AND estado = ?',
+                    [$confirmada->estado, $confirmada->pagoId, $confirmada->id, EstadoReserva::PendientePago],
+                ) === 1;
+                if ($cambio) {
+                    $this->anotarCambio($confirmada, EstadoReserva::PendientePago, $autor, $ahora);
+                }
+
+                return $cambio;
+            });
+        } catch (PDOException $error) {
+            if (($error->errorInfo[1] ?? null) === self::CLAVE_DUPLICADA) {
+                return false;
+            }
+            throw $error;
+        }
+    }
+
+    private function anotarCambio(Reserva $reserva, EstadoReserva $anterior, AutorDelCambio $autor, DateTimeImmutable $ahora): void
+    {
+        $this->base->ejecutar(
+            'INSERT INTO cambio_reserva (reserva_id, estado_anterior, estado_nuevo, autor_id, autor_rol, motivo, hecho_en) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            [$reserva->id, $anterior, $reserva->estado, $autor->id, $autor->rol->value, $autor->motivo, $ahora->setTimezone(new DateTimeZone('UTC'))],
+        );
     }
 
     /**

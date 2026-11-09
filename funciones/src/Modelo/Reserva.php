@@ -34,6 +34,7 @@ final readonly class Reserva
      * @param ?DateTimeImmutable $venceEn       hasta cuándo se puede pagar, en UTC; sólo las pendientes de pago
      * @param ?string            $preferenciaId la preferencia de Checkout Pro, una vez creada
      * @param ?string            $enlaceDePago  adónde va el espectador a pagarla (su init_point)
+     * @param ?string            $pagoId        el pago de Mercado Pago que la confirmó
      */
     public function __construct(
         public string $id,
@@ -47,6 +48,7 @@ final readonly class Reserva
         public ?DateTimeImmutable $venceEn = null,
         public ?string $preferenciaId = null,
         public ?string $enlaceDePago = null,
+        public ?string $pagoId = null,
     ) {
     }
 
@@ -107,7 +109,7 @@ final readonly class Reserva
      */
     public function conPreferencia(string $preferenciaId, string $enlaceDePago): self
     {
-        return new self($this->id, $this->funcionId, $this->usuarioId, $this->codigo, $this->cantidad, $this->total, $this->estado, $this->creadaEn, $this->venceEn, $preferenciaId, $enlaceDePago);
+        return new self($this->id, $this->funcionId, $this->usuarioId, $this->codigo, $this->cantidad, $this->total, $this->estado, $this->creadaEn, $this->venceEn, $preferenciaId, $enlaceDePago, $this->pagoId);
     }
 
     /**
@@ -119,6 +121,22 @@ final readonly class Reserva
     public function cancelar(): self
     {
         return $this->pasarA(EstadoReserva::Cancelada);
+    }
+
+    /**
+     * La reserva pagada (X-01.4): la confirma el pago aprobado que avisó Mercado Pago, y queda
+     * anotado cuál, para no procesarlo dos veces.
+     *
+     * @throws ReglaIncumplida si no está pendiente de pago
+     */
+    public function confirmarPago(string $pagoId): self
+    {
+        if ($this->estado !== EstadoReserva::PendientePago) {
+            throw new ReglaIncumplida("Una reserva {$this->estado->etiqueta()} no espera ningún pago.");
+        }
+        $confirmada = $this->pasarA(EstadoReserva::Confirmada);
+
+        return new self($confirmada->id, $confirmada->funcionId, $confirmada->usuarioId, $confirmada->codigo, $confirmada->cantidad, $confirmada->total, $confirmada->estado, $confirmada->creadaEn, $confirmada->venceEn, $confirmada->preferenciaId, $confirmada->enlaceDePago, $pagoId);
     }
 
     /**
@@ -136,7 +154,7 @@ final readonly class Reserva
      */
     public function conOtroCodigo(): self
     {
-        return new self($this->id, $this->funcionId, $this->usuarioId, self::nuevoCodigo(), $this->cantidad, $this->total, $this->estado, $this->creadaEn, $this->venceEn, $this->preferenciaId, $this->enlaceDePago);
+        return new self($this->id, $this->funcionId, $this->usuarioId, self::nuevoCodigo(), $this->cantidad, $this->total, $this->estado, $this->creadaEn, $this->venceEn, $this->preferenciaId, $this->enlaceDePago, $this->pagoId);
     }
 
     /**
@@ -148,7 +166,7 @@ final readonly class Reserva
             throw new ReglaIncumplida("Una reserva {$this->estado->etiqueta()} no puede quedar {$siguiente->etiqueta()}.");
         }
 
-        return new self($this->id, $this->funcionId, $this->usuarioId, $this->codigo, $this->cantidad, $this->total, $siguiente, $this->creadaEn, $this->venceEn, $this->preferenciaId, $this->enlaceDePago);
+        return new self($this->id, $this->funcionId, $this->usuarioId, $this->codigo, $this->cantidad, $this->total, $siguiente, $this->creadaEn, $this->venceEn, $this->preferenciaId, $this->enlaceDePago, $this->pagoId);
     }
 
     /**

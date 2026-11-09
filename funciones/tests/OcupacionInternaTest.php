@@ -84,7 +84,7 @@ final class OcupacionInternaTest extends TestCase
     public function testDeUnaFuncionCuentaLasConfirmadasYLasConAsistencia(): void
     {
         self::assertSame(
-            ['funcion_id' => self::FUNCION, 'lugares_ocupados' => 5],
+            ['funcion_id' => self::FUNCION, 'lugares_ocupados' => 5, 'maximo_por_persona' => 6],
             self::json($this->pedir('/interno/funciones/' . self::FUNCION . '/ocupacion')),
         );
     }

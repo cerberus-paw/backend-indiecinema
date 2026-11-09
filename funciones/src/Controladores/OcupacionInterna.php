@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace IndieCinema\Funciones\Controladores;
 
+use IndieCinema\Funciones\Modelo\Reserva;
 use IndieCinema\Funciones\Repositorios\RepositorioDeReservas;
 use IndieCinema\Nucleo\Controlador;
 use IndieCinema\Nucleo\Http\ExcepcionHttp;
@@ -29,7 +30,8 @@ final class OcupacionInterna extends Controlador
     }
 
     /**
-     * GET /interno/funciones/{id}/ocupacion, para la ficha. Si viene el usuario, devuelve además
+     * GET /interno/funciones/{id}/ocupacion, para la ficha. Trae también el tope de lugares por
+     * persona, para que programación no tenga su propia copia del número, y si viene el usuario,
      * cuántos lugares ya tiene reservados él (IC-463).
      *
      * @throws ExcepcionHttp 404 si el id no es un UUID
@@ -41,7 +43,11 @@ final class OcupacionInterna extends Controlador
             throw ExcepcionHttp::noEncontrada();
         }
 
-        $datos = ['funcion_id' => $id, 'lugares_ocupados' => $this->reservas->lugaresOcupados($id)];
+        $datos = [
+            'funcion_id' => $id,
+            'lugares_ocupados' => $this->reservas->lugaresOcupados($id),
+            'maximo_por_persona' => Reserva::MAXIMO_POR_PERSONA,
+        ];
         $usuario = $peticion->consulta('usuario');
         if (is_string($usuario) && Uuid::esValido($usuario)) {
             $datos['lugares_del_usuario'] = $this->reservas->lugaresOcupadosPorUsuario($id, $usuario);

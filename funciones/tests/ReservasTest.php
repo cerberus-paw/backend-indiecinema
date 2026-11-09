@@ -270,9 +270,9 @@ final class ReservasTest extends TestCase
             $respuesta = $this->reservar($cantidad);
 
             self::assertSame(422, $respuesta->estado(), "Aceptó «{$cantidad}».");
-            self::assertStringContainsString('Ingresá entre 1 y 40 lugares.', $respuesta->cuerpo());
+            self::assertStringContainsString('Ingresá entre 1 y 6 lugares.', $respuesta->cuerpo());
             // Arriba, el resumen con el link a la cantidad (E4-10.5).
-            self::assertSame(['#cantidad' => 'Ingresá entre 1 y 40 lugares.'], Formularios::resumen($respuesta->cuerpo())['enlaces'] ?? null);
+            self::assertSame(['#cantidad' => 'Ingresá entre 1 y 6 lugares.'], Formularios::resumen($respuesta->cuerpo())['enlaces'] ?? null);
         }
         self::assertSame(0, $this->reservas());
     }
@@ -767,7 +767,7 @@ final class ReservasTest extends TestCase
             $respuesta = $this->reservarEnJson($cantidad);
 
             self::assertSame(422, $respuesta->estado(), "Aceptó «{$cantidad}».");
-            self::assertSame('Ingresá entre 1 y 40 lugares.', self::json($respuesta)['errores']['cantidad']);
+            self::assertSame('Ingresá entre 1 y 6 lugares.', self::json($respuesta)['errores']['cantidad']);
         }
         self::assertSame(0, $this->reservas());
     }

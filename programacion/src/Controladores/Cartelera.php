@@ -286,31 +286,34 @@ final class Cartelera extends Controlador
     }
 
     /**
-     * Los lugares libres de una función, si está agotada y el máximo que puede reservar el espectador.
+     * Los lugares libres de una función, si está agotada y lo que puede reservar el espectador.
+     * Sólo de una programada por darse se pregunta: en otro estado no hay reservas que contar, y
+     * una que ya pasó no está «agotada» aunque se hayan tomado todos los lugares. El tope por
+     * persona lo manda funciones con la ocupación, así el número está en un solo lugar (IC-463).
+     * Sin el dato de funciones, todo null: la ficha deja el campo hasta el cupo y la reserva la
+     * controla funciones igual.
      *
-     * @return array{lugares_libres: ?int, agotada: bool, maximo_por_persona: int, lugares_restantes_usuario: int, maximo_reserva: int}
+     * @return array{lugares_libres: ?int, agotada: bool, maximo_por_persona: ?int, lugares_restantes_usuario: ?int, maximo_reserva: ?int}
      */
     private function lugaresDe(CupoDeFuncion $funcion, ?string $usuarioId = null): array
     {
-        $maximoPorPersona = min(Funcion::MAXIMO_POR_PERSONA, $funcion->cupo);
         $ocupacion = TarjetaDeFuncion::muestraLugares($funcion->estado, $funcion->fechaHora)
             ? $this->ocupacion->deUnaParaUsuario($funcion->id, $usuarioId)
             : null;
+        $libres = TarjetaDeFuncion::lugaresLibres($funcion->estado, $funcion->fechaHora, $funcion->cupo, $ocupacion['ocupados'] ?? null);
+        if ($ocupacion === null || $libres === null) {
+            return ['lugares_libres' => null, 'agotada' => false, 'maximo_por_persona' => null, 'lugares_restantes_usuario' => null, 'maximo_reserva' => null];
+        }
 
-        $libres = $ocupacion !== null
-            ? TarjetaDeFuncion::lugaresLibres($funcion->estado, $funcion->fechaHora, $funcion->cupo, $ocupacion['ocupados'])
-            : null;
-
-        $delUsuario = $ocupacion['del_usuario'] ?? 0;
-        $restantesUsuario = max(0, $maximoPorPersona - $delUsuario);
-        $maximoReserva = $libres !== null ? min($libres, $restantesUsuario) : $restantesUsuario;
+        $maximoPorPersona = min($ocupacion['maximo_por_persona'], $funcion->cupo);
+        $restantesUsuario = max(0, $maximoPorPersona - $ocupacion['del_usuario']);
 
         return [
             'lugares_libres' => $libres,
             'agotada' => $libres === 0,
             'maximo_por_persona' => $maximoPorPersona,
             'lugares_restantes_usuario' => $restantesUsuario,
-            'maximo_reserva' => $maximoReserva,
+            'maximo_reserva' => min($libres, $restantesUsuario),
         ];
     }
 

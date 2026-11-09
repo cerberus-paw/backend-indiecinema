@@ -117,9 +117,11 @@ final class Reservas extends Controlador
         $valor = is_string($valor) ? trim($valor) : '';
 
         // Entero y dentro del cupo, como el min y el max del campo: el navegador controla lo mismo.
+        // El mensaje nombra el tope por persona y no el cupo: es lo más que se puede pedir, y si
+        // pide de más, el servicio le dice cuánto le queda (IC-463).
         $cantidad = filter_var($valor, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1, 'max_range' => $funcion->cupo]]);
         if ($cantidad === false) {
-            $mensaje = "Ingresá entre 1 y {$funcion->cupo} lugares.";
+            $mensaje = 'Ingresá entre 1 y ' . ServicioDeReservas::maximoPorPersona($funcion) . ' lugares.';
 
             return $enJson
                 ? $this->json(['errores' => ['cantidad' => $mensaje], ...$this->lugaresDe($funcion, $usuario)], 422)

@@ -154,9 +154,9 @@ final class ServicioDeReservas
      * Es lo que funciones sabe de la función; si está «agotada» para mostrar lo decide
      * programación, que es la que conoce el estado y la fecha.
      */
-    public function lugaresLibres(FuncionDeProgramacion $funcion): int
+    public function lugaresLibres(FuncionDeProgramacion $funcion, DateTimeImmutable $ahora = new DateTimeImmutable()): int
     {
-        return max(0, $funcion->cupo - $this->reservas->lugaresOcupados($funcion->id));
+        return max(0, $funcion->cupo - $this->reservas->lugaresOcupados($funcion->id, $ahora));
     }
 
     /**
@@ -185,7 +185,7 @@ final class ServicioDeReservas
     ): Reserva {
         $funcion = $this->funcion($funcionId);
         $reserva = Reserva::nueva($funcion, $espectador->id, $cantidad, $ahora, $this->pagos?->minutosParaPagar());
-        $reserva = $this->agregar($funcion, $reserva);
+        $reserva = $this->agregar($funcion, $reserva, $ahora);
         if ($reserva->estado !== EstadoReserva::PendientePago || $this->pagos === null) {
             return $reserva;
         }
@@ -212,10 +212,10 @@ final class ServicioDeReservas
      *
      * @throws ExcepcionHttp 503 si la función queda bloqueada demasiado
      */
-    private function agregar(FuncionDeProgramacion $funcion, Reserva $reserva): Reserva
+    private function agregar(FuncionDeProgramacion $funcion, Reserva $reserva, DateTimeImmutable $ahora): Reserva
     {
-        return $this->reservas->conLaFuncionBloqueada($funcion->id, function () use ($funcion, $reserva): Reserva {
-            $libres = $this->lugaresLibres($funcion);
+        return $this->reservas->conLaFuncionBloqueada($funcion->id, function () use ($funcion, $reserva, $ahora): Reserva {
+            $libres = $this->lugaresLibres($funcion, $ahora);
             if ($reserva->cantidad > $libres) {
                 throw new ReglaIncumplida(match ($libres) {
                     0 => 'La función está agotada.',

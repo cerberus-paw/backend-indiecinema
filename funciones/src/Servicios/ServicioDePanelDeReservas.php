@@ -168,9 +168,10 @@ final class ServicioDePanelDeReservas
      *
      * @return array{reservados: int, libres: int, asistentes: int, recaudado: float, reservas: int}
      */
-    public static function resumen(FuncionDeProgramacion $funcion, array $reservas): array
+    public static function resumen(FuncionDeProgramacion $funcion, array $reservas, DateTimeImmutable $ahora = new DateTimeImmutable()): array
     {
-        $enPie = array_values(array_filter($reservas, static fn (Reserva $reserva): bool => $reserva->estado->ocupaLugares()));
+        // Una pendiente que venció ya no retiene sus lugares, aunque la tarea no la haya cancelado.
+        $enPie = array_values(array_filter($reservas, static fn (Reserva $reserva): bool => $reserva->estado->ocupaLugares() && !$reserva->vencida($ahora)));
         $reservados = array_sum(array_map(static fn (Reserva $reserva): int => $reserva->cantidad, $enPie));
 
         return [

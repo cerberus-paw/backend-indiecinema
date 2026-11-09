@@ -61,17 +61,39 @@ final class RepositorioDeReservas
     }
 
     /**
-     * Los lugares que ocupan las reservas de la función: las confirmadas y las de quienes ya
-     * entraron (EstadoReserva::ocupaLugares()).
+     * Los lugares que ocupan las reservas de la función: las confirmadas, las de quienes ya
+     * entraron y las que esperan el pago, mientras estén a tiempo (EstadoReserva::ocupaLugares()).
+     *
+     * Una pendiente vencida deja de ocupar sus lugares en el momento en que vence, aunque la tarea
+     * que la cancela (bin/liberar-vencidas.php) todavía no haya pasado (X-01.5): así el cupo nunca
+     * depende de cada cuánto corre el cron.
      */
-    public function lugaresOcupados(string $funcionId): int
+    public function lugaresOcupados(string $funcionId, DateTimeImmutable $ahora = new DateTimeImmutable()): int
     {
-        $ocupan = array_values(array_filter(EstadoReserva::cases(), static fn (EstadoReserva $estado): bool => $estado->ocupaLugares()));
+        [$condicion, $parametros] = self::queOcupan($ahora);
 
         return (int) $this->base->valor(
-            'SELECT COALESCE(SUM(cantidad), 0) FROM reserva WHERE funcion_id = ? AND estado IN (' . implode(', ', array_fill(0, count($ocupan), '?')) . ')',
-            [$funcionId, ...$ocupan],
+            "SELECT COALESCE(SUM(cantidad), 0) FROM reserva WHERE funcion_id = ? AND {$condicion}",
+            [$funcionId, ...$parametros],
         );
+    }
+
+    /**
+     * La condición de las reservas que ocupan lugares ahora, con sus parámetros.
+     *
+     * @return array{string, list<mixed>}
+     */
+    private static function queOcupan(DateTimeImmutable $ahora): array
+    {
+        $sinVencer = array_values(array_filter(
+            EstadoReserva::cases(),
+            static fn (EstadoReserva $estado): bool => $estado->ocupaLugares() && $estado !== EstadoReserva::PendientePago,
+        ));
+
+        return [
+            '(estado IN (' . implode(', ', array_fill(0, count($sinVencer), '?')) . ') OR (estado = ? AND vence_en > ?))',
+            [...$sinVencer, EstadoReserva::PendientePago, $ahora->setTimezone(new DateTimeZone('UTC'))],
+        ];
     }
 
     /**
@@ -82,18 +104,17 @@ final class RepositorioDeReservas
      *
      * @return array<string, int> funcion_id => lugares ocupados, también las que no tienen reservas (0)
      */
-    public function lugaresOcupadosDe(array $funcionesIds): array
+    public function lugaresOcupadosDe(array $funcionesIds, DateTimeImmutable $ahora = new DateTimeImmutable()): array
     {
         if ($funcionesIds === []) {
             return [];
         }
-        $ocupan = array_values(array_filter(EstadoReserva::cases(), static fn (EstadoReserva $estado): bool => $estado->ocupaLugares()));
+        [$condicion, $parametros] = self::queOcupan($ahora);
         $ocupados = array_fill_keys($funcionesIds, 0);
         foreach ($this->base->filas(
             'SELECT funcion_id, SUM(cantidad) AS ocupados FROM reserva WHERE funcion_id IN ('
-            . implode(', ', array_fill(0, count($funcionesIds), '?')) . ') AND estado IN ('
-            . implode(', ', array_fill(0, count($ocupan), '?')) . ') GROUP BY funcion_id',
-            [...$funcionesIds, ...$ocupan],
+            . implode(', ', array_fill(0, count($funcionesIds), '?')) . ") AND {$condicion} GROUP BY funcion_id",
+            [...$funcionesIds, ...$parametros],
         ) as $fila) {
             $ocupados[$fila['funcion_id']] = (int) $fila['ocupados'];
         }
@@ -203,6 +224,20 @@ final class RepositorioDeReservas
             'INSERT INTO cambio_reserva (reserva_id, estado_anterior, estado_nuevo, autor_id, autor_rol, motivo, hecho_en) VALUES (?, ?, ?, ?, ?, ?, ?)',
             [$reserva->id, $anterior, $reserva->estado, $autor->id, $autor->rol->value, $autor->motivo, $ahora->setTimezone(new DateTimeZone('UTC'))],
         );
+    }
+
+    /**
+     * Las pendientes de pago que ya vencieron, de la que venció primero a la última (X-01.5). Usa
+     * el índice por estado y vencimiento.
+     *
+     * @return list<Reserva>
+     */
+    public function vencidas(DateTimeImmutable $ahora, int $cuantas): array
+    {
+        return array_map(self::reserva(...), $this->base->filas(
+            'SELECT * FROM reserva WHERE estado = ? AND vence_en <= ? ORDER BY vence_en, id LIMIT ?',
+            [EstadoReserva::PendientePago, $ahora->setTimezone(new DateTimeZone('UTC')), $cuantas],
+        ));
     }
 
     /**

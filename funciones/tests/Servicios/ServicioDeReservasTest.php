@@ -50,6 +50,32 @@ final class ServicioDeReservasTest extends TestCase
     }
 
     /**
+     * Mientras el que reservó paga, sus lugares son suyos; cuando vence el plazo, quedan libres en
+     * el momento, sin esperar a que la tarea la cancele (X-01.5).
+     */
+    public function testLosLugaresDeUnaPendienteVencidaQuedanLibresSinEsperarALaTarea(): void
+    {
+        // Reservó los 40 a las 12:00 (15:00 en UTC, como guarda la base) y tenía 15 minutos.
+        $this->base->ejecutar(
+            "INSERT INTO reserva (id, funcion_id, usuario_id, codigo, cantidad, total, estado, creada_en, vence_en) VALUES (?, ?, ?, 'VENC2345', ?, '140000.00', 'pendiente_pago', '2026-10-20 15:00:00', '2026-10-20 15:15:00')",
+            [Uuid::nuevo(), self::PROGRAMADA, Uuid::nuevo(), self::CUPO],
+        );
+        $espectador = new Usuario(Uuid::nuevo(), Rol::Espectador);
+
+        try {
+            $this->servicio()->reservar($espectador, self::PROGRAMADA, 1, new DateTimeImmutable('2026-10-20 12:14:00'));
+            self::fail('Reservó un lugar que todavía se estaba pagando.');
+        } catch (ReglaIncumplida $error) {
+            self::assertSame('La función está agotada.', $error->getMessage());
+        }
+        $reserva = $this->servicio()->reservar($espectador, self::PROGRAMADA, self::CUPO, new DateTimeImmutable('2026-10-20 12:15:00'));
+
+        self::assertSame(self::CUPO, $reserva->cantidad);
+        // La vencida sigue pendiente hasta que pase la tarea: lo que cambió es que ya no cuenta.
+        self::assertSame(1, $this->base->valor("SELECT COUNT(*) FROM reserva WHERE estado = 'pendiente_pago'"));
+    }
+
+    /**
      * Ocupa lugares sin pasar por el servicio, como si ya los hubieran reservado otros.
      */
     private function ocupar(int $cantidad, string $estado = 'confirmada'): void

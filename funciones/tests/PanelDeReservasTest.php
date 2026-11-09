@@ -14,6 +14,7 @@ use IndieCinema\Nucleo\Pruebas\Dobles\ServidorSmtpDePrueba;
 use IndieCinema\Nucleo\Uuid;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use IndieCinema\Nucleo\Pruebas\Dobles\PaginasParaValidar;
 
 /**
  * El seguimiento de las reservas de punta a punta (E4-03): el panel del organizador con la
@@ -93,7 +94,7 @@ final class PanelDeReservasTest extends TestCase
         parse_str((string) parse_url($ruta, PHP_URL_QUERY), $consulta);
         $cuerpo = $metodo === 'POST' ? ['_csrf' => self::CSRF, ...$cuerpo] : $cuerpo;
 
-        return $aplicacion->atender(new Peticion($metodo, (string) parse_url($ruta, PHP_URL_PATH), $consulta, $cuerpo, $cabeceras, ['csrf' => self::CSRF], []));
+        return PaginasParaValidar::anotar($metodo, $ruta, $aplicacion->atender(new Peticion($metodo, (string) parse_url($ruta, PHP_URL_PATH), $consulta, $cuerpo, $cabeceras, ['csrf' => self::CSRF], [])));
     }
 
     private function deProgramacion(string $funcion, array $cuerpo, string $token = self::TOKEN_DE_PROGRAMACION): Respuesta
@@ -160,6 +161,7 @@ final class PanelDeReservasTest extends TestCase
         self::assertMatchesRegularExpression('#Lugares libres</dt>\s*<dd class="panel-dato-valor"[^>]*>35</dd>#', $cuerpo);
         self::assertMatchesRegularExpression('#Asistentes registrados</dt>\s*<dd class="panel-dato-valor"[^>]*>3</dd>#', $cuerpo);
         self::assertStringContainsString('$ 17.500', $cuerpo);
+        self::assertStringContainsString('<td>Eva</td>', $cuerpo);
     }
 
     /**
@@ -221,6 +223,7 @@ final class PanelDeReservasTest extends TestCase
         self::assertSame(200, $respuesta->estado());
         $datos = json_decode($respuesta->cuerpo(), true);
         self::assertSame($codigo, $datos['reserva']['codigo']);
+        self::assertSame('Eva', $datos['reserva']['espectador']);
         self::assertSame('asistio', $datos['reserva']['estado']);
         self::assertSame('con asistencia', $datos['reserva']['estado_etiqueta']);
         // Ya no se registra de nuevo: la fila deja de tener botón.
@@ -264,11 +267,69 @@ final class PanelDeReservasTest extends TestCase
         self::assertSame('text/csv; charset=utf-8', $respuesta->cabecera('Content-Type'));
         self::assertStringContainsString('attachment; filename="reservas-' . self::PROXIMA . '.csv"', (string) $respuesta->cabecera('Content-Disposition'));
         self::assertSame(
-            "\u{FEFF}Código;Lugares;Total;Estado;\"Reservada el\";Hora\r\n"
-            . "{$primera};2;7000,00;confirmada;2026-10-19;10:00\r\n"
-            . "{$segunda};1;3500,00;\"con asistencia\";2026-10-20;20:30\r\n",
+            "\u{FEFF}Código;Espectador;Lugares;Total;Estado;\"Reservada el\";Hora\r\n"
+            . "{$primera};Eva;2;7000,00;confirmada;2026-10-19;10:00\r\n"
+            . "{$segunda};Eva;1;3500,00;\"con asistencia\";2026-10-20;20:30\r\n",
             $respuesta->cuerpo(),
         );
+    }
+
+    public function testUnaFormulaEnElNombreDelEspectadorSeEscribeComoTextoEnElCsv(): void
+    {
+        $formulaHipervinculo = $this->reserva(self::PROXIMA, 1, usuario: 'ffffffff-1111-4111-8111-111111111111');
+        $formulaSuma = $this->reserva(self::PROXIMA, 1, usuario: 'eeeeeeee-2222-4222-8222-222222222222');
+        $formulaResta = $this->reserva(self::PROXIMA, 1, usuario: 'dddddddd-3333-4333-8333-333333333333');
+        $formulaArroba = $this->reserva(self::PROXIMA, 1, usuario: 'cccccccc-4444-4444-8444-444444444444');
+        $formulaTabulado = $this->reserva(self::PROXIMA, 1, usuario: '99999999-5555-4555-8555-555555555555');
+
+        $respuesta = $this->pedir('GET', '/organizador/funciones/' . self::PROXIMA . '/reservas.csv');
+
+        self::assertSame(200, $respuesta->estado());
+        $cuerpo = $respuesta->cuerpo();
+        self::assertStringContainsString("{$formulaHipervinculo};\"'=HYPERLINK(\"\"http://malo.test\"\")\";1;3500,00;", $cuerpo);
+        self::assertStringContainsString("{$formulaSuma};'+12345;1;3500,00;", $cuerpo);
+        self::assertStringContainsString("{$formulaResta};'-100;1;3500,00;", $cuerpo);
+        self::assertStringContainsString("{$formulaArroba};'@admin;1;3500,00;", $cuerpo);
+        self::assertStringContainsString("{$formulaTabulado};\"'\tTabulado\";1;3500,00;", $cuerpo);
+    }
+
+    public function testElCsvYElPanelSalenIgualConElNombreVacioSiCuentasFalla(): void
+    {
+        $salidaDelLog = fopen('php://memory', 'w+');
+        $configuracionCaida = new Configuracion([
+            'app' => ['subsistema' => 'funciones', 'prefijo' => '/funcion', 'entorno' => 'desarrollo'],
+            'base' => self::baseDePruebas(),
+            'nginx' => ['secreto' => self::SECRETO],
+            'subsistemas' => ['programacion' => self::$url, 'cuentas' => 'http://127.0.0.1:9'],
+            'interno' => ['token' => 'token-de-funciones'],
+            'llamadores' => ['programacion' => hash('sha256', self::TOKEN_DE_PROGRAMACION)],
+            'correo' => ['servidor' => self::$correo->url(), 'remitente' => 'no-responder@indiecinema.test'],
+            'sitio' => ['url' => 'http://localhost:8080'],
+        ]);
+
+        $reserva = $this->reserva(self::PROXIMA, 2, creada: '2026-10-19 13:00:00');
+
+        $aplicacion = new Aplicacion(dirname(__DIR__), $configuracionCaida, new Log('funciones', $salidaDelLog));
+        $csv = $aplicacion->atender(new Peticion('GET', '/organizador/funciones/' . self::PROXIMA . '/reservas.csv', [], [], [
+            'X-Nginx-Secreto' => self::SECRETO,
+            'X-Usuario-Id' => self::ORGANIZADORA,
+            'X-Rol' => 'organizador',
+        ], [], []));
+
+        self::assertSame(200, $csv->estado());
+        self::assertStringContainsString("{$reserva};;2;7000,00;confirmada;2026-10-19;10:00\r\n", $csv->cuerpo());
+
+        $pantalla = $aplicacion->atender(new Peticion('GET', '/organizador/funciones/' . self::PROXIMA . '/reservas', [], [], [
+            'X-Nginx-Secreto' => self::SECRETO,
+            'X-Usuario-Id' => self::ORGANIZADORA,
+            'X-Rol' => 'organizador',
+        ], [], []));
+        self::assertSame(200, $pantalla->estado());
+        self::assertStringContainsString('<td>—</td>', $pantalla->cuerpo());
+
+        rewind($salidaDelLog);
+        $log = (string) stream_get_contents($salidaDelLog);
+        self::assertStringContainsString('Sin los nombres de los espectadores:', $log);
     }
 
     // ---- El panel del administrador (E4-03.3) -----------------------------------------------

@@ -160,6 +160,42 @@ final class ServicioDeReservas
     }
 
     /**
+     * Lo más que puede tener reservado una misma persona en esta función.
+     */
+    public static function maximoPorPersona(FuncionDeProgramacion $funcion): int
+    {
+        return min(Reserva::MAXIMO_POR_PERSONA, $funcion->cupo);
+    }
+
+    /**
+     * Cuántos lugares más puede reservar el espectador en esta función sin superar el tope personal.
+     */
+    public function lugaresRestantesPara(FuncionDeProgramacion $funcion, string $usuarioId): int
+    {
+        $yaReservados = $this->reservas->lugaresOcupadosPorUsuario($funcion->id, $usuarioId);
+
+        return max(0, self::maximoPorPersona($funcion) - $yaReservados);
+    }
+
+    /**
+     * El mensaje cuando el pedido supera el tope por persona: dice siempre cuál es el máximo.
+     */
+    public static function mensajeDeMaximoPorPersona(int $yaReservados, int $restantes, int $maximo): string
+    {
+        if ($yaReservados === 0) {
+            return "Se pueden reservar hasta {$maximo} lugares por persona en cada función.";
+        }
+        if ($restantes === 0) {
+            return "Ya tenés reservados los {$maximo} lugares máximos por persona para esta función.";
+        }
+
+        $lugaresTexto = $yaReservados === 1 ? '1 lugar reservado' : "{$yaReservados} lugares reservados";
+        $sumarTexto = $restantes === 1 ? '1 lugar más' : "hasta {$restantes} lugares más";
+
+        return "Ya tenés {$lugaresTexto}: podés sumar {$sumarTexto} (máximo {$maximo} por persona).";
+    }
+
+    /**
      * Reserva $cantidad lugares de la función para el espectador.
      *
      * El cupo se pide a programación antes de bloquear: así la espera por la API interna no
@@ -222,6 +258,12 @@ final class ServicioDeReservas
                     1 => 'Queda 1 lugar.',
                     default => "Quedan {$libres} lugares.",
                 });
+            }
+            $yaReservados = $this->reservas->lugaresOcupadosPorUsuario($funcion->id, $reserva->usuarioId);
+            $maximo = self::maximoPorPersona($funcion);
+            $restantes = max(0, $maximo - $yaReservados);
+            if ($reserva->cantidad > $restantes) {
+                throw new ReglaIncumplida(self::mensajeDeMaximoPorPersona($yaReservados, $restantes, $maximo));
             }
             for ($intento = 0; $intento < self::INTENTOS_DE_CODIGO; ++$intento) {
                 if ($this->reservas->agregar($reserva)) {

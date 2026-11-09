@@ -95,6 +95,24 @@ final class ServicioDeUsuarios
     }
 
     /**
+     * Varios usuarios como los ve el administrador o los otros subsistemas, indexados por id. Los
+     * que no existen o no son un UUID válido se ignoran.
+     *
+     * @param list<string> $ids
+     *
+     * @return array<string, UsuarioEnListado>
+     */
+    public function buscarVarios(array $ids): array
+    {
+        $validos = array_values(array_unique(array_filter($ids, Uuid::esValido(...))));
+        if ($validos === []) {
+            return [];
+        }
+
+        return $this->usuarios->buscarVariosEnListado($validos);
+    }
+
+    /**
      * «Guardar cambios» de la tabla: deja a cada usuario de espectador o de organizador. Al
      * moderador y al administrador no se los cambia desde la web, y su desplegable está apagado.
      *

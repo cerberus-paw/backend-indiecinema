@@ -13,4 +13,5 @@ parameters:
         - src
         - tests
         - rutas.php
+        - bin
     tmpDir: .phpstan

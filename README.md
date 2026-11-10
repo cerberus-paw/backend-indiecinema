@@ -228,9 +228,10 @@ todo el sitio se vea igual aunque lo sirvan subsistemas distintos.
   compose (`COMPOSE_PROFILES=buzon` en `.env`), que en el VPS sólo escucha en la máquina y se ve
   con `ssh -L 8025:127.0.0.1:8025 …`. Con un proveedor de verdad, un servidor con usuario exige
   `smtps://` o STARTTLS para no mandar la clave sin cifrar.
-- **Las tareas programadas, cuando las haya**, las va a disparar el cron del servidor con
+- **Las tareas programadas** las dispara el cron del servidor con
   `docker compose exec -T <subsistema> php bin/<tarea>.php`, en lugar de sumar un contenedor sólo
-  para eso. Por ahora no hace falta ninguna: la votación y el acuerdo los cierra el organizador
+  para eso. La única es `funciones/bin/liberar-vencidas.php`, que cancela las reservas que
+  vencieron sin pagar (ver «Mercado Pago»). La votación y el acuerdo los cierra el organizador
   desde la ficha.
 - **Las rutas dentro del contenedor copian las del disco** (`/src/backend-indiecinema/<subsistema>`
   y `/src/frontend-indiecinema`), así los repositorios `path` de Composer funcionan igual si se
@@ -675,9 +676,19 @@ Para tener las credenciales de prueba:
 5. `activo = true`, y reiniciar funciones (`docker compose restart funciones`).
 
 El aviso de pago necesita una URL pública, así que en `localhost` el pago queda pendiente hasta
-que vence: se prueba de punta a punta en el servidor de desarrollo. Para pagar con el comprador
-de prueba, las tarjetas de prueba están en la documentación de Checkout Pro («Tarjetas de
-prueba»), con el titular `APRO` para un pago aprobado y `OTHE` para uno rechazado.
+que vence: se prueba de punta a punta en el servidor de desarrollo.
+
+Una reserva pendiente deja de ocupar sus lugares en cuanto vence. Para que además figure como
+cancelada en «Mis reservas» y en los paneles, el cron del servidor corre cada cinco minutos (con
+`crontab -e`, en la carpeta del back):
+
+```
+*/5 * * * * cd /home/ubuntu/indiecinema/backend-indiecinema && docker compose exec -T funciones php bin/liberar-vencidas.php
+```
+
+Para pagar con el comprador de prueba, las tarjetas de prueba están en la documentación de
+Checkout Pro («Tarjetas de prueba»), con el titular `APRO` para un pago aprobado y `OTHE` para
+uno rechazado.
 
 Las credenciales nunca van al repositorio: gitleaks frena un `APP_USR-…` o un `TEST-…` en el CI.
 

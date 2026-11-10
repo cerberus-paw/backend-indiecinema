@@ -364,6 +364,80 @@ final class AvisosDePagoTest extends TestCase
         self::assertSame('pendiente_pago', $this->reserva()['estado']);
     }
 
+    /**
+     * Venció el plazo antes de que llegara el aviso (X-01.5).
+     *
+     * @param array<string, mixed> $reserva
+     */
+    private function vencer(array $reserva): void
+    {
+        $this->base->ejecutar('UPDATE reserva SET vence_en = ? WHERE id = ?', [gmdate('Y-m-d H:i:s', time() - 60), $reserva['id']]);
+    }
+
+    /**
+     * Si el pago llega tarde y los lugares siguen libres, la reserva se confirma igual: el
+     * espectador pagó.
+     */
+    public function testUnPagoQueLlegaDespuesDelVencimientoConfirmaSiQuedanLugares(): void
+    {
+        $reserva = $this->pendiente();
+        $this->vencer($reserva);
+        self::pagoEnMercadoPago(self::PAGO, $reserva['id'], $reserva['total']);
+
+        self::assertSame(200, $this->avisar()->estado());
+
+        self::assertSame('confirmada', $this->reserva()['estado']);
+        self::assertSame([], self::reembolsosPedidos());
+        self::assertCount(1, self::$correo->correos());
+    }
+
+    /**
+     * Si mientras tanto otros se llevaron los lugares, la reserva se cancela y el pago se devuelve.
+     */
+    public function testUnPagoQueLlegaTardeSinLugaresCancelaLaReservaYSeDevuelve(): void
+    {
+        $reserva = $this->pendiente('2');
+        $this->vencer($reserva);
+        // Otro reservó 39 de los 40 cuando los de esta ya estaban libres.
+        $this->base->ejecutar(
+            "INSERT INTO reserva (id, funcion_id, usuario_id, codigo, cantidad, total, estado, creada_en) VALUES (?, ?, ?, 'OTRA2345', 39, '136500.00', 'confirmada', UTC_TIMESTAMP())",
+            [Uuid::nuevo(), self::PROXIMA, Uuid::nuevo()],
+        );
+        self::pagoEnMercadoPago(self::PAGO, $reserva['id'], $reserva['total']);
+
+        self::assertSame(200, $this->avisar()->estado());
+
+        self::assertSame('cancelada', $this->base->valor('SELECT estado FROM reserva WHERE id = ?', [$reserva['id']]));
+        self::assertSame([self::PAGO], self::reembolsosPedidos());
+        self::assertSame(
+            [['estado_anterior' => 'pendiente_pago', 'estado_nuevo' => 'cancelada', 'autor_id' => self::EVA, 'autor_rol' => 'espectador', 'motivo' => 'Venció el plazo para pagar y el pago llegó cuando ya no quedaban lugares.']],
+            $this->historial($reserva['id']),
+        );
+        self::assertSame([], self::$correo->correos());
+    }
+
+    /**
+     * Al vencer, la reserva dejó de contarle para el tope por persona: si mientras tanto el
+     * espectador reservó otra vez, el pago tardío no lo puede dejar por encima del tope.
+     */
+    public function testUnPagoQueLlegaTardeNoPasaElTopePorPersona(): void
+    {
+        $reserva = $this->pendiente('2');
+        $this->vencer($reserva);
+        // Después del vencimiento, Eva reservó otros 5: con los 2 de esta tendría 7 de 6.
+        $this->base->ejecutar(
+            "INSERT INTO reserva (id, funcion_id, usuario_id, codigo, cantidad, total, estado, creada_en) VALUES (?, ?, ?, 'OTRA6789', 5, '17500.00', 'confirmada', UTC_TIMESTAMP())",
+            [Uuid::nuevo(), self::PROXIMA, self::EVA],
+        );
+        self::pagoEnMercadoPago(self::PAGO, $reserva['id'], $reserva['total']);
+
+        self::assertSame(200, $this->avisar()->estado());
+
+        self::assertSame('cancelada', $this->base->valor('SELECT estado FROM reserva WHERE id = ?', [$reserva['id']]));
+        self::assertSame([self::PAGO], self::reembolsosPedidos());
+        self::assertSame([], self::$correo->correos());
+    }
+
     public function testConElCobroApagadoLaRutaNoExiste(): void
     {
         $this->configurar(['activo' => false]);

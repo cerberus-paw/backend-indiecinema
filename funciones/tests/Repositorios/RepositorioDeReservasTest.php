@@ -92,8 +92,8 @@ final class RepositorioDeReservasTest extends TestCase
 
         self::assertTrue($this->reservas->guardarPreferencia($reserva));
         self::assertEquals($reserva, $this->reservas->buscar($reserva->id));
-        // Mientras espera el pago ocupa sus lugares.
-        self::assertSame(2, $this->reservas->lugaresOcupados($reserva->funcionId));
+        // Mientras espera el pago, y está a tiempo, ocupa sus lugares.
+        self::assertSame(2, $this->reservas->lugaresOcupados($reserva->funcionId, new DateTimeImmutable('2026-10-20 12:10:00')));
     }
 
     /**

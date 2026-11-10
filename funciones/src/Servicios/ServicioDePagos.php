@@ -7,6 +7,7 @@ namespace IndieCinema\Funciones\Servicios;
 use DateTimeImmutable;
 use IndieCinema\Funciones\Modelo\AutorDelCambio;
 use IndieCinema\Funciones\Modelo\EstadoReserva;
+use IndieCinema\Funciones\Modelo\FuncionDeProgramacion;
 use IndieCinema\Funciones\Modelo\Reserva;
 use IndieCinema\Funciones\Repositorios\RepositorioDeReservas;
 use IndieCinema\Nucleo\Http\ExcepcionHttp;
@@ -26,15 +27,24 @@ use RuntimeException;
  *
  * Si se cobró algo que no tiene una reserva que confirmar (la reserva se canceló, ya la pagó otro
  * pago, o el monto no coincide), se le devuelve la plata al comprador.
+ *
+ * Un pago que llega después de que venció la reserva (X-01.5) la confirma igual si todavía quedan
+ * los lugares, con la función bloqueada como al reservar; si no quedan, la reserva se cancela y el
+ * pago se devuelve. Lo mismo si confirmarla dejaría al espectador por encima del tope por
+ * persona.
  */
 final class ServicioDePagos
 {
     /** Si dos avisos compiten por la misma reserva, el que pierde la vuelve a leer una vez. */
     private const INTENTOS = 2;
 
+    /** Lo que dice el historial de una que venció y ya no tenía lugar cuando llegó el pago. */
+    public const MOTIVO_SIN_LUGAR = 'Venció el plazo para pagar y el pago llegó cuando ya no quedaban lugares.';
+
     public function __construct(
         private readonly ClienteMercadoPago $cliente,
         private readonly RepositorioDeReservas $reservas,
+        private readonly FuncionesDeProgramacion $funciones,
         private readonly LoggerInterface $log,
     ) {
     }
@@ -42,8 +52,8 @@ final class ServicioDePagos
     /**
      * @return ?Reserva la reserva, si este aviso la confirmó: para mandar el correo una sola vez
      *
-     * @throws ExcepcionHttp    503 si Mercado Pago no responde: el aviso falla y Mercado Pago lo
-     *                          vuelve a mandar
+     * @throws ExcepcionHttp    503 si Mercado Pago (o programación, con una reserva vencida) no
+     *                          responde: el aviso falla y Mercado Pago lo vuelve a mandar
      * @throws RuntimeException si Mercado Pago responde algo que no se entiende
      */
     public function procesar(string $pagoId, DateTimeImmutable $ahora = new DateTimeImmutable()): ?Reserva
@@ -87,13 +97,19 @@ final class ServicioDePagos
             if ($reserva->estado !== EstadoReserva::PendientePago) {
                 break;
             }
-            $confirmada = $reserva->confirmarPago($pagoId);
-            // El espectador paga: él es quien la confirma, y el motivo dice con qué pago.
-            $autor = new AutorDelCambio($reserva->usuarioId, Rol::Espectador, "Pago {$pagoId} aprobado en Mercado Pago.");
-            if ($this->reservas->guardarPago($confirmada, $autor, $ahora)) {
+            $confirmada = $reserva->vencida($ahora)
+                ? $this->confirmarVencida($reserva, $pagoId, $ahora)
+                : $this->confirmar($reserva, $pagoId, $ahora);
+            if ($confirmada instanceof Reserva) {
                 $this->log->info('El pago {pago} confirmó la reserva {reserva}.', $contexto);
 
                 return $confirmada;
+            }
+            if ($confirmada === false) {
+                $this->log->warning('El pago {pago} llegó con la reserva {reserva} vencida y sin lugar: se cancela y se devuelve.', $contexto);
+                $this->cliente->reembolsar($pagoId);
+
+                return null;
             }
             // Otro aviso, o el espectador, la cambió mientras tanto: se mira cómo quedó.
             $reserva = $this->reservas->buscar($reserva->id) ?? throw new RuntimeException("La reserva {$reserva->id} desapareció.");
@@ -104,6 +120,59 @@ final class ServicioDePagos
         $this->cliente->reembolsar($pagoId);
 
         return null;
+    }
+
+    /**
+     * @return ?Reserva la confirmada, o null si cambió mientras tanto
+     */
+    private function confirmar(Reserva $reserva, string $pagoId, DateTimeImmutable $ahora): ?Reserva
+    {
+        $confirmada = $reserva->confirmarPago($pagoId);
+        // El espectador paga: él es quien la confirma, y el motivo dice con qué pago.
+        $autor = new AutorDelCambio($reserva->usuarioId, Rol::Espectador, "Pago {$pagoId} aprobado en Mercado Pago.");
+
+        return $this->reservas->guardarPago($confirmada, $autor, $ahora) ? $confirmada : null;
+    }
+
+    /**
+     * La reserva venció y sus lugares ya no son suyos: se confirma sólo si todavía están libres y
+     * la función todavía admite reservas, con la función bloqueada para que nadie se los lleve
+     * mientras tanto.
+     *
+     * @return Reserva|false|null la confirmada; false si no había lugar y se canceló; null si
+     *                            cambió mientras tanto
+     *
+     * @throws ExcepcionHttp 503 si programación no responde
+     */
+    private function confirmarVencida(Reserva $reserva, string $pagoId, DateTimeImmutable $ahora): Reserva|false|null
+    {
+        $funcion = $this->funciones->buscar($reserva->funcionId);
+
+        return $this->reservas->conLaFuncionBloqueada($reserva->funcionId, function () use ($reserva, $funcion, $pagoId, $ahora): Reserva|false|null {
+            $ocupados = $this->reservas->lugaresOcupados($reserva->funcionId, $ahora);
+            $delEspectador = $this->reservas->lugaresOcupadosPorUsuario($reserva->funcionId, $reserva->usuarioId, $ahora);
+            if (self::quedaLugar($reserva, $funcion, $ocupados, $delEspectador, $ahora)) {
+                return $this->confirmar($reserva, $pagoId, $ahora);
+            }
+            $autor = new AutorDelCambio($reserva->usuarioId, Rol::Espectador, self::MOTIVO_SIN_LUGAR);
+
+            return $this->reservas->guardarEstado($reserva->cancelar(), $reserva->estado, $autor, $ahora) ? false : null;
+        });
+    }
+
+    /**
+     * Las mismas reglas que al reservar: el cupo de la función y el tope por persona. Al vencer, la
+     * reserva dejó de contarle al espectador, que pudo haber reservado otra vez mientras tanto.
+     *
+     * @param int $ocupados      sin contar la reserva, que ya venció
+     * @param int $delEspectador lo que el espectador ya tiene en la función, sin contar esta
+     */
+    private static function quedaLugar(Reserva $reserva, ?FuncionDeProgramacion $funcion, int $ocupados, int $delEspectador, DateTimeImmutable $ahora): bool
+    {
+        return $funcion !== null
+            && $funcion->motivoParaNoReservar($ahora) === null
+            && $reserva->cantidad <= $funcion->cupo - $ocupados
+            && $reserva->cantidad <= ServicioDeReservas::maximoPorPersona($funcion) - $delEspectador;
     }
 
     /**

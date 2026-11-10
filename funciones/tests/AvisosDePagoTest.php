@@ -416,6 +416,28 @@ final class AvisosDePagoTest extends TestCase
         self::assertSame([], self::$correo->correos());
     }
 
+    /**
+     * Al vencer, la reserva dejó de contarle para el tope por persona: si mientras tanto el
+     * espectador reservó otra vez, el pago tardío no lo puede dejar por encima del tope.
+     */
+    public function testUnPagoQueLlegaTardeNoPasaElTopePorPersona(): void
+    {
+        $reserva = $this->pendiente('2');
+        $this->vencer($reserva);
+        // Después del vencimiento, Eva reservó otros 5: con los 2 de esta tendría 7 de 6.
+        $this->base->ejecutar(
+            "INSERT INTO reserva (id, funcion_id, usuario_id, codigo, cantidad, total, estado, creada_en) VALUES (?, ?, ?, 'OTRA6789', 5, '17500.00', 'confirmada', UTC_TIMESTAMP())",
+            [Uuid::nuevo(), self::PROXIMA, self::EVA],
+        );
+        self::pagoEnMercadoPago(self::PAGO, $reserva['id'], $reserva['total']);
+
+        self::assertSame(200, $this->avisar()->estado());
+
+        self::assertSame('cancelada', $this->base->valor('SELECT estado FROM reserva WHERE id = ?', [$reserva['id']]));
+        self::assertSame([self::PAGO], self::reembolsosPedidos());
+        self::assertSame([], self::$correo->correos());
+    }
+
     public function testConElCobroApagadoLaRutaNoExiste(): void
     {
         $this->configurar(['activo' => false]);

@@ -684,9 +684,11 @@ cancelada en «Mis reservas» y en los paneles, el cron del servidor corre cada 
 
 ```
 */5 * * * * cd /home/ubuntu/indiecinema/backend-indiecinema && docker compose exec -T funciones php bin/liberar-vencidas.php
-``` Para pagar con el comprador
-de prueba, las tarjetas de prueba están en la documentación de Checkout Pro («Tarjetas de
-prueba»), con el titular `APRO` para un pago aprobado y `OTHE` para uno rechazado.
+```
+
+Para pagar con el comprador de prueba, las tarjetas de prueba están en la documentación de
+Checkout Pro («Tarjetas de prueba»), con el titular `APRO` para un pago aprobado y `OTHE` para
+uno rechazado.
 
 Las credenciales nunca van al repositorio: gitleaks frena un `APP_USR-…` o un `TEST-…` en el CI.
 

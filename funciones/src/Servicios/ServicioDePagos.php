@@ -30,7 +30,8 @@ use RuntimeException;
  *
  * Un pago que llega después de que venció la reserva (X-01.5) la confirma igual si todavía quedan
  * los lugares, con la función bloqueada como al reservar; si no quedan, la reserva se cancela y el
- * pago se devuelve.
+ * pago se devuelve. Lo mismo si confirmarla dejaría al espectador por encima del tope por
+ * persona.
  */
 final class ServicioDePagos
 {
@@ -148,7 +149,9 @@ final class ServicioDePagos
         $funcion = $this->funciones->buscar($reserva->funcionId);
 
         return $this->reservas->conLaFuncionBloqueada($reserva->funcionId, function () use ($reserva, $funcion, $pagoId, $ahora): Reserva|false|null {
-            if (self::quedaLugar($reserva, $funcion, $this->reservas->lugaresOcupados($reserva->funcionId, $ahora), $ahora)) {
+            $ocupados = $this->reservas->lugaresOcupados($reserva->funcionId, $ahora);
+            $delEspectador = $this->reservas->lugaresOcupadosPorUsuario($reserva->funcionId, $reserva->usuarioId, $ahora);
+            if (self::quedaLugar($reserva, $funcion, $ocupados, $delEspectador, $ahora)) {
                 return $this->confirmar($reserva, $pagoId, $ahora);
             }
             $autor = new AutorDelCambio($reserva->usuarioId, Rol::Espectador, self::MOTIVO_SIN_LUGAR);
@@ -158,13 +161,18 @@ final class ServicioDePagos
     }
 
     /**
-     * @param int $ocupados sin contar la reserva, que ya venció
+     * Las mismas reglas que al reservar: el cupo de la función y el tope por persona. Al vencer, la
+     * reserva dejó de contarle al espectador, que pudo haber reservado otra vez mientras tanto.
+     *
+     * @param int $ocupados      sin contar la reserva, que ya venció
+     * @param int $delEspectador lo que el espectador ya tiene en la función, sin contar esta
      */
-    private static function quedaLugar(Reserva $reserva, ?FuncionDeProgramacion $funcion, int $ocupados, DateTimeImmutable $ahora): bool
+    private static function quedaLugar(Reserva $reserva, ?FuncionDeProgramacion $funcion, int $ocupados, int $delEspectador, DateTimeImmutable $ahora): bool
     {
         return $funcion !== null
             && $funcion->motivoParaNoReservar($ahora) === null
-            && $reserva->cantidad <= $funcion->cupo - $ocupados;
+            && $reserva->cantidad <= $funcion->cupo - $ocupados
+            && $reserva->cantidad <= ServicioDeReservas::maximoPorPersona($funcion) - $delEspectador;
     }
 
     /**

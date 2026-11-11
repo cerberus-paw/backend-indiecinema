@@ -6,8 +6,8 @@ namespace IndieCinema\Programacion\Modelo;
 
 /**
  * Cómo se ordenan las funciones en la cartelera (E4-06.1): por fecha, precio o título, de forma
- * ascendente o descendente. El orden por defecto es por fecha ascendente (de la más próxima a la
- * más lejana).
+ * ascendente o descendente, o por la reputación de la sala (EF-04.4). El orden por defecto es por
+ * fecha ascendente (de la más próxima a la más lejana).
  */
 enum OrdenDeCartelera: string
 {
@@ -17,6 +17,8 @@ enum OrdenDeCartelera: string
     case PrecioDescendente = 'precio_desc';
     case TituloAscendente = 'titulo_asc';
     case TituloDescendente = 'titulo_desc';
+    // Las salas con mejor promedio de calificaciones primero; las que no tienen, al final (EF-04.4).
+    case MejorCalificadas = 'calificacion_desc';
 
     public function etiqueta(): string
     {
@@ -27,6 +29,7 @@ enum OrdenDeCartelera: string
             self::PrecioDescendente => 'Precio: mayor a menor',
             self::TituloAscendente => 'Título: A - Z',
             self::TituloDescendente => 'Título: Z - A',
+            self::MejorCalificadas => 'Mejor calificadas',
         };
     }
 

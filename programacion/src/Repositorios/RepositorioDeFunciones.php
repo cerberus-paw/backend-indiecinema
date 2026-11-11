@@ -67,7 +67,7 @@ final class RepositorioDeFunciones
         $encontradas = array_map(static fn (array $fila): string => (string) $fila['id'], $filas);
         $obrasPorFuncion = [];
         foreach ($this->base->filas(
-            'SELECT fo.funcion_id, fo.estado, o.titulo FROM funcion_obra fo JOIN obra o ON o.id = fo.obra_id
+            'SELECT fo.funcion_id, fo.estado, o.id, o.titulo FROM funcion_obra fo JOIN obra o ON o.id = fo.obra_id
              WHERE fo.funcion_id IN (' . implode(', ', array_fill(0, count($encontradas), '?')) . ')
              ORDER BY o.titulo, o.id',
             $encontradas,
@@ -80,19 +80,21 @@ final class RepositorioDeFunciones
             $obras = $obrasPorFuncion[(string) $fila['id']] ?? [];
             // Como en buscar(): si ya hay elegidas son ésas; si no, las candidatas.
             $elegidas = array_filter($obras, static fn (array $obra): bool => $obra['estado'] === 'elegida');
+            $proyectadas = $elegidas ?: $obras;
             $resumenes[(string) $fila['id']] = new ResumenDeFuncion(
                 (string) $fila['id'],
                 EstadoFuncion::from((string) $fila['estado']),
                 $fila['fecha_hora'] === null ? null : new DateTimeImmutable((string) $fila['fecha_hora']),
                 (float) $fila['precio_base'],
                 (int) $fila['cupo'],
-                array_values(array_map(static fn (array $obra): string => (string) $obra['titulo'], $elegidas ?: $obras)),
+                array_values(array_map(static fn (array $obra): string => (string) $obra['titulo'], $proyectadas)),
                 $elegidas !== [],
                 (string) $fila['sala_id'],
                 (string) $fila['sala_nombre'],
                 (string) $fila['sala_localidad'],
                 (bool) $fila['sala_habilitada'],
                 (string) $fila['organizador_id'],
+                array_values(array_map(static fn (array $obra): string => (string) $obra['id'], $proyectadas)),
             );
         }
 
@@ -285,6 +287,27 @@ final class RepositorioDeFunciones
             array_values(array_map(static fn (array $obra): string => (string) $obra['titulo'], $elegidas ?: $obras)),
             $elegidas !== [],
         );
+    }
+
+    /**
+     * Las funciones finalizadas de una sala, de la más reciente a la más vieja, para el historial
+     * de proyecciones de su ficha (EF-04.3).
+     *
+     * @return list<ResumenDeFuncion>
+     */
+    public function finalizadasDeLaSala(string $salaId, int $cuantas): array
+    {
+        $ids = array_map(
+            static fn (array $fila): string => (string) $fila['id'],
+            $this->base->filas(
+                'SELECT id FROM funcion WHERE sala_id = ? AND estado = ? ORDER BY fecha_hora DESC, id LIMIT ?',
+                [$salaId, EstadoFuncion::Finalizada, $cuantas],
+            ),
+        );
+        $resumenes = $this->resumenes($ids);
+
+        // resumenes() no respeta el orden: se vuelve al de la consulta.
+        return array_values(array_filter(array_map(static fn (string $id): ?ResumenDeFuncion => $resumenes[$id] ?? null, $ids)));
     }
 
     /**

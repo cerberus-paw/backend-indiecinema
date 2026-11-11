@@ -11,7 +11,9 @@ use IndieCinema\Funciones\Modelo\FuncionDeProgramacion;
 use IndieCinema\Funciones\Modelo\ReglaIncumplida;
 use IndieCinema\Funciones\Modelo\Reserva;
 use IndieCinema\Funciones\Servicios\AvisosDeReservas;
+use IndieCinema\Funciones\Modelo\Calificacion;
 use IndieCinema\Funciones\Servicios\PagosDeReservas;
+use IndieCinema\Funciones\Servicios\ServicioDeCalificaciones;
 use IndieCinema\Funciones\Servicios\ServicioDeReservas;
 use IndieCinema\Nucleo\Controlador;
 use IndieCinema\Nucleo\Http\ExcepcionHttp;
@@ -40,6 +42,7 @@ final class Reservas extends Controlador
         private readonly AvisosDeReservas $avisos,
         private readonly PagosDeReservas $pagos,
         private readonly LoggerInterface $log,
+        private readonly ServicioDeCalificaciones $calificaciones,
     ) {
     }
 
@@ -73,8 +76,11 @@ final class Reservas extends Controlador
             $sinProgramacion = true;
         }
 
+        // Las funciones que ya calificó, para no ofrecer el botón otra vez (EF-04.2).
+        $calificadas = $this->calificaciones->deLasReservas($espectador, $reservas);
+
         return $this->vista('mis_reservas.html.twig', [
-            'reservas' => array_map(static function (Reserva $reserva) use ($funciones, $sinProgramacion): array {
+            'reservas' => array_map(static function (Reserva $reserva) use ($funciones, $sinProgramacion, $calificadas): array {
                 $funcion = $funciones[$reserva->funcionId] ?? null;
 
                 return [
@@ -82,10 +88,18 @@ final class Reservas extends Controlador
                     'estado_etiqueta' => $reserva->estado->etiqueta(),
                     // Sin programación no se sabe si empezó: el botón queda en el comprobante.
                     'cancelable' => !$sinProgramacion && ServicioDeReservas::seCancela($reserva, $funcion),
+                    // Sin programación tampoco se sabe si terminó: Calificacion lo decide con la función.
+                    'calificable' => !isset($calificadas[$reserva->funcionId]) && Calificacion::motivoParaNoCalificar($reserva, $funcion) === null,
+                    // Lo que calificó (EF-04.5), en la reserva con la que calificó: si fue con dos
+                    // reservas a la misma función, no se repite en las dos filas.
+                    'calificacion' => isset($calificadas[$reserva->funcionId]) && $calificadas[$reserva->funcionId]->reservaId === $reserva->id
+                        ? ['puntaje' => $calificadas[$reserva->funcionId]->puntaje, 'comentario' => $calificadas[$reserva->funcionId]->comentario]
+                        : null,
                     'funcion' => $funcion === null ? null : self::datosDeFuncion($funcion),
                 ];
             }, $reservas),
             'sin_programacion' => $sinProgramacion,
+            'calificada' => $peticion->consulta('calificada') === '1',
             'paginado' => [
                 'numero' => $numero,
                 'total_paginas' => $paginas,

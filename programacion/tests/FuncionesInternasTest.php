@@ -135,6 +135,8 @@ final class FuncionesInternasTest extends TestCase
             'titulos_elegidos' => false,
             'sala' => ['id' => $this->sala->id, 'nombre' => 'Cine Club El Galpón', 'localidad' => 'Luján', 'habilitada' => true],
             'organizador_id' => self::ORGANIZADORA,
+            // Las mismas que los títulos, por id y en el mismo orden (EF-04.2).
+            'obras_ids' => [$this->obras['La ciénaga'], $this->obras['Zama']],
         ], $this->json($this->pedir($funcion->id)));
     }
 
@@ -151,6 +153,7 @@ final class FuncionesInternasTest extends TestCase
         self::assertSame('2026-10-24T20:30:00', $datos['fecha_hora']);
         self::assertSame(['Zama'], $datos['titulos']);
         self::assertTrue($datos['titulos_elegidos']);
+        self::assertSame([$this->obras['Zama']], $datos['obras_ids']);
     }
 
     public function testUnaSalaDeshabilitadaApareceMarcadaYUnaDadaDeBajaNo(): void

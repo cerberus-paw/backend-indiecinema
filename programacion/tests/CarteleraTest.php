@@ -1673,6 +1673,40 @@ final class CarteleraTest extends TestCase
     }
 
     /**
+     * F-02.1: en el acuerdo de fecha, el título ya elegido muestra su afiche, como las candidatas
+     * de la votación; sin afiche cargado, el marcador. Antes salía siempre el marcador.
+     */
+    public function testLaFichaEnAcuerdoMuestraElAficheDelTituloElegido(): void
+    {
+        [$funcionId] = $this->funcionEnAcuerdo();
+        $obraId = (string) $this->base->valor('SELECT obra_id FROM funcion_obra WHERE funcion_id = ?', [$funcionId]);
+        self::assertNotNull($this->base->valor('SELECT afiche FROM obra WHERE id = ?', [$obraId]), 'La obra de los datos de prueba tiene afiche.');
+
+        $elegido = $this->tituloElegido($this->pedir("/cartelera/{$funcionId}")->cuerpo());
+        self::assertStringContainsString("src=\"/obras/{$obraId}/afiche\"", $elegido);
+        self::assertStringNotContainsString('ficha-titulo-afiche-vacio', $elegido);
+
+        $this->base->ejecutar('UPDATE obra SET afiche = NULL WHERE id = ?', [$obraId]);
+        $elegido = $this->tituloElegido($this->pedir("/cartelera/{$funcionId}")->cuerpo());
+        self::assertStringContainsString('ficha-titulo-afiche-vacio', $elegido);
+        self::assertStringNotContainsString('<img', $elegido);
+    }
+
+    /**
+     * El bloque «Título ya elegido» de la ficha en acuerdo, para mirar sólo ese afiche y no el de
+     * la sala ni el del resto de la página.
+     */
+    private function tituloElegido(string $ficha): string
+    {
+        $desde = strpos($ficha, 'id="ficha-titulos-rotulo"');
+        self::assertNotFalse($desde, 'La ficha en acuerdo tiene el bloque «Título ya elegido».');
+        $hasta = strpos($ficha, '</ul>', $desde);
+        self::assertNotFalse($hasta);
+
+        return substr($ficha, $desde, $hasta - $desde);
+    }
+
+    /**
      * Criterio E3-13.6: La ficha muestra las franjas, los votos y el estado del acuerdo.
      */
     public function testFichaDeFuncionEnAcuerdoMuestraFranjasVotosYEstado(): void

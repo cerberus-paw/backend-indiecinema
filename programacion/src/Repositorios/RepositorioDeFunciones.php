@@ -290,6 +290,27 @@ final class RepositorioDeFunciones
     }
 
     /**
+     * Las funciones finalizadas de una sala, de la más reciente a la más vieja, para el historial
+     * de proyecciones de su ficha (EF-04.3).
+     *
+     * @return list<ResumenDeFuncion>
+     */
+    public function finalizadasDeLaSala(string $salaId, int $cuantas): array
+    {
+        $ids = array_map(
+            static fn (array $fila): string => (string) $fila['id'],
+            $this->base->filas(
+                'SELECT id FROM funcion WHERE sala_id = ? AND estado = ? ORDER BY fecha_hora DESC, id LIMIT ?',
+                [$salaId, EstadoFuncion::Finalizada, $cuantas],
+            ),
+        );
+        $resumenes = $this->resumenes($ids);
+
+        // resumenes() no respeta el orden: se vuelve al de la consulta.
+        return array_values(array_filter(array_map(static fn (string $id): ?ResumenDeFuncion => $resumenes[$id] ?? null, $ids)));
+    }
+
+    /**
      * Las programadas que ya terminaron (EF-04.1), de la que terminó primero a la última, con el
      * organizador de su sala. Una función termina a su hora más la duración de las funciones de
      * la sala, que es lo más que pueden durar sus obras (Sala::crearFuncion()): así no se da por

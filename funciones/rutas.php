@@ -5,6 +5,7 @@ declare(strict_types=1);
 use IndieCinema\Funciones\Controladores\AcuerdosInternos;
 use IndieCinema\Funciones\Controladores\AvisosDePago;
 use IndieCinema\Funciones\Controladores\Calificaciones;
+use IndieCinema\Funciones\Controladores\CalificacionesInternas;
 use IndieCinema\Funciones\Controladores\CobrosInternos;
 use IndieCinema\Funciones\Controladores\OcupacionInterna;
 use IndieCinema\Funciones\Controladores\Reservas;
@@ -60,6 +61,10 @@ return static function (Router $router): void {
     // su ficha, y de una página entera de tarjetas en un solo pedido.
     $router->interna('GET', '/interno/funciones/{id}/ocupacion', [OcupacionInterna::class, 'deUna'], ['programacion']);
     $router->interna('GET', '/interno/ocupacion', [OcupacionInterna::class, 'deVarias'], ['programacion']);
+
+    // Los promedios y las últimas calificaciones, para las fichas de programación (EF-04.3).
+    $router->interna('GET', '/interno/calificaciones/resumen', [CalificacionesInternas::class, 'resumen'], ['programacion']);
+    $router->interna('GET', '/interno/calificaciones', [CalificacionesInternas::class, 'ultimas'], ['programacion']);
 
     // Lo cobrado de cada función, para el reparto de recaudación (EF-02.5).
     $router->interna('GET', '/interno/funciones/{id}/cobros', [CobrosInternos::class, 'deUna'], ['recaudacion']);

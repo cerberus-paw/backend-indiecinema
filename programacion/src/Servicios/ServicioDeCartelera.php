@@ -14,6 +14,7 @@ use IndieCinema\Programacion\Modelo\FiltrosDeCartelera;
 use IndieCinema\Programacion\Modelo\FuncionEnCartelera;
 use IndieCinema\Programacion\Modelo\Genero;
 use IndieCinema\Programacion\Modelo\ObraEnDetalle;
+use IndieCinema\Programacion\Modelo\OrdenDeCartelera;
 use IndieCinema\Programacion\Modelo\PaginaDeCartelera;
 use IndieCinema\Programacion\Modelo\ReglaIncumplida;
 use IndieCinema\Programacion\Repositorios\RepositorioDeCartelera;
@@ -45,6 +46,8 @@ final class ServicioDeCartelera
         private readonly RepositorioDeVotos $votos,
         Configuracion $configuracion,
         private readonly ?AcuerdosDeFunciones $acuerdos = null,
+        // Para ordenar por reputación (EF-04.4): los promedios viven en funciones.
+        private readonly ?CalificacionesDeFunciones $calificaciones = null,
     ) {
         $porPagina = $configuracion->obtener('cartelera.por_pagina', self::POR_PAGINA);
         if (!is_int($porPagina) || $porPagina < 1 || $porPagina > self::MAXIMO_POR_PAGINA) {
@@ -62,7 +65,7 @@ final class ServicioDeCartelera
      */
     public function pagina(FiltrosDeCartelera $filtros, int $numero): PaginaDeCartelera
     {
-        $pagina = $this->cartelera->pagina($filtros, $numero, $this->porPagina);
+        $pagina = $this->cartelera->pagina($filtros, $numero, $this->porPagina, reputacion: $this->reputacion($filtros));
         if (!$pagina->existe()) {
             throw ExcepcionHttp::noEncontrada();
         }
@@ -88,7 +91,33 @@ final class ServicioDeCartelera
      */
     public function todas(FiltrosDeCartelera $filtros): array
     {
-        return $this->cartelera->todas($filtros);
+        return $this->cartelera->todas($filtros, reputacion: $this->reputacion($filtros));
+    }
+
+    /**
+     * Las salas de las funciones filtradas, de la mejor calificada a la peor, si se pidió ordenar
+     * por reputación (EF-04.4): por promedio y, si empatan, por cuántas calificaciones tienen. Las
+     * que no tienen ninguna no están, y van al final. Si funciones no responde, la lista queda
+     * vacía y la cartelera sale por fecha.
+     *
+     * @return list<string>
+     */
+    private function reputacion(FiltrosDeCartelera $filtros): array
+    {
+        if ($filtros->orden !== OrdenDeCartelera::MejorCalificadas || $this->calificaciones === null) {
+            return [];
+        }
+        $promedios = [];
+        foreach (array_chunk($this->cartelera->salasDe($filtros), CalificacionesDeFunciones::MAXIMO_POR_PEDIDO) as $tanda) {
+            $resumen = $this->calificaciones->resumen(['salas' => $tanda]);
+            if ($resumen === null) {
+                return [];
+            }
+            $promedios += $resumen['salas'];
+        }
+        uasort($promedios, static fn (array $una, array $otra): int => [$otra['promedio'], $otra['cantidad']] <=> [$una['promedio'], $una['cantidad']]);
+
+        return array_map(strval(...), array_keys($promedios));
     }
 
     /**

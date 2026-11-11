@@ -12,6 +12,7 @@ use IndieCinema\Programacion\Modelo\DatosDeSala;
 use IndieCinema\Programacion\Modelo\FichaDeSala;
 use IndieCinema\Programacion\Modelo\FiltrosDeCartelera;
 use IndieCinema\Programacion\Modelo\ImagenSubida;
+use IndieCinema\Programacion\Modelo\ResumenDeFuncion;
 use IndieCinema\Programacion\Modelo\Sala;
 use IndieCinema\Programacion\Repositorios\RepositorioDeCartelera;
 use IndieCinema\Programacion\Repositorios\RepositorioDeFunciones;
@@ -145,6 +146,16 @@ final class ServicioDeSalas
         }
 
         return new FichaDeSala($sala, $this->cartelera->todas(new FiltrosDeCartelera(salaId: $sala->id)));
+    }
+
+    /**
+     * Las últimas funciones que se dieron en la sala, para el historial de su ficha (EF-04.3).
+     *
+     * @return list<ResumenDeFuncion>
+     */
+    public function proyectadas(Sala $sala, int $cuantas = 10): array
+    {
+        return $this->funciones->finalizadasDeLaSala($sala->id, $cuantas);
     }
 
     /**

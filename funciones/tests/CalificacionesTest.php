@@ -138,6 +138,23 @@ final class CalificacionesTest extends TestCase
         self::assertStringContainsString('¡Gracias por calificar!', $despues->cuerpo());
     }
 
+    public function testMisReservasMuestraLoQueCalificoEnLaReservaConLaQueFue(): void
+    {
+        $conLaQueFue = $this->reserva(self::FINALIZADA);
+        $otraDeLaMisma = $this->reserva(self::FINALIZADA);
+        $ausente = $this->reserva(self::FINALIZADA, 'ausente');
+        $this->pedir('POST', "/reservas/{$conLaQueFue}/calificar", ['puntaje' => '4', 'comentario' => 'Buen <debate> después.']);
+
+        $cuerpo = $this->pedir('GET', '/reservas')->cuerpo();
+
+        self::assertSame(1, substr_count($cuerpo, 'Calificaste 4 de 5.'));
+        self::assertStringContainsString('«Buen &lt;debate&gt; después.»', $cuerpo);
+        // La otra reserva de la misma función ya no ofrece calificar.
+        self::assertStringNotContainsString("/funcion/reservas/{$otraDeLaMisma}/calificar", $cuerpo);
+        self::assertStringContainsString('Reservaste y no asististe', $cuerpo);
+        self::assertStringContainsString($ausente, $cuerpo);
+    }
+
     public function testElComentarioEsOpcional(): void
     {
         $reserva = $this->reserva(self::FINALIZADA);

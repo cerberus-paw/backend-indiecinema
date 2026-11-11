@@ -138,6 +138,31 @@ final class RepositorioDeReservas
     }
 
     /**
+     * Cuántos lugares entraron a cada función, para el historial de proyecciones de la ficha de
+     * una sala (EF-04.3): los de las reservas con la asistencia registrada.
+     *
+     * @param list<string> $funcionesIds
+     *
+     * @return array<string, int> funcion_id => asistentes; las que no tienen, en 0
+     */
+    public function asistentesDe(array $funcionesIds): array
+    {
+        if ($funcionesIds === []) {
+            return [];
+        }
+        $asistentes = array_fill_keys($funcionesIds, 0);
+        foreach ($this->base->filas(
+            'SELECT funcion_id, SUM(cantidad) AS asistentes FROM reserva WHERE funcion_id IN ('
+            . implode(', ', array_fill(0, count($funcionesIds), '?')) . ') AND estado = ? GROUP BY funcion_id',
+            [...$funcionesIds, EstadoReserva::Asistio],
+        ) as $fila) {
+            $asistentes[$fila['funcion_id']] = (int) $fila['asistentes'];
+        }
+
+        return $asistentes;
+    }
+
+    /**
      * Las reservas en pie de esas funciones, para lo cobrado que pide recaudación (EF-02.5): las que
      * ocupan lugares salvo las que todavía esperan el pago, que no se cobraron. Las canceladas no:
      * soltaron sus lugares, y si se habían pagado, el reembolso es de EF-03.4.

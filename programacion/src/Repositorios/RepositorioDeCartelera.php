@@ -53,11 +53,16 @@ final class RepositorioDeCartelera
      *
      * @throws InvalidArgumentException si el número o el tamaño de la página no son positivos
      */
+    /**
+     * @param list<string> $reputacion las salas de la mejor calificada a la peor, para ordenar por
+     *                                 «Mejor calificadas» (EF-04.4); sin ella, ese orden es por fecha
+     */
     public function pagina(
         FiltrosDeCartelera $filtros,
         int $numero,
         int $tamano,
         DateTimeImmutable $ahora = new DateTimeImmutable(),
+        array $reputacion = [],
     ): PaginaDeCartelera {
         if ($numero < 1 || $tamano < 1) {
             throw new InvalidArgumentException('El número y el tamaño de la página tienen que ser positivos.');
@@ -71,7 +76,8 @@ final class RepositorioDeCartelera
             return $pagina;
         }
 
-        $funciones = $this->funciones("{$condiciones} " . self::orden($filtros->orden) . ' LIMIT ? OFFSET ?', [...$parametros, $tamano, ($numero - 1) * $tamano]);
+        [$orden, $deLaReputacion] = self::orden($filtros->orden, $reputacion);
+        $funciones = $this->funciones("{$condiciones} {$orden} LIMIT ? OFFSET ?", [...$parametros, ...$deLaReputacion, $tamano, ($numero - 1) * $tamano]);
 
         return new PaginaDeCartelera($funciones, $numero, $tamano, $total);
     }
@@ -80,13 +86,32 @@ final class RepositorioDeCartelera
      * Todas las funciones filtradas, sin paginar y en el mismo orden que las páginas: lo que se
      * descarga en CSV.
      *
+     * @param list<string> $reputacion como en pagina()
+     *
      * @return list<FuncionEnCartelera>
      */
-    public function todas(FiltrosDeCartelera $filtros, DateTimeImmutable $ahora = new DateTimeImmutable()): array
+    public function todas(FiltrosDeCartelera $filtros, DateTimeImmutable $ahora = new DateTimeImmutable(), array $reputacion = []): array
+    {
+        [$condiciones, $parametros] = self::condiciones($filtros, $ahora);
+        [$orden, $deLaReputacion] = self::orden($filtros->orden, $reputacion);
+
+        return $this->funciones("{$condiciones} {$orden}", [...$parametros, ...$deLaReputacion]);
+    }
+
+    /**
+     * Las salas que tienen alguna función con estos filtros, para pedir sólo sus calificaciones al
+     * ordenar por reputación (EF-04.4).
+     *
+     * @return list<string>
+     */
+    public function salasDe(FiltrosDeCartelera $filtros, DateTimeImmutable $ahora = new DateTimeImmutable()): array
     {
         [$condiciones, $parametros] = self::condiciones($filtros, $ahora);
 
-        return $this->funciones("{$condiciones} " . self::orden($filtros->orden), $parametros);
+        return array_map(
+            static fn (array $fila): string => (string) $fila['id'],
+            $this->base->filas('SELECT DISTINCT s.id ' . self::DESDE . " WHERE {$condiciones}", $parametros),
+        );
     }
 
     /**
@@ -296,17 +321,32 @@ final class RepositorioDeCartelera
      * El ORDER BY de la cartelera según el criterio elegido (E4-06.1), sólo con fragmentos fijos:
      * las funciones sin fecha quedan al final al ordenar por fecha, y a igualdad de criterio
      * desempatan la fecha, el estado, la sala y el id para que el paginado sea estable.
+     *
+     * Por reputación (EF-04.4), las salas van en el orden de $reputacion, que llega como
+     * parámetros: FIELD() da la posición de la sala en la lista, y 0 a las que no están (sin
+     * calificaciones), que por eso van al final. Sin la lista, ese orden es por fecha.
+     *
+     * @param list<string> $reputacion
+     *
+     * @return array{string, list<string>} el ORDER BY y sus parámetros
      */
-    private static function orden(OrdenDeCartelera $orden): string
+    private static function orden(OrdenDeCartelera $orden, array $reputacion = []): array
     {
-        return 'ORDER BY ' . match ($orden) {
+        if ($orden === OrdenDeCartelera::MejorCalificadas && $reputacion !== []) {
+            $marcas = implode(', ', array_fill(0, count($reputacion), '?'));
+
+            return ["ORDER BY FIELD(s.id, {$marcas}) = 0, FIELD(s.id, {$marcas}), " . self::DESEMPATE, [...$reputacion, ...$reputacion]];
+        }
+
+        return ['ORDER BY ' . match ($orden) {
             OrdenDeCartelera::FechaAscendente => self::DESEMPATE,
             OrdenDeCartelera::FechaDescendente => "(f.fecha_hora IS NULL), f.fecha_hora DESC, (f.estado = 'en_votacion_titulos'), s.nombre, f.id",
             OrdenDeCartelera::PrecioAscendente => 'f.precio_base ASC, ' . self::DESEMPATE,
             OrdenDeCartelera::PrecioDescendente => 'f.precio_base DESC, ' . self::DESEMPATE,
             OrdenDeCartelera::TituloAscendente => self::TITULO . ' ASC, ' . self::DESEMPATE,
             OrdenDeCartelera::TituloDescendente => self::TITULO . ' DESC, ' . self::DESEMPATE,
-        };
+            OrdenDeCartelera::MejorCalificadas => self::DESEMPATE,
+        }, []];
     }
 
     /**

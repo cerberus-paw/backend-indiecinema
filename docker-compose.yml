@@ -96,7 +96,7 @@ services:
       - ./nucleo:/src/backend-indiecinema/nucleo:ro
       - ../frontend-indiecinema:/src/frontend-indiecinema:ro
 
-  # La documentación de las salas (pólizas y habilitaciones, en PDF) llega con EF-05: va a su
+  # La documentación de las salas (pólizas y habilitaciones, en PDF) llega con EF-07: va a su
   # propio volumen, fuera del webroot, como los archivos de programación.
   moderacion:
     <<: *subsistema

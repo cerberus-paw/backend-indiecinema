@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace IndieCinema\Recaudacion\Modelo;
 
 /**
- * Lo cobrado de una función: cada reserva en pie y el neto, que es lo que se reparte (EF-06).
+ * Lo cobrado de una función: cada reserva en pie y el neto, que es lo que se reparte (EF-08).
  */
 final readonly class CobrosDeFuncion
 {

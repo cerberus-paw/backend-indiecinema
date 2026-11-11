@@ -47,8 +47,8 @@ backend-indiecinema/
 ├── cuentas/               /cuenta/   registro, ingreso, sesión, roles y usuarios del administrador
 ├── programacion/          /          obras, salas, funciones, cartelera, votación de títulos y solicitudes de sala
 ├── funciones/             /funcion/  las reservas con el cupo de cada función, sus paneles y el acuerdo de fecha
-├── moderacion/            /moderacion/  armado (EF-01): las solicitudes de sala, las denuncias y los términos llegan con EF-05 y EF-18
-└── recaudacion/           /recaudacion/ armado (EF-02): el reparto, las liquidaciones y la reportería llegan con EF-06 y EF-10
+├── moderacion/            /moderacion/  armado (EF-01): las solicitudes de sala, las denuncias y los términos llegan con EF-07 y EF-16
+└── recaudacion/           /recaudacion/ armado (EF-02): el reparto, las liquidaciones y la reportería llegan con EF-08 y EF-09
 ```
 
 Lo que todavía no está (los beneficios, dentro de recaudación) se suma con la misma forma.

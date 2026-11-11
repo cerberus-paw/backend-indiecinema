@@ -28,4 +28,8 @@ docker_process_sql --database=mysql <<-SQL
 		ON \`programacion\`.* TO 'migraciones'@'localhost';
 	GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, DROP, INDEX, REFERENCES, CREATE VIEW, SHOW VIEW, TRIGGER
 		ON \`funciones\`.* TO 'migraciones'@'localhost';
+	GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, DROP, INDEX, REFERENCES, CREATE VIEW, SHOW VIEW, TRIGGER
+		ON \`moderacion\`.* TO 'migraciones'@'localhost';
+	GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, DROP, INDEX, REFERENCES, CREATE VIEW, SHOW VIEW, TRIGGER
+		ON \`recaudacion\`.* TO 'migraciones'@'localhost';
 SQL

@@ -119,6 +119,7 @@ services:
       MYSQL_CLAVE_CUENTAS: ${MYSQL_CLAVE_CUENTAS:?falta MYSQL_CLAVE_CUENTAS en .env}
       MYSQL_CLAVE_PROGRAMACION: ${MYSQL_CLAVE_PROGRAMACION:?falta MYSQL_CLAVE_PROGRAMACION en .env}
       MYSQL_CLAVE_FUNCIONES: ${MYSQL_CLAVE_FUNCIONES:?falta MYSQL_CLAVE_FUNCIONES en .env}
+      MYSQL_CLAVE_MODERACION: ${MYSQL_CLAVE_MODERACION:?falta MYSQL_CLAVE_MODERACION en .env}
     volumes:
       - datos-mysql:/var/lib/mysql
       # Corre una sola vez, con la base vacía: esquemas, usuarios y permisos.
@@ -129,6 +130,7 @@ services:
       - ./cuentas/migraciones:/migraciones/cuentas:ro
       - ./programacion/migraciones:/migraciones/programacion:ro
       - ./funciones/migraciones:/migraciones/funciones:ro
+      - ./moderacion/migraciones:/migraciones/moderacion:ro
     networks: [interna]
 
 networks:

@@ -209,6 +209,8 @@ todo el sitio se vea igual aunque lo sirvan subsistemas distintos.
   /interno/funciones/{id}/cancelar-reservas` de funciones, que cancela sus reservas y les avisa por
   correo a los espectadores (la dirección se la pide a cuentas). Cada cambio de estado de una
   reserva queda en la tabla `cambio_reserva`, con quién lo hizo.
+  Recaudación reparte lo cobrado pero no lo mueve: lo pide a `GET /interno/funciones/{id}/cobros`
+  y `GET /interno/cobros?funciones=…` de funciones, la única con la credencial de Mercado Pago.
   El acuerdo de fecha (las franjas, el mínimo y los «Me sirve») se guarda en funciones, que es
   la que después cuenta los lugares, pero sus pantallas están en la ficha y en «Mis funciones»,
   que sirve programación: programación lo maneja con `/interno/acuerdos` de funciones (proponer,

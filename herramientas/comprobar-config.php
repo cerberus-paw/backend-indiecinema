@@ -16,7 +16,7 @@
 
 declare(strict_types=1);
 
-const SUBSISTEMAS = ['cuentas', 'programacion', 'funciones', 'moderacion'];
+const SUBSISTEMAS = ['cuentas', 'programacion', 'funciones', 'moderacion', 'recaudacion'];
 
 /**
  * @return array<string, list<string>>|null las claves de cada sección, o null si no se puede leer

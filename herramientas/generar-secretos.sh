@@ -6,14 +6,14 @@
 #
 # Para sumar un subsistema a un servidor que ya los tiene, herramientas/sumar-subsistema.sh.
 #
-# A mano son 15 secretos y 13 huellas repartidos en cinco archivos, y un solo valor que no
+# A mano son 18 secretos y 21 huellas repartidos en seis archivos, y un solo valor que no
 # coincida deja un subsistema sin arrancar o respondiendo 403. Los secretos nacen en el servidor
 # y no salen de ahí. No pisa archivos que ya existan: rotar secretos es otro procedimiento
 # (cambiar la clave de un usuario de MySQL que ya existe no se hace editando el .env).
 
 set -euo pipefail
 
-SUBSISTEMAS=(cuentas programacion funciones moderacion)
+SUBSISTEMAS=(cuentas programacion funciones moderacion recaudacion)
 
 for archivo in .env "${SUBSISTEMAS[@]/%//config/config.ini}"; do
 	if [ -e "$archivo" ]; then
@@ -43,6 +43,8 @@ token_nginx=$(al_azar)
 # Sólo lo lee docker compose, que corre con tu usuario.
 (umask 077 && cat >.env <<EOF
 PUERTO_HTTP=80
+# El correo se simula también en los servidores: el buzón de prueba (ver el README, [correo]).
+COMPOSE_PROFILES=buzon
 
 MYSQL_CLAVE_ROOT=$(al_azar)
 MYSQL_CLAVE_MIGRACIONES=$(al_azar)
@@ -50,11 +52,13 @@ MYSQL_CLAVE_CUENTAS=${clave[cuentas]}
 MYSQL_CLAVE_PROGRAMACION=${clave[programacion]}
 MYSQL_CLAVE_FUNCIONES=${clave[funciones]}
 MYSQL_CLAVE_MODERACION=${clave[moderacion]}
+MYSQL_CLAVE_RECAUDACION=${clave[recaudacion]}
 
 NGINX_SECRETO_CUENTAS=${secreto[cuentas]}
 NGINX_SECRETO_PROGRAMACION=${secreto[programacion]}
 NGINX_SECRETO_FUNCIONES=${secreto[funciones]}
 NGINX_SECRETO_MODERACION=${secreto[moderacion]}
+NGINX_SECRETO_RECAUDACION=${secreto[recaudacion]}
 NGINX_TOKEN_INTERNO=$token_nginx
 EOF
 )
@@ -72,6 +76,7 @@ for subsistema in "${SUBSISTEMAS[@]}"; do
 		-e "s/^programacion = \"d3fd[0-9a-f]*\"/programacion = \"$(huella "${token[programacion]}")\"/" \
 		-e "s/^funciones = \"d3fd[0-9a-f]*\"/funciones = \"$(huella "${token[funciones]}")\"/" \
 		-e "s/^moderacion = \"d3fd[0-9a-f]*\"/moderacion = \"$(huella "${token[moderacion]}")\"/" \
+		-e "s/^recaudacion = \"d3fd[0-9a-f]*\"/recaudacion = \"$(huella "${token[recaudacion]}")\"/" \
 		-e "s/^nginx = \"d3fd[0-9a-f]*\"/nginx = \"$(huella "$token_nginx")\"/" \
 		"$subsistema/config/config.ejemplo.ini" >"$destino")
 

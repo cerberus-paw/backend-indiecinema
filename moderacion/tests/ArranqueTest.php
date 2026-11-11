@@ -43,6 +43,7 @@ final class ArranqueTest extends TestCase
         yield 'cuentas' => ['cuentas'];
         yield 'programación' => ['programacion'];
         yield 'funciones' => ['funciones'];
+        yield 'recaudación' => ['recaudacion'];
     }
 
     #[DataProvider('llamadores')]

@@ -90,6 +90,7 @@ final class FuncionesDeProgramacion
             || !is_bool($datos['titulos_elegidos'] ?? null) || !is_string($datos['organizador_id'] ?? null)
             || !is_string($sala['id'] ?? null) || !is_string($sala['nombre'] ?? null)
             || !is_string($sala['localidad'] ?? null) || !is_bool($sala['habilitada'] ?? null)
+            || !is_array($datos['obras_ids'] ?? null) || !array_is_list($datos['obras_ids'])
         ) {
             throw new RuntimeException('programacion no respondió una función a GET /interno/funciones/{id}.');
         }
@@ -107,6 +108,7 @@ final class FuncionesDeProgramacion
             $sala['localidad'],
             $sala['habilitada'],
             $datos['organizador_id'],
+            array_map(strval(...), $datos['obras_ids']),
         );
     }
 }

@@ -19,6 +19,8 @@ const PROXIMA = '12121212-1212-4212-8212-121212121212';
 const EMPEZADA = '34343434-3434-4434-8434-343434343434';
 const CANCELADA = '56565656-5656-4656-8656-565656565656';
 const A_LA_GORRA = '78787878-7878-4878-8878-787878787878';
+const FINALIZADA = '13131313-1313-4313-8313-131313131313';
+const VIEJA = '24242424-2424-4424-8424-242424242424';
 
 header('Content-Type: application/json');
 $cabeceras = getallheaders();
@@ -39,6 +41,7 @@ $funcion = static fn (string $id, string $estado, ?string $fecha, array $titulos
     'titulos_elegidos' => $elegidos,
     'sala' => ['id' => 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', 'nombre' => 'Cine Club El Galpón', 'localidad' => 'Luján', 'habilitada' => $publicada],
     'organizador_id' => 'ffffffff-ffff-4fff-8fff-ffffffffffff',
+    'obras_ids' => array_map(static fn (string $titulo): string => $titulo === 'Zama' ? '0b0b0b0b-0b0b-40b0-80b0-0b0b0b0b0b0b' : '0c0c0c0c-0c0c-40c0-80c0-0c0c0c0c0c0c', $titulos),
 ];
 
 /**
@@ -53,6 +56,10 @@ $responder = static function (string $id) use ($funcion): ?array {
         // hace una hora.
         PROXIMA => $funcion($id, 'programada', date('Y-m-d\\TH:i:s', strtotime('+30 days')), ['Zama'], true),
         EMPEZADA => $funcion($id, 'programada', date('Y-m-d\\TH:i:s', strtotime('-1 hour')), ['Zama'], true),
+        // Terminaron: una hace dos días, que se puede calificar, y otra hace cuarenta, fuera del
+        // plazo (EF-04.2).
+        FINALIZADA => $funcion($id, 'finalizada', date('Y-m-d\\TH:i:s', strtotime('-2 days')), ['Zama'], true),
+        VIEJA => $funcion($id, 'finalizada', date('Y-m-d\\TH:i:s', strtotime('-40 days')), ['Zama'], true),
         // Sin precio: no hay nada que cobrar (X-01).
         A_LA_GORRA => $funcion($id, 'programada', date('Y-m-d\\TH:i:s', strtotime('+30 days')), ['Zama'], true, precio: 0),
         // El organizador la canceló: el panel de sus reservas no registra asistencia.

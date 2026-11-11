@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use IndieCinema\Funciones\Controladores\AcuerdosInternos;
 use IndieCinema\Funciones\Controladores\AvisosDePago;
+use IndieCinema\Funciones\Controladores\Calificaciones;
 use IndieCinema\Funciones\Controladores\OcupacionInterna;
 use IndieCinema\Funciones\Controladores\Reservas;
 use IndieCinema\Funciones\Controladores\ReservasDeLaFuncion;
@@ -37,6 +38,9 @@ return static function (Router $router): void {
     // La cancelación del espectador, con una pantalla que la confirma antes (E4-01.5).
     $router->get('/reservas/{id}/cancelar', [Reservas::class, 'confirmarCancelacion'], Rol::Espectador);
     $router->post('/reservas/{id}/cancelar', [Reservas::class, 'cancelar'], Rol::Espectador);
+    // Calificar la función a la que asistió (EF-04.2): las reglas las controla el servicio.
+    $router->get('/reservas/{id}/calificar', [Calificaciones::class, 'formulario'], Rol::Espectador);
+    $router->post('/reservas/{id}/calificar', [Calificaciones::class, 'calificar'], Rol::Espectador);
 
     // El seguimiento de las reservas (E4-03). El organizador, las de sus funciones: que la función
     // sea suya lo controla el servicio, con el id del que pide.

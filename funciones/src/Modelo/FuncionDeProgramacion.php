@@ -23,6 +23,8 @@ final readonly class FuncionDeProgramacion
      * @param ?DateTimeImmutable $fechaHora       la hora de la sala; null mientras no tiene fecha
      * @param list<string>       $titulos         las elegidas o, en votación, las candidatas
      * @param bool               $titulosElegidos si $titulos ya son las que se proyectan
+     * @param list<string>       $obrasIds        las mismas obras, por id: la calificación las copia
+     *                                            (EF-04.2)
      */
     public function __construct(
         public string $id,
@@ -37,6 +39,7 @@ final readonly class FuncionDeProgramacion
         public string $salaLocalidad,
         public bool $salaHabilitada,
         public string $organizadorId,
+        public array $obrasIds = [],
     ) {
     }
 

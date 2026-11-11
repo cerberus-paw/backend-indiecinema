@@ -18,7 +18,7 @@ readonly VALIDADOR=ghcr.io/validator/validator@sha256:0af71abb9e40083cc0e8b3fcbe
 readonly -A PRUEBAS=(
 	[programacion]='InicioTest|CarteleraTest|FichaDeLaFuncionTest|ObrasTest|SalasDelOrganizadorTest|ObrasDelOrganizadorTest|FuncionesDelOrganizadorTest|SolicitudDeSalaTest|AdministracionDeSolicitudesTest'
 	[cuentas]='IngresoTest|RegistroTest|MiCuentaTest|AdministracionDeUsuariosTest'
-	[funciones]='ReservasTest|PanelDeReservasTest'
+	[funciones]='ReservasTest|PanelDeReservasTest|CalificacionesTest'
 )
 
 main() {

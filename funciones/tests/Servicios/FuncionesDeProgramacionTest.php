@@ -54,6 +54,7 @@ final class FuncionesDeProgramacionTest extends TestCase
         self::assertNull($funcion->fechaHora);
         self::assertSame(['La ciénaga', 'Zama'], $funcion->titulos);
         self::assertFalse($funcion->titulosElegidos);
+        self::assertSame(['0c0c0c0c-0c0c-40c0-80c0-0c0c0c0c0c0c', '0b0b0b0b-0b0b-40b0-80b0-0b0b0b0b0b0b'], $funcion->obrasIds);
     }
 
     public function testUnaQueNoExisteEsNullYUnIdMalFormadoNiSePide(): void

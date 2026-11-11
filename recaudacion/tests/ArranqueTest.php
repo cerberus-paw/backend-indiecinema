@@ -89,7 +89,7 @@ final class ArranqueTest extends TestCase
         self::assertStringContainsString('<footer', $respuesta->cuerpo());
         self::assertStringContainsString('Olga Organizadora', $respuesta->cuerpo());
         // anotar() guarda sólo las de 200 y 422: ésta va a mano, para que el validador del CI
-        // tenga una página de recaudación mientras no haya pantallas (EF-06 las suma).
+        // tenga una página de recaudación mientras no haya pantallas (EF-08 las suma).
         PaginasParaValidar::guardar('recaudacion-error-404', $respuesta->cuerpo());
     }
 }

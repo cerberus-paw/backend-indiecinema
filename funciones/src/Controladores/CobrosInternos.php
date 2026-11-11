@@ -19,7 +19,7 @@ use IndieCinema\Nucleo\Uuid;
  *
  * Por cada reserva en pie: su total y lo que se cobró de verdad. Una reserva a la gorra, o que se
  * confirmó con el cobro apagado, no tiene pago: total puede ser más que 0, pero cobrado es 0. El
- * neto suma lo cobrado (sin reembolsos hasta EF-03.4). Los montos van como texto con dos decimales,
+ * neto suma lo cobrado (sin reembolsos hasta EF-06.4). Los montos van como texto con dos decimales,
  * como los guarda la base: sin pasar por float.
  */
 final class CobrosInternos extends Controlador
@@ -86,7 +86,7 @@ final class CobrosInternos extends Controlador
                 'pago_id' => $reserva->pagoId,
                 'estado' => $reserva->estado->value,
                 // Todavía no se registra ningún reembolso: los de Mercado Pago quedan en el log
-                // hasta EF-03.4, que suma la columna y los descuenta del neto. El campo ya está,
+                // hasta EF-06.4, que suma la columna y los descuenta del neto. El campo ya está,
                 // para que recaudación no tenga que cambiar.
                 'reembolsada' => false,
             ];

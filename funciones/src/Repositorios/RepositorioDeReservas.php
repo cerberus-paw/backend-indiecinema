@@ -165,7 +165,7 @@ final class RepositorioDeReservas
     /**
      * Las reservas en pie de esas funciones, para lo cobrado que pide recaudación (EF-02.5): las que
      * ocupan lugares salvo las que todavía esperan el pago, que no se cobraron. Las canceladas no:
-     * soltaron sus lugares, y si se habían pagado, el reembolso es de EF-03.4.
+     * soltaron sus lugares, y si se habían pagado, el reembolso es de EF-06.4.
      *
      * @param list<string> $funcionesIds
      *

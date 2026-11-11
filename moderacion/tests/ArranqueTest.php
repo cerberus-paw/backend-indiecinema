@@ -89,7 +89,7 @@ final class ArranqueTest extends TestCase
         self::assertStringContainsString('<footer', $respuesta->cuerpo());
         self::assertStringContainsString('Mora Moderadora', $respuesta->cuerpo());
         // anotar() guarda sólo las de 200 y 422: ésta va a mano, para que el validador del CI
-        // tenga una página de moderación mientras no haya pantallas (EF-05 las suma).
+        // tenga una página de moderación mientras no haya pantallas (EF-07 las suma).
         PaginasParaValidar::guardar('moderacion-error-404', $respuesta->cuerpo());
     }
 }

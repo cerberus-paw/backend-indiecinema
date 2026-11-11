@@ -2,7 +2,7 @@
 # Corre el análisis estático y las pruebas de un subsistema (o de todos) sin PHP ni Composer en la
 # máquina: con la misma imagen de los subsistemas y contra un MySQL descartable, como el CI.
 #
-#   herramientas/pruebas.sh funciones                  # un subsistema: nucleo, cuentas, programacion o funciones
+#   herramientas/pruebas.sh funciones                  # un subsistema: nucleo, cuentas, programacion, funciones o moderacion
 #   herramientas/pruebas.sh funciones --filter Reserva # lo que sigue va a PHPUnit
 #   herramientas/pruebas.sh                            # los cuatro
 #
@@ -17,7 +17,7 @@ set -euo pipefail
 readonly RED=indiecinema-pruebas
 readonly MYSQL=mysql-pruebas
 readonly IMAGEN=indiecinema-pruebas
-readonly PAQUETES=(nucleo cuentas programacion funciones)
+readonly PAQUETES=(nucleo cuentas programacion funciones moderacion)
 
 main() {
 	cd "$(dirname "$(realpath "$0")")/.."

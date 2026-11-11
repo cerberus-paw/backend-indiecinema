@@ -19,6 +19,7 @@ readonly -A PRUEBAS=(
 	[programacion]='InicioTest|CarteleraTest|FichaDeLaFuncionTest|ObrasTest|SalasDelOrganizadorTest|ObrasDelOrganizadorTest|FuncionesDelOrganizadorTest|SolicitudDeSalaTest|AdministracionDeSolicitudesTest'
 	[cuentas]='IngresoTest|RegistroTest|MiCuentaTest|AdministracionDeUsuariosTest'
 	[funciones]='ReservasTest|PanelDeReservasTest'
+	[moderacion]='ArranqueTest'
 )
 
 main() {
@@ -28,7 +29,7 @@ main() {
 	mkdir -p "$carpeta"
 
 	# Adentro del contenedor el back está en /src/backend-indiecinema (herramientas/pruebas.sh).
-	for paquete in programacion cuentas funciones; do
+	for paquete in programacion cuentas funciones moderacion; do
 		PAGINAS_PARA_VALIDAR=/src/backend-indiecinema/.paginas-para-validar \
 			herramientas/pruebas.sh "$paquete" --filter "${PRUEBAS[$paquete]}"
 	done

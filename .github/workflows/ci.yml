@@ -40,7 +40,7 @@ jobs:
       # Que falle uno no corta los otros: se ve de una vez todo lo que está roto.
       fail-fast: false
       matrix:
-        paquete: [nucleo, cuentas, programacion, funciones]
+        paquete: [nucleo, cuentas, programacion, funciones, moderacion]
     # Las pruebas que tocan la base corren contra un MySQL de verdad, como en el README.
     services:
       mysql:
@@ -109,7 +109,7 @@ jobs:
         run: composer pruebas
       # El validador del W3C (E4-10.7) sobre esas páginas: un error de HTML no pasa; los avisos, sí.
       # Fijado por digest, como gitleaks, para que una versión nueva no rompa el CI sin aviso. El
-      # núcleo no dibuja páginas; en los otros tres, que no haya ninguna también es un error.
+      # núcleo no dibuja páginas; en los subsistemas, que no haya ninguna también es un error.
       - name: Validar el HTML (W3C)
         if: matrix.paquete != 'nucleo'
         run: |
@@ -124,7 +124,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        paquete: [nucleo, cuentas, programacion, funciones]
+        paquete: [nucleo, cuentas, programacion, funciones, moderacion]
     steps:
       - uses: actions/checkout@v7
       - uses: shivammathur/setup-php@v2

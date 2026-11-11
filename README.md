@@ -46,10 +46,11 @@ backend-indiecinema/
 ├── nucleo/                MVC común: ruteo, middleware, base de datos, vistas y errores
 ├── cuentas/               /cuenta/   registro, ingreso, sesión, roles y usuarios del administrador
 ├── programacion/          /          obras, salas, funciones, cartelera, votación de títulos y solicitudes de sala
-└── funciones/             /funcion/  las reservas con el cupo de cada función, sus paneles y el acuerdo de fecha
+├── funciones/             /funcion/  las reservas con el cupo de cada función, sus paneles y el acuerdo de fecha
+└── moderacion/            /moderacion/  armado (EF-01): las solicitudes de sala, las denuncias y los términos llegan con EF-05 y EF-18
 ```
 
-Lo que todavía no está (el cobro, la moderación y los beneficios) se suma con la misma forma.
+Lo que todavía no está (la recaudación y los beneficios) se suma con la misma forma.
 
 Cada subsistema tiene la misma estructura por dentro:
 
@@ -255,8 +256,9 @@ cp .env.ejemplo .env
 cp cuentas/config/config.ejemplo.ini cuentas/config/config.ini
 cp programacion/config/config.ejemplo.ini programacion/config/config.ini
 cp funciones/config/config.ejemplo.ini funciones/config/config.ini
+cp moderacion/config/config.ejemplo.ini moderacion/config/config.ini
 
-composer install -d cuentas && composer install -d programacion && composer install -d funciones
+composer install -d cuentas && composer install -d programacion && composer install -d funciones && composer install -d moderacion
 docker compose up -d --build
 
 # La primera vez, MySQL crea los esquemas y aplica las migraciones antes de aceptar conexiones:
@@ -281,6 +283,7 @@ repositorios, porque el núcleo y el front se instalan desde rutas relativas:
 docker run --rm -u "$(id -u):$(id -g)" -v "$PWD/..:/app" -w /app/backend-indiecinema/cuentas composer:2 install
 docker run --rm -u "$(id -u):$(id -g)" -v "$PWD/..:/app" -w /app/backend-indiecinema/programacion composer:2 install
 docker run --rm -u "$(id -u):$(id -g)" -v "$PWD/..:/app" -w /app/backend-indiecinema/funciones composer:2 install
+docker run --rm -u "$(id -u):$(id -g)" -v "$PWD/..:/app" -w /app/backend-indiecinema/moderacion composer:2 install
 ```
 
 ### Qué queda andando
@@ -339,7 +342,7 @@ usar esa parte (un correo que no sale, un 500 al reservar).
 ### La base de datos
 
 La primera vez que arranca MySQL, con el volumen vacío, corre `mysql/init/`: crea los esquemas
-`cuentas`, `programacion` y `funciones`, cada uno con un usuario del mismo nombre que sólo puede
+`cuentas`, `programacion`, `funciones` y `moderacion`, cada uno con un usuario del mismo nombre que sólo puede
 leer y escribir datos de su esquema (`SELECT`, `INSERT`, `UPDATE`, `DELETE`). Las claves son las
 `MYSQL_CLAVE_*` de `.env`, las mismas que van en `[base] clave` de cada `config.ini`. `root` sólo
 entra desde adentro del contenedor de MySQL, nunca desde la red.
@@ -350,7 +353,7 @@ de MySQL y la aplicación nunca usa. Con la base recién creada se aplican solas
 después, con:
 
 ```
-docker compose exec mysql bash /herramientas/migrar.sh                # los tres subsistemas
+docker compose exec mysql bash /herramientas/migrar.sh                # todos los subsistemas
 docker compose exec mysql bash /herramientas/migrar.sh programacion   # uno solo
 ```
 
@@ -360,6 +363,9 @@ docker compose exec mysql bash /herramientas/migrar.sh programacion   # uno solo
 - Lo aplicado se anota en el esquema `control_migraciones`, que ningún subsistema ve: correr el
   comando de nuevo no hace nada si no hay migraciones nuevas.
 - Una migración aplicada no se edita: el comando lo detecta y frena. El cambio va en una nueva.
+- Un subsistema nuevo en una base que ya tiene datos, donde `mysql/init/` no vuelve a correr: con
+  su `MYSQL_CLAVE_*` en `.env` y MySQL recreado, `docker compose exec mysql bash
+  /herramientas/crear-esquema.sh moderacion` crea su esquema, su usuario y sus permisos.
 - MySQL no deshace un `CREATE` ni un `ALTER`: si una migración falla a mitad de camino, no se
   anota, y hay que revisar qué quedó antes de correrla de nuevo. Conviene una sola cosa por
   migración.
@@ -569,7 +575,7 @@ compose, y los archivos van al volumen de programación.
 ## Pruebas
 
 ```
-herramientas/pruebas.sh funciones                    # nucleo, cuentas, programacion o funciones
+herramientas/pruebas.sh funciones                    # nucleo, cuentas, programacion, funciones o moderacion
 herramientas/pruebas.sh funciones --filter Reservas  # lo que sigue va a PHPUnit
 herramientas/pruebas.sh                              # los cuatro
 ```
@@ -590,7 +596,7 @@ Corre las pruebas que dibujan esas páginas, que las guardan en `.paginas-para-v
 valida con la imagen del validador (`ghcr.io/validator/validator`, la misma versión que el CI).
 Falla si alguna tiene un error de HTML; los avisos no la hacen fallar.
 
-El núcleo y los tres subsistemas tienen las suyas (las de los subsistemas necesitan el
+El núcleo y los subsistemas tienen las suyas (las de los subsistemas necesitan el
 `composer install` de arriba, que trae PHPUnit):
 
 ```
@@ -599,6 +605,7 @@ composer pruebas -d nucleo
 composer pruebas -d cuentas
 composer pruebas -d programacion
 composer pruebas -d funciones
+composer pruebas -d moderacion
 ```
 
 Las que tocan la base corren contra un MySQL de verdad: sin la variable `PRUEBAS_MYSQL_HOST` se

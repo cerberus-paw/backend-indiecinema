@@ -363,9 +363,11 @@ docker compose exec mysql bash /herramientas/migrar.sh programacion   # uno solo
 - Lo aplicado se anota en el esquema `control_migraciones`, que ningún subsistema ve: correr el
   comando de nuevo no hace nada si no hay migraciones nuevas.
 - Una migración aplicada no se edita: el comando lo detecta y frena. El cambio va en una nueva.
-- Un subsistema nuevo en una base que ya tiene datos, donde `mysql/init/` no vuelve a correr: con
-  su `MYSQL_CLAVE_*` en `.env` y MySQL recreado, `docker compose exec mysql bash
-  /herramientas/crear-esquema.sh moderacion` crea su esquema, su usuario y sus permisos.
+- Un subsistema nuevo en un servidor que ya está andando, donde `mysql/init/` no vuelve a correr:
+  antes de mergearlo, `bash herramientas/sumar-subsistema.sh moderacion` le genera sus secretos y
+  su `config.ini`, y lo suma a los de los demás. Después del despliegue, `docker compose exec mysql
+  bash /herramientas/crear-esquema.sh moderacion` crea su esquema, su usuario y sus permisos. En
+  un servidor nuevo, todo junto: `bash herramientas/generar-secretos.sh`.
 - MySQL no deshace un `CREATE` ni un `ALTER`: si una migración falla a mitad de camino, no se
   anota, y hay que revisar qué quedó antes de correrla de nuevo. Conviene una sola cosa por
   migración.

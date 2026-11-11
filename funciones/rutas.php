@@ -6,6 +6,7 @@ use IndieCinema\Funciones\Controladores\AcuerdosInternos;
 use IndieCinema\Funciones\Controladores\AvisosDePago;
 use IndieCinema\Funciones\Controladores\Calificaciones;
 use IndieCinema\Funciones\Controladores\CalificacionesInternas;
+use IndieCinema\Funciones\Controladores\CobrosInternos;
 use IndieCinema\Funciones\Controladores\OcupacionInterna;
 use IndieCinema\Funciones\Controladores\Reservas;
 use IndieCinema\Funciones\Controladores\ReservasDeLaFuncion;
@@ -65,8 +66,12 @@ return static function (Router $router): void {
     $router->interna('GET', '/interno/calificaciones/resumen', [CalificacionesInternas::class, 'resumen'], ['programacion']);
     $router->interna('GET', '/interno/calificaciones', [CalificacionesInternas::class, 'ultimas'], ['programacion']);
 
+    // Lo cobrado de cada función, para el reparto de recaudación (EF-02.5).
+    $router->interna('GET', '/interno/funciones/{id}/cobros', [CobrosInternos::class, 'deUna'], ['recaudacion']);
+    $router->interna('GET', '/interno/cobros', [CobrosInternos::class, 'deVarias'], ['recaudacion']);
+
     // Para comprobar que los otros subsistemas llegan hasta acá con su token.
-    $router->interna('GET', '/interno/estado', [EstadoInterno::class, 'mostrar'], ['cuentas', 'programacion']);
+    $router->interna('GET', '/interno/estado', [EstadoInterno::class, 'mostrar'], ['cuentas', 'programacion', 'moderacion', 'recaudacion']);
 
     // API interna de acuerdos de fecha (E3-13 / IC-154, IC-155, IC-156, IC-157, IC-158).
     $router->interna('POST', '/interno/acuerdos', [AcuerdosInternos::class, 'proponer'], ['programacion']);

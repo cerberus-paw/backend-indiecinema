@@ -35,7 +35,7 @@ main() {
 	# Composer en su imagen, como en el README: el servidor no tiene PHP. Se monta la carpeta de los
 	# dos repositorios, porque el núcleo y el front se instalan desde rutas relativas.
 	local subsistema
-	for subsistema in cuentas programacion funciones; do
+	for subsistema in cuentas programacion funciones moderacion recaudacion; do
 		docker run --rm -u "$(id -u):$(id -g)" -v "$(realpath ..):/app" -w "/app/$(basename "$PWD")/$subsistema" \
 			composer:2 install --no-interaction --no-progress </dev/null
 	done

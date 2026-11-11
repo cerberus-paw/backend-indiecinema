@@ -97,11 +97,14 @@ final class PanelDeReservasTest extends TestCase
         return PaginasParaValidar::anotar($metodo, $ruta, $aplicacion->atender(new Peticion($metodo, (string) parse_url($ruta, PHP_URL_PATH), $consulta, $cuerpo, $cabeceras, ['csrf' => self::CSRF], [])));
     }
 
-    private function deProgramacion(string $funcion, array $cuerpo, string $token = self::TOKEN_DE_PROGRAMACION): Respuesta
+    /**
+     * @param string $aviso «cancelar-reservas» o «finalizada»
+     */
+    private function deProgramacion(string $funcion, array $cuerpo, string $token = self::TOKEN_DE_PROGRAMACION, string $aviso = 'cancelar-reservas'): Respuesta
     {
         $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion, new Log('funciones', fopen('php://memory', 'w')));
 
-        return $aplicacion->atender(new Peticion('POST', "/interno/funciones/{$funcion}/cancelar-reservas", [], $cuerpo, [
+        return $aplicacion->atender(new Peticion('POST', "/interno/funciones/{$funcion}/{$aviso}", [], $cuerpo, [
             'X-Llamador' => 'programacion',
             'Authorization' => "Bearer {$token}",
         ], [], []));
@@ -442,6 +445,65 @@ final class PanelDeReservasTest extends TestCase
         self::assertSame(400, $this->deProgramacion(self::PROXIMA, ['organizador_id' => self::ORGANIZADORA])->estado());
         self::assertSame(403, $this->deProgramacion(self::PROXIMA, ['organizador_id' => self::ORGANIZADORA, 'titulo' => 'Zama'], 'otro-token')->estado());
         self::assertSame('confirmada', $this->estadoDe($codigo));
+    }
+
+    // ---- La función terminó (EF-04.1) -------------------------------------------------------
+
+    public function testAlTerminarLaFuncionLasConfirmadasSinAsistenciaQuedanAusentes(): void
+    {
+        $deEva = $this->reserva(self::EMPEZADA, 2, usuario: self::EVA);
+        $deElias = $this->reserva(self::EMPEZADA, 1, usuario: self::ELIAS);
+        $conAsistencia = $this->reserva(self::EMPEZADA, 1, 'asistio');
+        $cancelada = $this->reserva(self::EMPEZADA, 1, 'cancelada');
+        $deOtraFuncion = $this->reserva(self::PROXIMA, 1);
+
+        $respuesta = $this->deProgramacion(self::EMPEZADA, ['organizador_id' => self::ORGANIZADORA], aviso: 'finalizada');
+
+        self::assertSame(200, $respuesta->estado(), $respuesta->cuerpo());
+        self::assertSame(['ausentes' => 2], json_decode($respuesta->cuerpo(), true));
+        self::assertSame(['ausente', 'ausente', 'asistio', 'cancelada', 'confirmada'], array_map($this->estadoDe(...), [$deEva, $deElias, $conAsistencia, $cancelada, $deOtraFuncion]));
+        self::assertSame([
+            'estado_anterior' => 'confirmada',
+            'estado_nuevo' => 'ausente',
+            'autor_id' => self::ORGANIZADORA,
+            'autor_rol' => 'organizador',
+            'motivo' => 'La función terminó sin la asistencia registrada.',
+        ], $this->historialDe($deEva)[0]);
+
+        // Si programación no recibió la respuesta y lo pide otra vez, no queda ninguna confirmada.
+        self::assertSame(['ausentes' => 0], json_decode($this->deProgramacion(self::EMPEZADA, ['organizador_id' => self::ORGANIZADORA], aviso: 'finalizada')->cuerpo(), true));
+    }
+
+    public function testElAvisoDeQueTerminoPideElOrganizadorYSoloLoMandaProgramacion(): void
+    {
+        $codigo = $this->reserva(self::EMPEZADA, 1);
+
+        self::assertSame(400, $this->deProgramacion(self::EMPEZADA, [], aviso: 'finalizada')->estado());
+        self::assertSame(400, $this->deProgramacion(self::EMPEZADA, ['organizador_id' => 'no-es-un-uuid'], aviso: 'finalizada')->estado());
+        self::assertSame(404, $this->deProgramacion('no-es-un-uuid', ['organizador_id' => self::ORGANIZADORA], aviso: 'finalizada')->estado());
+        self::assertSame(403, $this->deProgramacion(self::EMPEZADA, ['organizador_id' => self::ORGANIZADORA], 'otro-token', 'finalizada')->estado());
+        self::assertSame('confirmada', $this->estadoDe($codigo));
+    }
+
+    public function testElOrganizadorRegistraTardeLaAsistenciaDeUnaReservaAusente(): void
+    {
+        $codigo = $this->reserva(self::EMPEZADA, 2, 'ausente');
+
+        $respuesta = $this->pedir('POST', '/organizador/funciones/' . self::EMPEZADA . '/asistencia', cuerpo: ['codigo' => $codigo], extra: self::ACEPTA_JSON);
+
+        self::assertSame(200, $respuesta->estado(), $respuesta->cuerpo());
+        self::assertSame('asistio', $this->estadoDe($codigo));
+        self::assertSame(['ausente', 'asistio'], [$this->historialDe($codigo)[0]['estado_anterior'], $this->historialDe($codigo)[0]['estado_nuevo']]);
+    }
+
+    public function testLaListaDelOrganizadorMuestraLasAusentes(): void
+    {
+        $codigo = $this->reserva(self::EMPEZADA, 2, 'ausente');
+
+        $cuerpo = $this->pedir('GET', '/organizador/funciones/' . self::EMPEZADA . '/reservas')->cuerpo();
+
+        self::assertStringContainsString($codigo, $cuerpo);
+        self::assertStringContainsString('no asistió', $cuerpo);
     }
 
     // ---- Quién entra (E4-03.6) --------------------------------------------------------------

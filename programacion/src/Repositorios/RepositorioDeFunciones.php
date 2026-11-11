@@ -288,6 +288,31 @@ final class RepositorioDeFunciones
     }
 
     /**
+     * Las programadas que ya terminaron (EF-04.1), de la que terminó primero a la última, con el
+     * organizador de su sala. Una función termina a su hora más la duración de las funciones de
+     * la sala, que es lo más que pueden durar sus obras (Sala::crearFuncion()): así no se da por
+     * terminada una que todavía se está proyectando. También las de una sala dada de baja: no
+     * vuelven a la cartelera, pero sus reservas también tienen que quedar al día.
+     *
+     * @return list<array{id: string, organizador_id: string}>
+     */
+    public function terminadas(DateTimeImmutable $ahora, int $cuantas): array
+    {
+        return array_map(
+            static fn (array $fila): array => ['id' => (string) $fila['id'], 'organizador_id' => (string) $fila['organizador_id']],
+            $this->base->filas(
+                'SELECT f.id, s.organizador_id
+                 FROM funcion f
+                 JOIN sala s ON s.id = f.sala_id
+                 WHERE f.estado = ? AND f.fecha_hora + INTERVAL s.duracion_funcion MINUTE <= ?
+                 ORDER BY f.fecha_hora, f.id
+                 LIMIT ?',
+                [EstadoFuncion::Programada, $ahora, $cuantas],
+            ),
+        );
+    }
+
+    /**
      * La función y sus obras juntas: una función sin obras no tiene que quedar en la base.
      */
     public function agregar(Funcion $funcion): void

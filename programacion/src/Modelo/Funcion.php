@@ -89,7 +89,8 @@ final class Funcion
      * Si el organizador puede editar la función (E3-11.3): sólo una programada que todavía no se
      * dio. En votación las obras son las candidatas que se están votando y la fecha sale del
      * acuerdo; cancelada y finalizada ya terminaron. Y una programada cuya fecha ya pasó ya se
-     * proyectó: nada la pasa a finalizada sola, y con otra fecha volvería a la cartelera.
+     * proyectó, aunque la tarea todavía no la haya finalizado (EF-04.1): con otra fecha volvería
+     * a la cartelera.
      *
      * Es estático para que lo usen también la ficha y el panel, que no leen la entidad.
      */
@@ -118,8 +119,8 @@ final class Funcion
 
     /**
      * Si el organizador puede cancelar la función (E3-11.4): en votación o programada, mientras
-     * todavía no se dio. Una programada cuya fecha ya pasó ya se proyectó, aunque nada la haya
-     * pasado a finalizada.
+     * todavía no se dio. Una programada cuya fecha ya pasó ya se proyectó, aunque la tarea todavía
+     * no la haya finalizado (EF-04.1).
      *
      * cancelar() controla sólo el ciclo de vida; la fecha la mira quien ofrece cancelar. Es
      * estático por lo mismo que seEdita().
@@ -250,7 +251,8 @@ final class Funcion
     }
 
     /**
-     * Una función programada termina cuando ya se proyectó: no antes de su fecha.
+     * Una función programada termina cuando ya se proyectó: no antes de su fecha. La finaliza
+     * FinalizacionDeFunciones, cuando pasó también la duración de las funciones de la sala.
      *
      * @throws ReglaIncumplida si no está programada, o si su fecha todavía no llegó
      */

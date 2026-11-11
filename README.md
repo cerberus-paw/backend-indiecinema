@@ -230,9 +230,11 @@ todo el sitio se vea igual aunque lo sirvan subsistemas distintos.
   `smtps://` o STARTTLS para no mandar la clave sin cifrar.
 - **Las tareas programadas** las dispara el cron del servidor con
   `docker compose exec -T <subsistema> php bin/<tarea>.php`, en lugar de sumar un contenedor sólo
-  para eso. La única es `funciones/bin/liberar-vencidas.php`, que cancela las reservas que
-  vencieron sin pagar (ver «Mercado Pago»). La votación y el acuerdo los cierra el organizador
-  desde la ficha.
+  para eso. Son dos: `funciones/bin/liberar-vencidas.php`, que cancela las reservas que
+  vencieron sin pagar (ver «Mercado Pago»), y `programacion/bin/finalizar-funciones.php`, que
+  pasa a finalizada cada función terminada (su hora más la duración de las funciones de la sala)
+  y deja «ausente» a quien no fue. La votación y el acuerdo los cierra el organizador desde la
+  ficha.
 - **Las rutas dentro del contenedor copian las del disco** (`/src/backend-indiecinema/<subsistema>`
   y `/src/frontend-indiecinema`), así los repositorios `path` de Composer funcionan igual si se
   instala desde afuera o desde adentro del contenedor.
@@ -684,7 +686,11 @@ cancelada en «Mis reservas» y en los paneles, el cron del servidor corre cada 
 
 ```
 */5 * * * * cd /home/ubuntu/indiecinema/backend-indiecinema && docker compose exec -T funciones php bin/liberar-vencidas.php
+*/15 * * * * cd /home/ubuntu/indiecinema/backend-indiecinema && docker compose exec -T programacion php bin/finalizar-funciones.php
 ```
+
+La segunda finaliza las funciones terminadas (EF-04.1): no es del cobro, pero va en el mismo
+crontab.
 
 Para pagar con el comprador de prueba, las tarjetas de prueba están en la documentación de
 Checkout Pro («Tarjetas de prueba»), con el titular `APRO` para un pago aprobado y `OTHE` para

@@ -208,7 +208,7 @@ final class Reservas extends Controlador
             'funcion' => $funcion === null ? null : self::datosDeFuncion($funcion),
             'con_pago' => $reserva->preferenciaId !== null,
             'regreso' => match ($reserva->estado) {
-                EstadoReserva::Confirmada, EstadoReserva::Asistio => 'acreditado',
+                EstadoReserva::Confirmada, EstadoReserva::Asistio, EstadoReserva::Ausente => 'acreditado',
                 EstadoReserva::PendientePago => $reserva->vencida() ? 'vencido' : 'esperando',
                 EstadoReserva::Cancelada => 'cancelada',
             },

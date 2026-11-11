@@ -48,6 +48,8 @@ return static function (Router $router): void {
     $router->post('/administracion/reservas/{id}/anular', [ReservasDelAdministrador::class, 'anular'], Rol::Administrador);
     // Programación canceló una función: se cancelan sus reservas y se avisa a los espectadores.
     $router->interna('POST', '/interno/funciones/{id}/cancelar-reservas', [ReservasInternas::class, 'cancelarDeLaFuncion'], ['programacion']);
+    // Programación finalizó una función (EF-04.1): las confirmadas sin asistencia quedan ausentes.
+    $router->interna('POST', '/interno/funciones/{id}/finalizada', [ReservasInternas::class, 'finalizada'], ['programacion']);
 
     // Los lugares ocupados, para que programación muestre los libres (E4-02): de una función en
     // su ficha, y de una página entera de tarjetas en un solo pedido.

@@ -11,6 +11,7 @@ use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Seguridad\Rol;
 use IndieCinema\Programacion\Modelo\Genero;
 use IndieCinema\Programacion\Modelo\Obra;
+use IndieCinema\Programacion\Servicios\CalificacionesDeFunciones;
 use IndieCinema\Programacion\Servicios\ServicioDeCartelera;
 use IndieCinema\Programacion\Servicios\ServicioDeObras;
 
@@ -26,6 +27,8 @@ final class Obras extends Controlador
     public function __construct(
         private readonly ServicioDeObras $servicio,
         private readonly ServicioDeCartelera $cartelera,
+        // El promedio y las últimas calificaciones de la obra, que viven en funciones (EF-04.3).
+        private readonly CalificacionesDeFunciones $calificaciones,
     ) {
     }
 
@@ -76,6 +79,11 @@ final class Obras extends Controlador
         $funciones = $this->servicio->proximasFunciones($id);
         $tarjetasFunciones = TarjetaDeFuncion::todas($funciones, $this->cartelera->acuerdosDe($funciones));
 
+        $resumen = $this->calificaciones->resumen(['obras' => [$obra->id]]);
+        $deLaObra = $resumen['obras'][$obra->id] ?? null;
+        $ultimas = $deLaObra === null ? [] : $this->calificaciones->ultimas('obra', $obra->id);
+        $calificaciones = CalificacionesParaMostrar::datos($resumen !== null && $ultimas !== null, $deLaObra, $ultimas);
+
         $datosObra = [
             ...TarjetaDeObra::datos($obra, $mapaGeneros),
             'editable' => $esDueno,
@@ -87,12 +95,14 @@ final class Obras extends Controlador
             return $this->json([
                 'obra' => $datosObra,
                 'funciones' => $tarjetasFunciones,
+                'calificaciones' => $calificaciones,
             ]);
         }
 
         return $this->vista(self::PLANTILLA_FICHA, [
             'obra' => $datosObra,
             'funciones' => $tarjetasFunciones,
+            'calificaciones' => $calificaciones,
         ]);
     }
 }

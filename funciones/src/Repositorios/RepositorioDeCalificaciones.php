@@ -80,6 +80,58 @@ final class RepositorioDeCalificaciones
     }
 
     /**
+     * El promedio y la cantidad de calificaciones de cada sala, obra, organizador o función
+     * (EF-04.3), en una consulta por cada tipo que se pida. Los que no tienen calificaciones no
+     * vienen.
+     *
+     * @param array{salas?: list<string>, obras?: list<string>, organizadores?: list<string>, funciones?: list<string>} $ids
+     *
+     * @return array{salas: array<string, array{promedio: float, cantidad: int}>, obras: array<string, array{promedio: float, cantidad: int}>, organizadores: array<string, array{promedio: float, cantidad: int}>, funciones: array<string, array{promedio: float, cantidad: int}>}
+     */
+    public function resumen(array $ids): array
+    {
+        // Columnas fijas, nunca lo que viene del pedido: el tipo elige una de éstas.
+        $columnas = ['salas' => 'c.sala_id', 'organizadores' => 'c.organizador_id', 'funciones' => 'c.funcion_id', 'obras' => 'co.obra_id'];
+        $resumen = ['salas' => [], 'obras' => [], 'organizadores' => [], 'funciones' => []];
+        foreach ($columnas as $tipo => $columna) {
+            $lista = $ids[$tipo] ?? [];
+            if ($lista === []) {
+                continue;
+            }
+            $union = $tipo === 'obras' ? ' JOIN calificacion_obra co ON co.calificacion_id = c.id' : '';
+            $marcas = implode(', ', array_fill(0, count($lista), '?'));
+            foreach ($this->base->filas(
+                "SELECT {$columna} AS id, AVG(c.puntaje) AS promedio, COUNT(*) AS cantidad
+                 FROM calificacion c{$union}
+                 WHERE {$columna} IN ({$marcas})
+                 GROUP BY {$columna}",
+                $lista,
+            ) as $fila) {
+                $resumen[$tipo][(string) $fila['id']] = ['promedio' => round((float) $fila['promedio'], 1), 'cantidad' => (int) $fila['cantidad']];
+            }
+        }
+
+        return $resumen;
+    }
+
+    /**
+     * Las últimas calificaciones de una sala o de una obra, de la más nueva a la más vieja, para
+     * su ficha (EF-04.3).
+     *
+     * @param 'sala'|'obra' $de
+     *
+     * @return list<Calificacion>
+     */
+    public function ultimas(string $de, string $id, int $cuantas): array
+    {
+        $sql = $de === 'obra'
+            ? 'SELECT c.* FROM calificacion c JOIN calificacion_obra co ON co.calificacion_id = c.id WHERE co.obra_id = ? ORDER BY c.creada_en DESC, c.id LIMIT ?'
+            : 'SELECT c.* FROM calificacion c WHERE c.sala_id = ? ORDER BY c.creada_en DESC, c.id LIMIT ?';
+
+        return array_map(self::calificacion(...), $this->base->filas($sql, [$id, $cuantas]));
+    }
+
+    /**
      * Sin las obras: quien las necesita las pide aparte.
      *
      * @param array<string, mixed> $fila

@@ -19,6 +19,8 @@ final readonly class ResumenDeFuncion
      * @param list<string>       $titulos        las elegidas o, mientras está en votación, las
      *                                           candidatas, por título
      * @param bool               $titulosElegidos si $titulos ya son las que se proyectan
+     * @param list<string>       $obrasIds        las mismas obras que $titulos, por id: funciones
+     *                                            las copia al calificar (EF-04.2)
      */
     public function __construct(
         public string $id,
@@ -33,6 +35,7 @@ final readonly class ResumenDeFuncion
         public string $salaLocalidad,
         public bool $salaHabilitada,
         public string $organizadorId,
+        public array $obrasIds = [],
     ) {
     }
 }

@@ -140,13 +140,24 @@ final readonly class Reserva
     }
 
     /**
-     * La reserva de quien ya entró: el organizador la registra con el código en la puerta.
+     * La reserva de quien ya entró: el organizador la registra con el código en la puerta, o
+     * después, si la función ya terminó y la reserva quedó ausente.
      *
-     * @throws ReglaIncumplida si no está confirmada
+     * @throws ReglaIncumplida si no está confirmada ni ausente
      */
     public function registrarAsistencia(): self
     {
         return $this->pasarA(EstadoReserva::Asistio);
+    }
+
+    /**
+     * La reserva de quien no fue: la función terminó y nadie registró su asistencia (EF-04.1).
+     *
+     * @throws ReglaIncumplida si no está confirmada
+     */
+    public function marcarAusente(): self
+    {
+        return $this->pasarA(EstadoReserva::Ausente);
     }
 
     /**

@@ -40,7 +40,7 @@ trait ConBaseDePruebas
     private static function baseConTablasNuevas(Configuracion $configuracion): BaseDeDatos
     {
         $base = BaseDeDatos::conectar($configuracion);
-        $base->ejecutar('DROP TABLE IF EXISTS cambio_reserva, voto_acuerdo, acuerdo_franja, acuerdo_fecha, reserva');
+        $base->ejecutar('DROP TABLE IF EXISTS calificacion_obra, calificacion, cambio_reserva, voto_acuerdo, acuerdo_franja, acuerdo_fecha, reserva');
         foreach (glob(dirname(__DIR__) . '/migraciones/*.sql') ?: [] as $migracion) {
             $base->ejecutar((string) file_get_contents($migracion));
         }

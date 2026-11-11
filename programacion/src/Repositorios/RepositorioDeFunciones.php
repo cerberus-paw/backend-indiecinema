@@ -67,7 +67,7 @@ final class RepositorioDeFunciones
         $encontradas = array_map(static fn (array $fila): string => (string) $fila['id'], $filas);
         $obrasPorFuncion = [];
         foreach ($this->base->filas(
-            'SELECT fo.funcion_id, fo.estado, o.titulo FROM funcion_obra fo JOIN obra o ON o.id = fo.obra_id
+            'SELECT fo.funcion_id, fo.estado, o.id, o.titulo FROM funcion_obra fo JOIN obra o ON o.id = fo.obra_id
              WHERE fo.funcion_id IN (' . implode(', ', array_fill(0, count($encontradas), '?')) . ')
              ORDER BY o.titulo, o.id',
             $encontradas,
@@ -80,19 +80,21 @@ final class RepositorioDeFunciones
             $obras = $obrasPorFuncion[(string) $fila['id']] ?? [];
             // Como en buscar(): si ya hay elegidas son ésas; si no, las candidatas.
             $elegidas = array_filter($obras, static fn (array $obra): bool => $obra['estado'] === 'elegida');
+            $proyectadas = $elegidas ?: $obras;
             $resumenes[(string) $fila['id']] = new ResumenDeFuncion(
                 (string) $fila['id'],
                 EstadoFuncion::from((string) $fila['estado']),
                 $fila['fecha_hora'] === null ? null : new DateTimeImmutable((string) $fila['fecha_hora']),
                 (float) $fila['precio_base'],
                 (int) $fila['cupo'],
-                array_values(array_map(static fn (array $obra): string => (string) $obra['titulo'], $elegidas ?: $obras)),
+                array_values(array_map(static fn (array $obra): string => (string) $obra['titulo'], $proyectadas)),
                 $elegidas !== [],
                 (string) $fila['sala_id'],
                 (string) $fila['sala_nombre'],
                 (string) $fila['sala_localidad'],
                 (bool) $fila['sala_habilitada'],
                 (string) $fila['organizador_id'],
+                array_values(array_map(static fn (array $obra): string => (string) $obra['id'], $proyectadas)),
             );
         }
 
@@ -284,6 +286,52 @@ final class RepositorioDeFunciones
             (bool) $fila['sala_habilitada'],
             array_values(array_map(static fn (array $obra): string => (string) $obra['titulo'], $elegidas ?: $obras)),
             $elegidas !== [],
+        );
+    }
+
+    /**
+     * Las funciones finalizadas de una sala, de la más reciente a la más vieja, para el historial
+     * de proyecciones de su ficha (EF-04.3).
+     *
+     * @return list<ResumenDeFuncion>
+     */
+    public function finalizadasDeLaSala(string $salaId, int $cuantas): array
+    {
+        $ids = array_map(
+            static fn (array $fila): string => (string) $fila['id'],
+            $this->base->filas(
+                'SELECT id FROM funcion WHERE sala_id = ? AND estado = ? ORDER BY fecha_hora DESC, id LIMIT ?',
+                [$salaId, EstadoFuncion::Finalizada, $cuantas],
+            ),
+        );
+        $resumenes = $this->resumenes($ids);
+
+        // resumenes() no respeta el orden: se vuelve al de la consulta.
+        return array_values(array_filter(array_map(static fn (string $id): ?ResumenDeFuncion => $resumenes[$id] ?? null, $ids)));
+    }
+
+    /**
+     * Las programadas que ya terminaron (EF-04.1), de la que terminó primero a la última, con el
+     * organizador de su sala. Una función termina a su hora más la duración de las funciones de
+     * la sala, que es lo más que pueden durar sus obras (Sala::crearFuncion()): así no se da por
+     * terminada una que todavía se está proyectando. También las de una sala dada de baja: no
+     * vuelven a la cartelera, pero sus reservas también tienen que quedar al día.
+     *
+     * @return list<array{id: string, organizador_id: string}>
+     */
+    public function terminadas(DateTimeImmutable $ahora, int $cuantas): array
+    {
+        return array_map(
+            static fn (array $fila): array => ['id' => (string) $fila['id'], 'organizador_id' => (string) $fila['organizador_id']],
+            $this->base->filas(
+                'SELECT f.id, s.organizador_id
+                 FROM funcion f
+                 JOIN sala s ON s.id = f.sala_id
+                 WHERE f.estado = ? AND f.fecha_hora + INTERVAL s.duracion_funcion MINUTE <= ?
+                 ORDER BY f.fecha_hora, f.id
+                 LIMIT ?',
+                [EstadoFuncion::Programada, $ahora, $cuantas],
+            ),
         );
     }
 

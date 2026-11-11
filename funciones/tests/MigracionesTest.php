@@ -149,7 +149,7 @@ final class MigracionesTest extends TestCase
         $datos = $this->reservaValida();
         $this->insertarReserva($datos);
 
-        foreach (['asistio', 'cancelada'] as $estado) {
+        foreach (['asistio', 'ausente', 'cancelada'] as $estado) {
             $this->base->ejecutar('UPDATE reserva SET estado = ? WHERE id = ?', [$estado, $datos['id']]);
             self::assertSame($estado, $this->base->valor('SELECT estado FROM reserva WHERE id = ?', [$datos['id']]));
         }

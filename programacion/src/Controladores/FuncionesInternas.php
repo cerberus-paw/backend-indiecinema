@@ -79,6 +79,8 @@ final class FuncionesInternas extends Controlador
                 'habilitada' => $funcion->salaHabilitada,
             ],
             'organizador_id' => $funcion->organizadorId,
+            // Las mismas que titulos, por id, en el mismo orden (EF-04.2).
+            'obras_ids' => $funcion->obrasIds,
         ];
     }
 }

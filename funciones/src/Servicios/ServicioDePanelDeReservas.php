@@ -87,7 +87,8 @@ final class ServicioDePanelDeReservas
             EstadoReserva::Cancelada => throw new ReglaIncumplida("La reserva {$codigo} está cancelada: sus lugares se liberaron."),
             // Sin el pago acreditado no hay entrada: el espectador todavía la puede pagar.
             EstadoReserva::PendientePago => throw new ReglaIncumplida("La reserva {$codigo} todavía no se pagó."),
-            EstadoReserva::Confirmada => null,
+            // La función ya terminó y la tarea la dejó ausente, pero entró: se registra tarde.
+            EstadoReserva::Confirmada, EstadoReserva::Ausente => null,
         };
         $conAsistencia = $reserva->registrarAsistencia();
         if (!$this->reservas->guardarEstado($conAsistencia, $reserva->estado, AutorDelCambio::de($organizador, Rol::Organizador), $ahora)) {
@@ -157,6 +158,33 @@ final class ServicioDePanelDeReservas
         }
 
         return $canceladas;
+    }
+
+    /**
+     * La función terminó (EF-04.1): las reservas confirmadas que no tienen la asistencia quedan
+     * ausentes, y las que ya entraron, las canceladas y las que esperan el pago quedan como están
+     * (una pendiente vence sola, X-01.5). Como cancelarDeLaFuncion(), repetirla no cambia nada:
+     * programación la vuelve a pedir si no recibió la respuesta.
+     *
+     * @param string $organizadorId el de la función, autor del cambio en el historial
+     *
+     * @return int cuántas quedaron ausentes ahora
+     */
+    public function marcarAusentes(string $funcionId, string $organizadorId, DateTimeImmutable $ahora = new DateTimeImmutable()): int
+    {
+        $autor = new AutorDelCambio($organizadorId, Rol::Organizador, 'La función terminó sin la asistencia registrada.');
+        $ausentes = 0;
+        foreach ($this->reservas->deLaFuncion($funcionId) as $reserva) {
+            if ($reserva->estado !== EstadoReserva::Confirmada) {
+                continue;
+            }
+            // Si el organizador registró la asistencia justo antes, ya no está confirmada y no se toca.
+            if ($this->reservas->guardarEstado($reserva->marcarAusente(), $reserva->estado, $autor, $ahora)) {
+                ++$ausentes;
+            }
+        }
+
+        return $ausentes;
     }
 
     /**

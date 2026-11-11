@@ -13,6 +13,8 @@ use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Uuid;
 
 /**
+ * Lo que programación le avisa a funciones de una función: que se canceló o que terminó.
+ *
  * POST /interno/funciones/{id}/cancelar-reservas: programación avisa que canceló una función, y
  * funciones cancela sus reservas confirmadas y les avisa por correo a los espectadores (E4-03.4).
  * Sólo la llama programación, con su token: lo controla la ruta.
@@ -53,5 +55,26 @@ final class ReservasInternas extends Controlador
 
         return $this->json(['canceladas' => count($canceladas)])
             ->alTerminar(fn (): int => $this->avisos->funcionCancelada($canceladas, $titulo, $fecha));
+    }
+
+    /**
+     * POST /interno/funciones/{id}/finalizada: programación finalizó la función (EF-04.1), y las
+     * reservas confirmadas sin asistencia quedan ausentes. Programación lo pide antes de guardar
+     * la función como finalizada, y si no recibe la respuesta lo repite en la próxima pasada.
+     *
+     * @throws ExcepcionHttp 404 si el id no es un UUID; 400 sin el organizador de la función
+     */
+    public function finalizada(Peticion $peticion): Respuesta
+    {
+        $id = (string) $peticion->parametro('id');
+        if (!Uuid::esValido($id)) {
+            throw ExcepcionHttp::noEncontrada();
+        }
+        $organizador = $peticion->campo('organizador_id');
+        if (!is_string($organizador) || !Uuid::esValido($organizador)) {
+            throw ExcepcionHttp::solicitudInvalida('Falta el id del organizador de la función, en «organizador_id».');
+        }
+
+        return $this->json(['ausentes' => $this->servicio->marcarAusentes($id, $organizador)]);
     }
 }

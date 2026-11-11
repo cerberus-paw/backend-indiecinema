@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 use IndieCinema\Funciones\Controladores\AcuerdosInternos;
 use IndieCinema\Funciones\Controladores\AvisosDePago;
+use IndieCinema\Funciones\Controladores\Calificaciones;
+use IndieCinema\Funciones\Controladores\CalificacionesInternas;
 use IndieCinema\Funciones\Controladores\CobrosInternos;
 use IndieCinema\Funciones\Controladores\OcupacionInterna;
 use IndieCinema\Funciones\Controladores\Reservas;
@@ -38,6 +40,9 @@ return static function (Router $router): void {
     // La cancelación del espectador, con una pantalla que la confirma antes (E4-01.5).
     $router->get('/reservas/{id}/cancelar', [Reservas::class, 'confirmarCancelacion'], Rol::Espectador);
     $router->post('/reservas/{id}/cancelar', [Reservas::class, 'cancelar'], Rol::Espectador);
+    // Calificar la función a la que asistió (EF-04.2): las reglas las controla el servicio.
+    $router->get('/reservas/{id}/calificar', [Calificaciones::class, 'formulario'], Rol::Espectador);
+    $router->post('/reservas/{id}/calificar', [Calificaciones::class, 'calificar'], Rol::Espectador);
 
     // El seguimiento de las reservas (E4-03). El organizador, las de sus funciones: que la función
     // sea suya lo controla el servicio, con el id del que pide.
@@ -49,11 +54,17 @@ return static function (Router $router): void {
     $router->post('/administracion/reservas/{id}/anular', [ReservasDelAdministrador::class, 'anular'], Rol::Administrador);
     // Programación canceló una función: se cancelan sus reservas y se avisa a los espectadores.
     $router->interna('POST', '/interno/funciones/{id}/cancelar-reservas', [ReservasInternas::class, 'cancelarDeLaFuncion'], ['programacion']);
+    // Programación finalizó una función (EF-04.1): las confirmadas sin asistencia quedan ausentes.
+    $router->interna('POST', '/interno/funciones/{id}/finalizada', [ReservasInternas::class, 'finalizada'], ['programacion']);
 
     // Los lugares ocupados, para que programación muestre los libres (E4-02): de una función en
     // su ficha, y de una página entera de tarjetas en un solo pedido.
     $router->interna('GET', '/interno/funciones/{id}/ocupacion', [OcupacionInterna::class, 'deUna'], ['programacion']);
     $router->interna('GET', '/interno/ocupacion', [OcupacionInterna::class, 'deVarias'], ['programacion']);
+
+    // Los promedios y las últimas calificaciones, para las fichas de programación (EF-04.3).
+    $router->interna('GET', '/interno/calificaciones/resumen', [CalificacionesInternas::class, 'resumen'], ['programacion']);
+    $router->interna('GET', '/interno/calificaciones', [CalificacionesInternas::class, 'ultimas'], ['programacion']);
 
     // Lo cobrado de cada función, para el reparto de recaudación (EF-02.5).
     $router->interna('GET', '/interno/funciones/{id}/cobros', [CobrosInternos::class, 'deUna'], ['recaudacion']);

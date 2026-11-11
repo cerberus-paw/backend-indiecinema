@@ -133,6 +133,7 @@ final class ServicioDeReservas
         match ($reserva->estado) {
             EstadoReserva::Cancelada => throw new ReglaIncumplida('La reserva ya está cancelada.'),
             EstadoReserva::Asistio => throw new ReglaIncumplida('Ya registraron tu asistencia: la reserva no se puede cancelar.'),
+            EstadoReserva::Ausente => throw new ReglaIncumplida('La función ya terminó: la reserva ya no se puede cancelar.'),
             // Una pendiente se cancela igual: suelta los lugares sin esperar a que venza.
             EstadoReserva::Confirmada, EstadoReserva::PendientePago => null,
         };

@@ -90,6 +90,11 @@ final class Reservas extends Controlador
                     'cancelable' => !$sinProgramacion && ServicioDeReservas::seCancela($reserva, $funcion),
                     // Sin programación tampoco se sabe si terminó: Calificacion lo decide con la función.
                     'calificable' => !isset($calificadas[$reserva->funcionId]) && Calificacion::motivoParaNoCalificar($reserva, $funcion) === null,
+                    // Lo que calificó (EF-04.5), en la reserva con la que calificó: si fue con dos
+                    // reservas a la misma función, no se repite en las dos filas.
+                    'calificacion' => isset($calificadas[$reserva->funcionId]) && $calificadas[$reserva->funcionId]->reservaId === $reserva->id
+                        ? ['puntaje' => $calificadas[$reserva->funcionId]->puntaje, 'comentario' => $calificadas[$reserva->funcionId]->comentario]
+                        : null,
                     'funcion' => $funcion === null ? null : self::datosDeFuncion($funcion),
                 ];
             }, $reservas),

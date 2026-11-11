@@ -9,6 +9,7 @@ use IndieCinema\Nucleo\Http\ExcepcionHttp;
 use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Seguridad\Rol;
+use IndieCinema\Programacion\Modelo\FuncionEnCartelera;
 use IndieCinema\Programacion\Modelo\Genero;
 use IndieCinema\Programacion\Modelo\Obra;
 use IndieCinema\Programacion\Servicios\CalificacionesDeFunciones;
@@ -77,9 +78,14 @@ final class Obras extends Controlador
         $esDueno = $usuario !== null && $usuario->alcanza(Rol::Organizador) && $obra->duenoId === $usuario->id;
 
         $funciones = $this->servicio->proximasFunciones($id);
+        // En un pedido, el promedio de la obra y el de las salas donde se da (EF-04.3 y EF-04.4).
+        $resumen = $this->calificaciones->resumen([
+            'obras' => [$obra->id],
+            'salas' => array_values(array_unique(array_map(static fn (FuncionEnCartelera $funcion): string => $funcion->salaId, $funciones))),
+        ]);
+        $funciones = self::porReputacionDeLaSala($funciones, $resumen['salas'] ?? []);
         $tarjetasFunciones = TarjetaDeFuncion::todas($funciones, $this->cartelera->acuerdosDe($funciones));
 
-        $resumen = $this->calificaciones->resumen(['obras' => [$obra->id]]);
         $deLaObra = $resumen['obras'][$obra->id] ?? null;
         $ultimas = $deLaObra === null ? [] : $this->calificaciones->ultimas('obra', $obra->id);
         $calificaciones = CalificacionesParaMostrar::datos($resumen !== null && $ultimas !== null, $deLaObra, $ultimas);
@@ -104,5 +110,26 @@ final class Obras extends Controlador
             'funciones' => $tarjetasFunciones,
             'calificaciones' => $calificaciones,
         ]);
+    }
+
+    /**
+     * Las próximas funciones de la obra, primero las de las salas mejor calificadas (EF-04.4): al
+     * buscar un título, se elige también dónde verlo. Las de salas sin calificaciones van después,
+     * y entre las de una misma reputación sigue el orden por fecha (usort es estable).
+     *
+     * @param list<FuncionEnCartelera>                            $funciones por fecha
+     * @param array<string, array{promedio: float, cantidad: int}> $salas     las calificadas
+     *
+     * @return list<FuncionEnCartelera>
+     */
+    private static function porReputacionDeLaSala(array $funciones, array $salas): array
+    {
+        usort($funciones, static fn (FuncionEnCartelera $una, FuncionEnCartelera $otra): int => [
+            isset($salas[$otra->salaId]), $salas[$otra->salaId]['promedio'] ?? 0.0, $salas[$otra->salaId]['cantidad'] ?? 0,
+        ] <=> [
+            isset($salas[$una->salaId]), $salas[$una->salaId]['promedio'] ?? 0.0, $salas[$una->salaId]['cantidad'] ?? 0,
+        ]);
+
+        return $funciones;
     }
 }

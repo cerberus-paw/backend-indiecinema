@@ -19,6 +19,9 @@ use RuntimeException;
  */
 final class CalificacionesDeFunciones
 {
+    /** Lo más que acepta funciones de cada tipo en un resumen (CalificacionesInternas::MAXIMO_POR_TIPO). */
+    public const MAXIMO_POR_PEDIDO = 100;
+
     private ?ClienteInterno $cliente = null;
 
     public function __construct(

@@ -12,7 +12,7 @@ use RuntimeException;
 final class ConfiguracionTest extends TestCase
 {
     /** Todos llaman a todos (EF-01.5): cada uno tiene la URL y la huella de los demás. */
-    private const TODOS = ['cuentas', 'programacion', 'funciones', 'moderacion'];
+    private const TODOS = ['cuentas', 'programacion', 'funciones', 'moderacion', 'recaudacion'];
 
     /**
      * @return iterable<string, array{string}>
@@ -23,6 +23,7 @@ final class ConfiguracionTest extends TestCase
         yield 'programacion' => ['programacion'];
         yield 'funciones' => ['funciones'];
         yield 'moderacion' => ['moderacion'];
+        yield 'recaudacion' => ['recaudacion'];
     }
 
     private static function ejemplo(string $subsistema): Configuracion

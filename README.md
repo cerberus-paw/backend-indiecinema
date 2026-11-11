@@ -342,7 +342,7 @@ usar esa parte (un correo que no sale, un 500 al reservar).
 ### La base de datos
 
 La primera vez que arranca MySQL, con el volumen vacío, corre `mysql/init/`: crea los esquemas
-`cuentas`, `programacion`, `funciones` y `moderacion`, cada uno con un usuario del mismo nombre que sólo puede
+`cuentas`, `programacion`, `funciones`, `moderacion` y `recaudacion`, cada uno con un usuario del mismo nombre que sólo puede
 leer y escribir datos de su esquema (`SELECT`, `INSERT`, `UPDATE`, `DELETE`). Las claves son las
 `MYSQL_CLAVE_*` de `.env`, las mismas que van en `[base] clave` de cada `config.ini`. `root` sólo
 entra desde adentro del contenedor de MySQL, nunca desde la red.

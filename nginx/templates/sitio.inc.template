@@ -46,7 +46,7 @@ add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style
 
 # Las rutas /interno/ son para la red del compose: desde afuera no existen, con o sin prefijo.
 # Es una expresión regular para que gane sobre los prefijos de abajo (que no llevan ^~).
-location ~ ^/(cuenta/|funcion/|moderacion/)?interno(/|$) {
+location ~ ^/(cuenta/|funcion/|moderacion/|recaudacion/)?interno(/|$) {
     return 404;
 }
 
@@ -127,6 +127,16 @@ location /moderacion/ {
     set $subsistema moderacion;
     set $secreto "${NGINX_SECRETO_MODERACION}";
     rewrite ^/moderacion(/.*)$ $1 break;
+    include conf.d/subsistema.inc;
+}
+
+location = /recaudacion {
+    return 301 /recaudacion/;
+}
+location /recaudacion/ {
+    set $subsistema recaudacion;
+    set $secreto "${NGINX_SECRETO_RECAUDACION}";
+    rewrite ^/recaudacion(/.*)$ $1 break;
     include conf.d/subsistema.inc;
 }
 

@@ -23,12 +23,12 @@ sql() {
 }
 
 if [ $# -eq 0 ]; then
-	set -- cuentas programacion funciones moderacion
+	set -- cuentas programacion funciones moderacion recaudacion
 fi
 
 for subsistema in "$@"; do
 	case $subsistema in
-		cuentas | programacion | funciones | moderacion) ;;
+		cuentas | programacion | funciones | moderacion | recaudacion) ;;
 		*) echo "No existe el subsistema «${subsistema}»." >&2; exit 1 ;;
 	esac
 

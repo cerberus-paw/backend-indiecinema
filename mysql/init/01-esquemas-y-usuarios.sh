@@ -16,7 +16,7 @@ sql_texto() {
 	printf "'%s'" "${valor//\'/\'\'}"
 }
 
-for subsistema in cuentas programacion funciones moderacion; do
+for subsistema in cuentas programacion funciones moderacion recaudacion; do
 	variable="MYSQL_CLAVE_${subsistema^^}"
 	clave=${!variable:?falta $variable en el entorno de MySQL}
 

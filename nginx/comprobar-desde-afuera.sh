@@ -109,6 +109,7 @@ espera 404 /funcion/interno/estado
 espera 404 /funcion/interno/funciones/00000003-0000-4000-8000-000000000001
 espera 404 /interno/funciones/00000003-0000-4000-8000-000000000001
 espera 404 /moderacion/interno/estado
+espera 404 /recaudacion/interno/estado
 # Disfrazadas: nginx decodifica y normaliza la ruta antes de elegir la location.
 espera 404 /funcion/%69nterno/estado
 espera 404 /funcion//interno/estado
@@ -118,6 +119,8 @@ espera 404 /cuenta/%2e/interno/sesion
 espera 404 /moderacion/%69nterno/estado
 espera 404 /moderacion//interno/estado
 espera 404 /moderacion/x/../interno/estado
+espera 404 /recaudacion/%69nterno/estado
+espera 404 /recaudacion//interno/estado
 
 echo "El auth_request y las respuestas de error de nginx tampoco se pueden pedir directo:"
 espera 404 /_sesion
@@ -148,9 +151,10 @@ if [[ -n ${SIN_SUBSISTEMAS:-} ]]; then
 	sin_servicio application/json application/json
 fi
 
-echo "/funcion y /moderacion sin la barra van con la barra:"
+echo "/funcion, /moderacion y /recaudacion sin la barra van con la barra:"
 espera 301 /funcion /funcion/
 espera 301 /moderacion /moderacion/
+espera 301 /recaudacion /recaudacion/
 
 echo "Muchas búsquedas seguidas desde una IP:"
 rafaga 61 GET '/cartelera?q=x' text/html

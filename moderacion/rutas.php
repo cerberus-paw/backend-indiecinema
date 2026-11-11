@@ -15,5 +15,5 @@ use IndieCinema\Nucleo\Ruteo\Router;
  */
 return static function (Router $router): void {
     // Para comprobar que los otros subsistemas llegan hasta acá con su token.
-    $router->interna('GET', '/interno/estado', [EstadoInterno::class, 'mostrar'], ['cuentas', 'programacion', 'funciones']);
+    $router->interna('GET', '/interno/estado', [EstadoInterno::class, 'mostrar'], ['cuentas', 'programacion', 'funciones', 'recaudacion']);
 };

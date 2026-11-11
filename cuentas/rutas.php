@@ -41,10 +41,12 @@ return static function (Router $router): void {
     // el usuario para avisarle por correo que se canceló la función que reservó (E4-03.4), pero
     // no da roles.
     // Varios usuarios en un solo pedido, para el listado y el CSV de reservas de funciones (IC-464).
-    $router->interna('GET', '/interno/usuarios', [UsuariosInternos::class, 'varios'], ['programacion', 'funciones']);
-    $router->interna('GET', '/interno/usuarios/{id}', [UsuariosInternos::class, 'mostrar'], ['programacion', 'funciones']);
+    // Recaudación, para los nombres de las liquidaciones (EF-06).
+    $router->interna('GET', '/interno/usuarios', [UsuariosInternos::class, 'varios'], ['programacion', 'funciones', 'recaudacion']);
+    // Moderación, para el nombre y el correo de quien manda una solicitud de sala (EF-05).
+    $router->interna('GET', '/interno/usuarios/{id}', [UsuariosInternos::class, 'mostrar'], ['programacion', 'funciones', 'moderacion']);
     $router->interna('POST', '/interno/usuarios/{id}/roles', [UsuariosInternos::class, 'darRol'], ['programacion']);
 
     // Para comprobar que los otros subsistemas llegan hasta acá con su token.
-    $router->interna('GET', '/interno/estado', [EstadoInterno::class, 'mostrar'], ['programacion', 'funciones']);
+    $router->interna('GET', '/interno/estado', [EstadoInterno::class, 'mostrar'], ['programacion', 'funciones', 'moderacion', 'recaudacion']);
 };

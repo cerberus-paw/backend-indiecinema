@@ -60,7 +60,8 @@ jobs:
       # Los dos repositorios uno al lado del otro, como en la máquina de cada uno: los subsistemas
       # instalan el front desde ../../frontend-indiecinema.
       # La rama del front con el mismo nombre que ésta, si existe; si no, la rama a la que apunta
-      # el PR (dev o main), y si tampoco existe, main. Así un cambio que toca los dos
+      # el PR, y si tampoco existe, dev y después main (F-02.2): al mergear una cadena, las ramas del
+      # front ya mergeadas se borran, y lo suyo está en dev, no en main. Así un cambio que toca los dos
       # repositorios (las ramas IC-… se llaman igual en los dos) se prueba entero antes de mergear
       # ninguno. Las ramas van por env y no en el script, por si traen algo raro.
       - name: Elegir la rama del front
@@ -69,7 +70,7 @@ jobs:
           RAMA: ${{ github.head_ref || github.ref_name }}
           BASE: ${{ github.base_ref || github.ref_name }}
         run: |
-          for ref in "$RAMA" "$BASE" main; do
+          for ref in "$RAMA" "$BASE" dev main; do
             if git ls-remote --exit-code --heads https://github.com/cerberus-paw/frontend-indiecinema.git "refs/heads/$ref" >/dev/null; then
               echo "ref=$ref" >> "$GITHUB_OUTPUT"
               break

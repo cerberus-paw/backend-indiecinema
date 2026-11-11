@@ -47,10 +47,11 @@ backend-indiecinema/
 ├── cuentas/               /cuenta/   registro, ingreso, sesión, roles y usuarios del administrador
 ├── programacion/          /          obras, salas, funciones, cartelera, votación de títulos y solicitudes de sala
 ├── funciones/             /funcion/  las reservas con el cupo de cada función, sus paneles y el acuerdo de fecha
-└── moderacion/            /moderacion/  armado (EF-01): las solicitudes de sala, las denuncias y los términos llegan con EF-05 y EF-18
+├── moderacion/            /moderacion/  armado (EF-01): las solicitudes de sala, las denuncias y los términos llegan con EF-05 y EF-18
+└── recaudacion/           /recaudacion/ armado (EF-02): el reparto, las liquidaciones y la reportería llegan con EF-06 y EF-10
 ```
 
-Lo que todavía no está (la recaudación y los beneficios) se suma con la misma forma.
+Lo que todavía no está (los beneficios, dentro de recaudación) se suma con la misma forma.
 
 Cada subsistema tiene la misma estructura por dentro:
 
@@ -208,6 +209,8 @@ todo el sitio se vea igual aunque lo sirvan subsistemas distintos.
   /interno/funciones/{id}/cancelar-reservas` de funciones, que cancela sus reservas y les avisa por
   correo a los espectadores (la dirección se la pide a cuentas). Cada cambio de estado de una
   reserva queda en la tabla `cambio_reserva`, con quién lo hizo.
+  Recaudación reparte lo cobrado pero no lo mueve: lo pide a `GET /interno/funciones/{id}/cobros`
+  y `GET /interno/cobros?funciones=…` de funciones, la única con la credencial de Mercado Pago.
   El acuerdo de fecha (las franjas, el mínimo y los «Me sirve») se guarda en funciones, que es
   la que después cuenta los lugares, pero sus pantallas están en la ficha y en «Mis funciones»,
   que sirve programación: programación lo maneja con `/interno/acuerdos` de funciones (proponer,
@@ -257,8 +260,9 @@ cp cuentas/config/config.ejemplo.ini cuentas/config/config.ini
 cp programacion/config/config.ejemplo.ini programacion/config/config.ini
 cp funciones/config/config.ejemplo.ini funciones/config/config.ini
 cp moderacion/config/config.ejemplo.ini moderacion/config/config.ini
+cp recaudacion/config/config.ejemplo.ini recaudacion/config/config.ini
 
-composer install -d cuentas && composer install -d programacion && composer install -d funciones && composer install -d moderacion
+composer install -d cuentas && composer install -d programacion && composer install -d funciones && composer install -d moderacion && composer install -d recaudacion
 docker compose up -d --build
 
 # La primera vez, MySQL crea los esquemas y aplica las migraciones antes de aceptar conexiones:
@@ -284,6 +288,7 @@ docker run --rm -u "$(id -u):$(id -g)" -v "$PWD/..:/app" -w /app/backend-indieci
 docker run --rm -u "$(id -u):$(id -g)" -v "$PWD/..:/app" -w /app/backend-indiecinema/programacion composer:2 install
 docker run --rm -u "$(id -u):$(id -g)" -v "$PWD/..:/app" -w /app/backend-indiecinema/funciones composer:2 install
 docker run --rm -u "$(id -u):$(id -g)" -v "$PWD/..:/app" -w /app/backend-indiecinema/moderacion composer:2 install
+docker run --rm -u "$(id -u):$(id -g)" -v "$PWD/..:/app" -w /app/backend-indiecinema/recaudacion composer:2 install
 ```
 
 ### Qué queda andando
@@ -342,7 +347,7 @@ usar esa parte (un correo que no sale, un 500 al reservar).
 ### La base de datos
 
 La primera vez que arranca MySQL, con el volumen vacío, corre `mysql/init/`: crea los esquemas
-`cuentas`, `programacion`, `funciones` y `moderacion`, cada uno con un usuario del mismo nombre que sólo puede
+`cuentas`, `programacion`, `funciones`, `moderacion` y `recaudacion`, cada uno con un usuario del mismo nombre que sólo puede
 leer y escribir datos de su esquema (`SELECT`, `INSERT`, `UPDATE`, `DELETE`). Las claves son las
 `MYSQL_CLAVE_*` de `.env`, las mismas que van en `[base] clave` de cada `config.ini`. `root` sólo
 entra desde adentro del contenedor de MySQL, nunca desde la red.
@@ -577,7 +582,7 @@ compose, y los archivos van al volumen de programación.
 ## Pruebas
 
 ```
-herramientas/pruebas.sh funciones                    # nucleo, cuentas, programacion, funciones o moderacion
+herramientas/pruebas.sh funciones                    # nucleo, cuentas, programacion, funciones, moderacion o recaudacion
 herramientas/pruebas.sh funciones --filter Reservas  # lo que sigue va a PHPUnit
 herramientas/pruebas.sh                              # los cuatro
 ```
@@ -608,6 +613,7 @@ composer pruebas -d cuentas
 composer pruebas -d programacion
 composer pruebas -d funciones
 composer pruebas -d moderacion
+composer pruebas -d recaudacion
 ```
 
 Las que tocan la base corren contra un MySQL de verdad: sin la variable `PRUEBAS_MYSQL_HOST` se

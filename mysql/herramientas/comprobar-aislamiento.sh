@@ -11,8 +11,9 @@ set -uo pipefail
 
 # Una tabla de cada esquema para intentar leer. No hace falta que exista: MySQL controla el
 # permiso antes de buscar la tabla, así que el error es el mismo.
-# La de moderación todavía no existe (llega con EF-05): para el intento da lo mismo.
-declare -A tabla=([cuentas]=usuario [programacion]=sala [funciones]=reserva [moderacion]=solicitud)
+# Las de moderación y recaudación todavía no existen (llegan con EF-05 y EF-06): para el intento
+# da lo mismo.
+declare -A tabla=([cuentas]=usuario [programacion]=sala [funciones]=reserva [moderacion]=solicitud [recaudacion]=liquidacion)
 fallas=0
 
 # Corre $3 como el usuario $1 y espera que MySQL lo rechace por permisos.
@@ -27,12 +28,12 @@ rechaza() {
 	fi
 }
 
-for subsistema in cuentas programacion funciones moderacion; do
+for subsistema in cuentas programacion funciones moderacion recaudacion; do
 	variable="MYSQL_CLAVE_${subsistema^^}"
 	clave=${!variable:?falta $variable en el entorno de MySQL}
 	echo "Usuario ${subsistema}:"
 
-	for otro in cuentas programacion funciones moderacion; do
+	for otro in cuentas programacion funciones moderacion recaudacion; do
 		[ "$otro" = "$subsistema" ] && continue
 		rechaza "$subsistema" "$clave" "SELECT * FROM ${otro}.${tabla[$otro]}"
 	done

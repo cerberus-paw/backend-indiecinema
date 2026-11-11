@@ -137,6 +137,38 @@ final class RepositorioDeReservas
         return $ocupados;
     }
 
+    /**
+     * Las reservas en pie de esas funciones, para lo cobrado que pide recaudación (EF-02.5): las que
+     * ocupan lugares salvo las que todavía esperan el pago, que no se cobraron. Las canceladas no:
+     * soltaron sus lugares, y si se habían pagado, el reembolso es de EF-03.4.
+     *
+     * @param list<string> $funcionesIds
+     *
+     * @return array<string, list<Reserva>> funcion_id => sus reservas, de la primera a la última;
+     *                                      las que no tienen, con la lista vacía
+     */
+    public function cobradasDe(array $funcionesIds): array
+    {
+        if ($funcionesIds === []) {
+            return [];
+        }
+        $estados = array_values(array_filter(
+            EstadoReserva::cases(),
+            static fn (EstadoReserva $estado): bool => $estado->ocupaLugares() && $estado !== EstadoReserva::PendientePago,
+        ));
+        $porFuncion = array_fill_keys($funcionesIds, []);
+        foreach ($this->base->filas(
+            'SELECT * FROM reserva WHERE funcion_id IN (' . implode(', ', array_fill(0, count($funcionesIds), '?')) . ')
+             AND estado IN (' . implode(', ', array_fill(0, count($estados), '?')) . ')
+             ORDER BY creada_en, codigo',
+            [...$funcionesIds, ...$estados],
+        ) as $fila) {
+            $porFuncion[$fila['funcion_id']][] = self::reserva($fila);
+        }
+
+        return $porFuncion;
+    }
+
     public function buscar(string $id): ?Reserva
     {
         $fila = $this->base->fila('SELECT * FROM reserva WHERE id = ?', [$id]);

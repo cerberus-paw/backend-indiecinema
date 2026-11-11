@@ -40,7 +40,7 @@ jobs:
       # Que falle uno no corta los otros: se ve de una vez todo lo que está roto.
       fail-fast: false
       matrix:
-        paquete: [nucleo, cuentas, programacion, funciones, moderacion]
+        paquete: [nucleo, cuentas, programacion, funciones, moderacion, recaudacion]
     # Las pruebas que tocan la base corren contra un MySQL de verdad, como en el README.
     services:
       mysql:
@@ -124,7 +124,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        paquete: [nucleo, cuentas, programacion, funciones, moderacion]
+        paquete: [nucleo, cuentas, programacion, funciones, moderacion, recaudacion]
     steps:
       - uses: actions/checkout@v7
       - uses: shivammathur/setup-php@v2

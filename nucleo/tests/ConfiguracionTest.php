@@ -11,6 +11,9 @@ use RuntimeException;
 
 final class ConfiguracionTest extends TestCase
 {
+    /** Todos llaman a todos (EF-01.5): cada uno tiene la URL y la huella de los demás. */
+    private const TODOS = ['cuentas', 'programacion', 'funciones', 'moderacion'];
+
     /**
      * @return iterable<string, array{string}>
      */
@@ -19,6 +22,7 @@ final class ConfiguracionTest extends TestCase
         yield 'cuentas' => ['cuentas'];
         yield 'programacion' => ['programacion'];
         yield 'funciones' => ['funciones'];
+        yield 'moderacion' => ['moderacion'];
     }
 
     private static function ejemplo(string $subsistema): Configuracion
@@ -43,24 +47,24 @@ final class ConfiguracionTest extends TestCase
     }
 
     #[DataProvider('subsistemas')]
-    public function testElEjemploTieneLaUrlDeLosOtrosDos(string $subsistema): void
+    public function testElEjemploTieneLaUrlDeLosOtros(string $subsistema): void
     {
         $configuracion = self::ejemplo($subsistema);
 
-        foreach (array_diff(['cuentas', 'programacion', 'funciones'], [$subsistema]) as $otro) {
+        foreach (array_diff(self::TODOS, [$subsistema]) as $otro) {
             self::assertSame("http://{$otro}:8080", $configuracion->requerir("subsistemas.{$otro}"));
         }
         self::assertNull($configuracion->obtener("subsistemas.{$subsistema}"));
     }
 
     /**
-     * Copiando los tres ejemplos, cada uno acepta el token de los otros (todos «cambiar»).
+     * Copiando los ejemplos, cada uno acepta el token de los otros (todos «cambiar»).
      */
     #[DataProvider('subsistemas')]
     public function testElEjemploAceptaElTokenDeEjemploDeLosOtros(string $subsistema): void
     {
         $llamadores = self::ejemplo($subsistema)->seccion('llamadores');
-        $esperados = array_values(array_diff(['cuentas', 'programacion', 'funciones'], [$subsistema]));
+        $esperados = array_values(array_diff(self::TODOS, [$subsistema]));
         if ($subsistema === 'cuentas') {
             $esperados[] = 'nginx';
         }

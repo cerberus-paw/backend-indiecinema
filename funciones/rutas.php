@@ -55,7 +55,7 @@ return static function (Router $router): void {
     $router->interna('GET', '/interno/ocupacion', [OcupacionInterna::class, 'deVarias'], ['programacion']);
 
     // Para comprobar que los otros subsistemas llegan hasta acá con su token.
-    $router->interna('GET', '/interno/estado', [EstadoInterno::class, 'mostrar'], ['cuentas', 'programacion']);
+    $router->interna('GET', '/interno/estado', [EstadoInterno::class, 'mostrar'], ['cuentas', 'programacion', 'moderacion']);
 
     // API interna de acuerdos de fecha (E3-13 / IC-154, IC-155, IC-156, IC-157, IC-158).
     $router->interna('POST', '/interno/acuerdos', [AcuerdosInternos::class, 'proponer'], ['programacion']);

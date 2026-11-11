@@ -105,5 +105,5 @@ return static function (Router $router): void {
     $router->interna('GET', '/interno/funciones', [FuncionesInternas::class, 'varias'], ['funciones']);
 
     // Para comprobar que los otros subsistemas llegan hasta acá con su token.
-    $router->interna('GET', '/interno/estado', [EstadoInterno::class, 'mostrar'], ['cuentas', 'funciones']);
+    $router->interna('GET', '/interno/estado', [EstadoInterno::class, 'mostrar'], ['cuentas', 'funciones', 'moderacion']);
 };

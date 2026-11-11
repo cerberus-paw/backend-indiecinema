@@ -42,9 +42,10 @@ return static function (Router $router): void {
     // no da roles.
     // Varios usuarios en un solo pedido, para el listado y el CSV de reservas de funciones (IC-464).
     $router->interna('GET', '/interno/usuarios', [UsuariosInternos::class, 'varios'], ['programacion', 'funciones']);
-    $router->interna('GET', '/interno/usuarios/{id}', [UsuariosInternos::class, 'mostrar'], ['programacion', 'funciones']);
+    // Moderación, para el nombre y el correo de quien manda una solicitud de sala (EF-05).
+    $router->interna('GET', '/interno/usuarios/{id}', [UsuariosInternos::class, 'mostrar'], ['programacion', 'funciones', 'moderacion']);
     $router->interna('POST', '/interno/usuarios/{id}/roles', [UsuariosInternos::class, 'darRol'], ['programacion']);
 
     // Para comprobar que los otros subsistemas llegan hasta acá con su token.
-    $router->interna('GET', '/interno/estado', [EstadoInterno::class, 'mostrar'], ['programacion', 'funciones']);
+    $router->interna('GET', '/interno/estado', [EstadoInterno::class, 'mostrar'], ['programacion', 'funciones', 'moderacion']);
 };

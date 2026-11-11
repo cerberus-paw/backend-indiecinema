@@ -44,6 +44,8 @@ services:
       NGINX_SECRETO_CUENTAS: ${NGINX_SECRETO_CUENTAS:?falta NGINX_SECRETO_CUENTAS en .env}
       NGINX_SECRETO_PROGRAMACION: ${NGINX_SECRETO_PROGRAMACION:?falta NGINX_SECRETO_PROGRAMACION en .env}
       NGINX_SECRETO_FUNCIONES: ${NGINX_SECRETO_FUNCIONES:?falta NGINX_SECRETO_FUNCIONES en .env}
+      NGINX_SECRETO_MODERACION: ${NGINX_SECRETO_MODERACION:?falta NGINX_SECRETO_MODERACION en .env}
+      NGINX_SECRETO_RECAUDACION: ${NGINX_SECRETO_RECAUDACION:?falta NGINX_SECRETO_RECAUDACION en .env}
       # Con el que nginx llama a /interno/sesion de cuentas: su SHA-256 va en [llamadores] nginx
       # del config.ini de cuentas.
       NGINX_TOKEN_INTERNO: ${NGINX_TOKEN_INTERNO:?falta NGINX_TOKEN_INTERNO en .env}
@@ -57,7 +59,7 @@ services:
       # crearía vacía y con dueño root dentro del clon del front.
       - ../frontend-indiecinema:/srv/frontend-indiecinema:ro
     networks: [interna]
-    depends_on: [cuentas, programacion, funciones]
+    depends_on: [cuentas, programacion, funciones, moderacion, recaudacion]
 
   # Cada subsistema monta sólo su carpeta, el núcleo y el front: nunca la de otro, así un
   # subsistema comprometido no lee el config.ini (ni los secretos) de los demás.
@@ -94,6 +96,31 @@ services:
       - ./nucleo:/src/backend-indiecinema/nucleo:ro
       - ../frontend-indiecinema:/src/frontend-indiecinema:ro
 
+  # La documentación de las salas (pólizas y habilitaciones, en PDF) llega con EF-05: va a su
+  # propio volumen, fuera del webroot, como los archivos de programación.
+  moderacion:
+    <<: *subsistema
+    working_dir: /src/backend-indiecinema/moderacion
+    environment:
+      APACHE_DOCUMENT_ROOT: /src/backend-indiecinema/moderacion/public
+    volumes:
+      - ./moderacion:/src/backend-indiecinema/moderacion:ro
+      - ./nucleo:/src/backend-indiecinema/nucleo:ro
+      - ../frontend-indiecinema:/src/frontend-indiecinema:ro
+      - archivos-moderacion:/var/indiecinema/archivos
+
+  # Recaudación no guarda archivos ni tiene la credencial de Mercado Pago: lo cobrado lo pide a
+  # funciones por la API interna (EF-02.5).
+  recaudacion:
+    <<: *subsistema
+    working_dir: /src/backend-indiecinema/recaudacion
+    environment:
+      APACHE_DOCUMENT_ROOT: /src/backend-indiecinema/recaudacion/public
+    volumes:
+      - ./recaudacion:/src/backend-indiecinema/recaudacion:ro
+      - ./nucleo:/src/backend-indiecinema/nucleo:ro
+      - ../frontend-indiecinema:/src/frontend-indiecinema:ro
+
   # El buzón de prueba (Mailpit): recibe los correos de los subsistemas y los muestra en
   # http://localhost:8025, sin mandarlos a nadie. Arranca sólo con el perfil «buzon», que se activa
   # en el .env de desarrollo. En el VPS no existe, y los correos salen por el servidor de la
@@ -120,6 +147,7 @@ services:
       MYSQL_CLAVE_PROGRAMACION: ${MYSQL_CLAVE_PROGRAMACION:?falta MYSQL_CLAVE_PROGRAMACION en .env}
       MYSQL_CLAVE_FUNCIONES: ${MYSQL_CLAVE_FUNCIONES:?falta MYSQL_CLAVE_FUNCIONES en .env}
       MYSQL_CLAVE_MODERACION: ${MYSQL_CLAVE_MODERACION:?falta MYSQL_CLAVE_MODERACION en .env}
+      MYSQL_CLAVE_RECAUDACION: ${MYSQL_CLAVE_RECAUDACION:?falta MYSQL_CLAVE_RECAUDACION en .env}
     volumes:
       - datos-mysql:/var/lib/mysql
       # Corre una sola vez, con la base vacía: esquemas, usuarios y permisos.
@@ -131,6 +159,7 @@ services:
       - ./programacion/migraciones:/migraciones/programacion:ro
       - ./funciones/migraciones:/migraciones/funciones:ro
       - ./moderacion/migraciones:/migraciones/moderacion:ro
+      - ./recaudacion/migraciones:/migraciones/recaudacion:ro
     networks: [interna]
 
 networks:
@@ -139,3 +168,4 @@ networks:
 volumes:
   datos-mysql:
   archivos-programacion:
+  archivos-moderacion:

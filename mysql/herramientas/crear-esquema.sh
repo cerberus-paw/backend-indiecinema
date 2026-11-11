@@ -15,8 +15,8 @@ set -euo pipefail
 
 subsistema=${1:-}
 case $subsistema in
-	cuentas | programacion | funciones | moderacion) ;;
-	*) echo "Uso: crear-esquema.sh <subsistema>, uno de cuentas, programacion, funciones o moderacion." >&2; exit 1 ;;
+	cuentas | programacion | funciones | moderacion | recaudacion) ;;
+	*) echo "Uso: crear-esquema.sh <subsistema>, uno de cuentas, programacion, funciones, moderacion o recaudacion." >&2; exit 1 ;;
 esac
 
 variable="MYSQL_CLAVE_${subsistema^^}"

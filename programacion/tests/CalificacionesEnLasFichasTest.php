@@ -120,7 +120,9 @@ final class CalificacionesEnLasFichasTest extends TestCase
     {
         $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion($funciones), new Log('programacion', fopen('php://memory', 'w')));
 
-        return PaginasParaValidar::anotar('GET', $ruta, $aplicacion->atender(new Peticion('GET', $ruta, [], [], [], [], [])));
+        parse_str((string) parse_url($ruta, PHP_URL_QUERY), $consulta);
+
+        return PaginasParaValidar::anotar('GET', $ruta, $aplicacion->atender(new Peticion('GET', (string) parse_url($ruta, PHP_URL_PATH), $consulta, [], [], [], [])));
     }
 
     /**
@@ -204,5 +206,79 @@ final class CalificacionesEnLasFichasTest extends TestCase
 
         self::funcionesResponde([]);
         self::assertStringContainsString('Todavía nadie calificó una función de esta película.', $this->pedir("/obras/{$this->obraId}")->cuerpo());
+    }
+
+    // ---- Orden por reputación (EF-04.4) ---------------------------------------------------------
+
+    /**
+     * Tres salas con una función de Zama cada una: la mejor calificada da la más lejana, y la que
+     * no tiene calificaciones, la más próxima. Por fecha salen al revés que por reputación.
+     *
+     * @return array{string, string, string} los nombres de las salas, de la mejor a la peor
+     */
+    private function tresSalas(): array
+    {
+        $salas = new RepositorioDeSalas($this->base);
+        $funciones = new RepositorioDeFunciones($this->base);
+        $nombres = [];
+        foreach ([['Cine Club El Galpón', '+5 days', 4.5], ['Sótano 9', '+3 days', 3.0], ['La Terraza Indie', '+1 day', null]] as [$nombre, $cuando, $promedio]) {
+            $sala = $nombre === 'Cine Club El Galpón'
+                ? $this->sala
+                : Sala::nueva(self::ORGANIZADORA, new DatosDeSala($nombre, 'Una sala.', 'Calle 1', 'Luján', 60, 2, 120, 15), 'sala.jpg');
+            if ($sala !== $this->sala) {
+                $salas->agregar($sala);
+                $this->base->ejecutar('UPDATE sala SET habilitada = TRUE WHERE id = ?', [$sala->id]);
+            }
+            $funciones->agregar(Funcion::programada($sala->id, [$this->obraId], 40, 3500.0, new DateTimeImmutable($cuando)));
+            if ($promedio !== null) {
+                $calificadas[$sala->id] = ['promedio' => $promedio, 'cantidad' => 3];
+            }
+            $nombres[] = $nombre;
+        }
+        self::funcionesResponde(['salas' => $calificadas ?? []]);
+
+        return [$nombres[0], $nombres[1], $nombres[2]];
+    }
+
+    /**
+     * @param list<string> $textos
+     */
+    private static function assertEnOrden(array $textos, string $cuerpo): void
+    {
+        $posiciones = array_map(static fn (string $texto): int|false => strpos($cuerpo, $texto), $textos);
+        self::assertNotContains(false, $posiciones, 'Falta alguno de: ' . implode(', ', $textos));
+        $ordenadas = $posiciones;
+        sort($ordenadas);
+        self::assertSame($ordenadas, $posiciones, 'No están en el orden: ' . implode(', ', $textos));
+    }
+
+    public function testLaCarteleraSeOrdenaPorLaReputacionDeLaSalaYLasSinCalificarVanAlFinal(): void
+    {
+        [$mejor, $media, $sinCalificar] = $this->tresSalas();
+
+        $porReputacion = $this->pedir('/cartelera?orden=calificacion_desc');
+        self::assertSame(200, $porReputacion->estado(), $porReputacion->cuerpo());
+        self::assertEnOrden([$mejor, $media, $sinCalificar], $porReputacion->cuerpo());
+        self::assertStringContainsString('Mejor calificadas', $porReputacion->cuerpo());
+
+        // Por fecha, como siempre, al revés.
+        self::assertEnOrden([$sinCalificar, $media, $mejor], $this->pedir('/cartelera')->cuerpo());
+    }
+
+    public function testSiFuncionesNoRespondeLaCarteleraSaleOrdenadaPorFecha(): void
+    {
+        [$mejor, $media, $sinCalificar] = $this->tresSalas();
+
+        $respuesta = $this->pedir('/cartelera?orden=calificacion_desc', 'http://127.0.0.1:9');
+
+        self::assertSame(200, $respuesta->estado());
+        self::assertEnOrden([$sinCalificar, $media, $mejor], $respuesta->cuerpo());
+    }
+
+    public function testLaFichaDeLaObraMuestraPrimeroLasFuncionesDeLasSalasMejorCalificadas(): void
+    {
+        [$mejor, $media, $sinCalificar] = $this->tresSalas();
+
+        self::assertEnOrden([$mejor, $media, $sinCalificar], $this->pedir("/obras/{$this->obraId}")->cuerpo());
     }
 }

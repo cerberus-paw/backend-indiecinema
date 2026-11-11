@@ -29,6 +29,8 @@ final class UsuariosInternosTest extends TestCase
 
     private const TOKEN_DE_PROGRAMACION = 'token-de-programacion';
     private const TOKEN_DE_FUNCIONES = 'token-de-funciones';
+    private const TOKEN_DE_MODERACION = 'token-de-moderacion';
+    private const TOKEN_DE_RECAUDACION = 'token-de-recaudacion';
     private const ADMINISTRADOR = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
 
     private Configuracion $configuracion;
@@ -48,6 +50,8 @@ final class UsuariosInternosTest extends TestCase
             'llamadores' => [
                 'programacion' => hash('sha256', self::TOKEN_DE_PROGRAMACION),
                 'funciones' => hash('sha256', self::TOKEN_DE_FUNCIONES),
+                'moderacion' => hash('sha256', self::TOKEN_DE_MODERACION),
+                'recaudacion' => hash('sha256', self::TOKEN_DE_RECAUDACION),
             ],
         ]);
         $this->base = self::baseConTablasNuevas($this->configuracion);
@@ -187,6 +191,14 @@ final class UsuariosInternosTest extends TestCase
         self::assertSame(200, $this->pedir('GET', "/interno/usuarios/{$this->eva}", llamador: 'funciones', token: self::TOKEN_DE_FUNCIONES)->estado());
         self::assertSame(403, $this->pedir('GET', "/interno/usuarios/{$this->eva}", llamador: 'funciones', token: 'otro-token')->estado());
         self::assertSame(403, $this->pedir('POST', "/interno/usuarios/{$this->eva}/roles", ['rol' => 'organizador', 'otorgado_por' => self::ADMINISTRADOR], 'funciones', self::TOKEN_DE_FUNCIONES)->estado());
+        // Moderación lee el nombre y el correo de quien manda una solicitud (EF-01.5), pero tampoco da roles.
+        self::assertSame(200, $this->pedir('GET', "/interno/usuarios/{$this->eva}", llamador: 'moderacion', token: self::TOKEN_DE_MODERACION)->estado());
+        self::assertSame(403, $this->pedir('POST', "/interno/usuarios/{$this->eva}/roles", ['rol' => 'organizador', 'otorgado_por' => self::ADMINISTRADOR], 'moderacion', self::TOKEN_DE_MODERACION)->estado());
+        self::assertSame(403, $this->pedir('GET', '/interno/usuarios', llamador: 'moderacion', token: self::TOKEN_DE_MODERACION, consulta: ['ids' => $this->eva])->estado());
+        // Recaudación pide los nombres de una lista, para las liquidaciones (EF-02.4), y nada más.
+        self::assertSame(200, $this->pedir('GET', '/interno/usuarios', llamador: 'recaudacion', token: self::TOKEN_DE_RECAUDACION, consulta: ['ids' => $this->eva])->estado());
+        self::assertSame(403, $this->pedir('GET', "/interno/usuarios/{$this->eva}", llamador: 'recaudacion', token: self::TOKEN_DE_RECAUDACION)->estado());
+        self::assertSame(403, $this->pedir('POST', "/interno/usuarios/{$this->eva}/roles", ['rol' => 'organizador', 'otorgado_por' => self::ADMINISTRADOR], 'recaudacion', self::TOKEN_DE_RECAUDACION)->estado());
         // Programación con un token que no es el suyo.
         self::assertSame(403, $this->pedir('GET', "/interno/usuarios/{$this->eva}", token: 'otro-token')->estado());
         self::assertSame(['espectador'], $this->roles());

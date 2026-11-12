@@ -71,33 +71,30 @@ final class RepositorioDeVotos
     }
 
     /**
-     * Determina la obra ganadora de la votación entre las candidatas (E3-12.4).
-     * Es la obra con mayor cantidad de votos. Si hay empate o no hay votos,
-     * se resuelve de forma determinista eligiendo la primera candidata con la cantidad máxima de votos.
+     * Las obras que ganan la votación entre las candidatas: las $cuantas más votadas (E3-12.4,
+     * EF-05.1), de la más votada a la menos. Una candidata sin votos cuenta cero, y el empate lo
+     * gana la que va primero entre las candidatas, así que el resultado es siempre el mismo. Si hay
+     * menos candidatas que $cuantas, están todas.
      *
-     * @param list<string> $candidatasIds
+     * @param list<string> $candidatasIds en el orden de la votación
+     * @param positive-int $cuantas       las películas por función de la sala
+     *
+     * @return non-empty-list<string>
      *
      * @throws ReglaIncumplida si no hay obras candidatas
      */
-    public function obraMasVotada(string $funcionId, array $candidatasIds): string
+    public function masVotadas(string $funcionId, array $candidatasIds, int $cuantas): array
     {
         if ($candidatasIds === []) {
             throw new ReglaIncumplida('No hay obras candidatas.');
         }
 
         $conteo = $this->conteoPorObra($funcionId);
+        $posiciones = array_flip($candidatasIds);
+        $ordenadas = $candidatasIds;
+        usort($ordenadas, static fn (string $una, string $otra): int => ($conteo[$otra] ?? 0) <=> ($conteo[$una] ?? 0)
+            ?: $posiciones[$una] <=> $posiciones[$otra]);
 
-        $ganadoraId = $candidatasIds[0];
-        $maxVotos = $conteo[$ganadoraId] ?? 0;
-
-        foreach ($candidatasIds as $obraId) {
-            $votos = $conteo[$obraId] ?? 0;
-            if ($votos > $maxVotos) {
-                $maxVotos = $votos;
-                $ganadoraId = $obraId;
-            }
-        }
-
-        return $ganadoraId;
+        return array_slice($ordenadas, 0, $cuantas);
     }
 }

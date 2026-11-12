@@ -56,7 +56,7 @@ crean en el guion (pasos 14 y 16) se cancelan al final, así no quedan en la car
 | Paso | Qué hacer | Qué se tiene que ver |
 |---|---|---|
 | 18 | (Privada) Ingresar como Eva, abrir la función del paso 16, votar una obra y después cambiar el voto a otra | «Esta es tu elección actual» sobre la obra votada. El voto se cambia sin sumar dos |
-| 19 | (Normal) Como organizador, abrir la ficha de esa función y «Cerrar votación» | Antes de cerrar ve cuántos votos lleva cada obra: 1 la última que votó Eva en el paso 18, y 0 las otras. Al cerrar gana la más votada y lleva a «Proponer franjas horarias» |
+| 19 | (Normal) Como organizador, abrir la ficha de esa función y «Cerrar votación» | Antes de cerrar ve cuántos votos lleva cada obra: 1 la última que votó Eva en el paso 18, y 0 las otras. Al cerrar quedan las más votadas, tantas como películas por función tiene la sala (en un empate, la que va primero entre las candidatas), y lleva a «Proponer franjas horarias» |
 | 20 | Proponer una franja que termina antes de empezar. Después, dos franjas de mañana en adelante con un mínimo de 1 asistente, y «Publicar franjas y abrir acuerdo» | Primero, el error junto a la opción. Después la función pasa a «En acuerdo de fecha», con las dos franjas y la fecha límite: las 23:59 del día anterior a la primera |
 | 21 | (Privada) Como Eva, marcar «Me sirve» en las dos franjas; desmarcar una y volver a marcarla | Cada franja cuenta a los que la marcaron, y se puede marcar más de una |
 | 22 | (Normal) Recargar la ficha y «Confirmar franja ganadora y programar función» | Antes de confirmar, «¡La franja ganadora alcanzó el mínimo requerido!». Después la función queda programada con esa fecha, y aparece en la cartelera y en la portada |

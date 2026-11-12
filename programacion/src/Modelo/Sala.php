@@ -62,15 +62,21 @@ final class Sala
     }
 
     /**
-     * Una función nueva en esta sala, en votación entre las obras candidatas.
+     * Una función nueva en esta sala, en votación entre las obras candidatas hasta
+     * $votacionCierraEn (EF-03.1).
      *
      * @param list<string> $obrasIds
      *
      * @throws ReglaIncumplida si la sala no está habilitada, si el cupo no entra en ella o si
      *                         Funcion::nueva() rechaza los datos
      */
-    public function crearFuncion(array $obrasIds, int $cupo, float $precioBase): Funcion
-    {
+    public function crearFuncion(
+        array $obrasIds,
+        int $cupo,
+        float $precioBase,
+        ?DateTimeImmutable $votacionCierraEn = null,
+        DateTimeImmutable $ahora = new DateTimeImmutable(),
+    ): Funcion {
         if (!$this->habilitada) {
             throw new ReglaIncumplida('La sala todavía no está habilitada para programar funciones.');
         }
@@ -78,7 +84,7 @@ final class Sala
             throw new ReglaIncumplida("El cupo no puede ser mayor a la capacidad de la sala ({$this->datos->capacidad}).");
         }
 
-        return Funcion::nueva($this->id, $obrasIds, $cupo, $precioBase);
+        return Funcion::nueva($this->id, $obrasIds, $cupo, $precioBase, $votacionCierraEn, $ahora);
     }
 
     /**

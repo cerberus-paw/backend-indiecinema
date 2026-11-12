@@ -107,6 +107,34 @@ class RepositorioDeAcuerdos
     }
 
     /**
+     * Toma el aviso de la cancelación del acuerdo (EF-03.2): lo marca como dado, si todavía no lo
+     * estaba. Es una sola sentencia para que dos pedidos al mismo tiempo no avisen los dos.
+     *
+     * @return bool si lo tomó este pedido; false si ya estaba avisado o el acuerdo no existe
+     */
+    public function tomarAvisoDeCancelacion(string $id): bool
+    {
+        return $this->base->ejecutar(
+            'UPDATE acuerdo_fecha SET cancelacion_avisada_en = ? WHERE id = ? AND cancelacion_avisada_en IS NULL',
+            [(new DateTimeImmutable())->format('Y-m-d H:i:s'), $id],
+        ) === 1;
+    }
+
+    /**
+     * Los que marcaron «Me sirve» en alguna franja del acuerdo, una vez cada uno: comprometieron su
+     * reserva, y son a quienes hay que avisarles si la función no se da (EF-03.2).
+     *
+     * @return list<string> los ids de usuario
+     */
+    public function comprometidos(string $acuerdoId): array
+    {
+        return array_map(
+            static fn (array $fila): string => (string) $fila['usuario_id'],
+            $this->base->filas('SELECT DISTINCT usuario_id FROM voto_acuerdo WHERE acuerdo_id = ? ORDER BY usuario_id', [$acuerdoId]),
+        );
+    }
+
+    /**
      * Marca «Me sirve» en una franja. Marcarla dos veces no suma: la clave única es por franja y
      * usuario, y el segundo pedido (un doble clic) deja el voto como estaba (E3-13.F7).
      */

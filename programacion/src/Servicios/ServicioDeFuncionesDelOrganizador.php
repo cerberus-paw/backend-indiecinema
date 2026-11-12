@@ -136,11 +136,13 @@ final class ServicioDeFuncionesDelOrganizador
     }
 
     /**
-     * Da de alta una nueva función en votación de títulos (E3-12.1), sin fecha todavía.
+     * Da de alta una nueva función en votación de títulos (E3-12.1), sin fecha todavía. La
+     * votación cierra sola en $votacionCierraEn (EF-03.1), o antes si la cierra el organizador.
      *
      * @param list<string> $obrasIds
      *
-     * @throws ReglaIncumplida si la sala no es suya o una obra no está en el catálogo
+     * @throws ReglaIncumplida si la sala no es suya, una obra no está en el catálogo o el cierre
+     *                         no es futuro
      */
     public function crearEnVotacionDeTitulos(
         Usuario $organizador,
@@ -148,6 +150,7 @@ final class ServicioDeFuncionesDelOrganizador
         array $obrasIds,
         int $cupo,
         float $precioBase,
+        ?DateTimeImmutable $votacionCierraEn = null,
     ): Funcion {
         $sala = $this->salas->buscar($salaId);
         if ($sala === null || !$sala->esDe($organizador->id)) {
@@ -159,7 +162,7 @@ final class ServicioDeFuncionesDelOrganizador
             throw new ReglaIncumplida('Una de las obras no está en el catálogo.');
         }
 
-        $funcion = $sala->crearFuncion($obrasIds, $cupo, $precioBase);
+        $funcion = $sala->crearFuncion($obrasIds, $cupo, $precioBase, $votacionCierraEn);
         $this->funciones->agregar($funcion);
 
         return $funcion;
@@ -309,8 +312,9 @@ final class ServicioDeFuncionesDelOrganizador
     }
 
     /**
-     * Cierra la votación de títulos de una función propia con la obra más votada (E3-12.4).
-     * La función pasa a estado «en acuerdo de fecha» y conserva únicamente la obra ganadora.
+     * Cierra la votación de títulos de una función propia con la obra más votada (E3-12.4), antes
+     * de su fecha de cierre o en una que no tiene. La función pasa a estado «en acuerdo de fecha»
+     * y conserva únicamente la obra ganadora, como cuando la cierra la tarea (CierresPorFecha).
      *
      * @throws ExcepcionHttp 404 si la función no existe, es de otro organizador o no está en votación de títulos
      */
@@ -321,9 +325,7 @@ final class ServicioDeFuncionesDelOrganizador
             throw ExcepcionHttp::noEncontrada();
         }
 
-        $obraGanadora = $this->votos->obraMasVotada($funcion->id, $funcion->obrasIds);
-        $funcion->cerrarVotacionTitulos([$obraGanadora]);
-        $this->funciones->guardar($funcion);
+        (new CierresPorFecha($this->funciones, $this->votos))->cerrarVotacion($funcion);
 
         return $funcion;
     }

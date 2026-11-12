@@ -21,6 +21,8 @@ const CANCELADA = '56565656-5656-4656-8656-565656565656';
 const A_LA_GORRA = '78787878-7878-4878-8878-787878787878';
 const FINALIZADA = '13131313-1313-4313-8313-131313131313';
 const VIEJA = '24242424-2424-4424-8424-242424242424';
+// Empieza en cinco horas: la que pide el recordatorio del día antes (EF-03.3).
+const EN_CINCO_HORAS = '45454545-4545-4545-8545-454545454545';
 
 header('Content-Type: application/json');
 $cabeceras = getallheaders();
@@ -39,7 +41,7 @@ $funcion = static fn (string $id, string $estado, ?string $fecha, array $titulos
     'cupo' => 40,
     'titulos' => $titulos,
     'titulos_elegidos' => $elegidos,
-    'sala' => ['id' => 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', 'nombre' => 'Cine Club El Galpón', 'localidad' => 'Luján', 'habilitada' => $publicada],
+    'sala' => ['id' => 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', 'nombre' => 'Cine Club El Galpón', 'localidad' => 'Luján', 'habilitada' => $publicada, 'direccion' => 'Av. San Martín 450'],
     'organizador_id' => 'ffffffff-ffff-4fff-8fff-ffffffffffff',
     'obras_ids' => array_map(static fn (string $titulo): string => $titulo === 'Zama' ? '0b0b0b0b-0b0b-40b0-80b0-0b0b0b0b0b0b' : '0c0c0c0c-0c0c-40c0-80c0-0c0c0c0c0c0c', $titulos),
 ];
@@ -56,6 +58,7 @@ $responder = static function (string $id) use ($funcion): ?array {
         // hace una hora.
         PROXIMA => $funcion($id, 'programada', date('Y-m-d\\TH:i:s', strtotime('+30 days')), ['Zama'], true),
         EMPEZADA => $funcion($id, 'programada', date('Y-m-d\\TH:i:s', strtotime('-1 hour')), ['Zama'], true),
+        EN_CINCO_HORAS => $funcion($id, 'programada', date('Y-m-d\\TH:i:s', strtotime('+5 hours')), ['Zama'], true),
         // Terminaron: una hace dos días, que se puede calificar, y otra hace cuarenta, fuera del
         // plazo (EF-04.2).
         FINALIZADA => $funcion($id, 'finalizada', date('Y-m-d\\TH:i:s', strtotime('-2 days')), ['Zama'], true),
@@ -78,6 +81,22 @@ $responder = static function (string $id) use ($funcion): ?array {
 };
 
 $ruta = (string) parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+if ($ruta === '/interno/funciones/proximas') {
+    // Las programadas que conoce y caen en el rango, como GET /interno/funciones/proximas (EF-03.3).
+    $desde = strtotime((string) ($_GET['desde'] ?? ''));
+    $hasta = strtotime((string) ($_GET['hasta'] ?? ''));
+    $proximas = [];
+    foreach ([PROXIMA, EN_CINCO_HORAS] as $id) {
+        $datos = $responder($id);
+        $cuando = strtotime((string) $datos['fecha_hora']);
+        if ($cuando > $desde && $cuando <= $hasta) {
+            $proximas[] = $datos;
+        }
+    }
+    echo json_encode($proximas);
+
+    return;
+}
 if ($ruta === '/interno/funciones') {
     // Las de una página de «Mis reservas»: las que no conoce no vienen.
     $varias = [];

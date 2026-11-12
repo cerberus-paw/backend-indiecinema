@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace IndieCinema\Programacion\Controladores;
 
+use DateTimeImmutable;
 use IndieCinema\Nucleo\Controlador;
 use IndieCinema\Nucleo\Http\ExcepcionHttp;
 use IndieCinema\Nucleo\Http\Peticion;
@@ -21,6 +22,15 @@ final class FuncionesInternas extends Controlador
 {
     /** Una página de «Mis reservas»: un pedido más largo es un error de quien llama. */
     private const MAXIMO_POR_PEDIDO = 20;
+
+    /**
+     * Lo más que se piden las próximas: un día de recordatorios entra de sobra. Con más, quedan
+     * para la próxima pasada de la tarea, que corre cada hora.
+     */
+    private const MAXIMAS_PROXIMAS = 500;
+
+    /** Un rango más largo es un error de quien llama: el recordatorio pide un día. */
+    private const DIAS_MAXIMOS = 7;
 
     public function __construct(private readonly ServicioDeFunciones $servicio)
     {
@@ -60,6 +70,30 @@ final class FuncionesInternas extends Controlador
     }
 
     /**
+     * GET /interno/funciones/proximas?desde=…&hasta=…: las programadas que empiezan en ese rango,
+     * de la más próxima a la última, como una lista con los mismos campos que la de a una. Es lo
+     * que pide funciones para el recordatorio del día antes (EF-03.3). Las fechas van como las
+     * manda la de a una, en ISO 8601 sin zona.
+     */
+    public function proximas(Peticion $peticion): Respuesta
+    {
+        $desde = self::fecha($peticion->consulta('desde'));
+        $hasta = self::fecha($peticion->consulta('hasta'));
+        if ($desde === null || $hasta === null || $hasta <= $desde || $desde->diff($hasta)->days > self::DIAS_MAXIMOS) {
+            return $this->json(['error' => 'Se piden «desde» y «hasta» en ISO 8601, en ese orden y con hasta ' . self::DIAS_MAXIMOS . ' días entre las dos.'], 400);
+        }
+
+        return $this->json(array_map(self::datos(...), $this->servicio->programadasEntre($desde, $hasta, self::MAXIMAS_PROXIMAS)));
+    }
+
+    private static function fecha(mixed $texto): ?DateTimeImmutable
+    {
+        $fecha = is_string($texto) ? DateTimeImmutable::createFromFormat('!Y-m-d\\TH:i:s', $texto) : false;
+
+        return $fecha === false ? null : $fecha;
+    }
+
+    /**
      * @return array<string, mixed>
      */
     private static function datos(ResumenDeFuncion $funcion): array
@@ -77,6 +111,8 @@ final class FuncionesInternas extends Controlador
                 'nombre' => $funcion->salaNombre,
                 'localidad' => $funcion->salaLocalidad,
                 'habilitada' => $funcion->salaHabilitada,
+                // Para el recordatorio de la función (EF-03.3).
+                'direccion' => $funcion->salaDireccion,
             ],
             'organizador_id' => $funcion->organizadorId,
             // Las mismas que titulos, por id, en el mismo orden (EF-04.2).

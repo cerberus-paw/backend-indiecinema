@@ -36,6 +36,8 @@ final readonly class ResumenDeFuncion
         public bool $salaHabilitada,
         public string $organizadorId,
         public array $obrasIds = [],
+        /** Para el recordatorio de la función (EF-03.3): adónde hay que ir. */
+        public string $salaDireccion = '',
     ) {
     }
 }

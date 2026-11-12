@@ -75,6 +75,28 @@ final class FuncionesDeProgramacion
     }
 
     /**
+     * Las programadas que empiezan después de $desde y hasta $hasta, de la más próxima a la última
+     * (EF-03.3).
+     *
+     * @return list<FuncionDeProgramacion>
+     *
+     * @throws ExcepcionHttp    503 si programación no responde a tiempo
+     * @throws RuntimeException si responde algo que no son funciones: el contrato se rompió
+     */
+    public function proximas(DateTimeImmutable $desde, DateTimeImmutable $hasta): array
+    {
+        $datos = $this->cliente->get('programacion', '/interno/funciones/proximas', [
+            'desde' => $desde->format('Y-m-d\\TH:i:s'),
+            'hasta' => $hasta->format('Y-m-d\\TH:i:s'),
+        ]);
+        if (!is_array($datos) || !array_is_list($datos)) {
+            throw new RuntimeException('programacion no respondió las funciones a GET /interno/funciones/proximas.');
+        }
+
+        return array_map(self::funcion(...), $datos);
+    }
+
+    /**
      * Lee la respuesta sin suponer nada: si falta un campo o tiene otro tipo, es que programación
      * cambió lo que manda, y mejor un error claro que una función a medias.
      */
@@ -109,6 +131,8 @@ final class FuncionesDeProgramacion
             $sala['habilitada'],
             $datos['organizador_id'],
             array_map(strval(...), $datos['obras_ids']),
+            // Llegó con el recordatorio (EF-03.3): un programación anterior no la manda.
+            is_string($sala['direccion'] ?? null) ? $sala['direccion'] : '',
         );
     }
 }

@@ -65,16 +65,23 @@ final class ServicioDePanelDeReservas
     /**
      * Registra en la puerta que entró quien reservó: la reserva pasa a «asistió», una sola vez.
      * El código se acepta como lo dicte el espectador: en minúsculas o con espacios y guiones.
+     * Sólo desde una hora antes de la función hasta que termina (EF-05.2): después ya quedó
+     * ausente, y semanas antes es un error.
      *
      * @throws ExcepcionHttp   404 si la función no existe o es de otro
-     * @throws ReglaIncumplida si la función se canceló, no hay una reserva con ese código para esta
-     *                         función, ya está registrada, está cancelada, o cambió mientras tanto
+     * @throws ReglaIncumplida si la función se canceló, está fuera de la ventana de asistencia, no
+     *                         hay una reserva con ese código para esta función, ya está
+     *                         registrada, está cancelada, o cambió mientras tanto
      */
     public function registrarAsistencia(Usuario $organizador, string $funcionId, string $codigo, DateTimeImmutable $ahora = new DateTimeImmutable()): Reserva
     {
         $funcion = $this->funcionPropia($organizador, $funcionId);
         if ($funcion->estado === 'cancelada') {
             throw new ReglaIncumplida('La función está cancelada: no hay asistencia que registrar.');
+        }
+        $fueraDeHora = $funcion->motivoParaNoRegistrarAsistencia($ahora);
+        if ($fueraDeHora !== null) {
+            throw new ReglaIncumplida($fueraDeHora);
         }
         $codigo = self::codigo($codigo);
         if ($codigo === '') {

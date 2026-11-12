@@ -46,6 +46,8 @@ final class PanelDeReservasTest extends TestCase
     private const PROXIMA = '12121212-1212-4212-8212-121212121212';
     private const EMPEZADA = '34343434-3434-4434-8434-343434343434';
     private const CANCELADA = '56565656-5656-4656-8656-565656565656';
+    private const FINALIZADA = '13131313-1313-4313-8313-131313131313';
+    private const EN_VOTACION = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
     private const TOKEN_DE_PROGRAMACION = 'token-de-programacion';
 
     private static ServidorSmtpDePrueba $correo;
@@ -193,18 +195,22 @@ final class PanelDeReservasTest extends TestCase
 
     // ---- La asistencia (E4-03.2) ------------------------------------------------------------
 
+    /**
+     * Las pruebas que registran usan EMPEZADA: empezó hace una hora y dura dos, así que está dentro
+     * de la ventana de asistencia (EF-05.2).
+     */
     public function testRegistraLaAsistenciaUnaSolaVezConElCodigoComoLoDicten(): void
     {
-        $codigo = $this->reserva(self::PROXIMA, 2);
+        $codigo = $this->reserva(self::EMPEZADA, 2);
 
-        $respuesta = $this->pedir('POST', '/organizador/funciones/' . self::PROXIMA . '/asistencia', cuerpo: ['codigo' => strtolower(substr($codigo, 0, 4) . ' ' . substr($codigo, 4))]);
+        $respuesta = $this->pedir('POST', '/organizador/funciones/' . self::EMPEZADA . '/asistencia', cuerpo: ['codigo' => strtolower(substr($codigo, 0, 4) . ' ' . substr($codigo, 4))]);
 
         self::assertSame(303, $respuesta->estado());
-        self::assertSame('/funcion/organizador/funciones/' . self::PROXIMA . "/reservas?asistencia={$codigo}", $respuesta->cabecera('Location'));
+        self::assertSame('/funcion/organizador/funciones/' . self::EMPEZADA . "/reservas?asistencia={$codigo}", $respuesta->cabecera('Location'));
         self::assertSame('asistio', $this->estadoDe($codigo));
-        self::assertStringContainsString("Se registró la asistencia de la reserva {$codigo}", $this->pedir('GET', '/organizador/funciones/' . self::PROXIMA . "/reservas?asistencia={$codigo}")->cuerpo());
+        self::assertStringContainsString("Se registró la asistencia de la reserva {$codigo}", $this->pedir('GET', '/organizador/funciones/' . self::EMPEZADA . "/reservas?asistencia={$codigo}")->cuerpo());
 
-        $otraVez = $this->pedir('POST', '/organizador/funciones/' . self::PROXIMA . '/asistencia', cuerpo: ['codigo' => $codigo]);
+        $otraVez = $this->pedir('POST', '/organizador/funciones/' . self::EMPEZADA . '/asistencia', cuerpo: ['codigo' => $codigo]);
         self::assertSame(422, $otraVez->estado());
         self::assertStringContainsString('ya tiene la asistencia registrada', $otraVez->cuerpo());
         self::assertSame([[
@@ -218,8 +224,8 @@ final class PanelDeReservasTest extends TestCase
 
     public function testLaAsistenciaEnJsonDevuelveLaFilaComoQuedoYElResumenDeArriba(): void
     {
-        $codigo = $this->reserva(self::PROXIMA, 2);
-        $ruta = '/organizador/funciones/' . self::PROXIMA . '/asistencia';
+        $codigo = $this->reserva(self::EMPEZADA, 2);
+        $ruta = '/organizador/funciones/' . self::EMPEZADA . '/asistencia';
 
         $respuesta = $this->pedir('POST', $ruta, cuerpo: ['codigo' => $codigo], extra: self::ACEPTA_JSON);
 
@@ -243,18 +249,47 @@ final class PanelDeReservasTest extends TestCase
 
     public function testNoRegistraUnCodigoDeOtraFuncionNiUnaCanceladaNiEnUnaFuncionCancelada(): void
     {
-        $deOtra = $this->reserva(self::EMPEZADA, 1);
-        $cancelada = $this->reserva(self::PROXIMA, 1, 'cancelada');
+        $deOtra = $this->reserva(self::PROXIMA, 1);
+        $cancelada = $this->reserva(self::EMPEZADA, 1, 'cancelada');
         $deLaCancelada = $this->reserva(self::CANCELADA, 1);
 
-        $otraFuncion = $this->pedir('POST', '/organizador/funciones/' . self::PROXIMA . '/asistencia', cuerpo: ['codigo' => $deOtra]);
+        $otraFuncion = $this->pedir('POST', '/organizador/funciones/' . self::EMPEZADA . '/asistencia', cuerpo: ['codigo' => $deOtra]);
         self::assertSame(422, $otraFuncion->estado());
         self::assertStringContainsString("No hay ninguna reserva con el código {$deOtra} para esta función", $otraFuncion->cuerpo());
 
-        self::assertStringContainsString('está cancelada', $this->pedir('POST', '/organizador/funciones/' . self::PROXIMA . '/asistencia', cuerpo: ['codigo' => $cancelada])->cuerpo());
+        self::assertStringContainsString('está cancelada', $this->pedir('POST', '/organizador/funciones/' . self::EMPEZADA . '/asistencia', cuerpo: ['codigo' => $cancelada])->cuerpo());
         self::assertSame(422, $this->pedir('POST', '/organizador/funciones/' . self::CANCELADA . '/asistencia', cuerpo: ['codigo' => $deLaCancelada])->estado());
-        self::assertSame(422, $this->pedir('POST', '/organizador/funciones/' . self::PROXIMA . '/asistencia', cuerpo: ['codigo' => '  '])->estado());
+        self::assertSame(422, $this->pedir('POST', '/organizador/funciones/' . self::EMPEZADA . '/asistencia', cuerpo: ['codigo' => '  '])->estado());
         self::assertSame(['confirmada', 'cancelada', 'confirmada'], [$this->estadoDe($deOtra), $this->estadoDe($cancelada), $this->estadoDe($deLaCancelada)]);
+    }
+
+    /**
+     * La asistencia se registra desde una hora antes hasta que termina la función (EF-05.2): fuera
+     * de eso, 422 con el motivo, también en JSON y también para una reserva que quedó ausente.
+     */
+    public function testFueraDeLaVentanaNoSeRegistraLaAsistencia(): void
+    {
+        $antes = $this->reserva(self::PROXIMA, 1);
+        $ausente = $this->reserva(self::FINALIZADA, 1, 'ausente');
+        $sinFecha = $this->reserva(self::EN_VOTACION, 1);
+
+        $temprano = $this->pedir('POST', '/organizador/funciones/' . self::PROXIMA . '/asistencia', cuerpo: ['codigo' => $antes]);
+        self::assertSame(422, $temprano->estado());
+        self::assertStringContainsString('La asistencia se registra desde una hora antes de la función', $temprano->cuerpo());
+
+        $enJson = $this->pedir('POST', '/organizador/funciones/' . self::PROXIMA . '/asistencia', cuerpo: ['codigo' => $antes], extra: self::ACEPTA_JSON);
+        self::assertSame(422, $enJson->estado());
+        self::assertStringStartsWith('La asistencia se registra desde una hora antes', json_decode($enJson->cuerpo(), true)['error']);
+
+        $tarde = $this->pedir('POST', '/organizador/funciones/' . self::FINALIZADA . '/asistencia', cuerpo: ['codigo' => $ausente]);
+        self::assertSame(422, $tarde->estado());
+        self::assertStringContainsString('La función ya terminó', $tarde->cuerpo());
+
+        $votacion = $this->pedir('POST', '/organizador/funciones/' . self::EN_VOTACION . '/asistencia', cuerpo: ['codigo' => $sinFecha]);
+        self::assertSame(422, $votacion->estado());
+        self::assertStringContainsString('todavía no tiene fecha', $votacion->cuerpo());
+
+        self::assertSame(['confirmada', 'ausente', 'confirmada'], [$this->estadoDe($antes), $this->estadoDe($ausente), $this->estadoDe($sinFecha)]);
     }
 
     // ---- El CSV (E4-03.5) -------------------------------------------------------------------

@@ -133,7 +133,7 @@ final class FuncionesInternasTest extends TestCase
             'cupo' => 40,
             'titulos' => ['La ciénaga', 'Zama'],
             'titulos_elegidos' => false,
-            'sala' => ['id' => $this->sala->id, 'nombre' => 'Cine Club El Galpón', 'localidad' => 'Luján', 'habilitada' => true, 'direccion' => 'Av. San Martín 450'],
+            'sala' => ['id' => $this->sala->id, 'nombre' => 'Cine Club El Galpón', 'localidad' => 'Luján', 'habilitada' => true, 'direccion' => 'Av. San Martín 450', 'duracion_funcion' => 120],
             'organizador_id' => self::ORGANIZADORA,
             // Las mismas que los títulos, por id y en el mismo orden (EF-04.2).
             'obras_ids' => [$this->obras['La ciénaga'], $this->obras['Zama']],
@@ -154,6 +154,8 @@ final class FuncionesInternasTest extends TestCase
         self::assertSame(['Zama'], $datos['titulos']);
         self::assertTrue($datos['titulos_elegidos']);
         self::assertSame([$this->obras['Zama']], $datos['obras_ids']);
+        // Cuánto dura una función en la sala: funciones arma con eso la ventana de asistencia (EF-05.2).
+        self::assertSame(120, $datos['sala']['duracion_funcion']);
     }
 
     public function testUnaSalaDeshabilitadaApareceMarcadaYUnaDadaDeBajaNo(): void

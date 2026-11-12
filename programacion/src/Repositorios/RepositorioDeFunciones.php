@@ -55,7 +55,8 @@ final class RepositorioDeFunciones
         $filas = $this->base->filas(
             "SELECT f.id, f.estado, f.fecha_hora, f.precio_base, f.cupo,
                     s.id AS sala_id, s.nombre AS sala_nombre, s.localidad AS sala_localidad,
-                    s.direccion AS sala_direccion, s.habilitada AS sala_habilitada, s.organizador_id
+                    s.direccion AS sala_direccion, s.duracion_funcion AS sala_duracion_funcion,
+                    s.habilitada AS sala_habilitada, s.organizador_id
              FROM funcion f
              JOIN sala s ON s.id = f.sala_id
              WHERE f.id IN ({$marcas}) AND s.dada_de_baja_en IS NULL",
@@ -96,6 +97,7 @@ final class RepositorioDeFunciones
                 (string) $fila['organizador_id'],
                 array_values(array_map(static fn (array $obra): string => (string) $obra['id'], $proyectadas)),
                 (string) $fila['sala_direccion'],
+                (int) $fila['sala_duracion_funcion'],
             );
         }
 

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace IndieCinema\Programacion\Servicios;
 
+use DateTimeImmutable;
 use IndieCinema\Nucleo\Http\ExcepcionHttp;
 use IndieCinema\Nucleo\Uuid;
 use IndieCinema\Programacion\Modelo\ResumenDeFuncion;
@@ -38,5 +39,15 @@ final class ServicioDeFunciones
     public function resumenes(array $ids): array
     {
         return $this->funciones->resumenes($ids);
+    }
+
+    /**
+     * Las programadas que empiezan en el rango, para el recordatorio de funciones (EF-03.3).
+     *
+     * @return list<ResumenDeFuncion>
+     */
+    public function programadasEntre(DateTimeImmutable $desde, DateTimeImmutable $hasta, int $cuantas): array
+    {
+        return $this->funciones->programadasEntre($desde, $hasta, $cuantas);
     }
 }

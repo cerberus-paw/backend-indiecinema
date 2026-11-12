@@ -55,7 +55,7 @@ final class RepositorioDeFunciones
         $filas = $this->base->filas(
             "SELECT f.id, f.estado, f.fecha_hora, f.precio_base, f.cupo,
                     s.id AS sala_id, s.nombre AS sala_nombre, s.localidad AS sala_localidad,
-                    s.habilitada AS sala_habilitada, s.organizador_id
+                    s.direccion AS sala_direccion, s.habilitada AS sala_habilitada, s.organizador_id
              FROM funcion f
              JOIN sala s ON s.id = f.sala_id
              WHERE f.id IN ({$marcas}) AND s.dada_de_baja_en IS NULL",
@@ -95,6 +95,7 @@ final class RepositorioDeFunciones
                 (bool) $fila['sala_habilitada'],
                 (string) $fila['organizador_id'],
                 array_values(array_map(static fn (array $obra): string => (string) $obra['id'], $proyectadas)),
+                (string) $fila['sala_direccion'],
             );
         }
 
@@ -355,6 +356,31 @@ final class RepositorioDeFunciones
                 [EstadoFuncion::EnVotacionTitulos, $ahora, $cuantas],
             ),
         );
+    }
+
+    /**
+     * Las programadas que empiezan después de $desde y hasta $hasta, como las piden los otros
+     * subsistemas (EF-03.3: funciones, para el recordatorio del día antes), de la más próxima a
+     * la última. Las de una sala dada de baja no, como en resumenes().
+     *
+     * @return list<ResumenDeFuncion>
+     */
+    public function programadasEntre(DateTimeImmutable $desde, DateTimeImmutable $hasta, int $cuantas): array
+    {
+        $ids = array_map(
+            static fn (array $fila): string => (string) $fila['id'],
+            $this->base->filas(
+                'SELECT f.id FROM funcion f JOIN sala s ON s.id = f.sala_id
+                 WHERE f.estado = ? AND f.fecha_hora > ? AND f.fecha_hora <= ? AND s.dada_de_baja_en IS NULL
+                 ORDER BY f.fecha_hora, f.id
+                 LIMIT ?',
+                [EstadoFuncion::Programada, $desde, $hasta, $cuantas],
+            ),
+        );
+        $resumenes = $this->resumenes($ids);
+
+        // resumenes() no respeta el orden: se vuelve al de la consulta.
+        return array_values(array_filter(array_map(static fn (string $id): ?ResumenDeFuncion => $resumenes[$id] ?? null, $ids)));
     }
 
     /**

@@ -133,7 +133,7 @@ final class FuncionesInternasTest extends TestCase
             'cupo' => 40,
             'titulos' => ['La ciénaga', 'Zama'],
             'titulos_elegidos' => false,
-            'sala' => ['id' => $this->sala->id, 'nombre' => 'Cine Club El Galpón', 'localidad' => 'Luján', 'habilitada' => true],
+            'sala' => ['id' => $this->sala->id, 'nombre' => 'Cine Club El Galpón', 'localidad' => 'Luján', 'habilitada' => true, 'direccion' => 'Av. San Martín 450'],
             'organizador_id' => self::ORGANIZADORA,
             // Las mismas que los títulos, por id y en el mismo orden (EF-04.2).
             'obras_ids' => [$this->obras['La ciénaga'], $this->obras['Zama']],
@@ -244,5 +244,57 @@ final class FuncionesInternasTest extends TestCase
 
         self::assertSame(403, $this->pedirVarias($id, 'cuentas', self::TOKEN_DE_CUENTAS)->estado());
         self::assertSame(403, $this->pedirVarias($id, 'funciones', '')->estado());
+    }
+
+    // ---- Las próximas, para el recordatorio (EF-03.3) -----------------------------------------
+
+    /**
+     * @param array<string, string> $consulta
+     */
+    private function pedirProximas(array $consulta, string $llamador = 'funciones', string $token = self::TOKEN_DE_FUNCIONES): Respuesta
+    {
+        $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion, new Log('programacion', fopen('php://memory', 'w')));
+
+        return $aplicacion->atender(new Peticion('GET', '/interno/funciones/proximas', $consulta, [], [
+            'X-Llamador' => $llamador,
+            'Authorization' => "Bearer {$token}",
+        ], [], []));
+    }
+
+    private function programadaEl(string $cuando): string
+    {
+        $funcion = $this->funcion();
+        $funcion->cerrarVotacionTitulos([$this->obras['Zama']]);
+        $funcion->fijarFechaHora(new DateTimeImmutable($cuando), new DateTimeImmutable('2026-01-01 00:00:00'));
+        $this->funciones->guardar($funcion);
+
+        return $funcion->id;
+    }
+
+    public function testProximasDaLasProgramadasDelRangoEnOrden(): void
+    {
+        $tarde = $this->programadaEl('2026-12-02 21:00:00');
+        $temprano = $this->programadaEl('2026-12-02 18:00:00');
+        $this->programadaEl('2026-12-04 20:00:00');
+        // En votación no tiene fecha: no está.
+        $this->funcion();
+
+        $respuesta = $this->pedirProximas(['desde' => '2026-12-01T20:00:00', 'hasta' => '2026-12-02T20:00:00']);
+        self::assertSame(200, $respuesta->estado(), $respuesta->cuerpo());
+        $lista = json_decode($respuesta->cuerpo(), true, 512, JSON_THROW_ON_ERROR);
+        self::assertSame([$temprano], array_column($lista, 'id'));
+        self::assertSame('Av. San Martín 450', $lista[0]['sala']['direccion']);
+
+        $hastaLaNoche = json_decode($this->pedirProximas(['desde' => '2026-12-01T20:00:00', 'hasta' => '2026-12-02T22:00:00'])->cuerpo(), true, 512, JSON_THROW_ON_ERROR);
+        self::assertSame([$temprano, $tarde], array_column($hastaLaNoche, 'id'));
+    }
+
+    public function testProximasPideUnRangoValidoYSoloLaPideFunciones(): void
+    {
+        self::assertSame(400, $this->pedirProximas([])->estado());
+        self::assertSame(400, $this->pedirProximas(['desde' => '2026-12-02T20:00:00', 'hasta' => '2026-12-01T20:00:00'])->estado());
+        self::assertSame(400, $this->pedirProximas(['desde' => '2026-12-01T20:00:00', 'hasta' => '2027-01-01T20:00:00'])->estado());
+        self::assertSame(400, $this->pedirProximas(['desde' => 'mañana', 'hasta' => '2026-12-01T20:00:00'])->estado());
+        self::assertSame(403, $this->pedirProximas(['desde' => '2026-12-01T20:00:00', 'hasta' => '2026-12-02T20:00:00'], 'cuentas', self::TOKEN_DE_CUENTAS)->estado());
     }
 }

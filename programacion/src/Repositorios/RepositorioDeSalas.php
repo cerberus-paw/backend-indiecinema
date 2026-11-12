@@ -32,6 +32,15 @@ final class RepositorioDeSalas
     }
 
     /**
+     * Si hay una fila con ese id, aunque la sala se haya dado de baja: un id así no se puede volver
+     * a usar (EF-07.1).
+     */
+    public function idUsado(string $id): bool
+    {
+        return $this->base->valor('SELECT COUNT(*) FROM sala WHERE id = ?', [$id]) > 0;
+    }
+
+    /**
      * Las que existen de esos ids, con el id como clave; las dadas de baja no vienen, como en
      * buscar(). Es lo que lee moderación para su bandeja (EF-07.1).
      *

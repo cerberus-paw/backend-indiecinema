@@ -12,9 +12,13 @@ use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Log;
 use IndieCinema\Nucleo\Uuid;
 use IndieCinema\Programacion\Modelo\DatosDeSala;
+use IndieCinema\Programacion\Modelo\ImagenSubida;
 use IndieCinema\Programacion\Modelo\ReglaIncumplida;
 use IndieCinema\Programacion\Modelo\Sala;
+use IndieCinema\Programacion\Pruebas\Controladores\FormularioDeSalaTest;
+use IndieCinema\Programacion\Pruebas\Dobles\Imagenes;
 use IndieCinema\Programacion\Repositorios\RepositorioDeSalas;
+use IndieCinema\Programacion\Servicios\ArchivosDeSalas;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -38,10 +42,15 @@ final class SalasInternasTest extends TestCase
     /** @var resource */
     private $salidaDelLog;
 
+    /** El volumen de archivos, uno por prueba. */
+    private string $carpeta;
+
     protected function setUp(): void
     {
+        $this->carpeta = sys_get_temp_dir() . '/archivos-' . bin2hex(random_bytes(4));
         $this->configuracion = new Configuracion([
             'app' => ['subsistema' => 'programacion', 'entorno' => 'desarrollo'],
+            'archivos' => ['carpeta' => $this->carpeta],
             'base' => self::baseDePruebas(),
             'nginx' => ['secreto' => 'secreto-de-nginx'],
             'llamadores' => [
@@ -52,6 +61,58 @@ final class SalasInternasTest extends TestCase
         $this->base = self::baseConTablasNuevas($this->configuracion);
         $this->salas = new RepositorioDeSalas($this->base);
         $this->salidaDelLog = fopen('php://memory', 'w+');
+    }
+
+    protected function tearDown(): void
+    {
+        array_map('unlink', glob("{$this->carpeta}/salas/*") ?: []);
+        @rmdir("{$this->carpeta}/salas");
+        @rmdir($this->carpeta);
+    }
+
+    /**
+     * @return list<string> las fotos que hay en el volumen
+     */
+    private function fotosGuardadas(): array
+    {
+        return array_map('basename', glob("{$this->carpeta}/salas/*") ?: []);
+    }
+
+    /**
+     * El alta de una sala como la manda moderación: los datos válidos del formulario, salvo lo que
+     * se cambie, y la foto como archivo subido.
+     *
+     * @param array<string, string>     $cambios
+     * @param ?array<string, mixed>     $foto    el archivo; sin uno, la foto de prueba
+     */
+    private function crear(string $id, array $cambios = [], ?array $foto = null, string $organizador = self::ORGANIZADORA, string $llamador = 'moderacion', string $token = self::TOKEN_DE_MODERACION): Respuesta
+    {
+        return $this->pedir(
+            'POST',
+            '/interno/salas',
+            cuerpo: $cambios + ['id' => $id, 'organizador_id' => $organizador] + FormularioDeSalaTest::camposValidos(),
+            archivos: ['imagen' => $foto ?? Imagenes::subida('sala.png')],
+            llamador: $llamador,
+            token: $token,
+        );
+    }
+
+    /**
+     * Un archivo cualquiera, como si lo hubiera subido moderación con ese nombre.
+     *
+     * @return array{name: string, type: string, tmp_name: string, error: int, size: int}
+     */
+    private static function archivo(string $contenido, string $nombre): array
+    {
+        $temporal = (string) tempnam(sys_get_temp_dir(), 'subida');
+        file_put_contents($temporal, $contenido);
+
+        return ['name' => $nombre, 'type' => 'image/jpeg', 'tmp_name' => $temporal, 'error' => UPLOAD_ERR_OK, 'size' => strlen($contenido)];
+    }
+
+    private function cuantasSalas(): int
+    {
+        return (int) $this->base->valor('SELECT COUNT(*) FROM sala');
     }
 
     private function sala(bool $habilitada = true, string $nombre = 'Cine Club El Galpón'): Sala
@@ -232,6 +293,127 @@ final class SalasInternasTest extends TestCase
     public function testLeerVariasSoloLaPideModeracion(): void
     {
         self::assertSame(403, $this->pedir('GET', '/interno/salas', ['ids' => $this->sala()->id], llamador: 'funciones', token: self::TOKEN_DE_FUNCIONES)->estado());
+    }
+
+    public function testCrearDejaLaSalaHabilitadaEnElListadoConSuFoto(): void
+    {
+        $id = Uuid::nuevo();
+
+        $respuesta = $this->crear($id);
+
+        self::assertSame(201, $respuesta->estado(), $respuesta->cuerpo());
+        self::assertSame(
+            ['id' => $id, 'nombre' => 'Cine Club El Galpón', 'localidad' => 'Luján', 'organizador_id' => self::ORGANIZADORA, 'habilitada' => true],
+            json_decode($respuesta->cuerpo(), true),
+        );
+        self::assertStringContainsString('Cine Club El Galpón', $this->enElListado());
+        $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion, new Log('programacion', fopen('php://memory', 'w')));
+        self::assertSame(file_get_contents(Imagenes::ruta('sala.png')), $aplicacion->atender(new Peticion('GET', "/salas/{$id}/imagen"))->cuerpo());
+        $sala = $this->salas->buscar($id) ?? self::fail('No se guardó la sala.');
+        self::assertSame(self::ORGANIZADORA, $sala->organizadorId);
+        self::assertSame(60, $sala->datos->capacidad);
+    }
+
+    /**
+     * Si moderación creó la sala y no llegó a guardar su id, el reintento no crea otra ni guarda
+     * otra foto.
+     */
+    public function testRepetirElPedidoNoCreaOtra(): void
+    {
+        $id = Uuid::nuevo();
+        self::assertSame(201, $this->crear($id)->estado());
+
+        $repetido = $this->crear($id, ['nombre' => 'Otro nombre']);
+
+        self::assertSame(200, $repetido->estado(), $repetido->cuerpo());
+        self::assertSame('Cine Club El Galpón', json_decode($repetido->cuerpo(), true)['nombre']);
+        self::assertSame(1, $this->cuantasSalas());
+        self::assertCount(1, $this->fotosGuardadas());
+    }
+
+    /**
+     * La sala de una solicitud que se mudó a moderación ya existe, sin habilitar: al aprobarla queda
+     * con los datos y la foto que se corrigieron allá, habilitada, y la foto vieja se borra.
+     */
+    public function testCompletaLaSalaSinHabilitarDeEseId(): void
+    {
+        $vieja = $this->sala(habilitada: false, nombre: 'El Galponcito');
+        $fotoVieja = (new ArchivosDeSalas($this->configuracion))->guardar(new ImagenSubida(Imagenes::subida('sala.jpg')['tmp_name'], 'jpg'));
+        $this->base->ejecutar('UPDATE sala SET imagen = ? WHERE id = ?', [$fotoVieja, $vieja->id]);
+
+        $respuesta = $this->crear($vieja->id);
+
+        self::assertSame(200, $respuesta->estado(), $respuesta->cuerpo());
+        $sala = $this->salas->buscar($vieja->id) ?? self::fail('No está la sala.');
+        self::assertTrue($sala->habilitada);
+        self::assertSame('Cine Club El Galpón', $sala->datos->nombre);
+        self::assertNotSame($fotoVieja, $sala->imagen);
+        self::assertSame([(string) $sala->imagen], $this->fotosGuardadas());
+        self::assertSame(1, $this->cuantasSalas());
+    }
+
+    public function testLaSalaDeOtroOrganizadorEs409(): void
+    {
+        $ajena = $this->sala();
+        $sinHabilitar = $this->sala(habilitada: false, nombre: 'El Microcine');
+        $otro = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+
+        self::assertSame(409, $this->crear($ajena->id, organizador: $otro)->estado());
+        self::assertSame(409, $this->crear($sinHabilitar->id, organizador: $otro)->estado());
+        self::assertFalse(($this->salas->buscar($sinHabilitar->id) ?? self::fail('No está la sala.'))->habilitada);
+        self::assertSame([], $this->fotosGuardadas());
+    }
+
+    public function testElIdDeUnaDadaDeBajaEs409(): void
+    {
+        $dadaDeBaja = $this->sala();
+        $this->base->ejecutar('UPDATE sala SET dada_de_baja_en = NOW() WHERE id = ?', [$dadaDeBaja->id]);
+
+        self::assertSame(409, $this->crear($dadaDeBaja->id)->estado());
+        self::assertSame([], $this->fotosGuardadas());
+    }
+
+    /**
+     * @return iterable<string, array{array<string, string>, ?array<string, mixed>, string, string}>
+     */
+    public static function altasInvalidas(): iterable
+    {
+        yield 'sin nombre' => [['nombre' => ''], null, 'nombre', 'Falta el nombre.'];
+        yield 'capacidad fuera de rango' => [['capacidad' => '0'], null, 'capacidad', 'La capacidad tiene que ser un número de butacas entre 1 y 2000.'];
+        yield 'un .exe con nombre de foto' => [[], self::archivo("MZ\x90\x00" . str_repeat("\x00", 200), 'sala.jpg'), 'imagen', 'La foto tiene que ser JPG, PNG o WebP.'];
+        yield 'una foto de más de 5 MB' => [[], self::archivo(str_repeat('a', 5 * 1024 * 1024 + 1), 'sala.jpg'), 'imagen', 'La foto puede pesar hasta 5 MB.'];
+        yield 'sin foto' => [[], ['name' => '', 'type' => '', 'tmp_name' => '', 'error' => UPLOAD_ERR_NO_FILE, 'size' => 0], 'imagen', 'Falta la foto de la sala.'];
+    }
+
+    /**
+     * Los mismos errores, con los mismos mensajes, que el formulario de sala: moderación se los
+     * muestra al moderador tal cual.
+     *
+     * @param array<string, string> $cambios
+     * @param ?array<string, mixed> $foto
+     */
+    #[\PHPUnit\Framework\Attributes\DataProvider('altasInvalidas')]
+    public function testLosDatosInvalidosSon422ConElErrorDelCampo(array $cambios, ?array $foto, string $campo, string $mensaje): void
+    {
+        $respuesta = $this->crear(Uuid::nuevo(), $cambios, $foto);
+
+        self::assertSame(422, $respuesta->estado(), $respuesta->cuerpo());
+        self::assertSame($mensaje, json_decode($respuesta->cuerpo(), true)['errores'][$campo] ?? null);
+        self::assertSame(0, $this->cuantasSalas());
+        self::assertSame([], $this->fotosGuardadas());
+    }
+
+    public function testElIdYElOrganizadorSonUuid(): void
+    {
+        self::assertSame(400, $this->crear('no-es-un-id')->estado());
+        self::assertSame(400, $this->crear(Uuid::nuevo(), organizador: 'yo')->estado());
+        self::assertSame(0, $this->cuantasSalas());
+    }
+
+    public function testCrearSoloLaPideModeracion(): void
+    {
+        self::assertSame(403, $this->crear(Uuid::nuevo(), llamador: 'funciones', token: self::TOKEN_DE_FUNCIONES)->estado());
+        self::assertSame(0, $this->cuantasSalas());
     }
 
     public function testSoloLaLlamaModeracion(): void

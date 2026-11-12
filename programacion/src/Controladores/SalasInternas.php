@@ -49,6 +49,34 @@ final class SalasInternas extends Controlador
     }
 
     /**
+     * POST /interno/salas (multipart): la sala de una solicitud aprobada, con el id que eligió
+     * moderación, el organizador, los datos y la foto como archivo. Queda habilitada; con el id de
+     * una sin habilitar del mismo organizador, la completa (ServicioDeSalas::crearParaSolicitud()).
+     * Los datos se validan como en el formulario de sala, y los errores vuelven por campo, con los
+     * mismos mensajes, para que moderación se los muestre al moderador. Programación no le pregunta
+     * a cuentas por el organizador: moderación lo sacó de la sesión del solicitante.
+     *
+     * @throws ExcepcionHttp 409 si el id es de una sala de otro organizador o dada de baja
+     */
+    public function crear(Peticion $peticion): Respuesta
+    {
+        $id = $peticion->campo('id');
+        $organizador = $peticion->campo('organizador_id');
+        if (!is_string($id) || !Uuid::esValido($id) || !is_string($organizador) || !Uuid::esValido($organizador)) {
+            return $this->json(['error' => '«id» y «organizador_id» son UUID.'], 400);
+        }
+        $formulario = FormularioDeSala::desdeCampos($peticion->cuerpo(), $peticion->archivo('imagen'), imagenObligatoria: true);
+        $datos = $formulario->datos();
+        if ($datos === null || $formulario->imagen === null) {
+            return $this->json(['errores' => $formulario->errores], 422);
+        }
+
+        [$sala, $creada] = $this->salas->crearParaSolicitud($id, $organizador, $datos, $formulario->imagen);
+
+        return $this->json(['id' => $sala->id] + self::datos($sala), $creada ? 201 : 200);
+    }
+
+    /**
      * POST /interno/salas/{id}/habilitacion con {habilitada, motivo, moderador_id}: publica la sala
      * o la suspende. Una suspendida deja de verse, y sus funciones en la cartelera, y no programa
      * funciones nuevas. El motivo y el moderador quedan en el log; el historial es de moderación.

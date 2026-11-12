@@ -111,6 +111,7 @@ return static function (Router $router): void {
     // Las salas de la bandeja de moderación (EF-07.1), y la de una solicitud: la habilita o la
     // suspende.
     $router->interna('GET', '/interno/salas', [SalasInternas::class, 'varias'], ['moderacion']);
+    $router->interna('POST', '/interno/salas', [SalasInternas::class, 'crear'], ['moderacion']);
     $router->interna('POST', '/interno/salas/{id}/habilitacion', [SalasInternas::class, 'habilitacion'], ['moderacion']);
 
     // Para comprobar que los otros subsistemas llegan hasta acá con su token.

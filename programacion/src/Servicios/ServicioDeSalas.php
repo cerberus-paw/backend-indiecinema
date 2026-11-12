@@ -57,6 +57,18 @@ final class ServicioDeSalas
     }
 
     /**
+     * Las que existen de esos ids, con el id como clave, sin las dadas de baja (EF-07.1).
+     *
+     * @param list<string> $ids
+     *
+     * @return array<string, Sala>
+     */
+    public function varias(array $ids): array
+    {
+        return $this->salas->varias($ids);
+    }
+
+    /**
      * @return list<Sala>
      */
     public function delOrganizador(Usuario $organizador): array

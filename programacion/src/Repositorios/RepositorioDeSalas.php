@@ -32,6 +32,28 @@ final class RepositorioDeSalas
     }
 
     /**
+     * Las que existen de esos ids, con el id como clave; las dadas de baja no vienen, como en
+     * buscar(). Es lo que lee moderación para su bandeja (EF-07.1).
+     *
+     * @param list<string> $ids
+     *
+     * @return array<string, Sala>
+     */
+    public function varias(array $ids): array
+    {
+        if ($ids === []) {
+            return [];
+        }
+        $salas = array_map(self::sala(...), $this->base->filas(
+            'SELECT ' . self::COLUMNAS . ' FROM sala
+             WHERE id IN (' . implode(', ', array_fill(0, count($ids), '?')) . ') AND dada_de_baja_en IS NULL',
+            $ids,
+        ));
+
+        return array_column($salas, null, 'id');
+    }
+
+    /**
      * Las salas de un organizador, de la más nueva a la más vieja.
      *
      * @return list<Sala>

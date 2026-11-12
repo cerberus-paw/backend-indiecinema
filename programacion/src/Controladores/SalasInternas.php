@@ -9,6 +9,7 @@ use IndieCinema\Nucleo\Http\ExcepcionHttp;
 use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Uuid;
+use IndieCinema\Programacion\Modelo\Sala;
 use IndieCinema\Programacion\Servicios\ServicioDeSalas;
 
 /**
@@ -19,8 +20,32 @@ use IndieCinema\Programacion\Servicios\ServicioDeSalas;
  */
 final class SalasInternas extends Controlador
 {
+    /** Una página de la bandeja de moderación: un pedido más largo es un error de quien llama. */
+    private const MAXIMO_POR_PEDIDO = 50;
+
     public function __construct(private readonly ServicioDeSalas $salas)
     {
+    }
+
+    /**
+     * GET /interno/salas?ids=…: nombre, localidad, organizador y si está habilitada de cada una,
+     * con su id como clave, como la lectura de varias funciones. Las que no existen o se dieron de
+     * baja no vienen. Un id que no es UUID es un error de moderación, que los saca de sus
+     * solicitudes: 400.
+     */
+    public function varias(Peticion $peticion): Respuesta
+    {
+        $lista = $peticion->consulta('ids');
+        $ids = is_string($lista) && $lista !== '' ? array_values(array_unique(explode(',', $lista))) : [];
+        if ($ids === [] || count($ids) > self::MAXIMO_POR_PEDIDO) {
+            return $this->json(['error' => 'Se piden entre 1 y ' . self::MAXIMO_POR_PEDIDO . ' salas por vez.'], 400);
+        }
+        if (array_filter($ids, static fn (string $id): bool => !Uuid::esValido($id)) !== []) {
+            return $this->json(['error' => 'Los ids de las salas son UUID.'], 400);
+        }
+
+        // Un objeto aunque esté vacío: json_encode() escribiría [] como lista.
+        return $this->json((object) array_map(self::datos(...), $this->salas->varias($ids)));
     }
 
     /**
@@ -52,5 +77,20 @@ final class SalasInternas extends Controlador
         $sala = $this->salas->cambiarHabilitacion($id, $habilitada, $moderador, trim($motivo));
 
         return $this->json(['id' => $sala->id, 'habilitada' => $sala->habilitada]);
+    }
+
+    /**
+     * Lo que moderación muestra de una sala en su bandeja.
+     *
+     * @return array{nombre: string, localidad: string, organizador_id: string, habilitada: bool}
+     */
+    private static function datos(Sala $sala): array
+    {
+        return [
+            'nombre' => $sala->datos->nombre,
+            'localidad' => $sala->datos->localidad,
+            'organizador_id' => $sala->organizadorId,
+            'habilitada' => $sala->habilitada,
+        ];
     }
 }

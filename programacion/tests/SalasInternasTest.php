@@ -188,6 +188,52 @@ final class SalasInternasTest extends TestCase
         self::assertTrue(($this->salas->buscar($sala->id) ?? self::fail('No está la sala.'))->habilitada);
     }
 
+    public function testLeeVariasSinLasDadasDeBajaNiLasQueNoExisten(): void
+    {
+        $galpon = $this->sala();
+        $sinHabilitar = $this->sala(habilitada: false, nombre: 'El Microcine');
+        $dadaDeBaja = $this->sala(nombre: 'La Vieja Usina');
+        $this->base->ejecutar('UPDATE sala SET dada_de_baja_en = NOW() WHERE id = ?', [$dadaDeBaja->id]);
+
+        $respuesta = $this->pedir('GET', '/interno/salas', ['ids' => implode(',', [$galpon->id, $sinHabilitar->id, $dadaDeBaja->id, Uuid::nuevo()])]);
+
+        self::assertSame(200, $respuesta->estado(), $respuesta->cuerpo());
+        self::assertEquals([
+            $galpon->id => ['nombre' => 'Cine Club El Galpón', 'localidad' => 'Luján', 'organizador_id' => self::ORGANIZADORA, 'habilitada' => true],
+            $sinHabilitar->id => ['nombre' => 'El Microcine', 'localidad' => 'Luján', 'organizador_id' => self::ORGANIZADORA, 'habilitada' => false],
+        ], json_decode($respuesta->cuerpo(), true));
+    }
+
+    public function testSinNingunaQueExistaEsUnObjetoVacio(): void
+    {
+        $respuesta = $this->pedir('GET', '/interno/salas', ['ids' => Uuid::nuevo()]);
+
+        self::assertSame(200, $respuesta->estado(), $respuesta->cuerpo());
+        self::assertSame('{}', $respuesta->cuerpo());
+    }
+
+    /**
+     * @return iterable<string, array{?string}>
+     */
+    public static function idsMalPedidos(): iterable
+    {
+        yield 'sin ids' => [null];
+        yield 'vacío' => [''];
+        yield 'uno que no es UUID' => [Uuid::nuevo() . ',no-es-un-id'];
+        yield 'más de 50' => [implode(',', array_map(static fn (): string => Uuid::nuevo(), range(1, 51)))];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('idsMalPedidos')]
+    public function testLosIdsMalPedidosSon400(?string $ids): void
+    {
+        self::assertSame(400, $this->pedir('GET', '/interno/salas', $ids === null ? [] : ['ids' => $ids])->estado());
+    }
+
+    public function testLeerVariasSoloLaPideModeracion(): void
+    {
+        self::assertSame(403, $this->pedir('GET', '/interno/salas', ['ids' => $this->sala()->id], llamador: 'funciones', token: self::TOKEN_DE_FUNCIONES)->estado());
+    }
+
     public function testSoloLaLlamaModeracion(): void
     {
         $sala = $this->sala();

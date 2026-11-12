@@ -41,7 +41,8 @@ backend-indiecinema/
 │   ├── init/              esquemas, usuarios y permisos; corre una vez, con la base vacía
 │   └── herramientas/      aplicar migraciones y comprobar que cada subsistema sólo ve su esquema
 ├── herramientas/          servidor de desarrollo sin Docker y despliegue en el VPS
-├── docs/seguridad.md      seguridad por capa: qué protege cada una y dónde está configurado
+├── docs/seguridad.md      seguridad por capa: qué protege cada una y dónde está configurado, y
+│                          las amenazas ordenadas por impacto y probabilidad
 ├── docs/guion-de-prueba.md  el recorrido de punta a punta en el sitio publicado, con cada rol
 ├── nucleo/                MVC común: ruteo, middleware, base de datos, vistas y errores
 ├── cuentas/               /cuenta/   registro, ingreso, sesión, roles y usuarios del administrador

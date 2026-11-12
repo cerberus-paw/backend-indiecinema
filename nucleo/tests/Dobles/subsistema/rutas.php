@@ -23,4 +23,5 @@ return static function (Router $router): void {
     $router->interna('POST', '/interno/eco', [ControladorDePrueba::class, 'eco'], ['programacion']);
     $router->interna('GET', '/interno/lento', [ControladorDePrueba::class, 'lento'], ['programacion']);
     $router->interna('GET', '/interno/falla', [ControladorDePrueba::class, 'falla'], ['programacion']);
+    $router->interna('POST', '/interno/falla', [ControladorDePrueba::class, 'falla'], ['programacion']);
 };

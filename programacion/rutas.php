@@ -99,6 +99,9 @@ return static function (Router $router): void {
     // El afiche de una obra, para las tarjetas de sus funciones: público como el catálogo.
     $router->get('/obras/{id}/afiche', [AficheDeObra::class, 'mostrar']);
 
+    // Las programadas que empiezan en un rango, para el recordatorio del día antes (EF-03.3). Antes
+    // que la de a una, para que «proximas» no se tome como un id.
+    $router->interna('GET', '/interno/funciones/proximas', [FuncionesInternas::class, 'proximas'], ['funciones']);
     // Una función para el subsistema funciones (acuerdo de fecha y reservas): sólo la pide él.
     $router->interna('GET', '/interno/funciones/{id}', [FuncionesInternas::class, 'mostrar'], ['funciones']);
     // Las de una página de «Mis reservas» en un solo pedido (E4-04.1).

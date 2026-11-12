@@ -40,6 +40,8 @@ final readonly class FuncionDeProgramacion
         public bool $salaHabilitada,
         public string $organizadorId,
         public array $obrasIds = [],
+        /** Adónde hay que ir, para el recordatorio (EF-03.3). */
+        public string $salaDireccion = '',
     ) {
     }
 

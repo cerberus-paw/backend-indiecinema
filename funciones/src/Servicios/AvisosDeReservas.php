@@ -18,7 +18,8 @@ use RuntimeException;
 
 /**
  * Los correos a los espectadores: la reserva confirmada (E4-04.3), la función que reservaron se
- * canceló (E4-03.4) y la que esperaban no juntó el mínimo del acuerdo de fecha (EF-03.2). Funciones sólo guarda el id de quien reservó: la dirección se la pide a
+ * canceló (E4-03.4), la que esperaban no juntó el mínimo del acuerdo de fecha (EF-03.2) y el
+ * recordatorio del día antes (EF-03.3). Funciones sólo guarda el id de quien reservó: la dirección se la pide a
  * cuentas por su API interna.
  *
  * El correo es un aviso y no lo que confirma ni lo que cancela: la reserva ya quedó así. Si cuentas
@@ -98,6 +99,33 @@ final class AvisosDeReservas
         }
 
         return $avisados;
+    }
+
+    /**
+     * El recordatorio el día antes de la función (EF-03.3), con lo que hace falta para llegar: la
+     * fecha y la hora, la sala con su dirección y el código para la puerta.
+     *
+     * @return bool si salió
+     *
+     * @throws RuntimeException si falta [sitio] url o no es http(s): es un error de configuración,
+     *                          no del correo
+     */
+    public function recordatorio(Reserva $reserva, FuncionDeProgramacion $funcion): bool
+    {
+        $comprobante = $this->urlDelSitio() . $this->configuracion->obtener('app.prefijo', '') . "/reservas/{$reserva->id}";
+        try {
+            [$correo, $nombre] = $this->destinatario($reserva->usuarioId);
+            $this->correo->enviar(new Correo($correo, "Recordatorio: «{$funcion->titulo()}»", self::textoDeRecordatorio($reserva, $funcion, $nombre, $comprobante)));
+
+            return true;
+        } catch (ExcepcionHttp | CorreoNoEnviado | RuntimeException $error) {
+            $this->log->warning('No salió el recordatorio de la reserva {reserva}: {motivo}', [
+                'reserva' => $reserva->id,
+                'motivo' => $error->getMessage(),
+            ]);
+
+            return false;
+        }
     }
 
     /**
@@ -187,6 +215,31 @@ final class AvisosDeReservas
             "Tu reserva {$reserva->codigo} ({$lugares}) quedó cancelada: no tenés que hacer nada.",
             '',
             'En la cartelera de IndieCinema podés elegir otra función.',
+            '',
+            'IndieCinema',
+        ]);
+    }
+
+    private static function textoDeRecordatorio(Reserva $reserva, FuncionDeProgramacion $funcion, string $nombre, string $comprobante): string
+    {
+        $lugares = $reserva->cantidad === 1 ? '1 lugar' : "{$reserva->cantidad} lugares";
+        $direccion = $funcion->salaDireccion === '' ? $funcion->salaLocalidad : "{$funcion->salaDireccion}, {$funcion->salaLocalidad}";
+
+        return implode("\n", [
+            "Hola, {$nombre}:",
+            '',
+            "Te recordamos tu función: «{$funcion->titulo()}».",
+            '',
+            'Fecha: ' . ($funcion->fechaHora === null ? 'a confirmar' : TextoParaMostrar::fecha($funcion->fechaHora)),
+            "Sala: {$funcion->salaNombre}",
+            "Dirección: {$direccion}",
+            "Lugares: {$lugares}",
+            'Código de la reserva: ' . substr($reserva->codigo, 0, 4) . '-' . substr($reserva->codigo, 4),
+            '',
+            'Mostrá el código en la puerta. El comprobante, para verlo o imprimirlo:',
+            $comprobante,
+            '',
+            'Si al final no podés ir, cancelá la reserva desde «Mis reservas»: así otro usa el lugar.',
             '',
             'IndieCinema',
         ]);

@@ -95,6 +95,23 @@ final class CierresPorFecha
     }
 
     /**
+     * Por qué la función, si empezara en $inicio, se pisaría con otra programada de su sala o no
+     * dejaría el tiempo entre funciones (EF-05.5); null si entra. Dura lo que duran sus obras
+     * elegidas, como las demás de la sala. Lo usan proponer y confirmar el acuerdo, a mano y acá.
+     */
+    public function motivoParaPisarse(Funcion $funcion, DateTimeImmutable $inicio): ?string
+    {
+        $sala = $this->salas->buscar($funcion->salaId)
+            ?? throw new LogicException("La función {$funcion->id} es de una sala que no existe.");
+
+        return $sala->motivoParaPisarse(
+            $inicio,
+            $this->obras->duracionDe($funcion->obrasIds),
+            $this->funciones->ocupadoEnLaSala($sala->id, $funcion->id),
+        );
+    }
+
+    /**
      * Los acuerdos de fecha que pasaron su fecha límite (EF-03.2). El acuerdo vive en funciones:
      * se le pregunta por cada función en acuerdo, y al leerlo funciones ya cierra sin mínimo el que
      * venció sin llegar (ServicioDeAcuerdos::cerrarSiVencio()).

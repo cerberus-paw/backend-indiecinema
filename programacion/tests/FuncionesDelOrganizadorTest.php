@@ -2217,6 +2217,35 @@ final class FuncionesDelOrganizadorTest extends TestCase
         self::assertStringContainsString('ya tiene un acuerdo de fecha abierto', $respuesta->cuerpo());
     }
 
+    /**
+     * EF-05.5: una franja no puede pisarse con otra función programada de la sala ni dejar menos que
+     * el tiempo entre funciones (15). La otra va de 20:00 a 21:43 (Zama dura 103), y la función en
+     * acuerdo dura 103 con su elegida: a las 21:50 se pisa; a las 21:58, justo después de la pausa,
+     * entra.
+     */
+    public function testProponerUnaFranjaQueSePisaConOtraFuncionRechazaLaPropuesta(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $this->programada($sala, self::dentroDe(12, '20:00:00'));
+        $funcion = $this->funcion($sala);
+        $this->enviar("/organizador/funciones/{$funcion->id}/cerrar-votacion", []);
+        self::acuerdoEnFunciones('ninguno');
+
+        $pisada = $this->enviar("/organizador/funciones/{$funcion->id}/acuerdo", [
+            'minimo_asistentes' => '5',
+            'franja_inicio' => [self::dentroDe(10, '20:00:00'), self::dentroDe(12, '21:50:00')],
+        ]);
+
+        self::assertSame(422, $pisada->estado());
+        self::assertStringContainsString('La opción 2 se pisa con otra función de la sala, que va de 20:00 a 21:43: entre una y otra tienen que quedar 15 minutos.', $pisada->cuerpo());
+
+        $justa = $this->enviar("/organizador/funciones/{$funcion->id}/acuerdo", [
+            'minimo_asistentes' => '5',
+            'franja_inicio' => [self::dentroDe(10, '20:00:00'), self::dentroDe(12, '21:58:00')],
+        ]);
+        self::assertSame(303, $justa->estado());
+    }
+
     public function testProponerAcuerdoRechazaFuncionEnOtroEstado(): void
     {
         $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
@@ -2228,6 +2257,28 @@ final class FuncionesDelOrganizadorTest extends TestCase
         ]);
 
         self::assertSame(404, $respuesta->estado());
+    }
+
+    /**
+     * EF-05.5: entre la propuesta y la confirmación se programó otra función que se pisa con la
+     * franja ganadora (la del doble de funciones, en diez días a las 20:00): no se programa, y la
+     * función sigue en acuerdo para cerrarlo y proponer otras.
+     */
+    public function testConfirmarUnaFranjaGanadoraQueSePisaNoProgramaLaFuncion(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $funcion = $this->funcion($sala);
+        $this->enviar("/organizador/funciones/{$funcion->id}/cerrar-votacion", []);
+        $this->programada($sala, self::dentroDe(10, '19:00:00'));
+        self::acuerdoEnFunciones('abierto');
+
+        $motivo = 'La franja ganadora se pisa con otra función de la sala, que va de 19:00 a 20:43: entre una y otra tienen que quedar 15 minutos. Cerrá el acuerdo sin mínimo y proponé franjas nuevas.';
+
+        // Como la que ya empezó: vuelve a la ficha, que se lo muestra al organizador.
+        $respuesta = $this->enviar("/organizador/funciones/{$funcion->id}/confirmar-acuerdo", ['volver' => 'ficha']);
+        self::assertSame(303, $respuesta->estado());
+        self::assertStringContainsString($motivo, $this->pedir('GET', (string) $respuesta->cabecera('Location'))->cuerpo());
+        self::assertSame(EstadoFuncion::EnAcuerdoFecha, ($this->funciones->buscar($funcion->id) ?? self::fail('No se encontró la función.'))->estado);
     }
 
     /**

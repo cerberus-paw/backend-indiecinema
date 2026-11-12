@@ -54,6 +54,8 @@ final class FuncionesDelOrganizadorTest extends TestCase
     private const ORGANIZADORA = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
     private const OTRO_ORGANIZADOR = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 
+    /** @var array<string, array<string, mixed>> la configuración, para el pedido en otro proceso */
+    private array $secciones;
     private Configuracion $configuracion;
     private BaseDeDatos $base;
     private RepositorioDeSalas $salas;
@@ -71,7 +73,7 @@ final class FuncionesDelOrganizadorTest extends TestCase
         // Funciones contesta la ocupación: ninguna función tiene reservas salvo que la prueba las
         // ponga con ocupados() (F-01.1).
         file_put_contents(sys_get_temp_dir() . '/ocupacion_de_prueba.json', '{}');
-        $this->configuracion = new Configuracion([
+        $this->secciones = [
             'app' => ['subsistema' => 'programacion', 'entorno' => 'desarrollo'],
             'base' => self::baseDePruebas(),
             'nginx' => ['secreto' => self::SECRETO],
@@ -80,7 +82,8 @@ final class FuncionesDelOrganizadorTest extends TestCase
                 'funciones' => self::$urlFunciones,
             ],
             'interno' => ['token' => 'token-de-programacion'],
-        ]);
+        ];
+        $this->configuracion = new Configuracion($this->secciones);
         $this->base = self::baseConTablasNuevas($this->configuracion);
         $this->salas = new RepositorioDeSalas($this->base);
         $this->funciones = new RepositorioDeFunciones($this->base);
@@ -183,10 +186,10 @@ final class FuncionesDelOrganizadorTest extends TestCase
      *
      * @param ?list<string> $candidatas
      */
-    private function funcion(Sala $sala, ?array $candidatas = null): Funcion
+    private function funcion(Sala $sala, ?array $candidatas = null, ?RepositorioDeFunciones $funciones = null): Funcion
     {
         $funcion = $sala->crearFuncion($candidatas ?? array_values($this->obras), 40, 3500.0);
-        $this->funciones->agregar($funcion);
+        ($funciones ?? $this->funciones)->agregar($funcion);
 
         return $funcion;
     }
@@ -224,15 +227,17 @@ final class FuncionesDelOrganizadorTest extends TestCase
     }
 
     /**
-     * Una ya programada para esa fecha.
+     * Una ya programada para esa fecha. Con $funciones, desde esa conexión: la que tiene tomada la
+     * sala (EF-05.6).
      */
-    private function programada(Sala $sala, string $fecha, string $titulo = 'Zama', string $programadaEl = 'now'): Funcion
+    private function programada(Sala $sala, string $fecha, string $titulo = 'Zama', string $programadaEl = 'now', ?RepositorioDeFunciones $funciones = null): Funcion
     {
-        $funcion = $this->funcion($sala);
+        $funciones ??= $this->funciones;
+        $funcion = $this->funcion($sala, funciones: $funciones);
         $funcion->cerrarVotacionTitulos([$this->obras[$titulo]]);
-        $this->funciones->guardar($funcion);
+        $funciones->guardar($funcion);
         $funcion->fijarFechaHora(new DateTimeImmutable($fecha), new DateTimeImmutable($programadaEl));
-        $this->funciones->guardar($funcion);
+        $funciones->guardar($funcion);
 
         return $funcion;
     }
@@ -2554,5 +2559,125 @@ final class FuncionesDelOrganizadorTest extends TestCase
         $respuesta = $this->enviar("/organizador/funciones/{$funcion->id}/cerrar-sin-minimo", []);
         self::assertSame(404, $respuesta->estado());
     }
-}
 
+    /**
+     * EF-05.6: dos programaciones a la vez en la misma sala van de a una. Otra conexión tiene
+     * tomada la sala y está programando una a las 20:30, sin confirmar todavía: la que se programa
+     * a las 21:00 en otro proceso espera, y cuando la otra se guarda ve que se pisa.
+     */
+    public function testProgramarEsperaALaOtraDeLaSalaYVeQueSePisa(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+
+        $respuesta = $this->mientrasOtraTieneLaSala($sala, '2030-10-25 20:30:00', '/organizador/funciones/nueva', [
+            'sala_id' => $sala->id,
+            'obras' => [$this->obras['La ciénaga']],
+            'fecha' => '2030-10-25',
+            'hora' => '21:00',
+            'precio' => '2500',
+            'cupo' => '40',
+        ]);
+
+        self::assertSame(422, $respuesta['estado']);
+        self::assertStringContainsString('Se pisa con otra función de la sala, que va de 20:30 a 22:13', $respuesta['cuerpo']);
+        self::assertSame(1, $this->cuantasFunciones($sala));
+    }
+
+    /**
+     * EF-05.6: si la sala no se suelta en 5 segundos, el formulario vuelve con lo cargado y le pide
+     * que pruebe de nuevo, en vez de un error del servidor.
+     */
+    public function testProgramarConLaSalaTomadaDemasiadoPideProbarDeNuevo(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $otra = BaseDeDatos::conectar($this->configuracion);
+
+        $respuesta = $otra->enTransaccion(function (BaseDeDatos $otra) use ($sala): array {
+            $otra->valor('SELECT id FROM sala WHERE id = ? FOR UPDATE', [$sala->id]);
+
+            return $this->resultado($this->enOtroProceso('/organizador/funciones/nueva', [
+                'sala_id' => $sala->id,
+                'obras' => [$this->obras['Zama']],
+                'fecha' => '2030-10-25',
+                'hora' => '20:30',
+                'precio' => '2500',
+                'cupo' => '40',
+            ]));
+        });
+
+        self::assertSame(422, $respuesta['estado']);
+        self::assertStringContainsString('Otra programación de esta sala se está guardando: probá de nuevo en unos segundos.', $respuesta['cuerpo']);
+        self::assertStringContainsString('value="2030-10-25"', $respuesta['cuerpo']);
+        self::assertSame(0, $this->cuantasFunciones($sala));
+    }
+
+    /**
+     * Otra conexión toma la sala y programa una función a $otraA sin confirmar; mientras tanto
+     * manda el pedido en otro proceso y comprueba que espera. Cuando la otra se confirma, devuelve
+     * lo que respondió el pedido (EF-05.6).
+     *
+     * @param array<string, mixed> $cuerpo
+     *
+     * @return array{estado: int, location: ?string, cuerpo: string}
+     */
+    private function mientrasOtraTieneLaSala(Sala $sala, string $otraA, string $ruta, array $cuerpo): array
+    {
+        $otra = BaseDeDatos::conectar($this->configuracion);
+        $proceso = $otra->enTransaccion(function (BaseDeDatos $otra) use ($sala, $otraA, $ruta, $cuerpo): array {
+            $otra->valor('SELECT id FROM sala WHERE id = ? FOR UPDATE', [$sala->id]);
+            $this->programada($sala, $otraA, funciones: new RepositorioDeFunciones($otra));
+            $proceso = $this->enOtroProceso($ruta, $cuerpo);
+            usleep(800_000);
+            self::assertTrue(proc_get_status($proceso['proceso'])['running'], 'El pedido no esperó a que se soltara la sala.');
+
+            return $proceso;
+        });
+
+        return $this->resultado($proceso);
+    }
+
+    /**
+     * El pedido de la organizadora, atendido por otro proceso con su propia conexión.
+     *
+     * @param array<string, mixed> $cuerpo
+     *
+     * @return array{proceso: resource, salida: resource, errores: resource}
+     */
+    private function enOtroProceso(string $ruta, array $cuerpo): array
+    {
+        $proceso = proc_open(
+            [
+                PHP_BINARY,
+                __DIR__ . '/Dobles/pedir.php',
+                (string) json_encode($this->secciones),
+                'POST',
+                $ruta,
+                (string) json_encode(['_csrf' => self::CSRF, ...$cuerpo]),
+                (string) json_encode(['X-Nginx-Secreto' => self::SECRETO, 'X-Usuario-Id' => self::ORGANIZADORA, 'X-Rol' => 'organizador']),
+                self::CSRF,
+            ],
+            [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']],
+            $tuberias,
+        );
+        self::assertNotFalse($proceso);
+
+        return ['proceso' => $proceso, 'salida' => $tuberias[1], 'errores' => $tuberias[2]];
+    }
+
+    /**
+     * @param array{proceso: resource, salida: resource, errores: resource} $lanzado
+     *
+     * @return array{estado: int, location: ?string, cuerpo: string}
+     */
+    private function resultado(array $lanzado): array
+    {
+        $salida = (string) stream_get_contents($lanzado['salida']);
+        $errores = (string) stream_get_contents($lanzado['errores']);
+        proc_close($lanzado['proceso']);
+        self::assertSame('', $errores);
+        $respuesta = json_decode($salida, true);
+        self::assertIsArray($respuesta, $salida);
+
+        return ['estado' => (int) $respuesta['estado'], 'location' => $respuesta['location'] ?? null, 'cuerpo' => (string) $respuesta['cuerpo']];
+    }
+}

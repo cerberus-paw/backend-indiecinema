@@ -132,10 +132,15 @@ final class ServicioDeFuncionesDelOrganizador
             $duracion += $duraciones[$obraId] ?? throw new ReglaIncumplida('Una de las obras no está en el catálogo.');
         }
 
-        $funcion = $sala->programarFuncion($obrasIds, $cupo, $precioBase, $fechaHora, $duracion, $this->funciones->ocupadoEnLaSala($sala->id));
-        $this->funciones->agregar($funcion);
+        // Con la sala bloqueada, para que otra programación a la vez no pase el control antes de
+        // que se guarde esta (EF-05.6).
+        return $this->salas->conLaSalaBloqueada($sala->id, function (?Sala $sala) use ($obrasIds, $cupo, $precioBase, $fechaHora, $duracion): Funcion {
+            $sala ?? throw new ReglaIncumplida('La sala no existe o no pertenece a tu cuenta.');
+            $funcion = $sala->programarFuncion($obrasIds, $cupo, $precioBase, $fechaHora, $duracion, $this->funciones->ocupadoEnLaSala($sala->id));
+            $this->funciones->agregar($funcion);
 
-        return $funcion;
+            return $funcion;
+        });
     }
 
     /**
@@ -222,11 +227,16 @@ final class ServicioDeFuncionesDelOrganizador
             $duracion += $duraciones[$obraId] ?? throw new ReglaIncumplida('Una de las obras no está en el catálogo.');
         }
 
-        $ocupado = $this->funciones->ocupadoEnLaSala($sala->id, $funcion->id);
-        $sala->actualizarFuncion($funcion, $obrasIds, $cupo, $precioBase, $fechaHora, $duracion, $ocupado);
-        $this->funciones->actualizar($funcion);
+        // Con la sala de destino bloqueada, como al programar (EF-05.6): la de origen pierde una
+        // función, ahí no puede quedar ninguna encimada.
+        return $this->salas->conLaSalaBloqueada($sala->id, function (?Sala $sala) use ($funcion, $obrasIds, $cupo, $precioBase, $fechaHora, $duracion): Funcion {
+            $sala ?? throw new ReglaIncumplida('La sala no existe o no pertenece a tu cuenta.');
+            $ocupado = $this->funciones->ocupadoEnLaSala($sala->id, $funcion->id);
+            $sala->actualizarFuncion($funcion, $obrasIds, $cupo, $precioBase, $fechaHora, $duracion, $ocupado);
+            $this->funciones->actualizar($funcion);
 
-        return $funcion;
+            return $funcion;
+        });
     }
 
     /**
@@ -416,17 +426,24 @@ final class ServicioDeFuncionesDelOrganizador
         if ($fechaHora <= new DateTimeImmutable()) {
             throw new ReglaIncumplida('La franja ganadora ya empezó: la función no se puede programar en esa fecha. Cerrá el acuerdo sin mínimo y proponé franjas nuevas.');
         }
-        // Entre la propuesta y ahora se pudo programar otra en ese horario (EF-05.5).
-        $pisada = $this->cierres()->motivoParaPisarse($funcion, $fechaHora);
-        if ($pisada !== null) {
-            throw new ReglaIncumplida("La franja ganadora {$pisada} Cerrá el acuerdo sin mínimo y proponé franjas nuevas.");
-        }
+        $acuerdos = $this->acuerdos;
 
-        $this->acuerdos->confirmar((string) $acuerdo['id']);
-        $funcion->fijarFechaHora($fechaHora);
-        $this->funciones->guardar($funcion);
+        // Con la sala bloqueada, como al programar (EF-05.6): el pedido a funciones va adentro, así
+        // nadie programa en ese horario entre el control y el guardado. Traba sólo esta sala, y
+        // funciones contesta en 2 segundos o falla.
+        return $this->salas->conLaSalaBloqueada($funcion->salaId, function () use ($funcion, $fechaHora, $acuerdo, $acuerdos): Funcion {
+            // Entre la propuesta y ahora se pudo programar otra en ese horario (EF-05.5).
+            $pisada = $this->cierres()->motivoParaPisarse($funcion, $fechaHora);
+            if ($pisada !== null) {
+                throw new ReglaIncumplida("La franja ganadora {$pisada} Cerrá el acuerdo sin mínimo y proponé franjas nuevas.");
+            }
 
-        return $funcion;
+            $acuerdos->confirmar((string) $acuerdo['id']);
+            $funcion->fijarFechaHora($fechaHora);
+            $this->funciones->guardar($funcion);
+
+            return $funcion;
+        });
     }
 
     /**

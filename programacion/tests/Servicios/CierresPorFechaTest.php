@@ -10,6 +10,7 @@ use IndieCinema\Nucleo\Uuid;
 use IndieCinema\Programacion\Modelo\DatosDeSala;
 use IndieCinema\Programacion\Modelo\Funcion;
 use IndieCinema\Programacion\Modelo\Obra;
+use IndieCinema\Programacion\Modelo\ReglaIncumplida;
 use IndieCinema\Programacion\Modelo\OrigenCopia;
 use IndieCinema\Programacion\Modelo\Sala;
 use IndieCinema\Programacion\Modelo\TipoObra;
@@ -345,6 +346,72 @@ final class CierresPorFechaTest extends TestCase
         $escrito = (string) stream_get_contents($log);
         self::assertStringContainsString('se pisa con otra función de la sala, que va de 19:00 a 20:40', $escrito);
         self::assertStringContainsString($id, $escrito);
+    }
+
+    /**
+     * EF-05.6: la tarea programa con la sala tomada. Justo cuando corre, otra conexión tiene la
+     * sala y está programando una función de 19:00 a 20:40 del día de la franja ganadora (mañana
+     * a las 20:00): la tarea espera a que se guarde, ve que se pisa y cancela con el motivo.
+     */
+    public function testLaTareaEsperaALaOtraDeLaSalaYVeQueSePisa(): void
+    {
+        $id = $this->enAcuerdo();
+        $acuerdos = $this->acuerdos();
+        $acuerdos->porFuncion[$id] = self::acuerdo('abierto', '-1 hour', 2);
+        $otra = $this->otraTomaLaSala((new DateTimeImmutable('+1 day'))->format('Y-m-d') . ' 19:00:00', 1500);
+
+        $desde = microtime(true);
+        $hechas = $this->cierresConAcuerdos($acuerdos)->cerrarAcuerdos();
+        $espero = microtime(true) - $desde;
+        self::assertSame(0, proc_close($otra));
+
+        self::assertGreaterThan(1.0, $espero, 'La tarea no esperó a que se soltara la sala.');
+        self::assertSame(['programadas' => 0, 'canceladas' => 1], $hechas);
+        self::assertSame('cancelada', $this->estadoDe($id));
+        self::assertSame([['cerrar-sin-minimo', 'acuerdo-1'], ['avisar-cancelacion', 'acuerdo-1', 'Zama', 'horario_ocupado']], $acuerdos->pedidos);
+    }
+
+    /**
+     * EF-05.6: si la sala no se suelta en 5 segundos, la pasada se corta sin programar ni pedirle
+     * nada a funciones, y la próxima lo vuelve a intentar.
+     */
+    public function testConLaSalaTomadaDemasiadoLaTareaCortaLaPasada(): void
+    {
+        $id = $this->enAcuerdo();
+        $acuerdos = $this->acuerdos();
+        $acuerdos->porFuncion[$id] = self::acuerdo('abierto', '-1 hour', 2);
+        $otra = $this->otraTomaLaSala((new DateTimeImmutable('+3 days'))->format('Y-m-d') . ' 19:00:00', 7000);
+
+        try {
+            $this->cierresConAcuerdos($acuerdos)->cerrarAcuerdos();
+            self::fail('Tenía que cortar la pasada.');
+        } catch (ReglaIncumplida $error) {
+            self::assertSame('Otra programación de esta sala se está guardando: probá de nuevo en unos segundos.', $error->getMessage());
+        } finally {
+            proc_close($otra);
+        }
+
+        self::assertSame('en_acuerdo_fecha', $this->estadoDe($id));
+        self::assertSame([], $acuerdos->pedidos);
+    }
+
+    /**
+     * Otra conexión, en otro proceso, toma la sala y programa una con Nosferatu (100 minutos) en
+     * $cuando; la guarda y la suelta después de $milisegundos. Vuelve cuando ya la tiene.
+     *
+     * @return resource
+     */
+    private function otraTomaLaSala(string $cuando, int $milisegundos)
+    {
+        $proceso = proc_open(
+            [PHP_BINARY, dirname(__DIR__) . '/Dobles/tomar-sala.php', $this->sala->id, $this->obras['Nosferatu'], $cuando, (string) $milisegundos],
+            [['pipe', 'r'], ['pipe', 'w'], STDERR],
+            $tuberias,
+        );
+        self::assertNotFalse($proceso);
+        self::assertSame("tomada\n", fgets($tuberias[1]), 'La otra conexión no tomó la sala.');
+
+        return $proceso;
     }
 
     /**

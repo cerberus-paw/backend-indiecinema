@@ -8,6 +8,7 @@ use DateTimeImmutable;
 use IndieCinema\Nucleo\Http\ExcepcionHttp;
 use IndieCinema\Programacion\Modelo\EstadoFuncion;
 use IndieCinema\Programacion\Modelo\Funcion;
+use IndieCinema\Programacion\Modelo\ReglaIncumplida;
 use IndieCinema\Programacion\Repositorios\RepositorioDeFunciones;
 use IndieCinema\Programacion\Repositorios\RepositorioDeObras;
 use IndieCinema\Programacion\Repositorios\RepositorioDeSalas;
@@ -159,6 +160,8 @@ final class CierresPorFecha
      * @return array{programadas: int, canceladas: int}
      *
      * @throws ExcepcionHttp|RuntimeException si funciones no responde o responde otra cosa
+     * @throws ReglaIncumplida si otro no suelta la sala de una función en 5 segundos (EF-05.6):
+     *                         la pasada se corta igual, y la próxima lo vuelve a intentar
      */
     public function cerrarAcuerdos(DateTimeImmutable $ahora = new DateTimeImmutable()): array
     {
@@ -205,36 +208,50 @@ final class CierresPorFecha
                 return null;
             }
             // Si en el medio se programó otra en ese horario (EF-05.5), se cancela y se avisa con
-            // ese motivo, el único por el que funciones avisa a un acuerdo confirmado.
-            $pisada = $this->motivoParaPisarse($funcion, $inicio);
-            if ($pisada !== null) {
-                $this->avisarPisada($funcion, $pisada);
-                $acuerdos->avisarCancelacion((string) $acuerdo['id'], $this->titulosDe($funcionId), 'horario_ocupado');
-                $funcion->cancelar();
-                $this->funciones->guardar($funcion);
+            // ese motivo, el único por el que funciones avisa a un acuerdo confirmado. Se controla
+            // y se programa con la sala bloqueada (EF-05.6); el aviso, ya sin bloquearla.
+            $pisada = $this->salas->conLaSalaBloqueada($funcion->salaId, function () use ($funcion, $inicio, $ahora): ?string {
+                $pisada = $this->motivoParaPisarse($funcion, $inicio);
+                if ($pisada === null) {
+                    $funcion->fijarFechaHora($inicio, $ahora);
+                    $this->funciones->guardar($funcion);
+                }
 
-                return 'canceladas';
+                return $pisada;
+            });
+            if ($pisada === null) {
+                return 'programadas';
             }
-            $funcion->fijarFechaHora($inicio, $ahora);
+            $this->avisarPisada($funcion, $pisada);
+            $acuerdos->avisarCancelacion((string) $acuerdo['id'], $this->titulosDe($funcionId), 'horario_ocupado');
+            $funcion->cancelar();
             $this->funciones->guardar($funcion);
 
-            return 'programadas';
+            return 'canceladas';
         }
 
         $leido = $acuerdo;
         if ($estado === 'abierto' && $limite !== null && $limite < $ahora && AcuerdosDeFunciones::alcanzoElMinimo($acuerdo)) {
             $inicio = self::fecha((AcuerdosDeFunciones::franjaQueLidera($acuerdo) ?? [])['inicio'] ?? null);
-            // La que se pisa con otra función de la sala (EF-05.5) tampoco se programa: se cancela
-            // como la que ya empezó, pero el aviso dice el motivo verdadero.
-            $pisada = $inicio !== null && $inicio > $ahora ? $this->motivoParaPisarse($funcion, $inicio) : null;
-            if ($pisada !== null) {
-                $this->avisarPisada($funcion, $pisada);
-            } elseif ($inicio !== null && $inicio > $ahora) {
-                $acuerdos->confirmar((string) $acuerdo['id']);
-                $funcion->fijarFechaHora($inicio, $ahora);
-                $this->funciones->guardar($funcion);
+            if ($inicio !== null && $inicio > $ahora) {
+                // Con la sala bloqueada, como el organizador al confirmar (EF-05.6): el control,
+                // el pedido a funciones y el guardado. La que se pisa con otra función de la sala
+                // (EF-05.5) no se programa: se cancela como la que ya empezó, pero el aviso dice el
+                // motivo verdadero, y eso va después, sin bloquear la sala.
+                $pisada = $this->salas->conLaSalaBloqueada($funcion->salaId, function () use ($funcion, $inicio, $ahora, $acuerdo, $acuerdos): ?string {
+                    $pisada = $this->motivoParaPisarse($funcion, $inicio);
+                    if ($pisada === null) {
+                        $acuerdos->confirmar((string) $acuerdo['id']);
+                        $funcion->fijarFechaHora($inicio, $ahora);
+                        $this->funciones->guardar($funcion);
+                    }
 
-                return 'programadas';
+                    return $pisada;
+                });
+                if ($pisada === null) {
+                    return 'programadas';
+                }
+                $this->avisarPisada($funcion, $pisada);
             }
             // La franja que llegó al mínimo ya empezó, o se pisa: no se puede programar, y la
             // función se cancela como si no hubiera llegado (es la regla del cierre a mano).

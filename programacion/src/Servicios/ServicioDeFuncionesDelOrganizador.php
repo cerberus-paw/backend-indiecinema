@@ -329,7 +329,7 @@ final class ServicioDeFuncionesDelOrganizador
             throw ExcepcionHttp::noEncontrada();
         }
 
-        (new CierresPorFecha($this->funciones, $this->votos, $this->salas, $this->obras, log: $this->log))->cerrarVotacion($funcion);
+        $this->cierres()->cerrarVotacion($funcion);
 
         return $funcion;
     }
@@ -373,6 +373,14 @@ final class ServicioDeFuncionesDelOrganizador
         if (($this->acuerdos->obtenerPorFuncion($funcion->id)['estado'] ?? null) === 'abierto') {
             throw new ReglaIncumplida('Esta función ya tiene un acuerdo de fecha abierto. Para proponer otras franjas, primero cerralo sin mínimo desde la ficha.');
         }
+        // Que ninguna se pise con otra función de la sala (EF-05.5): sólo cuentan las programadas,
+        // no las franjas de otros acuerdos abiertos, que todavía no se sabe si se usan.
+        foreach ($franjas as $indice => $franja) {
+            $pisada = $this->cierres()->motivoParaPisarse($funcion, self::fechaHora($franja['fecha_hora_inicio']));
+            if ($pisada !== null) {
+                throw new ReglaIncumplida('La opción ' . ($indice + 1) . " {$pisada}");
+            }
+        }
 
         return $this->acuerdos->proponer($funcion->id, $minimoAsistentes, $franjas);
     }
@@ -407,6 +415,11 @@ final class ServicioDeFuncionesDelOrganizador
         $fechaHora = self::fechaHora((string) ($lider['inicio'] ?? ''));
         if ($fechaHora <= new DateTimeImmutable()) {
             throw new ReglaIncumplida('La franja ganadora ya empezó: la función no se puede programar en esa fecha. Cerrá el acuerdo sin mínimo y proponé franjas nuevas.');
+        }
+        // Entre la propuesta y ahora se pudo programar otra en ese horario (EF-05.5).
+        $pisada = $this->cierres()->motivoParaPisarse($funcion, $fechaHora);
+        if ($pisada !== null) {
+            throw new ReglaIncumplida("La franja ganadora {$pisada} Cerrá el acuerdo sin mínimo y proponé franjas nuevas.");
         }
 
         $this->acuerdos->confirmar((string) $acuerdo['id']);
@@ -463,6 +476,14 @@ final class ServicioDeFuncionesDelOrganizador
         }
 
         return $acuerdo;
+    }
+
+    /**
+     * Los cierres que comparten el organizador y la tarea: así eligen y controlan igual.
+     */
+    private function cierres(): CierresPorFecha
+    {
+        return new CierresPorFecha($this->funciones, $this->votos, $this->salas, $this->obras, log: $this->log);
     }
 
     private static function fechaHora(string $texto): DateTimeImmutable

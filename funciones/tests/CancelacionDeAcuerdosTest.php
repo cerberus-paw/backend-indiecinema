@@ -127,6 +127,43 @@ final class CancelacionDeAcuerdosTest extends TestCase
     }
 
     /**
+     * EF-05.5: la tarea canceló porque la franja ganadora se pisaba con otra función de la sala. El
+     * correo dice eso, y no que faltó gente.
+     */
+    public function testConElHorarioOcupadoElCorreoDiceElMotivo(): void
+    {
+        $respuesta = $this->avisar($this->acuerdo('sin_minimo'), ['titulo' => 'Zama', 'motivo' => 'horario_ocupado']);
+
+        self::assertSame(['avisados' => 2], json_decode($respuesta->cuerpo(), true));
+        $respuesta->terminar();
+        $correos = self::$correo->correos();
+        self::assertCount(2, $correos);
+        [, $cuerpo] = explode("\r\n\r\n", $correos[0]['mensaje'], 2);
+        $texto = (string) base64_decode(str_replace("\r\n", '', $cuerpo), true);
+        self::assertStringContainsString('el horario que eligieron se superpuso con otra función de la sala', $texto);
+        self::assertStringNotContainsString('mínimo', $texto);
+    }
+
+    /**
+     * Un acuerdo que la tarea confirmó y no llegó a programar porque en el medio se programó otra
+     * función en ese horario: también se avisa, pero sólo con ese motivo.
+     */
+    public function testAUnConfirmadoSoloSeLeAvisaConElHorarioOcupado(): void
+    {
+        $confirmado = $this->acuerdo('confirmado');
+
+        self::assertSame(422, $this->avisar($confirmado)->estado());
+        $respuesta = $this->avisar($confirmado, ['titulo' => 'Zama', 'motivo' => 'horario_ocupado']);
+        self::assertSame(['avisados' => 2], json_decode($respuesta->cuerpo(), true));
+    }
+
+    public function testUnMotivoDesconocidoEs400(): void
+    {
+        self::assertSame(400, $this->avisar($this->acuerdo('sin_minimo'), ['titulo' => 'Zama', 'motivo' => 'otro'])->estado());
+        self::assertSame(0, (int) $this->base->valor('SELECT COUNT(*) FROM acuerdo_fecha WHERE cancelacion_avisada_en IS NOT NULL'));
+    }
+
+    /**
      * La tarea lo vuelve a pedir si no recibió la respuesta: la segunda vez no sale ningún correo.
      */
     public function testPedirloOtraVezNoRepiteLosCorreos(): void

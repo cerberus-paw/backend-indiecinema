@@ -36,6 +36,25 @@ final class RepositorioDeObras
     }
 
     /**
+     * Cuánto duran juntas esas obras, en minutos: lo que ocupa la sala una función con esas
+     * elegidas (EF-05.5), como la cuenta RepositorioDeFunciones::ocupadoEnLaSala(). Cuenta también
+     * las dadas de baja, que siguen en las funciones que ya las tenían.
+     *
+     * @param list<string> $ids
+     */
+    public function duracionDe(array $ids): int
+    {
+        if ($ids === []) {
+            return 0;
+        }
+
+        return (int) $this->base->valor(
+            'SELECT COALESCE(SUM(duracion), 0) FROM obra WHERE id IN (' . implode(', ', array_fill(0, count($ids), '?')) . ')',
+            $ids,
+        );
+    }
+
+    /**
      * Todas las obras activas del catálogo, ordenadas por título.
      *
      * @return list<Obra>

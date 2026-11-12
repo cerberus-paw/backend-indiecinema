@@ -234,11 +234,9 @@ todo el sitio se vea igual aunque lo sirvan subsistemas distintos.
   `smtps://` o STARTTLS para no mandar la clave sin cifrar.
 - **Las tareas programadas** las dispara el cron del servidor con
   `docker compose exec -T <subsistema> php bin/<tarea>.php`, en lugar de sumar un contenedor sólo
-  para eso. Son dos: `funciones/bin/liberar-vencidas.php`, que cancela las reservas que
-  vencieron sin pagar (ver «Mercado Pago»), y `programacion/bin/finalizar-funciones.php`, que
-  pasa a finalizada cada función terminada (su hora más la duración de las funciones de la sala)
-  y deja «ausente» a quien no fue. La votación y el acuerdo los cierra el organizador desde la
-  ficha.
+  para eso. Están en «Tareas programadas»: los cierres por fecha límite de la votación y del
+  acuerdo, el fin de las funciones, el recordatorio del día antes y las reservas que vencieron sin
+  pagar. El organizador puede cerrar la votación y el acuerdo antes desde la ficha.
 - **Las rutas dentro del contenedor copian las del disco** (`/src/backend-indiecinema/<subsistema>`
   y `/src/frontend-indiecinema`), así los repositorios `path` de Composer funcionan igual si se
   instala desde afuera o desde adentro del contenedor.
@@ -535,6 +533,29 @@ sudo certbot reconfigure --cert-name indiecinema.ejemplo.org --webroot -w /var/w
 sudo certbot renew --dry-run
 ```
 
+### Tareas programadas
+
+Las corre el cron de cada servidor (`crontab -e`, en la carpeta del back). Correrlas de más no
+duplica nada:
+
+```
+*/5 * * * * cd /home/ubuntu/indiecinema/backend-indiecinema && docker compose exec -T funciones php bin/liberar-vencidas.php
+*/15 * * * * cd /home/ubuntu/indiecinema/backend-indiecinema && docker compose exec -T programacion php bin/cerrar-por-fecha.php
+*/15 * * * * cd /home/ubuntu/indiecinema/backend-indiecinema && docker compose exec -T programacion php bin/finalizar-funciones.php
+0 * * * * cd /home/ubuntu/indiecinema/backend-indiecinema && docker compose exec -T funciones php bin/recordar-funciones.php
+```
+
+- `liberar-vencidas`: cancela las reservas que vencieron sin pagar (ver «Mercado Pago»).
+- `cerrar-por-fecha`: cierra las votaciones vencidas con la obra más votada. En los acuerdos
+  vencidos, programa la franja que llegó al mínimo, o cancela la función y avisa a los que
+  marcaron «Me sirve».
+- `finalizar-funciones`: pasa a finalizada cada función terminada (su hora más la duración de
+  las funciones de la sala) y deja «ausente» a quien no fue.
+- `recordar-funciones`: manda el recordatorio por correo a las reservas confirmadas de las
+  funciones de las próximas 24 horas.
+
+En local se prueban a mano con el mismo `docker compose exec`, y los correos llegan a Mailpit.
+
 ### Ramas y entornos
 
 Hay dos sitios, cada uno en su EC2, con su base y sus secretos:
@@ -696,16 +717,8 @@ El aviso de pago necesita una URL pública, así que en `localhost` el pago qued
 que vence: se prueba de punta a punta en el servidor de desarrollo.
 
 Una reserva pendiente deja de ocupar sus lugares en cuanto vence. Para que además figure como
-cancelada en «Mis reservas» y en los paneles, el cron del servidor corre cada cinco minutos (con
-`crontab -e`, en la carpeta del back):
-
-```
-*/5 * * * * cd /home/ubuntu/indiecinema/backend-indiecinema && docker compose exec -T funciones php bin/liberar-vencidas.php
-*/15 * * * * cd /home/ubuntu/indiecinema/backend-indiecinema && docker compose exec -T programacion php bin/finalizar-funciones.php
-```
-
-La segunda finaliza las funciones terminadas (EF-04.1): no es del cobro, pero va en el mismo
-crontab.
+cancelada en «Mis reservas» y en los paneles, la cancela `liberar-vencidas` cada cinco minutos
+(ver «Tareas programadas»).
 
 Para pagar con el comprador de prueba, las tarjetas de prueba están en la documentación de
 Checkout Pro («Tarjetas de prueba»), con el titular `APRO` para un pago aprobado y `OTHE` para

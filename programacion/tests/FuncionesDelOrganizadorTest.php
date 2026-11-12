@@ -169,9 +169,9 @@ final class FuncionesDelOrganizadorTest extends TestCase
      * habilitada se crean funciones: la prueba que la necesita sin habilitar la deshabilita
      * después.
      */
-    private function sala(string $organizador, string $nombre, int $capacidad = 60, int $peliculasPorFuncion = 2): Sala
+    private function sala(string $organizador, string $nombre, int $capacidad = 60, int $peliculasPorFuncion = 2, int $duracionFuncion = 120): Sala
     {
-        $sala = Sala::nueva($organizador, new DatosDeSala($nombre, 'Un galpón.', 'Av. San Martín 450', 'Luján', $capacidad, $peliculasPorFuncion, 120, 15), 'sala.jpg');
+        $sala = Sala::nueva($organizador, new DatosDeSala($nombre, 'Un galpón.', 'Av. San Martín 450', 'Luján', $capacidad, $peliculasPorFuncion, $duracionFuncion, 15), 'sala.jpg');
         $this->salas->agregar($sala);
         $this->base->ejecutar('UPDATE sala SET habilitada = TRUE WHERE id = ?', [$sala->id]);
 
@@ -194,10 +194,10 @@ final class FuncionesDelOrganizadorTest extends TestCase
     /**
      * Una obra más de la organizadora, para las votaciones de más de dos candidatas.
      */
-    private function obra(string $titulo): string
+    private function obra(string $titulo, int $duracion = 103): string
     {
         $generoId = (string) $this->base->valor('SELECT id FROM genero LIMIT 1');
-        $obra = Obra::nueva(self::ORGANIZADORA, $titulo, 'Sinopsis.', 2001, 'Lucrecia Martel', 103, TipoObra::Pelicula, OrigenCopia::LicenciaAdquirida, [$generoId]);
+        $obra = Obra::nueva(self::ORGANIZADORA, $titulo, 'Sinopsis.', 2001, 'Lucrecia Martel', $duracion, TipoObra::Pelicula, OrigenCopia::LicenciaAdquirida, [$generoId]);
         (new RepositorioDeObras($this->base))->agregar($obra);
 
         return $obra->id;
@@ -724,6 +724,30 @@ final class FuncionesDelOrganizadorTest extends TestCase
 
         self::assertSame(422, $respuesta->estado());
         self::assertStringContainsString('Para abrir una votación elegí al menos dos obras candidatas.', $respuesta->cuerpo());
+        self::assertSame(0, (int) $this->base->valor('SELECT COUNT(*) FROM funcion WHERE sala_id = ?', [$sala->id]));
+    }
+
+    /**
+     * EF-05.4: cada candidata, sola, tiene que entrar en la duración de la función de la sala; si
+     * no, ganaría una obra que no se puede proyectar. Juntas pueden pasarse: al cerrar quedan las
+     * que entran.
+     */
+    public function testUnaCandidataMasLargaQueLaSalaNoAbreLaVotacion(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+
+        $respuesta = $this->enviar('/organizador/funciones/nueva', [
+            'modo' => FormularioDeFuncion::MODO_EN_VOTACION_TITULOS,
+            'sala_id' => $sala->id,
+            'obras' => [$this->obras['Zama'], $this->obra('Rojo', 130)],
+            'cierre_fecha' => '2030-10-20',
+            'cierre_hora' => '23:00',
+            'precio' => '2500',
+            'cupo' => '40',
+        ]);
+
+        self::assertSame(422, $respuesta->estado());
+        self::assertStringContainsString('Rojo dura 130 minutos y en esta sala una función puede durar hasta 120.', $respuesta->cuerpo());
         self::assertSame(0, (int) $this->base->valor('SELECT COUNT(*) FROM funcion WHERE sala_id = ?', [$sala->id]));
     }
 
@@ -1869,11 +1893,11 @@ final class FuncionesDelOrganizadorTest extends TestCase
     /**
      * Criterio E3-12.4: «Listo cuando: La función queda con el título ganador y cambia de estado».
      * Desde EF-05.1 quedan tantos títulos como películas por función tiene la sala: en una de 2,
-     * con 1, 3 y 5 votos, las de 5 y 3.
+     * con 1, 3 y 5 votos, las de 5 y 3. La sala dura 360 minutos para que entren (EF-05.4).
      */
     public function testCerrarVotacionDejaLasMasVotadasHastaLasPeliculasPorFuncion(): void
     {
-        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón', peliculasPorFuncion: 2);
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón', duracionFuncion: 360, peliculasPorFuncion: 2);
         $tercera = $this->obra('Rojo');
         $funcion = $this->funcion($sala, [$this->obras['Zama'], $this->obras['La ciénaga'], $tercera]);
         $this->votar($funcion, $this->obras['Zama'], 1);
@@ -1917,7 +1941,7 @@ final class FuncionesDelOrganizadorTest extends TestCase
      */
     public function testCerrarVotacionConEmpateEnElCorteDesempataPorElOrdenDeLasCandidatas(): void
     {
-        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón', peliculasPorFuncion: 2);
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón', duracionFuncion: 360, peliculasPorFuncion: 2);
         $tercera = $this->obra('Rojo');
         $funcion = $this->funcion($sala, [$this->obras['Zama'], $this->obras['La ciénaga'], $tercera]);
         [$primera, $segunda] = array_values(array_diff($this->candidatas($funcion), [$tercera]));
@@ -1933,7 +1957,7 @@ final class FuncionesDelOrganizadorTest extends TestCase
 
     public function testCerrarVotacionSinVotosDejaLasPrimerasCandidatas(): void
     {
-        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón', peliculasPorFuncion: 2);
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón', duracionFuncion: 360, peliculasPorFuncion: 2);
         $funcion = $this->funcion($sala, [$this->obra('Rojo'), $this->obras['Zama'], $this->obras['La ciénaga']]);
         $candidatas = $this->candidatas($funcion);
 
@@ -1944,9 +1968,49 @@ final class FuncionesDelOrganizadorTest extends TestCase
         self::assertEqualsCanonicalizing(array_slice($candidatas, 0, 2), $leida->obrasIds);
     }
 
+    /**
+     * EF-05.4: quedan las más votadas que entran juntas en la duración de la sala. En una de 2
+     * películas y 180 minutos, A (5 votos, 120 min) entra; B (3, 100) ya no; C (1, 50) sí.
+     */
+    public function testAlCerrarSeSalteaLaQueNoEntraEnLaDuracion(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón', peliculasPorFuncion: 2, duracionFuncion: 180);
+        [$a, $b, $c] = [$this->obra('A', 120), $this->obra('B', 100), $this->obra('C', 50)];
+        $funcion = $this->funcion($sala, [$a, $b, $c]);
+        $this->votar($funcion, $a, 5);
+        $this->votar($funcion, $b, 3);
+        $this->votar($funcion, $c, 1);
+
+        self::assertSame(303, $this->enviar("/organizador/funciones/{$funcion->id}/cerrar-votacion", [])->estado());
+
+        $leida = $this->funciones->buscar($funcion->id) ?? self::fail('No se encontró la función.');
+        self::assertEqualsCanonicalizing([$a, $c], $leida->obrasIds);
+    }
+
+    /**
+     * Si la sala achicó la duración después de abrir la votación y ya no entra ninguna, queda la
+     * más votada sola, para no trabar la función, y el log lo avisa.
+     */
+    public function testSiNoEntraNingunaQuedaLaMasVotadaYElLogLoAvisa(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $funcion = $this->funcion($sala);
+        $this->votar($funcion, $this->obras['La ciénaga'], 2);
+        $this->base->ejecutar('UPDATE sala SET duracion_funcion = 90 WHERE id = ?', [$sala->id]);
+
+        self::assertSame(303, $this->enviar("/organizador/funciones/{$funcion->id}/cerrar-votacion", [])->estado());
+
+        $leida = $this->funciones->buscar($funcion->id) ?? self::fail('No se encontró la función.');
+        self::assertSame([$this->obras['La ciénaga']], $leida->obrasIds);
+        rewind($this->salidaDelLog);
+        $log = (string) stream_get_contents($this->salidaDelLog);
+        self::assertStringContainsString('ninguna candidata entra en la duración', $log);
+        self::assertStringContainsString($funcion->id, $log);
+    }
+
     public function testConMenosCandidatasQuePeliculasPorFuncionQuedanTodas(): void
     {
-        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón', peliculasPorFuncion: 3);
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón', duracionFuncion: 360, peliculasPorFuncion: 3);
         $funcion = $this->funcion($sala);
         $this->votar($funcion, $this->obras['Zama'], 1);
 

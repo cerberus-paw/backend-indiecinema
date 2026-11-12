@@ -64,7 +64,7 @@ final class CierresPorFechaTest extends TestCase
 
     private function cierres(): CierresPorFecha
     {
-        return new CierresPorFecha(new RepositorioDeFunciones($this->base), new RepositorioDeVotos($this->base), new RepositorioDeSalas($this->base));
+        return new CierresPorFecha(new RepositorioDeFunciones($this->base), new RepositorioDeVotos($this->base), new RepositorioDeSalas($this->base), new RepositorioDeObras($this->base));
     }
 
     /**
@@ -139,6 +139,24 @@ final class CierresPorFechaTest extends TestCase
         self::assertSame(['Nosferatu', 'Zama'], $this->elegidas($vencida));
     }
 
+    /**
+     * Las obras duran 100 minutos: en una sala de 2 películas y 180 minutos entra sólo la más
+     * votada (EF-05.4), aunque haya lugar para dos.
+     */
+    public function testLaTareaSalteaLasQueNoEntranEnLaDuracion(): void
+    {
+        $corta = Sala::nueva(self::ORGANIZADORA, new DatosDeSala('Cine Club La Usina', 'Una usina.', 'Mitre 120', 'Luján', 60, 2, 180, 15), 'sala.jpg');
+        (new RepositorioDeSalas($this->base))->agregar($corta);
+        $this->base->ejecutar('UPDATE sala SET habilitada = TRUE WHERE id = ?', [$corta->id]);
+        $vencida = $this->votacion('-1 hour', $corta);
+        $this->votar($vencida, 'Nosferatu', 5);
+        $this->votar($vencida, 'Zama', 3);
+
+        self::assertSame(1, $this->cierres()->cerrarVotaciones());
+
+        self::assertSame(['Nosferatu'], $this->elegidas($vencida));
+    }
+
     public function testNoTocaLasQueNoVencieronNiLasQueNoTienenCierre(): void
     {
         $abierta = $this->votacion('+1 hour');
@@ -208,7 +226,7 @@ final class CierresPorFechaTest extends TestCase
 
     private function cierresConAcuerdos(AcuerdosEnMemoria $acuerdos): CierresPorFecha
     {
-        return new CierresPorFecha(new RepositorioDeFunciones($this->base), new RepositorioDeVotos($this->base), new RepositorioDeSalas($this->base), $acuerdos);
+        return new CierresPorFecha(new RepositorioDeFunciones($this->base), new RepositorioDeVotos($this->base), new RepositorioDeSalas($this->base), new RepositorioDeObras($this->base), $acuerdos);
     }
 
     /**

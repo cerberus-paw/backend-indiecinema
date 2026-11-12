@@ -19,6 +19,7 @@ use IndieCinema\Programacion\Repositorios\RepositorioDeFunciones;
 use IndieCinema\Programacion\Repositorios\RepositorioDeObras;
 use IndieCinema\Programacion\Repositorios\RepositorioDeSalas;
 use IndieCinema\Programacion\Repositorios\RepositorioDeVotos;
+use Psr\Log\LoggerInterface;
 
 /**
  * El panel de funciones del organizador: lo que ve de las funciones de sus salas y el alta
@@ -36,6 +37,8 @@ final class ServicioDeFuncionesDelOrganizador
         private readonly RepositorioDeVotos $votos,
         private readonly ?AcuerdosDeFunciones $acuerdos = null,
         private readonly ?OcupacionDeFunciones $ocupacion = null,
+        /** Para avisar una votación que se cerró con una obra que no entra en la sala (EF-05.4). */
+        private readonly ?LoggerInterface $log = null,
     ) {
     }
 
@@ -157,10 +160,11 @@ final class ServicioDeFuncionesDelOrganizador
             throw new ReglaIncumplida('La sala no existe o no pertenece a tu cuenta.');
         }
 
-        $idsCatalogo = array_column($this->obras->todas(), 'id');
-        if (array_diff($obrasIds, $idsCatalogo) !== []) {
+        $catalogo = $this->obras->todas();
+        if (array_diff($obrasIds, array_column($catalogo, 'id')) !== []) {
             throw new ReglaIncumplida('Una de las obras no está en el catálogo.');
         }
+        $sala->controlarCandidatas(array_values(array_filter($catalogo, static fn (Obra $obra): bool => in_array($obra->id, $obrasIds, true))));
 
         $funcion = $sala->crearFuncion($obrasIds, $cupo, $precioBase, $votacionCierraEn);
         $this->funciones->agregar($funcion);
@@ -325,7 +329,7 @@ final class ServicioDeFuncionesDelOrganizador
             throw ExcepcionHttp::noEncontrada();
         }
 
-        (new CierresPorFecha($this->funciones, $this->votos, $this->salas))->cerrarVotacion($funcion);
+        (new CierresPorFecha($this->funciones, $this->votos, $this->salas, $this->obras, log: $this->log))->cerrarVotacion($funcion);
 
         return $funcion;
     }

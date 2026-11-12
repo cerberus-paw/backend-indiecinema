@@ -452,6 +452,8 @@ final class FuncionesDelOrganizadorTest extends TestCase
             'modo' => FormularioDeFuncion::MODO_EN_VOTACION_TITULOS,
             'sala_id' => $sala->id,
             'obras' => $obrasIds,
+            'cierre_fecha' => '2030-10-20',
+            'cierre_hora' => '23:00',
             'precio' => '2500',
             'cupo' => '60',
         ]);
@@ -460,12 +462,13 @@ final class FuncionesDelOrganizadorTest extends TestCase
         self::assertSame('/organizador/funciones', $respuesta->cabecera('Location'));
 
         $funcionFila = $this->base->fila(
-            'SELECT id, estado, fecha_hora, precio_base, cupo FROM funcion WHERE sala_id = ?',
+            'SELECT id, estado, fecha_hora, votacion_cierra_en, precio_base, cupo FROM funcion WHERE sala_id = ?',
             [$sala->id],
         );
         self::assertNotNull($funcionFila);
         self::assertSame(EstadoFuncion::EnVotacionTitulos->value, $funcionFila['estado']);
         self::assertNull($funcionFila['fecha_hora']);
+        self::assertSame('2030-10-20 23:00:00', $funcionFila['votacion_cierra_en']);
         self::assertSame('2500.00', $funcionFila['precio_base']);
         self::assertSame(60, (int) $funcionFila['cupo']);
 
@@ -650,6 +653,8 @@ final class FuncionesDelOrganizadorTest extends TestCase
             'modo' => FormularioDeFuncion::MODO_EN_VOTACION_TITULOS,
             'sala_id' => $sala->id,
             'obras' => $obrasIds,
+            'cierre_fecha' => '2030-10-20',
+            'cierre_hora' => '23:00',
             'precio' => '2000',
             'cupo' => '30',
         ]);
@@ -677,6 +682,8 @@ final class FuncionesDelOrganizadorTest extends TestCase
             'modo' => FormularioDeFuncion::MODO_EN_VOTACION_TITULOS,
             'sala_id' => $sala->id,
             'obras' => [$this->obras['Zama']],
+            'cierre_fecha' => '2030-10-20',
+            'cierre_hora' => '23:00',
             'precio' => '2500',
             'cupo' => '40',
         ]);
@@ -684,6 +691,67 @@ final class FuncionesDelOrganizadorTest extends TestCase
         self::assertSame(422, $respuesta->estado());
         self::assertStringContainsString('Para abrir una votación elegí al menos dos obras candidatas.', $respuesta->cuerpo());
         self::assertSame(0, (int) $this->base->valor('SELECT COUNT(*) FROM funcion WHERE sala_id = ?', [$sala->id]));
+    }
+
+    /**
+     * EF-03.1: la votación cierra sola en su fecha, así que abrirla sin decir cuándo cierra, o con
+     * un cierre que ya pasó, vuelve al formulario con el motivo y no crea nada.
+     *
+     * @param array<string, string> $cierre
+     */
+    #[DataProvider('cierresQueNoSirven')]
+    public function testUnaVotacionNecesitaUnCierreFuturo(array $cierre, string $motivo): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+
+        $respuesta = $this->enviar('/organizador/funciones/nueva', [
+            'modo' => FormularioDeFuncion::MODO_EN_VOTACION_TITULOS,
+            'sala_id' => $sala->id,
+            'obras' => array_values($this->obras),
+            ...$cierre,
+            'precio' => '2500',
+            'cupo' => '40',
+        ]);
+
+        self::assertSame(422, $respuesta->estado());
+        self::assertStringContainsString($motivo, $respuesta->cuerpo());
+        self::assertSame(0, (int) $this->base->valor('SELECT COUNT(*) FROM funcion WHERE sala_id = ?', [$sala->id]));
+    }
+
+    /**
+     * @return array<string, array{array<string, string>, string}>
+     */
+    public static function cierresQueNoSirven(): array
+    {
+        return [
+            'sin día' => [['cierre_hora' => '23:00'], 'Falta el día en que cierra la votación.'],
+            'sin hora' => [['cierre_fecha' => '2030-10-20'], 'Falta la hora en que cierra la votación.'],
+            'pasado' => [['cierre_fecha' => '2020-01-01', 'cierre_hora' => '10:00'], 'El cierre de la votación tiene que ser futuro.'],
+            'día que no existe' => [['cierre_fecha' => '2030-04-31', 'cierre_hora' => '10:00'], 'El día y la hora del cierre no tienen un formato válido.'],
+        ];
+    }
+
+    /**
+     * Una función programada no tiene votación: el cierre que llegue, por ejemplo porque sin
+     * JavaScript se ven los dos bloques, no se pide ni se guarda.
+     */
+    public function testUnaFuncionProgramadaNoGuardaCierreDeVotacion(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+
+        $respuesta = $this->enviar('/organizador/funciones/nueva', [
+            'modo' => FormularioDeFuncion::MODO_PROGRAMADA,
+            'sala_id' => $sala->id,
+            'obras' => [$this->obras['Zama']],
+            'fecha' => '2030-10-25',
+            'hora' => '20:30',
+            'cierre_fecha' => '2020-01-01',
+            'precio' => '2500',
+            'cupo' => '40',
+        ]);
+
+        self::assertSame(303, $respuesta->estado());
+        self::assertNull($this->base->valor('SELECT votacion_cierra_en FROM funcion WHERE sala_id = ?', [$sala->id]));
     }
 
     /**

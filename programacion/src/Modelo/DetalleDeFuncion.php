@@ -23,6 +23,8 @@ final readonly class DetalleDeFuncion
         public SalaEnDetalle $sala,
         public array $obras,
         public bool $obrasElegidas = true,
+        /** Hasta cuándo se vota, si está o estuvo en votación con fecha de cierre (EF-03.1). */
+        public ?DateTimeImmutable $votacionCierraEn = null,
     ) {
     }
 }

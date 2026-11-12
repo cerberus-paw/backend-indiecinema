@@ -151,7 +151,7 @@ final class RepositorioDeCartelera
     public function detalle(string $id): ?DetalleDeFuncion
     {
         $fila = $this->base->fila(
-            'SELECT f.id, f.estado, f.fecha_hora, f.precio_base, f.cupo,
+            'SELECT f.id, f.estado, f.fecha_hora, f.votacion_cierra_en, f.precio_base, f.cupo,
                     s.id AS sala_id, s.nombre AS sala_nombre, s.descripcion AS sala_descripcion,
                     s.direccion AS sala_direccion, s.localidad AS sala_localidad,
                     s.capacidad AS sala_capacidad, s.imagen AS sala_imagen, s.organizador_id AS sala_organizador_id '
@@ -228,6 +228,7 @@ final class RepositorioDeCartelera
             $sala,
             $obras,
             $obrasElegidas,
+            $fila['votacion_cierra_en'] === null ? null : new DateTimeImmutable((string) $fila['votacion_cierra_en']),
         );
     }
 

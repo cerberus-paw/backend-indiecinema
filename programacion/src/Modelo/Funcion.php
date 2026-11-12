@@ -11,8 +11,9 @@ use IndieCinema\Nucleo\Uuid;
  * Una función de una sala: las obras que proyecta, el precio, el cupo y en qué parte de su ciclo
  * de vida está (EstadoFuncion).
  *
- * Nace con varias obras candidatas, que los espectadores votan; al cerrar la votación se queda
- * con las elegidas. La fecha es null hasta que se cierra el acuerdo de fecha, que corre en el
+ * Nace con varias obras candidatas, que los espectadores votan hasta la fecha de cierre que puso
+ * el organizador; al cerrar la votación, a mano o sola al vencer (EF-03.1), se queda con las
+ * elegidas. La fecha es null hasta que se cierra el acuerdo de fecha, que corre en el
  * subsistema funciones. Cada cambio de estado es un método, y el que no corresponde al estado
  * actual lanza ReglaIncumplida.
  *
@@ -35,6 +36,7 @@ final class Funcion
         public private(set) int $cupo,
         public private(set) EstadoFuncion $estado = EstadoFuncion::EnVotacionTitulos,
         public private(set) ?DateTimeImmutable $fechaHora = null,
+        public readonly ?DateTimeImmutable $votacionCierraEn = null,
     ) {
     }
 
@@ -42,13 +44,22 @@ final class Funcion
      * Se crea desde Sala::crearFuncion(), que además controla que la sala esté habilitada y que el
      * cupo entre en ella.
      *
-     * @param list<string> $obrasIds las candidatas
+     * @param list<string>           $obrasIds        las candidatas
+     * @param DateTimeImmutable|null $votacionCierraEn hasta cuándo se vota (EF-03.1); null es que
+     *                                                 sólo la cierra el organizador, como las que
+     *                                                 se abrieron antes de que existiera
      *
-     * @throws ReglaIncumplida sin obras, con obras repetidas, con un cupo que no es positivo o con
-     *                         un precio negativo
+     * @throws ReglaIncumplida sin obras, con obras repetidas, con un cupo que no es positivo, con
+     *                         un precio negativo o con un cierre que no es futuro
      */
-    public static function nueva(string $salaId, array $obrasIds, int $cupo, float $precioBase): self
-    {
+    public static function nueva(
+        string $salaId,
+        array $obrasIds,
+        int $cupo,
+        float $precioBase,
+        ?DateTimeImmutable $votacionCierraEn = null,
+        DateTimeImmutable $ahora = new DateTimeImmutable(),
+    ): self {
         if ($obrasIds === []) {
             throw new ReglaIncumplida('La función necesita al menos una obra.');
         }
@@ -61,8 +72,24 @@ final class Funcion
         if ($precioBase < 0) {
             throw new ReglaIncumplida('El precio no puede ser negativo.');
         }
+        if ($votacionCierraEn !== null && $votacionCierraEn <= $ahora) {
+            throw new ReglaIncumplida('El cierre de la votación tiene que ser futuro.');
+        }
 
-        return new self(Uuid::nuevo(), $salaId, $obrasIds, $precioBase, $cupo);
+        return new self(Uuid::nuevo(), $salaId, $obrasIds, $precioBase, $cupo, votacionCierraEn: $votacionCierraEn);
+    }
+
+    /**
+     * Si la votación de títulos ya pasó su fecha de cierre (EF-03.1): desde ahí no se vota más, y
+     * la tarea la cierra en la próxima pasada. Es estático para que lo use también la ficha, que
+     * no lee la entidad, como seEdita().
+     */
+    public static function votacionVencida(
+        EstadoFuncion $estado,
+        ?DateTimeImmutable $votacionCierraEn,
+        DateTimeImmutable $ahora = new DateTimeImmutable(),
+    ): bool {
+        return $estado === EstadoFuncion::EnVotacionTitulos && $votacionCierraEn !== null && $votacionCierraEn <= $ahora;
     }
 
     /**

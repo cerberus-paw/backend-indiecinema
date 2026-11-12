@@ -81,6 +81,7 @@ final class FuncionesDelOrganizador extends Controlador
             || $formulario->cupo === null
             || $formulario->precio === null
             || ($formulario->esProgramada() && $formulario->fechaHora === null)
+            || (!$formulario->esProgramada() && $formulario->votacionCierraEn === null)
         ) {
             // Sin mensaje general: la plantilla resume los errores de los campos (E4-10.5).
             return $this->formularioAlta($salas, $obras, ['formulario' => $formulario], 422);
@@ -105,6 +106,7 @@ final class FuncionesDelOrganizador extends Controlador
                     $formulario->obrasIds,
                     $formulario->cupo,
                     $formulario->precio,
+                    $formulario->votacionCierraEn,
                 );
             }
         } catch (ReglaIncumplida $regla) {

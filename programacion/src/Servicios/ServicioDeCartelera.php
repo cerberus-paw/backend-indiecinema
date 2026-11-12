@@ -10,6 +10,7 @@ use IndieCinema\Nucleo\Uuid;
 use IndieCinema\Programacion\Modelo\CupoDeFuncion;
 use IndieCinema\Programacion\Modelo\DetalleDeFuncion;
 use IndieCinema\Programacion\Modelo\EstadoFuncion;
+use IndieCinema\Programacion\Modelo\Funcion;
 use IndieCinema\Programacion\Modelo\FiltrosDeCartelera;
 use IndieCinema\Programacion\Modelo\FuncionEnCartelera;
 use IndieCinema\Programacion\Modelo\Genero;
@@ -208,6 +209,11 @@ final class ServicioDeCartelera
 
         if ($detalle->estado !== EstadoFuncion::EnVotacionTitulos) {
             throw new ReglaIncumplida('La votación de títulos para esta función no está abierta.');
+        }
+        // Pasada la fecha de cierre ya no se vota, aunque la tarea todavía no la haya cerrado
+        // (corre cada quince minutos): un voto de último momento podía cambiar la ganadora (EF-03.1).
+        if (Funcion::votacionVencida($detalle->estado, $detalle->votacionCierraEn)) {
+            throw new ReglaIncumplida('La votación de títulos ya cerró: en unos minutos se ve la obra elegida.');
         }
 
         $candidatasIds = array_map(static fn (ObraEnDetalle $o): string => $o->id, $detalle->obras);

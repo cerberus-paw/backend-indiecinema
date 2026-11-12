@@ -39,6 +39,8 @@ final class FormularioDeFuncion
     private const PRECIO_NEGATIVO = 'El precio no puede ser negativo.';
     private const PRECIO_INVALIDO = 'El precio tiene que ser un número de hasta 99.999.999,99, sin puntos de miles.';
     private const CUPO_INVALIDO = 'El cupo tiene que ser de al menos un lugar.';
+    private const FALTA_CIERRE_FECHA = 'Falta el día en que cierra la votación.';
+    private const FALTA_CIERRE_HORA = 'Falta la hora en que cierra la votación.';
     private const MODO_DESCONOCIDO = 'Elegí si la función se programa con fecha o se abre a votación de títulos.';
     /** Con una sola candidata no hay nada que votar (F-01.6). */
     private const CANDIDATAS_MINIMAS = 2;
@@ -62,6 +64,9 @@ final class FormularioDeFuncion
     public private(set) ?float $precio = null;
 
     public private(set) ?DateTimeImmutable $fechaHora = null;
+
+    /** Hasta cuándo se vota, si abre una votación (EF-03.1). */
+    public private(set) ?DateTimeImmutable $votacionCierraEn = null;
 
     /**
      * @param array<string, mixed> $campos            el cuerpo del POST
@@ -180,15 +185,41 @@ final class FormularioDeFuncion
             }
 
             if ($fecha !== '' && $hora !== '') {
-                // Asegurar hora en formato HH:MM
-                $horaNormalizada = strlen($hora) === 5 ? $hora : (strlen($hora) === 8 ? substr($hora, 0, 5) : $hora);
-                $fechaHora = DateTimeImmutable::createFromFormat('!Y-m-d H:i', "{$fecha} {$horaNormalizada}");
-                if ($fechaHora === false || $fechaHora->format('Y-m-d H:i') !== "{$fecha} {$horaNormalizada}") {
+                $fechaHora = self::fechaYHora($fecha, $hora);
+                if ($fechaHora === null) {
                     $this->errores['fecha'] = 'La fecha y el horario no tienen un formato válido.';
                 } elseif ($fechaHora <= $ahora) {
                     $this->errores['fecha'] = 'La fecha de la función tiene que ser futura.';
                 } else {
                     $this->fechaHora = $fechaHora;
+                }
+            }
+        }
+
+        // 3 bis. Cierre de la votación (EF-03.1): la propuesta dice que la votación «cierra en la
+        // fecha límite definida (o manualmente)». Es obligatorio, para que ninguna quede abierta
+        // para siempre si el organizador se olvida; cerrarla antes a mano sigue andando.
+        $cierreFecha = self::texto($campos['cierre_fecha'] ?? null);
+        $cierreHora = self::texto($campos['cierre_hora'] ?? null);
+        $this->valores['cierre_fecha'] = $cierreFecha;
+        $this->valores['cierre_hora'] = $cierreHora;
+
+        if (!$this->esProgramada()) {
+            if ($cierreFecha === '') {
+                $this->errores['cierre_fecha'] = self::FALTA_CIERRE_FECHA;
+            }
+            if ($cierreHora === '') {
+                $this->errores['cierre_hora'] = self::FALTA_CIERRE_HORA;
+            }
+
+            if ($cierreFecha !== '' && $cierreHora !== '') {
+                $cierre = self::fechaYHora($cierreFecha, $cierreHora);
+                if ($cierre === null) {
+                    $this->errores['cierre_fecha'] = 'El día y la hora del cierre no tienen un formato válido.';
+                } elseif ($cierre <= $ahora) {
+                    $this->errores['cierre_fecha'] = 'El cierre de la votación tiene que ser futuro.';
+                } else {
+                    $this->votacionCierraEn = $cierre;
                 }
             }
         }
@@ -242,6 +273,9 @@ final class FormularioDeFuncion
             'sala_id' => ['requerido' => true, 'mensajes' => ['requerido' => self::FALTA_SALA]],
             'fecha' => ['requerido' => true, 'mensajes' => ['requerido' => self::FALTA_FECHA]],
             'hora' => ['requerido' => true, 'mensajes' => ['requerido' => self::FALTA_HORA]],
+            // Sólo se piden al abrir una votación: ModoFuncion los habilita en ese modo (EF-03.1).
+            'cierre_fecha' => ['requerido' => true, 'mensajes' => ['requerido' => self::FALTA_CIERRE_FECHA]],
+            'cierre_hora' => ['requerido' => true, 'mensajes' => ['requerido' => self::FALTA_CIERRE_HORA]],
             // El precio va en un campo de texto con inputmode="decimal" (E4-09.4): en uno numérico
             // Chromium descarta la coma de 1500,50 sin avisar y además no aplica el pattern. Por eso
             // no van min ni step, que sólo valen en un campo numérico, ni sus mensajes: acá el
@@ -269,6 +303,19 @@ final class FormularioDeFuncion
                 'mensajes' => ['requerido' => self::CUPO_INVALIDO, 'valor_minimo' => self::CUPO_INVALIDO, 'tipo' => self::CUPO_INVALIDO],
             ],
         ];
+    }
+
+    /**
+     * Un día (AAAA-MM-DD) y una hora (HH:MM, o HH:MM:SS como la manda algún navegador) juntos, o
+     * null si no forman una fecha que exista: createFromFormat corre el 31 de abril al 1 de mayo
+     * sin avisar, por eso se compara contra lo que se escribió.
+     */
+    private static function fechaYHora(string $fecha, string $hora): ?DateTimeImmutable
+    {
+        $hora = strlen($hora) === 8 ? substr($hora, 0, 5) : $hora;
+        $fechaHora = DateTimeImmutable::createFromFormat('!Y-m-d H:i', "{$fecha} {$hora}");
+
+        return $fechaHora !== false && $fechaHora->format('Y-m-d H:i') === "{$fecha} {$hora}" ? $fechaHora : null;
     }
 
     private static function texto(mixed $valor): string

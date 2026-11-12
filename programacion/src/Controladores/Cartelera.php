@@ -493,6 +493,9 @@ final class Cartelera extends Controlador
                 : null,
             'duracion_total' => $duracion,
             'obras_elegidas' => $detalle->obrasElegidas,
+            // Hasta cuándo se vota (EF-03.1), «15 nov 20:00» como la fecha límite del acuerdo. Vencida, la ficha no ofrece votar.
+            'votacion_cierra' => $detalle->votacionCierraEn !== null ? TarjetaDeFuncion::diaMesYHora($detalle->votacionCierraEn) : null,
+            'votacion_vencida' => Funcion::votacionVencida($detalle->estado, $detalle->votacionCierraEn),
             'editable' => $editable,
             'cancelable' => $cancelable,
             'cerrable' => $cerrable,

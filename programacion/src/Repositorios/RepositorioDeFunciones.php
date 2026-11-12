@@ -22,7 +22,7 @@ use IndieCinema\Programacion\Modelo\ResumenDeFuncion;
  */
 final class RepositorioDeFunciones
 {
-    private const COLUMNAS = 'id, sala_id, precio_base, cupo, estado, fecha_hora';
+    private const COLUMNAS = 'id, sala_id, precio_base, cupo, estado, fecha_hora, votacion_cierra_en';
 
     public function __construct(private readonly BaseDeDatos $base)
     {
@@ -336,6 +336,28 @@ final class RepositorioDeFunciones
     }
 
     /**
+     * Las funciones en votación de títulos que ya pasaron su fecha de cierre (EF-03.1), de la que
+     * venció primero a la última. Las que no tienen fecha de cierre no: ésas sólo las cierra el
+     * organizador. También las de una sala dada de baja o sin habilitar, para que ninguna quede
+     * en votación para siempre.
+     *
+     * @return list<string> los ids
+     */
+    public function conVotacionVencida(DateTimeImmutable $ahora, int $cuantas): array
+    {
+        return array_map(
+            static fn (array $fila): string => (string) $fila['id'],
+            $this->base->filas(
+                'SELECT id FROM funcion
+                 WHERE estado = ? AND votacion_cierra_en <= ?
+                 ORDER BY votacion_cierra_en, id
+                 LIMIT ?',
+                [EstadoFuncion::EnVotacionTitulos, $ahora, $cuantas],
+            ),
+        );
+    }
+
+    /**
      * La función y sus obras juntas: una función sin obras no tiene que quedar en la base.
      */
     public function agregar(Funcion $funcion): void
@@ -343,10 +365,10 @@ final class RepositorioDeFunciones
         $estadoDeLasObras = $funcion->estado === EstadoFuncion::EnVotacionTitulos ? 'candidata' : 'elegida';
         $this->base->enTransaccion(function (BaseDeDatos $base) use ($funcion, $estadoDeLasObras): void {
             $base->ejecutar(
-                'INSERT INTO funcion (id, sala_id, precio_base, cupo, estado, fecha_hora) VALUES (?, ?, ?, ?, ?, ?)',
+                'INSERT INTO funcion (id, sala_id, precio_base, cupo, estado, fecha_hora, votacion_cierra_en) VALUES (?, ?, ?, ?, ?, ?, ?)',
                 [
                     $funcion->id, $funcion->salaId, self::precio($funcion->precioBase), $funcion->cupo,
-                    $funcion->estado, $funcion->fechaHora,
+                    $funcion->estado, $funcion->fechaHora, $funcion->votacionCierraEn,
                 ],
             );
             foreach ($funcion->obrasIds as $obraId) {
@@ -441,6 +463,7 @@ final class RepositorioDeFunciones
             (int) $fila['cupo'],
             EstadoFuncion::from((string) $fila['estado']),
             $fila['fecha_hora'] === null ? null : new DateTimeImmutable((string) $fila['fecha_hora']),
+            $fila['votacion_cierra_en'] === null ? null : new DateTimeImmutable((string) $fila['votacion_cierra_en']),
         );
     }
 }

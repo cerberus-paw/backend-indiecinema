@@ -333,4 +333,25 @@ final class FuncionTest extends TestCase
 
         $funcion->actualizar(self::SALA, [self::OBRA], 40, 2000.0, new DateTimeImmutable('2025-01-01 10:00:00'), self::ahora());
     }
+
+    public function testLaVotacionGuardaSuCierreYVenceAlLlegar(): void
+    {
+        $cierre = new DateTimeImmutable('2026-10-15 23:00:00');
+        $funcion = Funcion::nueva(self::SALA, [self::OBRA, self::OTRA_OBRA], 40, 3500.0, $cierre, self::ahora());
+
+        self::assertEquals($cierre, $funcion->votacionCierraEn);
+        self::assertFalse(Funcion::votacionVencida($funcion->estado, $cierre, self::ahora()));
+        self::assertTrue(Funcion::votacionVencida($funcion->estado, $cierre, $cierre));
+        // Sin cierre la cierra sólo el organizador, y una que ya no está en votación no vence.
+        self::assertFalse(Funcion::votacionVencida(EstadoFuncion::EnVotacionTitulos, null, $cierre));
+        self::assertFalse(Funcion::votacionVencida(EstadoFuncion::EnAcuerdoFecha, $cierre, $cierre->modify('+1 day')));
+    }
+
+    public function testElCierreDeLaVotacionTieneQueSerFuturo(): void
+    {
+        $this->expectException(ReglaIncumplida::class);
+        $this->expectExceptionMessage('El cierre de la votación tiene que ser futuro.');
+
+        Funcion::nueva(self::SALA, [self::OBRA, self::OTRA_OBRA], 40, 3500.0, self::ahora(), self::ahora());
+    }
 }

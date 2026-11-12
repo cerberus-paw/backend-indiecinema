@@ -1278,6 +1278,59 @@ final class CarteleraTest extends TestCase
         self::assertSame(0, (int) $this->base->valor("SELECT COUNT(*) FROM voto WHERE funcion_id = ?", [$funcionId]));
     }
 
+    /**
+     * EF-03.1: una votación con su cierre. Las obras son las dos primeras del catálogo.
+     *
+     * @return array{string, list<array<string, mixed>>} el id y las obras
+     */
+    private function votacionQueCierra(string $cuando): array
+    {
+        $this->cargarDatosDePrueba();
+        $salaId = (string) $this->base->valor("SELECT id FROM sala WHERE habilitada = TRUE AND dada_de_baja_en IS NULL LIMIT 1");
+        $obras = $this->base->filas("SELECT id, titulo FROM obra ORDER BY id LIMIT 2");
+        $funcionId = Uuid::nuevo();
+        $this->base->ejecutar(
+            "INSERT INTO funcion (id, sala_id, estado, votacion_cierra_en, precio_base, cupo) VALUES (?, ?, 'en_votacion_titulos', ?, 2000, 50)",
+            [$funcionId, $salaId, new DateTimeImmutable($cuando)],
+        );
+        foreach ($obras as $obra) {
+            $this->base->ejecutar("INSERT INTO funcion_obra (funcion_id, obra_id, estado) VALUES (?, ?, 'candidata')", [$funcionId, $obra['id']]);
+        }
+
+        return [$funcionId, $obras];
+    }
+
+    public function testLaFichaDiceCuandoCierraLaVotacion(): void
+    {
+        [$funcionId] = $this->votacionQueCierra('2030-11-15 20:00:00');
+
+        $ficha = $this->pedir("/cartelera/{$funcionId}");
+
+        self::assertSame(200, $ficha->estado());
+        self::assertStringContainsString('La votación cierra el <strong>15 nov 20:00</strong>', $ficha->cuerpo());
+    }
+
+    /**
+     * Pasado el cierre no se vota más, aunque la tarea todavía no haya cerrado la votación: corre
+     * cada quince minutos, y un voto en ese rato podía cambiar la ganadora.
+     */
+    public function testNoSeVotaDespuesDelCierreAunqueLaTareaNoHayaPasado(): void
+    {
+        [$funcionId, $obras] = $this->votacionQueCierra('-5 minutes');
+
+        $respuesta = $this->post("/cartelera/{$funcionId}/votar", ['obra_id' => $obras[0]['id']], Uuid::nuevo());
+
+        self::assertSame(303, $respuesta->estado());
+        self::assertStringContainsString('error_voto', $respuesta->cabecera('Location'));
+        self::assertSame(0, (int) $this->base->valor("SELECT COUNT(*) FROM voto WHERE funcion_id = ?", [$funcionId]));
+        $ficha = $this->pedir("/cartelera/{$funcionId}", cabeceras: [
+            'X-Nginx-Secreto' => self::SECRETO,
+            'X-Usuario-Id' => Uuid::nuevo(),
+            'X-Rol' => 'espectador',
+        ]);
+        self::assertStringContainsString('La votación ya cerró', $ficha->cuerpo());
+    }
+
     public function testNoSePuedeVotarPorObraQueNoEsCandidata(): void
     {
         $this->cargarDatosDePrueba();

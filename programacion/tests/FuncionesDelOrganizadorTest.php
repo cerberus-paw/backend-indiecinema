@@ -2612,6 +2612,30 @@ final class FuncionesDelOrganizadorTest extends TestCase
     }
 
     /**
+     * EF-05.6: editar también va de a uno. La función está a las 23:00 y se la pasa a las 21:00
+     * mientras otra conexión, con la sala tomada, programa una a las 20:30: la edición espera, ve
+     * que se pisa y la función conserva su fecha.
+     */
+    public function testEditarEsperaALaOtraDeLaSalaYVeQueSePisa(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $funcion = $this->programada($sala, '2030-10-25 23:00:00');
+
+        $respuesta = $this->mientrasOtraTieneLaSala($sala, '2030-10-25 20:30:00', "/organizador/funciones/{$funcion->id}/editar", [
+            'sala_id' => $sala->id,
+            'obras' => [$this->obras['Zama']],
+            'fecha' => '2030-10-25',
+            'hora' => '21:00',
+            'precio' => '2500',
+            'cupo' => '40',
+        ]);
+
+        self::assertSame(422, $respuesta['estado']);
+        self::assertStringContainsString('Se pisa con otra función de la sala, que va de 20:30 a 22:13', $respuesta['cuerpo']);
+        self::assertSame('2030-10-25 23:00:00', $this->base->valor('SELECT fecha_hora FROM funcion WHERE id = ?', [$funcion->id]));
+    }
+
+    /**
      * Otra conexión toma la sala y programa una función a $otraA sin confirmar; mientras tanto
      * manda el pedido en otro proceso y comprueba que espera. Cuando la otra se confirma, devuelve
      * lo que respondió el pedido (EF-05.6).

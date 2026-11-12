@@ -227,11 +227,16 @@ final class ServicioDeFuncionesDelOrganizador
             $duracion += $duraciones[$obraId] ?? throw new ReglaIncumplida('Una de las obras no está en el catálogo.');
         }
 
-        $ocupado = $this->funciones->ocupadoEnLaSala($sala->id, $funcion->id);
-        $sala->actualizarFuncion($funcion, $obrasIds, $cupo, $precioBase, $fechaHora, $duracion, $ocupado);
-        $this->funciones->actualizar($funcion);
+        // Con la sala de destino bloqueada, como al programar (EF-05.6): la de origen pierde una
+        // función, ahí no puede quedar ninguna encimada.
+        return $this->salas->conLaSalaBloqueada($sala->id, function (?Sala $sala) use ($funcion, $obrasIds, $cupo, $precioBase, $fechaHora, $duracion): Funcion {
+            $sala ?? throw new ReglaIncumplida('La sala no existe o no pertenece a tu cuenta.');
+            $ocupado = $this->funciones->ocupadoEnLaSala($sala->id, $funcion->id);
+            $sala->actualizarFuncion($funcion, $obrasIds, $cupo, $precioBase, $fechaHora, $duracion, $ocupado);
+            $this->funciones->actualizar($funcion);
 
-        return $funcion;
+            return $funcion;
+        });
     }
 
     /**

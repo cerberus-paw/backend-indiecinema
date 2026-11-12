@@ -194,10 +194,10 @@ final class FuncionesDelOrganizadorTest extends TestCase
     /**
      * Una obra más de la organizadora, para las votaciones de más de dos candidatas.
      */
-    private function obra(string $titulo): string
+    private function obra(string $titulo, int $duracion = 103): string
     {
         $generoId = (string) $this->base->valor('SELECT id FROM genero LIMIT 1');
-        $obra = Obra::nueva(self::ORGANIZADORA, $titulo, 'Sinopsis.', 2001, 'Lucrecia Martel', 103, TipoObra::Pelicula, OrigenCopia::LicenciaAdquirida, [$generoId]);
+        $obra = Obra::nueva(self::ORGANIZADORA, $titulo, 'Sinopsis.', 2001, 'Lucrecia Martel', $duracion, TipoObra::Pelicula, OrigenCopia::LicenciaAdquirida, [$generoId]);
         (new RepositorioDeObras($this->base))->agregar($obra);
 
         return $obra->id;
@@ -724,6 +724,30 @@ final class FuncionesDelOrganizadorTest extends TestCase
 
         self::assertSame(422, $respuesta->estado());
         self::assertStringContainsString('Para abrir una votación elegí al menos dos obras candidatas.', $respuesta->cuerpo());
+        self::assertSame(0, (int) $this->base->valor('SELECT COUNT(*) FROM funcion WHERE sala_id = ?', [$sala->id]));
+    }
+
+    /**
+     * EF-05.4: cada candidata, sola, tiene que entrar en la duración de la función de la sala; si
+     * no, ganaría una obra que no se puede proyectar. Juntas pueden pasarse: al cerrar quedan las
+     * que entran.
+     */
+    public function testUnaCandidataMasLargaQueLaSalaNoAbreLaVotacion(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+
+        $respuesta = $this->enviar('/organizador/funciones/nueva', [
+            'modo' => FormularioDeFuncion::MODO_EN_VOTACION_TITULOS,
+            'sala_id' => $sala->id,
+            'obras' => [$this->obras['Zama'], $this->obra('Rojo', 130)],
+            'cierre_fecha' => '2030-10-20',
+            'cierre_hora' => '23:00',
+            'precio' => '2500',
+            'cupo' => '40',
+        ]);
+
+        self::assertSame(422, $respuesta->estado());
+        self::assertStringContainsString('Rojo dura 130 minutos y en esta sala una función puede durar hasta 120.', $respuesta->cuerpo());
         self::assertSame(0, (int) $this->base->valor('SELECT COUNT(*) FROM funcion WHERE sala_id = ?', [$sala->id]));
     }
 

@@ -157,10 +157,11 @@ final class ServicioDeFuncionesDelOrganizador
             throw new ReglaIncumplida('La sala no existe o no pertenece a tu cuenta.');
         }
 
-        $idsCatalogo = array_column($this->obras->todas(), 'id');
-        if (array_diff($obrasIds, $idsCatalogo) !== []) {
+        $catalogo = $this->obras->todas();
+        if (array_diff($obrasIds, array_column($catalogo, 'id')) !== []) {
             throw new ReglaIncumplida('Una de las obras no está en el catálogo.');
         }
+        $sala->controlarCandidatas(array_values(array_filter($catalogo, static fn (Obra $obra): bool => in_array($obra->id, $obrasIds, true))));
 
         $funcion = $sala->crearFuncion($obrasIds, $cupo, $precioBase, $votacionCierraEn);
         $this->funciones->agregar($funcion);

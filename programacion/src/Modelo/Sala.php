@@ -62,6 +62,32 @@ final class Sala
     }
 
     /**
+     * Que cada candidata de una votación entre sola en la duración de la función de la sala
+     * (EF-05.4): si no, podría ganar una obra que no se puede proyectar. Juntas sí pueden pasarse:
+     * al cerrar la votación quedan las más votadas que entran.
+     *
+     * @param list<Obra> $candidatas
+     *
+     * @throws ReglaIncumplida con la primera que no entra
+     */
+    public function controlarCandidatas(array $candidatas): void
+    {
+        foreach ($candidatas as $obra) {
+            if ($obra->duracionMinutos > $this->datos->duracionFuncion) {
+                throw new ReglaIncumplida(self::noEntra($obra, $this->datos->duracionFuncion));
+            }
+        }
+    }
+
+    /**
+     * El motivo, para el modelo y para el formulario de función.
+     */
+    public static function noEntra(Obra $obra, int $duracionFuncion): string
+    {
+        return "{$obra->titulo} dura {$obra->duracionMinutos} minutos y en esta sala una función puede durar hasta {$duracionFuncion}.";
+    }
+
+    /**
      * Una función nueva en esta sala, en votación entre las obras candidatas hasta
      * $votacionCierraEn (EF-03.1).
      *

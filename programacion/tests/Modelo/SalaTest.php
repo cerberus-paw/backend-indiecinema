@@ -6,8 +6,11 @@ namespace IndieCinema\Programacion\Pruebas\Modelo;
 
 use IndieCinema\Programacion\Modelo\DatosDeSala;
 use IndieCinema\Programacion\Modelo\EstadoFuncion;
+use IndieCinema\Programacion\Modelo\Obra;
+use IndieCinema\Programacion\Modelo\OrigenCopia;
 use IndieCinema\Programacion\Modelo\ReglaIncumplida;
 use IndieCinema\Programacion\Modelo\Sala;
+use IndieCinema\Programacion\Modelo\TipoObra;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
@@ -37,6 +40,29 @@ final class SalaTest extends TestCase
         self::assertSame(3500.0, $funcion->precioBase);
         self::assertSame(EstadoFuncion::EnVotacionTitulos, $funcion->estado);
         self::assertNull($funcion->fechaHora);
+    }
+
+    private static function obra(string $titulo, int $duracion): Obra
+    {
+        return Obra::nueva('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', $titulo, 'Sinopsis.', 2001, 'Alguien', $duracion, TipoObra::Pelicula, OrigenCopia::LicenciaAdquirida, ['eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee']);
+    }
+
+    /**
+     * EF-05.4: cada candidata entra sola en la duración de la función (120 en esta sala), aunque
+     * juntas se pasen.
+     */
+    public function testLasCandidatasQueEntranSolasSeAceptanAunqueJuntasSePasen(): void
+    {
+        self::sala()->controlarCandidatas([self::obra('Zama', 120), self::obra('La ciénaga', 103)]);
+
+        $this->addToAssertionCount(1);
+    }
+
+    public function testUnaCandidataQueNoEntraSolaEsUnaReglaIncumplida(): void
+    {
+        $this->expectException(ReglaIncumplida::class);
+        $this->expectExceptionMessage('Rojo dura 121 minutos y en esta sala una función puede durar hasta 120.');
+        self::sala()->controlarCandidatas([self::obra('Zama', 100), self::obra('Rojo', 121)]);
     }
 
     public function testElCupoPuedeSerIgualALaCapacidad(): void

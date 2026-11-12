@@ -16,6 +16,7 @@ use IndieCinema\Programacion\Controladores\Inicio;
 use IndieCinema\Programacion\Controladores\Obras;
 use IndieCinema\Programacion\Controladores\ObrasDelOrganizador;
 use IndieCinema\Programacion\Controladores\Salas;
+use IndieCinema\Programacion\Controladores\SalasInternas;
 use IndieCinema\Programacion\Controladores\SalasDelOrganizador;
 use IndieCinema\Programacion\Controladores\SolicitudDeSala;
 
@@ -106,6 +107,9 @@ return static function (Router $router): void {
     $router->interna('GET', '/interno/funciones/{id}', [FuncionesInternas::class, 'mostrar'], ['funciones']);
     // Las de una página de «Mis reservas» en un solo pedido (E4-04.1).
     $router->interna('GET', '/interno/funciones', [FuncionesInternas::class, 'varias'], ['funciones']);
+
+    // La sala de una solicitud, para moderación (EF-07.1): la habilita o la suspende.
+    $router->interna('POST', '/interno/salas/{id}/habilitacion', [SalasInternas::class, 'habilitacion'], ['moderacion']);
 
     // Para comprobar que los otros subsistemas llegan hasta acá con su token.
     $router->interna('GET', '/interno/estado', [EstadoInterno::class, 'mostrar'], ['cuentas', 'funciones', 'moderacion', 'recaudacion']);

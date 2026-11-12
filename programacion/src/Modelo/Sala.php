@@ -78,7 +78,7 @@ final class Sala
         DateTimeImmutable $ahora = new DateTimeImmutable(),
     ): Funcion {
         if (!$this->habilitada) {
-            throw new ReglaIncumplida('La sala todavía no está habilitada para programar funciones.');
+            throw new ReglaIncumplida('La sala no está habilitada: no se pueden programar funciones.');
         }
         if ($cupo > $this->datos->capacidad) {
             throw new ReglaIncumplida("El cupo no puede ser mayor a la capacidad de la sala ({$this->datos->capacidad}).");
@@ -150,7 +150,7 @@ final class Sala
         array $ocupado,
     ): void {
         if (!$this->habilitada) {
-            throw new ReglaIncumplida('La sala todavía no está habilitada para programar funciones.');
+            throw new ReglaIncumplida('La sala no está habilitada: no se pueden programar funciones.');
         }
         if ($cupo > $this->datos->capacidad) {
             throw new ReglaIncumplida("El cupo no puede ser mayor a la capacidad de la sala ({$this->datos->capacidad}).");

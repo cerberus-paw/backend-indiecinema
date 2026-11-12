@@ -65,13 +65,14 @@ final class ServicioDeSalas
     }
 
     /**
-     * Publica la sala en el sitio o la retira. Cada cambio queda en el log, con quién lo hizo: es
-     * el registro de auditoría que pide la historia. Una sala retirada deja de verse en el listado
-     * público y sus funciones, en la cartelera.
+     * Publica la sala en el sitio o la retira. Cada cambio queda en el log, con quién lo hizo (el
+     * administrador desde la bandeja, o el moderador por la API interna, EF-07.1) y, si lo hay, por
+     * qué: es el registro de auditoría que pide la historia. Una sala retirada deja de verse en el
+     * listado público y sus funciones, en la cartelera, y no programa funciones nuevas.
      *
      * @throws ExcepcionHttp 404 si no existe o está dada de baja
      */
-    public function cambiarHabilitacion(string $id, bool $habilitada, Usuario $administrador): Sala
+    public function cambiarHabilitacion(string $id, bool $habilitada, string $quien, ?string $motivo = null): Sala
     {
         $sala = $this->buscar($id);
         if ($sala->habilitada === $habilitada) {
@@ -80,9 +81,11 @@ final class ServicioDeSalas
         }
         $sala->cambiarHabilitacion($habilitada);
         $this->salas->guardarHabilitacion($sala);
-        $this->log->notice($habilitada ? '{administrador} habilitó la sala {sala}.' : '{administrador} deshabilitó la sala {sala}.', [
-            'administrador' => $administrador->id,
+        $accion = $habilitada ? '{quien} habilitó la sala {sala}' : '{quien} deshabilitó la sala {sala}';
+        $this->log->notice($accion . ($motivo === null ? '.' : ': {motivo}'), [
+            'quien' => $quien,
             'sala' => $sala->id,
+            'motivo' => $motivo,
         ]);
 
         return $sala;

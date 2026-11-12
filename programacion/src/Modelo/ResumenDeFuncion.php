@@ -38,6 +38,8 @@ final readonly class ResumenDeFuncion
         public array $obrasIds = [],
         /** Para el recordatorio de la función (EF-03.3): adónde hay que ir. */
         public string $salaDireccion = '',
+        /** Cuánto dura una función en la sala, en minutos: hasta ahí se registra la asistencia (EF-05.2). */
+        public int $salaDuracionFuncion = 0,
     ) {
     }
 }

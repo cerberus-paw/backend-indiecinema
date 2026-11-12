@@ -113,6 +113,8 @@ final class FuncionesInternas extends Controlador
                 'habilitada' => $funcion->salaHabilitada,
                 // Para el recordatorio de la función (EF-03.3).
                 'direccion' => $funcion->salaDireccion,
+                // Hasta cuándo se registra la asistencia (EF-05.2): funciones no ve las salas.
+                'duracion_funcion' => $funcion->salaDuracionFuncion,
             ],
             'organizador_id' => $funcion->organizadorId,
             // Las mismas que titulos, por id, en el mismo orden (EF-04.2).

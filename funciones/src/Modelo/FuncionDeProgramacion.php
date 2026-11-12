@@ -42,7 +42,48 @@ final readonly class FuncionDeProgramacion
         public array $obrasIds = [],
         /** Adónde hay que ir, para el recordatorio (EF-03.3). */
         public string $salaDireccion = '',
+        /** Cuánto dura una función en la sala, en minutos: hasta ahí se registra la asistencia (EF-05.2). */
+        public int $salaDuracionFuncion = 0,
     ) {
+    }
+
+    /**
+     * Desde cuándo se registra la asistencia en la puerta: una hora antes, para que la puerta abra
+     * antes de empezar (EF-05.2). Null si todavía no tiene fecha.
+     */
+    public function asistenciaDesde(): ?DateTimeImmutable
+    {
+        return $this->fechaHora?->modify('-1 hour');
+    }
+
+    /**
+     * Hasta cuándo: hasta que termina, la fecha más la duración de la función de la sala, la misma
+     * cuenta con la que programación la finaliza y deja ausentes a los que no vinieron.
+     */
+    public function asistenciaHasta(): ?DateTimeImmutable
+    {
+        return $this->fechaHora?->modify("+{$this->salaDuracionFuncion} minutes");
+    }
+
+    /**
+     * Por qué no se puede registrar la asistencia a esa hora, para decírselo al organizador; null si
+     * se puede. Los dos bordes van adentro.
+     */
+    public function motivoParaNoRegistrarAsistencia(DateTimeImmutable $ahora = new DateTimeImmutable()): ?string
+    {
+        $desde = $this->asistenciaDesde();
+        $hasta = $this->asistenciaHasta();
+        if ($desde === null || $hasta === null) {
+            return 'La función todavía no tiene fecha: no hay asistencia que registrar.';
+        }
+        if ($ahora < $desde) {
+            return "La asistencia se registra desde una hora antes de la función: desde las {$desde->format('H:i')} del {$desde->format('d/m')}.";
+        }
+        if ($ahora > $hasta) {
+            return "La función ya terminó: la asistencia se registraba hasta las {$hasta->format('H:i')}.";
+        }
+
+        return null;
     }
 
     /**

@@ -41,7 +41,7 @@ $funcion = static fn (string $id, string $estado, ?string $fecha, array $titulos
     'cupo' => 40,
     'titulos' => $titulos,
     'titulos_elegidos' => $elegidos,
-    'sala' => ['id' => 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', 'nombre' => 'Cine Club El Galpón', 'localidad' => 'Luján', 'habilitada' => $publicada, 'direccion' => 'Av. San Martín 450'],
+    'sala' => ['id' => 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', 'nombre' => 'Cine Club El Galpón', 'localidad' => 'Luján', 'habilitada' => $publicada, 'direccion' => 'Av. San Martín 450', 'duracion_funcion' => 120],
     'organizador_id' => 'ffffffff-ffff-4fff-8fff-ffffffffffff',
     'obras_ids' => array_map(static fn (string $titulo): string => $titulo === 'Zama' ? '0b0b0b0b-0b0b-40b0-80b0-0b0b0b0b0b0b' : '0c0c0c0c-0c0c-40c0-80c0-0c0c0c0c0c0c', $titulos),
 ];

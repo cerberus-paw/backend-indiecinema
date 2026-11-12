@@ -106,6 +106,8 @@ final class ReservasDeLaFuncion extends Controlador
             'reservas' => array_map(fn (Reserva $r): array => self::fila($r, $nombres[$r->usuarioId] ?? null), $reservas),
             // Sólo se registra la asistencia de una función que sigue en pie.
             'registra_asistencia' => $funcion->estado !== 'cancelada',
+            // De qué hora a qué hora se registra (EF-05.2), para decirlo arriba del formulario.
+            'asistencia' => self::ventanaDeAsistencia($funcion),
             'codigo' => $codigo,
             // El aviso al volver de registrar una: sólo si de verdad está entre las de la función.
             'registrada' => in_array($registrada, array_column($reservas, 'codigo'), true) ? $registrada : null,
@@ -116,6 +118,24 @@ final class ReservasDeLaFuncion extends Controlador
         }
 
         return $this->vista('reservas_de_la_funcion.html.twig', $datos, $estado);
+    }
+
+    /**
+     * Las horas de la ventana de asistencia, con el día si empieza uno y termina otro; null si la
+     * función todavía no tiene fecha.
+     *
+     * @return ?array{desde: string, hasta: string}
+     */
+    private static function ventanaDeAsistencia(FuncionDeProgramacion $funcion): ?array
+    {
+        $desde = $funcion->asistenciaDesde();
+        $hasta = $funcion->asistenciaHasta();
+        if ($desde === null || $hasta === null) {
+            return null;
+        }
+        $formato = $desde->format('Y-m-d') === $hasta->format('Y-m-d') ? 'H:i' : 'H:i \d\e\l d/m';
+
+        return ['desde' => $desde->format($formato), 'hasta' => $hasta->format($formato)];
     }
 
     /**

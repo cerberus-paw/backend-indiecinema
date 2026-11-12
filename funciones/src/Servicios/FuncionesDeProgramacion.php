@@ -113,6 +113,7 @@ final class FuncionesDeProgramacion
             || !is_string($sala['id'] ?? null) || !is_string($sala['nombre'] ?? null)
             || !is_string($sala['localidad'] ?? null) || !is_bool($sala['habilitada'] ?? null)
             || !is_array($datos['obras_ids'] ?? null) || !array_is_list($datos['obras_ids'])
+            || !is_int($sala['duracion_funcion'] ?? null)
         ) {
             throw new RuntimeException('programacion no respondió una función a GET /interno/funciones/{id}.');
         }
@@ -133,6 +134,8 @@ final class FuncionesDeProgramacion
             array_map(strval(...), $datos['obras_ids']),
             // Llegó con el recordatorio (EF-03.3): un programación anterior no la manda.
             is_string($sala['direccion'] ?? null) ? $sala['direccion'] : '',
+            // La ventana de asistencia (EF-05.2): sin ella no se sabe cuándo termina.
+            $sala['duracion_funcion'],
         );
     }
 }

@@ -1,9 +1,10 @@
 #!/bin/bash
 # Publica en este servidor lo que está en su rama: trae los dos repositorios, instala las
-# dependencias, recrea los contenedores que cambiaron, aplica las migraciones y comprueba que el
-# sitio responda. No toca los datos ni los secretos (.env y los config.ini). La rama es la que tiene
-# clonada cada repositorio: main en producción y dev en el de desarrollo (README, «Ramas y
-# entornos»); el script no la elige, así un pedido no puede cambiar lo que publica un servidor.
+# dependencias, recrea los contenedores que cambiaron, aplica las migraciones, instala las tareas
+# programadas y comprueba que el sitio responda. No toca los datos ni los secretos (.env y los
+# config.ini). La rama es la que tiene clonada cada repositorio: main en producción y dev en el de
+# desarrollo (README, «Ramas y entornos»); el script no la elige, así un pedido no puede cambiar lo
+# que publica un servidor.
 #
 # Lo corre el workflow CD del back y del front cuando la CI pasa en esa rama. Entra por SSH con una
 # clave que en ~/.ssh/authorized_keys sólo puede correr este script, sin terminal ni túneles: si
@@ -57,7 +58,21 @@ main() {
 	done
 	docker compose exec -T mysql bash /herramientas/migrar.sh </dev/null
 
+	instalar_tareas
 	comprobar
+}
+
+# Reemplaza en el crontab del usuario las líneas de este repositorio (las que entran a esta carpeta,
+# y su comentario) por las de herramientas/crontab, y deja las demás como están. Va después de las migraciones porque
+# las tareas usan las tablas nuevas.
+instalar_tareas() {
+	local otras
+	otras=$(crontab -l 2>/dev/null | grep -vF -e "cd $PWD &&" -e '# Tareas programadas de IndieCinema' || true)
+	{
+		if [ -n "$otras" ]; then printf '%s\n' "$otras"; fi
+		sed "s|@BACK@|$PWD|" herramientas/crontab
+	} | crontab -
+	echo "Tareas programadas: $(grep -c '^[^#]' herramientas/crontab)."
 }
 
 # Pide la cartelera a este mismo servidor, sin pasar por el DNS pero con el nombre del certificado,

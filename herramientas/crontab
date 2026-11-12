@@ -1,0 +1,5 @@
+# Tareas programadas de IndieCinema (README, «Tareas programadas»). Las instala desplegar.sh.
+*/5 * * * * cd @BACK@ && docker compose exec -T funciones php bin/liberar-vencidas.php
+*/15 * * * * cd @BACK@ && docker compose exec -T programacion php bin/cerrar-por-fecha.php
+*/15 * * * * cd @BACK@ && docker compose exec -T programacion php bin/finalizar-funciones.php
+0 * * * * cd @BACK@ && docker compose exec -T funciones php bin/recordar-funciones.php

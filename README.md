@@ -535,15 +535,9 @@ sudo certbot renew --dry-run
 
 ### Tareas programadas
 
-Las corre el cron de cada servidor (`crontab -e`, en la carpeta del back). Correrlas de más no
-duplica nada:
-
-```
-*/5 * * * * cd /home/ubuntu/indiecinema/backend-indiecinema && docker compose exec -T funciones php bin/liberar-vencidas.php
-*/15 * * * * cd /home/ubuntu/indiecinema/backend-indiecinema && docker compose exec -T programacion php bin/cerrar-por-fecha.php
-*/15 * * * * cd /home/ubuntu/indiecinema/backend-indiecinema && docker compose exec -T programacion php bin/finalizar-funciones.php
-0 * * * * cd /home/ubuntu/indiecinema/backend-indiecinema && docker compose exec -T funciones php bin/recordar-funciones.php
-```
+Las corre el cron de cada servidor. Están en `herramientas/crontab` y las instala
+`desplegar.sh` en cada despliegue, así un merge a `main` las lleva a producción. Correrlas de más
+no duplica nada:
 
 - `liberar-vencidas`: cancela las reservas que vencieron sin pagar (ver «Mercado Pago»).
 - `cerrar-por-fecha`: cierra las votaciones vencidas con la obra más votada. En los acuerdos
@@ -554,7 +548,8 @@ duplica nada:
 - `recordar-funciones`: manda el recordatorio por correo a las reservas confirmadas de las
   funciones de las próximas 24 horas.
 
-En local se prueban a mano con el mismo `docker compose exec`, y los correos llegan a Mailpit.
+En local no se instalan: se prueban a mano con el `docker compose exec` de cada línea, y los correos
+llegan a Mailpit.
 
 ### Ramas y entornos
 

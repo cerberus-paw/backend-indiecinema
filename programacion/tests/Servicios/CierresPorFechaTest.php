@@ -349,8 +349,8 @@ final class CierresPorFechaTest extends TestCase
 
     /**
      * La pasada anterior confirmó en funciones y se cortó, y en el medio se programó otra en ese
-     * horario: se cancela igual. Funciones no avisa a un acuerdo confirmado, así que sólo lo anota
-     * el log.
+     * horario: se cancela igual, y se avisa con el motivo (a un confirmado funciones le avisa
+     * sólo por éste).
      */
     public function testUnConfirmadoSinProgramarQueSePisaSeCancela(): void
     {
@@ -363,9 +363,26 @@ final class CierresPorFechaTest extends TestCase
         self::assertSame(['programadas' => 0, 'canceladas' => 1], $this->cierresConAcuerdos($acuerdos, $log)->cerrarAcuerdos());
 
         self::assertSame('cancelada', $this->estadoDe($id));
-        self::assertSame([], $acuerdos->pedidos);
+        self::assertSame([['avisar-cancelacion', 'acuerdo-1', 'Zama', 'horario_ocupado']], $acuerdos->pedidos);
         rewind($log);
         self::assertStringContainsString('se pisa con otra función de la sala', (string) stream_get_contents($log));
+    }
+
+    /**
+     * La pasada que canceló porque la ganadora se pisaba no pudo avisar (funciones no respondió):
+     * la siguiente encuentra el acuerdo cerrado sin mínimo, pero con la franja que llegó al mínimo y
+     * se pisa, así que avisa con el mismo motivo.
+     */
+    public function testElReintentoDelAvisoMantieneElMotivo(): void
+    {
+        $id = $this->enAcuerdo();
+        $this->otraProgramada((new DateTimeImmutable('+1 day'))->format('Y-m-d') . ' 19:00:00');
+        $acuerdos = $this->acuerdos();
+        $acuerdos->porFuncion[$id] = self::acuerdo('sin_minimo', '-1 hour', 2, cerradoEn: '-5 minutes');
+
+        self::assertSame(['programadas' => 0, 'canceladas' => 1], $this->cierresConAcuerdos($acuerdos)->cerrarAcuerdos());
+
+        self::assertSame([['avisar-cancelacion', 'acuerdo-1', 'Zama', 'horario_ocupado']], $acuerdos->pedidos);
     }
 
     /**

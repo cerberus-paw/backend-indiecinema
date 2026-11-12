@@ -144,6 +144,19 @@ final class CancelacionDeAcuerdosTest extends TestCase
         self::assertStringNotContainsString('mínimo', $texto);
     }
 
+    /**
+     * Un acuerdo que la tarea confirmó y no llegó a programar porque en el medio se programó otra
+     * función en ese horario: también se avisa, pero sólo con ese motivo.
+     */
+    public function testAUnConfirmadoSoloSeLeAvisaConElHorarioOcupado(): void
+    {
+        $confirmado = $this->acuerdo('confirmado');
+
+        self::assertSame(422, $this->avisar($confirmado)->estado());
+        $respuesta = $this->avisar($confirmado, ['titulo' => 'Zama', 'motivo' => 'horario_ocupado']);
+        self::assertSame(['avisados' => 2], json_decode($respuesta->cuerpo(), true));
+    }
+
     public function testUnMotivoDesconocidoEs400(): void
     {
         self::assertSame(400, $this->avisar($this->acuerdo('sin_minimo'), ['titulo' => 'Zama', 'motivo' => 'otro'])->estado());

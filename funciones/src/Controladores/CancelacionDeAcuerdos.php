@@ -51,7 +51,7 @@ final class CancelacionDeAcuerdos extends Controlador
 
         $acuerdoId = (string) $peticion->parametro('id');
         try {
-            $comprometidos = $this->servicio->comprometidosParaAvisarCancelacion($acuerdoId);
+            $comprometidos = $this->servicio->comprometidosParaAvisarCancelacion($acuerdoId, $motivo === 'horario_ocupado');
         } catch (ReglaIncumplida $error) {
             return $this->json(['error' => $error->getMessage()], 422);
         }

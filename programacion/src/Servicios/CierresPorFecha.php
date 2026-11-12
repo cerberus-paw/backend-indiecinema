@@ -112,6 +112,30 @@ final class CierresPorFecha
     }
 
     /**
+     * Por qué se canceló un acuerdo cerrado sin mínimo, para el aviso: si la franja que lidera llegó
+     * al mínimo, no fue por falta de gente, y si se pisa con otra función de la sala es el horario
+     * ocupado (EF-05.5). Sale sólo de los datos, así que el reintento de una pasada que no pudo
+     * avisar dice lo mismo que la primera.
+     *
+     * @param array<string, mixed> $acuerdo como lo leyó la tarea, con sus franjas
+     */
+    private function motivoDeCancelacion(Funcion $funcion, array $acuerdo): string
+    {
+        $lider = AcuerdosDeFunciones::franjaQueLidera($acuerdo);
+        $inicio = self::fecha($lider['inicio'] ?? null);
+        $llego = $lider !== null && (int) ($lider['votos'] ?? 0) >= (int) ($acuerdo['minimo_asistentes'] ?? PHP_INT_MAX);
+
+        return $llego && $inicio !== null && $this->motivoParaPisarse($funcion, $inicio) !== null ? 'horario_ocupado' : 'sin_minimo';
+    }
+
+    private function titulosDe(string $funcionId): string
+    {
+        $titulos = $this->funciones->resumen($funcionId)->titulos ?? [];
+
+        return $titulos === [] ? 'la función' : implode(' + ', $titulos);
+    }
+
+    /**
      * Para revisar la sala: la tarea canceló una función porque la franja ganadora se pisaba.
      */
     private function avisarPisada(Funcion $funcion, string $pisada): void
@@ -180,11 +204,12 @@ final class CierresPorFecha
             if ($inicio === null || $inicio <= $ahora) {
                 return null;
             }
-            // Si en el medio se programó otra en ese horario (EF-05.5), se cancela. Funciones no
-            // avisa a los de un acuerdo confirmado, así que queda en el log.
+            // Si en el medio se programó otra en ese horario (EF-05.5), se cancela y se avisa con
+            // ese motivo, el único por el que funciones avisa a un acuerdo confirmado.
             $pisada = $this->motivoParaPisarse($funcion, $inicio);
             if ($pisada !== null) {
                 $this->avisarPisada($funcion, $pisada);
+                $acuerdos->avisarCancelacion((string) $acuerdo['id'], $this->titulosDe($funcionId), 'horario_ocupado');
                 $funcion->cancelar();
                 $this->funciones->guardar($funcion);
 
@@ -196,7 +221,7 @@ final class CierresPorFecha
             return 'programadas';
         }
 
-        $motivo = 'sin_minimo';
+        $leido = $acuerdo;
         if ($estado === 'abierto' && $limite !== null && $limite < $ahora && AcuerdosDeFunciones::alcanzoElMinimo($acuerdo)) {
             $inicio = self::fecha((AcuerdosDeFunciones::franjaQueLidera($acuerdo) ?? [])['inicio'] ?? null);
             // La que se pisa con otra función de la sala (EF-05.5) tampoco se programa: se cancela
@@ -204,7 +229,6 @@ final class CierresPorFecha
             $pisada = $inicio !== null && $inicio > $ahora ? $this->motivoParaPisarse($funcion, $inicio) : null;
             if ($pisada !== null) {
                 $this->avisarPisada($funcion, $pisada);
-                $motivo = 'horario_ocupado';
             } elseif ($inicio !== null && $inicio > $ahora) {
                 $acuerdos->confirmar((string) $acuerdo['id']);
                 $funcion->fijarFechaHora($inicio, $ahora);
@@ -224,8 +248,7 @@ final class CierresPorFecha
         if ($estado !== 'sin_minimo' || $limite === null || $limite >= $ahora || ($cerrado !== null && $cerrado <= $limite)) {
             return null;
         }
-        $titulos = $this->funciones->resumen($funcionId)->titulos ?? [];
-        $acuerdos->avisarCancelacion((string) $acuerdo['id'], $titulos === [] ? 'la función' : implode(' + ', $titulos), $motivo);
+        $acuerdos->avisarCancelacion((string) $acuerdo['id'], $this->titulosDe($funcionId), $this->motivoDeCancelacion($funcion, $leido));
         $funcion->cancelar();
         $this->funciones->guardar($funcion);
 

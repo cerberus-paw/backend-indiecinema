@@ -540,8 +540,8 @@ Las corre el cron de cada servidor. Están en `herramientas/crontab` y las insta
 no duplica nada:
 
 - `liberar-vencidas`: cancela las reservas que vencieron sin pagar (ver «Mercado Pago»).
-- `cerrar-por-fecha`: cierra las votaciones vencidas con las obras más votadas, tantas como
-  películas por función tiene la sala. En los acuerdos vencidos, programa la franja que llegó al mínimo, o cancela la función y avisa a los que
+- `cerrar-por-fecha`: cierra las votaciones vencidas con las obras más votadas que entran
+  en la duración de la sala, tantas como películas por función tiene. En los acuerdos vencidos, programa la franja que llegó al mínimo, o cancela la función y avisa a los que
   marcaron «Me sirve».
 - `finalizar-funciones`: pasa a finalizada cada función terminada (su hora más la duración de
   las funciones de la sala) y deja «ausente» a quien no fue.
@@ -646,7 +646,7 @@ listado de salas, la solicitud de sala con las mismas validaciones en el navegad
 servidor, la foto y el correo al equipo, la bandeja del administrador contra una cuentas de
 mentira (aprobar pide el rol y publica la sala, rechazar exige motivo, el historial y retirar la
 sala, y quién entra), la tabla de solicitudes con una pendiente por sala, la votación de títulos
-(votar, cambiar el voto y cerrarla con las más votadas, hasta las películas por función de la sala), el acuerdo de fecha visto desde
+(votar, cambiar el voto y cerrarla con las más votadas que entran en la sala, hasta las películas por función), el acuerdo de fecha visto desde
 programación, los lugares libres de la ficha y de las tarjetas, la cancelación de una función con
 reservas, la portada con las destacadas y las próximas funciones, «Acerca de», con los enlaces del encabezado y del pie, las opciones del
 menú y del pie que ve cada rol, y la página de error, que vuelve a la portada); en cuentas, el

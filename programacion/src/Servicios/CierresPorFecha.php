@@ -9,9 +9,11 @@ use IndieCinema\Nucleo\Http\ExcepcionHttp;
 use IndieCinema\Programacion\Modelo\EstadoFuncion;
 use IndieCinema\Programacion\Modelo\Funcion;
 use IndieCinema\Programacion\Repositorios\RepositorioDeFunciones;
+use IndieCinema\Programacion\Repositorios\RepositorioDeObras;
 use IndieCinema\Programacion\Repositorios\RepositorioDeSalas;
 use IndieCinema\Programacion\Repositorios\RepositorioDeVotos;
 use LogicException;
+use Psr\Log\LoggerInterface;
 use RuntimeException;
 
 /**
@@ -36,7 +38,9 @@ final class CierresPorFecha
         private readonly RepositorioDeFunciones $funciones,
         private readonly RepositorioDeVotos $votos,
         private readonly RepositorioDeSalas $salas,
+        private readonly RepositorioDeObras $obras,
         private readonly ?AcuerdosDeFunciones $acuerdos = null,
+        private readonly ?LoggerInterface $log = null,
     ) {
     }
 
@@ -64,16 +68,29 @@ final class CierresPorFecha
     }
 
     /**
-     * Termina la votación con las obras más votadas, tantas como películas por función tiene la
-     * sala ahora (EF-05.1), y la guarda en acuerdo de fecha. Es el mismo cierre para el organizador
+     * Termina la votación con las obras más votadas que entran juntas en la duración de la función
+     * de la sala, hasta las películas por función, con los parámetros que la sala tiene ahora
+     * (EF-05.1, EF-05.4), y la guarda en acuerdo de fecha. Es el mismo cierre para el organizador
      * (ServicioDeFuncionesDelOrganizador::cerrarVotacion()) y para la tarea: así los dos eligen
      * igual, también al desempatar.
+     *
+     * Si no entra ninguna (una votación abierta antes de controlar las candidatas, o una sala que
+     * achicó la duración), queda la más votada sola y el log lo avisa, para revisar esa sala.
      */
     public function cerrarVotacion(Funcion $funcion): void
     {
         $sala = $this->salas->buscar($funcion->salaId)
             ?? throw new LogicException("La función {$funcion->id} es de una sala que no existe.");
-        $funcion->cerrarVotacionTitulos($this->votos->masVotadas($funcion->id, $funcion->obrasIds, $sala->datos->peliculasPorFuncion));
+        $duraciones = array_column($this->obras->todas(), 'duracionMinutos', 'id');
+        $maxima = $sala->datos->duracionFuncion;
+        $elegidas = $this->votos->masVotadas($funcion->id, $funcion->obrasIds, $sala->datos->peliculasPorFuncion, $duraciones, $maxima);
+        if (array_sum(array_map(static fn (string $id): int => $duraciones[$id] ?? 0, $elegidas)) > $maxima) {
+            $this->log?->warning(
+                'Votación {funcion} cerrada con la más votada aunque ninguna candidata entra en la duración de la sala {sala} ({maxima} minutos).',
+                ['funcion' => $funcion->id, 'sala' => $sala->id, 'maxima' => $maxima],
+            );
+        }
+        $funcion->cerrarVotacionTitulos($elegidas);
         $this->funciones->guardar($funcion);
     }
 

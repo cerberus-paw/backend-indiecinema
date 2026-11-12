@@ -313,6 +313,42 @@ final class RepositorioDeReservas
     }
 
     /**
+     * Las confirmadas de la función que todavía no recibieron el recordatorio (EF-03.3). Las
+     * pendientes de pago no: si no pagan, vencen; y las canceladas ya no van.
+     *
+     * @return list<Reserva>
+     */
+    public function paraRecordar(string $funcionId): array
+    {
+        return array_map(self::reserva(...), $this->base->filas(
+            'SELECT * FROM reserva WHERE funcion_id = ? AND estado = ? AND recordada_en IS NULL ORDER BY creada_en, codigo',
+            [$funcionId, EstadoReserva::Confirmada],
+        ));
+    }
+
+    /**
+     * Toma el recordatorio de la reserva: lo marca como enviado, si todavía no lo estaba y sigue
+     * confirmada. Es una sola sentencia para que dos pasadas al mismo tiempo no lo manden las dos.
+     *
+     * @return bool si lo tomó esta pasada
+     */
+    public function tomarRecordatorio(string $id, DateTimeImmutable $ahora = new DateTimeImmutable()): bool
+    {
+        return $this->base->ejecutar(
+            'UPDATE reserva SET recordada_en = ? WHERE id = ? AND estado = ? AND recordada_en IS NULL',
+            [$ahora->setTimezone(new DateTimeZone('UTC')), $id, EstadoReserva::Confirmada],
+        ) === 1;
+    }
+
+    /**
+     * Lo devuelve si el correo no salió, para que la próxima pasada lo intente otra vez.
+     */
+    public function soltarRecordatorio(string $id): void
+    {
+        $this->base->ejecutar('UPDATE reserva SET recordada_en = NULL WHERE id = ?', [$id]);
+    }
+
+    /**
      * Las reservas de una función, de la primera a la última: la lista del organizador y su CSV.
      *
      * @return list<Reserva>

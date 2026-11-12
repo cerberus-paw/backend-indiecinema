@@ -358,6 +358,25 @@ final class RepositorioDeFunciones
     }
 
     /**
+     * Las funciones en acuerdo de fecha, por id, de a $cuantas, después de $desdeId (EF-03.2). Su
+     * fecha límite la sabe funciones, que es donde está el acuerdo: la tarea le pregunta por cada
+     * una. Se recorren por id, y no se repite la consulta desde el principio, porque las que
+     * todavía no vencieron siguen en acuerdo y volverían en cada tanda.
+     *
+     * @return list<string> los ids
+     */
+    public function enAcuerdoDeFecha(int $cuantas, string $desdeId = ''): array
+    {
+        return array_map(
+            static fn (array $fila): string => (string) $fila['id'],
+            $this->base->filas(
+                'SELECT id FROM funcion WHERE estado = ? AND id > ? ORDER BY id LIMIT ?',
+                [EstadoFuncion::EnAcuerdoFecha, $desdeId, $cuantas],
+            ),
+        );
+    }
+
+    /**
      * La función y sus obras juntas: una función sin obras no tiene que quedar en la base.
      */
     public function agregar(Funcion $funcion): void

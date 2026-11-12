@@ -6,6 +6,7 @@ use IndieCinema\Funciones\Controladores\AcuerdosInternos;
 use IndieCinema\Funciones\Controladores\AvisosDePago;
 use IndieCinema\Funciones\Controladores\Calificaciones;
 use IndieCinema\Funciones\Controladores\CalificacionesInternas;
+use IndieCinema\Funciones\Controladores\CancelacionDeAcuerdos;
 use IndieCinema\Funciones\Controladores\CobrosInternos;
 use IndieCinema\Funciones\Controladores\OcupacionInterna;
 use IndieCinema\Funciones\Controladores\Reservas;
@@ -80,4 +81,6 @@ return static function (Router $router): void {
     $router->interna('POST', '/interno/acuerdos/{id}/quitar-voto', [AcuerdosInternos::class, 'quitarVoto'], ['programacion']);
     $router->interna('POST', '/interno/acuerdos/{id}/confirmar', [AcuerdosInternos::class, 'confirmar'], ['programacion']);
     $router->interna('POST', '/interno/acuerdos/{id}/cerrar-sin-minimo', [AcuerdosInternos::class, 'cerrarSinMinimo'], ['programacion']);
+    // Programación canceló la función porque el acuerdo venció sin mínimo: avisa a los que marcaron (EF-03.2).
+    $router->interna('POST', '/interno/acuerdos/{id}/avisar-cancelacion', [CancelacionDeAcuerdos::class, 'avisar'], ['programacion']);
 };

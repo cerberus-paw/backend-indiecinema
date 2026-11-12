@@ -207,6 +207,33 @@ class ServicioDeAcuerdos
     }
 
     /**
+     * A quiénes avisarles que la función se canceló porque el acuerdo venció sin llegar al mínimo
+     * (EF-03.2): los que marcaron «Me sirve». La primera vez los devuelve y deja el aviso marcado;
+     * las siguientes, ninguno. Así la tarea de programación puede pedirlo de nuevo si no recibió
+     * la respuesta, sin que nadie reciba el correo dos veces.
+     *
+     * @return list<string> los ids de usuario
+     *
+     * @throws ReglaIncumplida si el acuerdo no existe o no cerró sin mínimo
+     */
+    public function comprometidosParaAvisarCancelacion(string $acuerdoId): array
+    {
+        $acuerdo = $this->acuerdoPorId($acuerdoId);
+        if ($acuerdo === null) {
+            throw new ReglaIncumplida('El acuerdo de fecha no existe.');
+        }
+        // Sólo uno que cerró sin mínimo: el aviso dice que la función no juntó el interés.
+        if ($acuerdo->estado !== EstadoAcuerdo::SinMinimo) {
+            throw new ReglaIncumplida('El acuerdo no cerró sin mínimo.');
+        }
+        if (!$this->repositorio->tomarAvisoDeCancelacion($acuerdo->id)) {
+            return [];
+        }
+
+        return $this->repositorio->comprometidos($acuerdo->id);
+    }
+
+    /**
      * Cierra el acuerdo cuando no alcanza el mínimo de asistentes (E3-13.5 / IC-157).
      *
      * @throws ReglaIncumplida si no está abierto

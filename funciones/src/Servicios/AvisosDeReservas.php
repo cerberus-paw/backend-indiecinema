@@ -17,8 +17,8 @@ use Psr\Log\LoggerInterface;
 use RuntimeException;
 
 /**
- * Los correos a los espectadores: la reserva confirmada (E4-04.3) y la función que reservaron se
- * canceló (E4-03.4). Funciones sólo guarda el id de quien reservó: la dirección se la pide a
+ * Los correos a los espectadores: la reserva confirmada (E4-04.3), la función que reservaron se
+ * canceló (E4-03.4) y la que esperaban no juntó el mínimo del acuerdo de fecha (EF-03.2). Funciones sólo guarda el id de quien reservó: la dirección se la pide a
  * cuentas por su API interna.
  *
  * El correo es un aviso y no lo que confirma ni lo que cancela: la reserva ya quedó así. Si cuentas
@@ -101,6 +101,34 @@ final class AvisosDeReservas
     }
 
     /**
+     * El correo a los que marcaron «Me sirve» cuando el acuerdo de fecha venció sin que ninguna
+     * franja llegara al mínimo y la función se canceló (EF-03.2). No tenían reserva todavía: el
+     * aviso es para que no la esperen.
+     *
+     * @param list<string> $usuariosIds
+     *
+     * @return int a cuántos les salió el aviso
+     */
+    public function acuerdoSinMinimo(array $usuariosIds, string $titulo, int $minimo): int
+    {
+        $avisados = 0;
+        foreach ($usuariosIds as $usuarioId) {
+            try {
+                [$correo, $nombre] = $this->destinatario($usuarioId);
+                $this->correo->enviar(new Correo($correo, "Se canceló la función «{$titulo}»", self::textoDeSinMinimo($nombre, $titulo, $minimo)));
+                ++$avisados;
+            } catch (ExcepcionHttp | CorreoNoEnviado | RuntimeException $error) {
+                $this->log->warning('No salió el aviso del acuerdo sin mínimo a {usuario}: {motivo}', [
+                    'usuario' => $usuarioId,
+                    'motivo' => $error->getMessage(),
+                ]);
+            }
+        }
+
+        return $avisados;
+    }
+
+    /**
      * @return array{0: string, 1: string} la dirección y el nombre
      *
      * @throws ExcepcionHttp    503 si cuentas no responde
@@ -157,6 +185,22 @@ final class AvisosDeReservas
             '',
             "El organizador canceló la función «{$titulo}»" . ($fecha === null ? '' : " del {$fecha}") . '.',
             "Tu reserva {$reserva->codigo} ({$lugares}) quedó cancelada: no tenés que hacer nada.",
+            '',
+            'En la cartelera de IndieCinema podés elegir otra función.',
+            '',
+            'IndieCinema',
+        ]);
+    }
+
+    private static function textoDeSinMinimo(string $nombre, string $titulo, int $minimo): string
+    {
+        $asistentes = $minimo === 1 ? '1 asistente' : "{$minimo} asistentes";
+
+        return implode("\n", [
+            "Hola, {$nombre}:",
+            '',
+            "Marcaste que te servía una fecha para «{$titulo}», pero al llegar la fecha límite ninguna franja juntó el mínimo de {$asistentes}.",
+            'La función se canceló: no se programa y no tenés que hacer nada.',
             '',
             'En la cartelera de IndieCinema podés elegir otra función.',
             '',

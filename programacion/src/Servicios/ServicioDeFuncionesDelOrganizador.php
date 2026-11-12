@@ -312,9 +312,9 @@ final class ServicioDeFuncionesDelOrganizador
     }
 
     /**
-     * Cierra la votación de títulos de una función propia con la obra más votada (E3-12.4), antes
-     * de su fecha de cierre o en una que no tiene. La función pasa a estado «en acuerdo de fecha»
-     * y conserva únicamente la obra ganadora, como cuando la cierra la tarea (CierresPorFecha).
+     * Cierra la votación de títulos de una función propia con las obras más votadas (E3-12.4,
+     * EF-05.1), antes de su fecha de cierre o en una que no tiene. La función pasa a estado «en
+     * acuerdo de fecha» y conserva las ganadoras, como cuando la cierra la tarea (CierresPorFecha).
      *
      * @throws ExcepcionHttp 404 si la función no existe, es de otro organizador o no está en votación de títulos
      */
@@ -325,7 +325,7 @@ final class ServicioDeFuncionesDelOrganizador
             throw ExcepcionHttp::noEncontrada();
         }
 
-        (new CierresPorFecha($this->funciones, $this->votos))->cerrarVotacion($funcion);
+        (new CierresPorFecha($this->funciones, $this->votos, $this->salas))->cerrarVotacion($funcion);
 
         return $funcion;
     }

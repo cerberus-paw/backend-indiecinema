@@ -64,16 +64,16 @@ final class CierresPorFechaTest extends TestCase
 
     private function cierres(): CierresPorFecha
     {
-        return new CierresPorFecha(new RepositorioDeFunciones($this->base), new RepositorioDeVotos($this->base));
+        return new CierresPorFecha(new RepositorioDeFunciones($this->base), new RepositorioDeVotos($this->base), new RepositorioDeSalas($this->base));
     }
 
     /**
      * Una votación con las tres candidatas que cierra en $cuando. Se crea con un cierre futuro y se
      * le cambia por SQL: el modelo no deja abrir una votación que ya cerró.
      */
-    private function votacion(?string $cuando): string
+    private function votacion(?string $cuando, ?Sala $sala = null): string
     {
-        $funcion = Funcion::nueva($this->sala->id, array_values($this->obras), 40, 3500.0, new DateTimeImmutable('+10 days'));
+        $funcion = Funcion::nueva(($sala ?? $this->sala)->id, array_values($this->obras), 40, 3500.0, new DateTimeImmutable('+10 days'));
         (new RepositorioDeFunciones($this->base))->agregar($funcion);
         $this->base->ejecutar(
             'UPDATE funcion SET votacion_cierra_en = ? WHERE id = ?',
@@ -119,6 +119,26 @@ final class CierresPorFechaTest extends TestCase
         self::assertSame(['Nosferatu'], $this->elegidas($vencida));
     }
 
+    /**
+     * En una sala de 2 películas por función quedan las 2 más votadas, igual que cuando la cierra el
+     * organizador (EF-05.1).
+     */
+    public function testEnUnaSalaDeDosPeliculasQuedanLasDosMasVotadas(): void
+    {
+        $deDos = Sala::nueva(self::ORGANIZADORA, new DatosDeSala('Cine Club La Usina', 'Una usina.', 'Mitre 120', 'Luján', 60, 2, 240, 15), 'sala.jpg');
+        (new RepositorioDeSalas($this->base))->agregar($deDos);
+        $this->base->ejecutar('UPDATE sala SET habilitada = TRUE WHERE id = ?', [$deDos->id]);
+        $vencida = $this->votacion('-1 hour', $deDos);
+        $this->votar($vencida, 'Nosferatu', 5);
+        $this->votar($vencida, 'Zama', 3);
+        $this->votar($vencida, 'La ciénaga', 1);
+
+        self::assertSame(1, $this->cierres()->cerrarVotaciones());
+
+        self::assertSame('en_acuerdo_fecha', $this->estadoDe($vencida));
+        self::assertSame(['Nosferatu', 'Zama'], $this->elegidas($vencida));
+    }
+
     public function testNoTocaLasQueNoVencieronNiLasQueNoTienenCierre(): void
     {
         $abierta = $this->votacion('+1 hour');
@@ -152,7 +172,7 @@ final class CierresPorFechaTest extends TestCase
     }
 
     /**
-     * Sin votos gana la primera candidata, como cuando la cierra el organizador (obraMasVotada()).
+     * Sin votos gana la primera candidata, como cuando la cierra el organizador (masVotadas()).
      */
     public function testSinVotosGanaLaPrimeraCandidata(): void
     {
@@ -188,7 +208,7 @@ final class CierresPorFechaTest extends TestCase
 
     private function cierresConAcuerdos(AcuerdosEnMemoria $acuerdos): CierresPorFecha
     {
-        return new CierresPorFecha(new RepositorioDeFunciones($this->base), new RepositorioDeVotos($this->base), $acuerdos);
+        return new CierresPorFecha(new RepositorioDeFunciones($this->base), new RepositorioDeVotos($this->base), new RepositorioDeSalas($this->base), $acuerdos);
     }
 
     /**

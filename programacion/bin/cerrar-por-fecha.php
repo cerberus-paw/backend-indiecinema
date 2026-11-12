@@ -20,6 +20,7 @@ use IndieCinema\Nucleo\Configuracion;
 use IndieCinema\Nucleo\Http\ClienteInterno;
 use IndieCinema\Nucleo\Log;
 use IndieCinema\Programacion\Repositorios\RepositorioDeFunciones;
+use IndieCinema\Programacion\Repositorios\RepositorioDeSalas;
 use IndieCinema\Programacion\Repositorios\RepositorioDeVotos;
 use IndieCinema\Programacion\Servicios\AcuerdosDeFunciones;
 use IndieCinema\Programacion\Servicios\CierresPorFecha;
@@ -39,6 +40,7 @@ try {
     $cierres = new CierresPorFecha(
         new RepositorioDeFunciones($base),
         new RepositorioDeVotos($base),
+        new RepositorioDeSalas($base),
         new AcuerdosDeFunciones(ClienteInterno::desdeConfiguracion($configuracion, $log)),
     );
 } catch (Throwable $error) {

@@ -169,9 +169,9 @@ final class FuncionesDelOrganizadorTest extends TestCase
      * habilitada se crean funciones: la prueba que la necesita sin habilitar la deshabilita
      * después.
      */
-    private function sala(string $organizador, string $nombre, int $capacidad = 60): Sala
+    private function sala(string $organizador, string $nombre, int $capacidad = 60, int $peliculasPorFuncion = 2): Sala
     {
-        $sala = Sala::nueva($organizador, new DatosDeSala($nombre, 'Un galpón.', 'Av. San Martín 450', 'Luján', $capacidad, 2, 120, 15), 'sala.jpg');
+        $sala = Sala::nueva($organizador, new DatosDeSala($nombre, 'Un galpón.', 'Av. San Martín 450', 'Luján', $capacidad, $peliculasPorFuncion, 120, 15), 'sala.jpg');
         $this->salas->agregar($sala);
         $this->base->ejecutar('UPDATE sala SET habilitada = TRUE WHERE id = ?', [$sala->id]);
 
@@ -179,14 +179,48 @@ final class FuncionesDelOrganizadorTest extends TestCase
     }
 
     /**
-     * Una función en votación de títulos, con las dos obras como candidatas.
+     * Una función en votación de títulos, con las dos obras como candidatas si no se dicen otras.
+     *
+     * @param ?list<string> $candidatas
      */
-    private function funcion(Sala $sala): Funcion
+    private function funcion(Sala $sala, ?array $candidatas = null): Funcion
     {
-        $funcion = $sala->crearFuncion(array_values($this->obras), 40, 3500.0);
+        $funcion = $sala->crearFuncion($candidatas ?? array_values($this->obras), 40, 3500.0);
         $this->funciones->agregar($funcion);
 
         return $funcion;
+    }
+
+    /**
+     * Una obra más de la organizadora, para las votaciones de más de dos candidatas.
+     */
+    private function obra(string $titulo): string
+    {
+        $generoId = (string) $this->base->valor('SELECT id FROM genero LIMIT 1');
+        $obra = Obra::nueva(self::ORGANIZADORA, $titulo, 'Sinopsis.', 2001, 'Lucrecia Martel', 103, TipoObra::Pelicula, OrigenCopia::LicenciaAdquirida, [$generoId]);
+        (new RepositorioDeObras($this->base))->agregar($obra);
+
+        return $obra->id;
+    }
+
+    /**
+     * Las candidatas en el orden en que las lee la base, que es el del desempate.
+     *
+     * @return list<string>
+     */
+    private function candidatas(Funcion $funcion): array
+    {
+        return ($this->funciones->buscar($funcion->id) ?? self::fail('No se encontró la función.'))->obrasIds;
+    }
+
+    /**
+     * Tantos votos de espectadores distintos para esa obra.
+     */
+    private function votar(Funcion $funcion, string $obraId, int $votos): void
+    {
+        for ($i = 0; $i < $votos; ++$i) {
+            $this->base->ejecutar('INSERT INTO voto (funcion_id, usuario_id, obra_id) VALUES (?, ?, ?)', [$funcion->id, Uuid::nuevo(), $obraId]);
+        }
     }
 
     /**
@@ -1829,83 +1863,97 @@ final class FuncionesDelOrganizadorTest extends TestCase
     }
 
     // =========================================================================
-    // Cierre de la votación con la obra más votada (E3-12.4)
+    // Cierre de la votación con las más votadas (E3-12.4, EF-05.1)
     // =========================================================================
 
     /**
      * Criterio E3-12.4: «Listo cuando: La función queda con el título ganador y cambia de estado».
+     * Desde EF-05.1 quedan tantos títulos como películas por función tiene la sala: en una de 2,
+     * con 1, 3 y 5 votos, las de 5 y 3.
      */
-    public function testCerrarVotacionConObraMasVotada(): void
+    public function testCerrarVotacionDejaLasMasVotadasHastaLasPeliculasPorFuncion(): void
     {
-        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
-        $funcion = $this->funcion($sala);
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón', peliculasPorFuncion: 2);
+        $tercera = $this->obra('Rojo');
+        $funcion = $this->funcion($sala, [$this->obras['Zama'], $this->obras['La ciénaga'], $tercera]);
+        $this->votar($funcion, $this->obras['Zama'], 1);
+        $this->votar($funcion, $this->obras['La ciénaga'], 3);
+        $this->votar($funcion, $tercera, 5);
 
-        // Votos: 2 para La ciénaga, 1 para Zama
-        $u1 = Uuid::nuevo();
-        $u2 = Uuid::nuevo();
-        $u3 = Uuid::nuevo();
-        $this->base->ejecutar('INSERT INTO voto (funcion_id, usuario_id, obra_id) VALUES (?, ?, ?)', [$funcion->id, $u1, $this->obras['La ciénaga']]);
-        $this->base->ejecutar('INSERT INTO voto (funcion_id, usuario_id, obra_id) VALUES (?, ?, ?)', [$funcion->id, $u2, $this->obras['La ciénaga']]);
-        $this->base->ejecutar('INSERT INTO voto (funcion_id, usuario_id, obra_id) VALUES (?, ?, ?)', [$funcion->id, $u3, $this->obras['Zama']]);
-
-        // Cierra la votación
         $respuesta = $this->enviar("/organizador/funciones/{$funcion->id}/cerrar-votacion", []);
         self::assertSame(303, $respuesta->estado());
         self::assertSame("/organizador/funciones/{$funcion->id}/proponer-franjas?votacion_cerrada=1", $respuesta->cabecera('Location'));
 
-        // Estado en base: en_acuerdo_fecha y obra elegida
-        $fila = $this->base->fila('SELECT estado FROM funcion WHERE id = ?', [$funcion->id]);
-        self::assertSame(EstadoFuncion::EnAcuerdoFecha->value, $fila['estado']);
-
-        $elegidas = $this->base->filas("SELECT obra_id FROM funcion_obra WHERE funcion_id = ? AND estado = 'elegida'", [$funcion->id]);
-        self::assertCount(1, $elegidas);
-        self::assertSame($this->obras['La ciénaga'], (string) $elegidas[0]['obra_id']);
-
-        // El modelo de la función ahora tiene sólo la obra ganadora
         $leida = $this->funciones->buscar($funcion->id) ?? self::fail('No se encontró la función.');
         self::assertSame(EstadoFuncion::EnAcuerdoFecha, $leida->estado);
-        self::assertSame([$this->obras['La ciénaga']], $leida->obrasIds);
+        self::assertEqualsCanonicalizing([$tercera, $this->obras['La ciénaga']], $leida->obrasIds);
 
-        // En el panel se muestra sólo el título ganador
+        // Las que no salieron siguen como candidatas, para el historial de la votación.
+        $elegidas = $this->base->filas("SELECT obra_id FROM funcion_obra WHERE funcion_id = ? AND estado = 'elegida'", [$funcion->id]);
+        self::assertCount(2, $elegidas);
+
         $panel = $this->pedir('GET', '/organizador/funciones')->cuerpo();
-        self::assertStringContainsString('La ciénaga', $panel);
+        self::assertStringContainsString('Rojo', $panel);
         self::assertStringContainsStringIgnoringCase('en acuerdo de fecha', $panel);
         self::assertStringNotContainsString("/organizador/funciones/{$funcion->id}/cerrar-votacion", $panel);
     }
 
-    public function testCerrarVotacionConEmpateODesempataDeterminista(): void
+    public function testEnUnaSalaDeUnaPeliculaQuedaSoloLaMasVotada(): void
     {
-        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón', peliculasPorFuncion: 1);
         $funcion = $this->funcion($sala);
+        $this->votar($funcion, $this->obras['La ciénaga'], 2);
+        $this->votar($funcion, $this->obras['Zama'], 1);
 
-        // 1 voto para cada una
-        $u1 = Uuid::nuevo();
-        $u2 = Uuid::nuevo();
-        $this->base->ejecutar('INSERT INTO voto (funcion_id, usuario_id, obra_id) VALUES (?, ?, ?)', [$funcion->id, $u1, $this->obras['Zama']]);
-        $this->base->ejecutar('INSERT INTO voto (funcion_id, usuario_id, obra_id) VALUES (?, ?, ?)', [$funcion->id, $u2, $this->obras['La ciénaga']]);
+        self::assertSame(303, $this->enviar("/organizador/funciones/{$funcion->id}/cerrar-votacion", [])->estado());
 
-        $respuesta = $this->enviar("/organizador/funciones/{$funcion->id}/cerrar-votacion", []);
-        self::assertSame(303, $respuesta->estado());
-
-        // Con empate, elige determinísticamente la primera candidata según el orden de candidatas
-        $candidatas = ($this->funciones->buscar($funcion->id) ?? self::fail('No se encontró la función.'))->obrasIds;
         $leida = $this->funciones->buscar($funcion->id) ?? self::fail('No se encontró la función.');
-        self::assertSame(EstadoFuncion::EnAcuerdoFecha, $leida->estado);
-        self::assertSame([$candidatas[0]], $leida->obrasIds);
+        self::assertSame([$this->obras['La ciénaga']], $leida->obrasIds);
     }
 
-    public function testCerrarVotacionSinVotosEligePrimeraCandidata(): void
+    /**
+     * El empate en el corte lo gana la que va primero entre las candidatas, como se leen de la
+     * base, así que el resultado es siempre el mismo.
+     */
+    public function testCerrarVotacionConEmpateEnElCorteDesempataPorElOrdenDeLasCandidatas(): void
     {
-        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
-        $funcion = $this->funcion($sala);
-        $candidatas = ($this->funciones->buscar($funcion->id) ?? self::fail('No se encontró la función.'))->obrasIds;
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón', peliculasPorFuncion: 2);
+        $tercera = $this->obra('Rojo');
+        $funcion = $this->funcion($sala, [$this->obras['Zama'], $this->obras['La ciénaga'], $tercera]);
+        [$primera, $segunda] = array_values(array_diff($this->candidatas($funcion), [$tercera]));
+        $this->votar($funcion, $tercera, 3);
+        $this->votar($funcion, $segunda, 1);
+        $this->votar($funcion, $primera, 1);
 
-        $respuesta = $this->enviar("/organizador/funciones/{$funcion->id}/cerrar-votacion", []);
-        self::assertSame(303, $respuesta->estado());
+        self::assertSame(303, $this->enviar("/organizador/funciones/{$funcion->id}/cerrar-votacion", [])->estado());
+
+        $leida = $this->funciones->buscar($funcion->id) ?? self::fail('No se encontró la función.');
+        self::assertEqualsCanonicalizing([$tercera, $primera], $leida->obrasIds);
+    }
+
+    public function testCerrarVotacionSinVotosDejaLasPrimerasCandidatas(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón', peliculasPorFuncion: 2);
+        $funcion = $this->funcion($sala, [$this->obra('Rojo'), $this->obras['Zama'], $this->obras['La ciénaga']]);
+        $candidatas = $this->candidatas($funcion);
+
+        self::assertSame(303, $this->enviar("/organizador/funciones/{$funcion->id}/cerrar-votacion", [])->estado());
 
         $leida = $this->funciones->buscar($funcion->id) ?? self::fail('No se encontró la función.');
         self::assertSame(EstadoFuncion::EnAcuerdoFecha, $leida->estado);
-        self::assertSame([$candidatas[0]], $leida->obrasIds);
+        self::assertEqualsCanonicalizing(array_slice($candidatas, 0, 2), $leida->obrasIds);
+    }
+
+    public function testConMenosCandidatasQuePeliculasPorFuncionQuedanTodas(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón', peliculasPorFuncion: 3);
+        $funcion = $this->funcion($sala);
+        $this->votar($funcion, $this->obras['Zama'], 1);
+
+        self::assertSame(303, $this->enviar("/organizador/funciones/{$funcion->id}/cerrar-votacion", [])->estado());
+
+        $leida = $this->funciones->buscar($funcion->id) ?? self::fail('No se encontró la función.');
+        self::assertEqualsCanonicalizing(array_values($this->obras), $leida->obrasIds);
     }
 
     public function testCerrarVotacionDesdeLaFichaTambienLlevaAProponerLasFranjas(): void

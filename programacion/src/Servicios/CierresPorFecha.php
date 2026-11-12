@@ -9,6 +9,7 @@ use IndieCinema\Nucleo\Http\ExcepcionHttp;
 use IndieCinema\Programacion\Modelo\EstadoFuncion;
 use IndieCinema\Programacion\Modelo\Funcion;
 use IndieCinema\Programacion\Repositorios\RepositorioDeFunciones;
+use IndieCinema\Programacion\Repositorios\RepositorioDeSalas;
 use IndieCinema\Programacion\Repositorios\RepositorioDeVotos;
 use LogicException;
 use RuntimeException;
@@ -16,8 +17,9 @@ use RuntimeException;
 /**
  * Los cierres que pasan solos al llegar la fecha límite (EF-03), como dice la propuesta. Lo corre
  * el cron del servidor con bin/cerrar-por-fecha.php:
- * - la votación de títulos que pasó su fecha de cierre pasa al acuerdo de fecha con la obra más
- *   votada, igual que si la cerrara el organizador (EF-03.1);
+ * - la votación de títulos que pasó su fecha de cierre pasa al acuerdo de fecha con las obras más
+ *   votadas, tantas como películas por función tiene la sala, igual que si la cerrara el
+ *   organizador (EF-03.1, EF-05.1);
  * - el acuerdo de fecha que pasó su fecha límite confirma la franja que llegó al mínimo y la
  *   función queda programada; si ninguna llegó, la función se cancela y se les avisa a los que
  *   marcaron «Me sirve» (EF-03.2).
@@ -33,6 +35,7 @@ final class CierresPorFecha
     public function __construct(
         private readonly RepositorioDeFunciones $funciones,
         private readonly RepositorioDeVotos $votos,
+        private readonly RepositorioDeSalas $salas,
         private readonly ?AcuerdosDeFunciones $acuerdos = null,
     ) {
     }
@@ -61,14 +64,16 @@ final class CierresPorFecha
     }
 
     /**
-     * Termina la votación con la obra más votada y la guarda en acuerdo de fecha. Es el mismo
-     * cierre para el organizador (ServicioDeFuncionesDelOrganizador::cerrarVotacion()) y para la
-     * tarea: así los dos eligen igual, también al desempatar.
+     * Termina la votación con las obras más votadas, tantas como películas por función tiene la
+     * sala ahora (EF-05.1), y la guarda en acuerdo de fecha. Es el mismo cierre para el organizador
+     * (ServicioDeFuncionesDelOrganizador::cerrarVotacion()) y para la tarea: así los dos eligen
+     * igual, también al desempatar.
      */
     public function cerrarVotacion(Funcion $funcion): void
     {
-        $obraGanadora = $this->votos->obraMasVotada($funcion->id, $funcion->obrasIds);
-        $funcion->cerrarVotacionTitulos([$obraGanadora]);
+        $sala = $this->salas->buscar($funcion->salaId)
+            ?? throw new LogicException("La función {$funcion->id} es de una sala que no existe.");
+        $funcion->cerrarVotacionTitulos($this->votos->masVotadas($funcion->id, $funcion->obrasIds, $sala->datos->peliculasPorFuncion));
         $this->funciones->guardar($funcion);
     }
 

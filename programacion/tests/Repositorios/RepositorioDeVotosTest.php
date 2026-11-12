@@ -109,7 +109,7 @@ final class RepositorioDeVotosTest extends TestCase
         self::assertSame(1, $conteo[$this->obra2]);
     }
 
-    public function testObraMasVotadaEligeLaQueTieneMasVotos(): void
+    public function testMasVotadasEligeLaQueTieneMasVotos(): void
     {
         $u1 = Uuid::nuevo();
         $u2 = Uuid::nuevo();
@@ -119,11 +119,11 @@ final class RepositorioDeVotosTest extends TestCase
         $this->votos->votar($this->funcionId, $u2, $this->obra2);
         $this->votos->votar($this->funcionId, $u3, $this->obra1);
 
-        $ganadora = $this->votos->obraMasVotada($this->funcionId, [$this->obra1, $this->obra2]);
-        self::assertSame($this->obra2, $ganadora);
+        $ganadora = $this->votos->masVotadas($this->funcionId, [$this->obra1, $this->obra2], 1);
+        self::assertSame([$this->obra2], $ganadora);
     }
 
-    public function testObraMasVotadaDesempataDeFormaDeterminista(): void
+    public function testMasVotadasDesempataDeFormaDeterminista(): void
     {
         $u1 = Uuid::nuevo();
         $u2 = Uuid::nuevo();
@@ -132,14 +132,14 @@ final class RepositorioDeVotosTest extends TestCase
         $this->votos->votar($this->funcionId, $u2, $this->obra2);
 
         // Con empate, elige la primera entre las candidatas con mayor puntaje
-        self::assertSame($this->obra1, $this->votos->obraMasVotada($this->funcionId, [$this->obra1, $this->obra2]));
-        self::assertSame($this->obra2, $this->votos->obraMasVotada($this->funcionId, [$this->obra2, $this->obra1]));
+        self::assertSame([$this->obra1], $this->votos->masVotadas($this->funcionId, [$this->obra1, $this->obra2], 1));
+        self::assertSame([$this->obra2], $this->votos->masVotadas($this->funcionId, [$this->obra2, $this->obra1], 1));
     }
 
-    public function testObraMasVotadaSinVotosEligePrimeraCandidata(): void
+    public function testMasVotadasSinVotosEligePrimeraCandidata(): void
     {
         // Sin votos registrados para esta función
         self::assertSame(0, $this->votos->totalDeVotos($this->funcionId));
-        self::assertSame($this->obra1, $this->votos->obraMasVotada($this->funcionId, [$this->obra1, $this->obra2]));
+        self::assertSame([$this->obra1], $this->votos->masVotadas($this->funcionId, [$this->obra1, $this->obra2], 1));
     }
 }

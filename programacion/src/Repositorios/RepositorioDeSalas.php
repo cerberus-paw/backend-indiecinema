@@ -32,6 +32,37 @@ final class RepositorioDeSalas
     }
 
     /**
+     * Si hay una fila con ese id, aunque la sala se haya dado de baja: un id así no se puede volver
+     * a usar (EF-07.1).
+     */
+    public function idUsado(string $id): bool
+    {
+        return $this->base->valor('SELECT COUNT(*) FROM sala WHERE id = ?', [$id]) > 0;
+    }
+
+    /**
+     * Las que existen de esos ids, con el id como clave; las dadas de baja no vienen, como en
+     * buscar(). Es lo que lee moderación para su bandeja (EF-07.1).
+     *
+     * @param list<string> $ids
+     *
+     * @return array<string, Sala>
+     */
+    public function varias(array $ids): array
+    {
+        if ($ids === []) {
+            return [];
+        }
+        $salas = array_map(self::sala(...), $this->base->filas(
+            'SELECT ' . self::COLUMNAS . ' FROM sala
+             WHERE id IN (' . implode(', ', array_fill(0, count($ids), '?')) . ') AND dada_de_baja_en IS NULL',
+            $ids,
+        ));
+
+        return array_column($salas, null, 'id');
+    }
+
+    /**
      * Las salas de un organizador, de la más nueva a la más vieja.
      *
      * @return list<Sala>

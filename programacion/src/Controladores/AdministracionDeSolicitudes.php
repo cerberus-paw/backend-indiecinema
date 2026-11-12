@@ -109,7 +109,7 @@ final class AdministracionDeSolicitudes extends Controlador
         if ($solicitud->estado !== EstadoSolicitud::Aprobada) {
             throw ExcepcionHttp::noEncontrada();
         }
-        $this->salas->cambiarHabilitacion($solicitud->sala->id, $habilitada, self::administrador($peticion));
+        $this->salas->cambiarHabilitacion($solicitud->sala->id, $habilitada, self::administrador($peticion)->id);
 
         return $this->redirigir('/administracion/solicitudes?' . http_build_query([
             'id' => $solicitud->id,

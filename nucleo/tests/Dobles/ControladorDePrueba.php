@@ -53,6 +53,11 @@ final class ControladorDePrueba extends Controlador
             'llamador' => $peticion->llamador(),
             'q' => $peticion->consulta('q'),
             'cuerpo' => $peticion->cuerpo(),
+            // Los que llegaron como subidos (Peticion deja pasar sólo ésos), con su contenido.
+            'archivos' => array_map(static fn (array $archivo): array => [
+                'nombre' => $archivo['name'],
+                'sha1' => sha1_file($archivo['tmp_name']),
+            ], array_filter(['imagen' => $peticion->archivo('imagen')])),
         ]);
     }
 

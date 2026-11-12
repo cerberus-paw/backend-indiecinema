@@ -57,6 +57,76 @@ final class ServicioDeSalas
     }
 
     /**
+     * La sala de una solicitud que aprobó moderación (EF-07.1), habilitada, con el id que eligió
+     * moderación: así repetir el pedido no crea otra.
+     *
+     * - Si no hay ninguna con ese id, la crea con la foto.
+     * - Si hay una sin habilitar del mismo organizador (la de una solicitud que se mudó a
+     *   moderación), le pone los datos y la foto corregidos allá y la habilita; la foto anterior se
+     *   borra recién cuando la base apunta a la nueva.
+     * - Si hay una habilitada del mismo organizador, es el reintento de un pedido que ya se hizo: no
+     *   la toca, porque sus datos ya son de su organizador.
+     *
+     * @return array{Sala, bool} la sala y si se creó
+     *
+     * @throws ExcepcionHttp 409 si el id es de una sala de otro organizador o de una dada de baja
+     */
+    public function crearParaSolicitud(string $id, string $organizadorId, DatosDeSala $datos, ImagenSubida $imagen): array
+    {
+        $existente = $this->salas->buscar($id);
+        if ($existente === null ? $this->salas->idUsado($id) : !$existente->esDe($organizadorId)) {
+            throw new ExcepcionHttp(409, 'Ese id es de otra sala.');
+        }
+        if ($existente?->habilitada) {
+            return [$existente, false];
+        }
+
+        $foto = $this->archivos->guardar($imagen);
+        $sala = $existente ?? new Sala($id, $organizadorId, $datos, $foto, habilitada: true);
+        $anterior = $existente?->imagen;
+        try {
+            if ($existente === null) {
+                $this->salas->agregar($sala);
+            } else {
+                $sala->cambiarDatos($datos);
+                $sala->cambiarImagen($foto);
+                $this->salas->guardar($sala);
+            }
+        } catch (Throwable $error) {
+            // Que no quede en el volumen una foto que nadie usa.
+            $this->archivos->borrar($foto);
+            throw $error;
+        }
+        // La anterior se borra recién cuando la base apunta a la nueva. Si habilitarla falla, el
+        // reintento la encuentra sin habilitar y la completa otra vez.
+        if ($anterior !== null) {
+            $this->archivos->borrar($anterior);
+        }
+        if ($existente !== null) {
+            $sala->cambiarHabilitacion(true);
+            $this->salas->guardarHabilitacion($sala);
+        }
+        $this->log->notice('Moderación habilitó la sala {sala} de {organizador}, de una solicitud aprobada.', [
+            'sala' => $sala->id,
+            'organizador' => $organizadorId,
+        ]);
+
+        return [$sala, $existente === null];
+    }
+
+    /**
+     * Las que existen de esos ids, con el id como clave, sin las dadas de baja (EF-07.1).
+     *
+     * @param list<string> $ids
+     *
+     * @return array<string, Sala>
+     */
+    public function varias(array $ids): array
+    {
+        return $this->salas->varias($ids);
+    }
+
+    /**
      * @return list<Sala>
      */
     public function delOrganizador(Usuario $organizador): array
@@ -65,13 +135,14 @@ final class ServicioDeSalas
     }
 
     /**
-     * Publica la sala en el sitio o la retira. Cada cambio queda en el log, con quién lo hizo: es
-     * el registro de auditoría que pide la historia. Una sala retirada deja de verse en el listado
-     * público y sus funciones, en la cartelera.
+     * Publica la sala en el sitio o la retira. Cada cambio queda en el log, con quién lo hizo (el
+     * administrador desde la bandeja, o el moderador por la API interna, EF-07.1) y, si lo hay, por
+     * qué: es el registro de auditoría que pide la historia. Una sala retirada deja de verse en el
+     * listado público y sus funciones, en la cartelera, y no programa funciones nuevas.
      *
      * @throws ExcepcionHttp 404 si no existe o está dada de baja
      */
-    public function cambiarHabilitacion(string $id, bool $habilitada, Usuario $administrador): Sala
+    public function cambiarHabilitacion(string $id, bool $habilitada, string $quien, ?string $motivo = null): Sala
     {
         $sala = $this->buscar($id);
         if ($sala->habilitada === $habilitada) {
@@ -80,9 +151,11 @@ final class ServicioDeSalas
         }
         $sala->cambiarHabilitacion($habilitada);
         $this->salas->guardarHabilitacion($sala);
-        $this->log->notice($habilitada ? '{administrador} habilitó la sala {sala}.' : '{administrador} deshabilitó la sala {sala}.', [
-            'administrador' => $administrador->id,
+        $accion = $habilitada ? '{quien} habilitó la sala {sala}' : '{quien} deshabilitó la sala {sala}';
+        $this->log->notice($accion . ($motivo === null ? '.' : ': {motivo}'), [
+            'quien' => $quien,
             'sala' => $sala->id,
+            'motivo' => $motivo,
         ]);
 
         return $sala;

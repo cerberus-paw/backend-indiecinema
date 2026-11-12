@@ -32,13 +32,16 @@ final class ServicioDeReservas
     public const POR_PAGINA = 20;
 
     /**
-     * @param ?PagosDeReservas $pagos el cobro con Mercado Pago; sin él, como con el cobro apagado,
-     *                                toda reserva nace confirmada
+     * @param ?PagosDeReservas      $pagos      el cobro con Mercado Pago; sin él, como con el cobro
+     *                                          apagado, toda reserva nace confirmada
+     * @param ?ServicioDeReembolsos $reembolsos la devolución del pago al cancelar (EF-06.4); sin
+     *                                          él, la reserva se cancela y no se devuelve nada
      */
     public function __construct(
         private readonly FuncionesDeProgramacion $funciones,
         private readonly RepositorioDeReservas $reservas,
         private readonly ?PagosDeReservas $pagos = null,
+        private readonly ?ServicioDeReembolsos $reembolsos = null,
     ) {
     }
 
@@ -122,6 +125,10 @@ final class ServicioDeReservas
      * Cancela la reserva del espectador: sus lugares vuelven a quedar libres para otros. No
      * bloquea la función como reservar(): soltar lugares nunca pasa el cupo.
      *
+     * Si la había pagado, se le devuelve la plata (EF-06.4). Si Mercado Pago no la devuelve, la
+     * reserva queda cancelada igual: el espectador no se come un error por algo que se arregla del
+     * otro lado, y el reembolso queda pendiente para el administrador.
+     *
      * @throws ExcepcionHttp   404 si no es suya
      * @throws ReglaIncumplida si ya no está confirmada, la función ya empezó, o cambió mientras
      *                         tanto (el organizador registró la asistencia)
@@ -145,7 +152,8 @@ final class ServicioDeReservas
             throw new ReglaIncumplida('La reserva cambió mientras tanto. Volvé a cargarla para ver en qué quedó.');
         }
 
-        return $cancelada;
+        // Después de guardarla: sólo se devuelve el pago de una cancelación que de verdad quedó.
+        return $this->reembolsos?->reembolsar($cancelada, $ahora) ?? $cancelada;
     }
 
     /**

@@ -18,9 +18,13 @@ use IndieCinema\Nucleo\Uuid;
  * llama recaudación, con su token: lo controla la ruta.
  *
  * Por cada reserva en pie: su total y lo que se cobró de verdad. Una reserva a la gorra, o que se
- * confirmó con el cobro apagado, no tiene pago: total puede ser más que 0, pero cobrado es 0. El
- * neto suma lo cobrado (sin reembolsos hasta EF-06.4). Los montos van como texto con dos decimales,
- * como los guarda la base: sin pasar por float.
+ * confirmó con el cobro apagado, no tiene pago: total puede ser más que 0, pero cobrado es 0.
+ *
+ * También van las canceladas que se habían pagado (EF-06.4), con reembolsada diciendo si la plata
+ * ya volvió. El neto es lo cobrado menos lo reembolsado: una devuelta no se reparte, y una que
+ * quedó pendiente de devolver sí, porque todavía está en la cuenta.
+ *
+ * Los montos van como texto con dos decimales, como los guarda la base: sin pasar por float.
  */
 final class CobrosInternos extends Controlador
 {
@@ -76,7 +80,8 @@ final class CobrosInternos extends Controlador
         $filas = [];
         foreach ($reservas as $reserva) {
             $cobrado = $reserva->pagoId === null ? '0.00' : $reserva->total;
-            $neto += self::centavos($cobrado);
+            $reembolsada = $reserva->reembolsoId !== null;
+            $neto += $reembolsada ? 0 : self::centavos($cobrado);
             $filas[] = [
                 'id' => $reserva->id,
                 'usuario_id' => $reserva->usuarioId,
@@ -85,10 +90,7 @@ final class CobrosInternos extends Controlador
                 'cobrado' => $cobrado,
                 'pago_id' => $reserva->pagoId,
                 'estado' => $reserva->estado->value,
-                // Todavía no se registra ningún reembolso: los de Mercado Pago quedan en el log
-                // hasta EF-06.4, que suma la columna y los descuenta del neto. El campo ya está,
-                // para que recaudación no tenga que cambiar.
-                'reembolsada' => false,
+                'reembolsada' => $reembolsada,
             ];
         }
 

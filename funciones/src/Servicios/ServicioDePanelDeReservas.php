@@ -26,9 +26,15 @@ final class ServicioDePanelDeReservas
     /** Las reservas que ve el administrador por página. */
     public const POR_PAGINA = 20;
 
+    /**
+     * @param ?ServicioDeReembolsos $reembolsos la devolución del pago al anular y al cancelarse la
+     *                                          función (EF-06.4); sin él, la reserva se cancela y
+     *                                          no se devuelve nada
+     */
     public function __construct(
         private readonly FuncionesDeProgramacion $funciones,
         private readonly RepositorioDeReservas $reservas,
+        private readonly ?ServicioDeReembolsos $reembolsos = null,
     ) {
     }
 
@@ -111,7 +117,9 @@ final class ServicioDePanelDeReservas
     }
 
     /**
-     * El administrador anula una reserva confirmada: queda cancelada y sus lugares se liberan.
+     * El administrador anula una reserva confirmada: queda cancelada y sus lugares se liberan, y
+     * si estaba pagada se le devuelve la plata al espectador (EF-06.4). Si el reembolso no sale, la
+     * anulación queda igual y el panel la muestra con el reembolso pendiente.
      *
      * @throws ExcepcionHttp   404 si no existe
      * @throws ReglaIncumplida si no está confirmada, o cambió mientras tanto
@@ -128,14 +136,17 @@ final class ServicioDePanelDeReservas
             throw new ReglaIncumplida("La reserva {$reserva->codigo} cambió mientras tanto. Volvé a cargar la página para ver en qué quedó.");
         }
 
-        return $anulada;
+        return $this->reembolsos?->reembolsar($anulada, $ahora) ?? $anulada;
     }
 
     /**
      * Cancela las reservas confirmadas de una función que se canceló (E4-03.4), y las que esperaban
      * el pago, que ya no tienen para qué pagarse. Las que ya tienen la asistencia o ya estaban
      * canceladas quedan como están. Llamarla dos veces no cambia nada: la segunda no encuentra
-     * ninguna que cancelar.
+     * ninguna que cancelar, y una reembolsada no se vuelve a reembolsar (EF-06.4).
+     *
+     * A cada una que estaba pagada se le devuelve la plata, una por una: si Mercado Pago se cae en
+     * la tercera, las dos primeras ya están devueltas y las demás quedan pendientes.
      *
      * @param string $organizadorId quién canceló la función, para el historial
      *
@@ -153,7 +164,7 @@ final class ServicioDePanelDeReservas
             // Si el espectador la canceló justo antes (o se acreditó el pago), ya no está como se
             // leyó y no se toca.
             if ($this->reservas->guardarEstado($cancelada, $reserva->estado, $autor, $ahora)) {
-                $canceladas[] = $cancelada;
+                $canceladas[] = $this->reembolsos?->reembolsar($cancelada, $ahora) ?? $cancelada;
             }
         }
 

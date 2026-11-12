@@ -50,20 +50,25 @@ final class CobrosInternosTest extends TestCase
         $this->reserva('asistio', self::FUNCION, 1, '3500.50', 'asistio', 'pago-2', '2026-11-01 11:00:00');
         // Se confirmó con el cobro apagado: total, pero nada cobrado.
         $this->reserva('sin_cobro', self::FUNCION, 1, '3500.00', 'confirmada', null, '2026-11-01 12:00:00');
-        // No cuentan: la que todavía espera el pago y la cancelada.
+        // No cuentan: la que todavía espera el pago y la cancelada que nunca se pagó.
         $this->reserva('pendiente', self::FUNCION, 1, '3500.00', 'pendiente_pago', null, '2026-11-01 13:00:00');
         $this->reserva('cancelada', self::FUNCION, 3, '10500.00', 'cancelada', null, '2026-11-01 14:00:00');
         $this->reserva('de_otra', self::OTRA, 1, '0.00', 'confirmada', null, '2026-11-01 15:00:00');
+        // Canceladas que sí se habían pagado (EF-06.4): una devuelta, que el neto descuenta, y una
+        // con el reembolso pendiente, que sigue contando porque la plata está en la cuenta.
+        $this->reserva('reembolsada', self::FUNCION, 2, '7000.00', 'cancelada', 'pago-3', '2026-11-01 16:00:00', 'reembolso-3');
+        $this->reserva('reembolso_pendiente', self::FUNCION, 1, '3500.00', 'cancelada', 'pago-4', '2026-11-01 17:00:00');
     }
 
-    private function reserva(string $nombre, string $funcion, int $cantidad, string $total, string $estado, ?string $pago, string $creada): void
+    private function reserva(string $nombre, string $funcion, int $cantidad, string $total, string $estado, ?string $pago, string $creada, ?string $reembolso = null): void
     {
         $this->ids[$nombre] = Uuid::nuevo();
         $this->base->ejecutar(
-            'INSERT INTO reserva (id, funcion_id, usuario_id, codigo, cantidad, total, estado, creada_en, vence_en, pago_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            'INSERT INTO reserva (id, funcion_id, usuario_id, codigo, cantidad, total, estado, creada_en, vence_en, pago_id, reembolso_id, reembolsada_en) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             [
                 $this->ids[$nombre], $funcion, '99999999-9999-4999-8999-999999999999', strtoupper(substr(bin2hex(random_bytes(4)), 0, 8)),
                 $cantidad, $total, $estado, $creada, $estado === 'pendiente_pago' ? '2099-01-01 00:00:00' : null, $pago,
+                $reembolso, $reembolso === null ? null : $creada,
             ],
         );
     }
@@ -86,7 +91,10 @@ final class CobrosInternosTest extends TestCase
         self::assertSame(200, $respuesta->estado(), $respuesta->cuerpo());
         $datos = json_decode($respuesta->cuerpo(), true);
         self::assertSame(self::FUNCION, $datos['funcion_id']);
-        self::assertSame([$this->ids['pagada'], $this->ids['asistio'], $this->ids['sin_cobro']], array_column($datos['reservas'], 'id'));
+        self::assertSame(
+            [$this->ids['pagada'], $this->ids['asistio'], $this->ids['sin_cobro'], $this->ids['reembolsada'], $this->ids['reembolso_pendiente']],
+            array_column($datos['reservas'], 'id'),
+        );
         self::assertSame([
             'id' => $this->ids['pagada'],
             'usuario_id' => '99999999-9999-4999-8999-999999999999',
@@ -99,8 +107,26 @@ final class CobrosInternosTest extends TestCase
         ], $datos['reservas'][0]);
         // La confirmada sin pago tiene total, pero no se cobró nada.
         self::assertSame(['3500.00', '0.00', null], [$datos['reservas'][2]['total'], $datos['reservas'][2]['cobrado'], $datos['reservas'][2]['pago_id']]);
-        // 7000.00 + 3500.50, sumado en centavos.
-        self::assertSame('10500.50', $datos['neto']);
+        // 7000.00 + 3500.50 + 3500.00 (la del reembolso pendiente), sumado en centavos: la
+        // reembolsada no suma.
+        self::assertSame('14000.50', $datos['neto']);
+    }
+
+    /**
+     * Una cancelada que se había pagado va igual (EF-06.4): recaudación tiene que ver si la plata
+     * volvió. La devuelta no se reparte; la que quedó pendiente de devolver, sí.
+     */
+    public function testLasCanceladasQueSePagaronVanConSuReembolso(): void
+    {
+        $datos = json_decode($this->pedir('/interno/funciones/' . self::FUNCION . '/cobros')->cuerpo(), true);
+
+        $porId = array_column($datos['reservas'], null, 'id');
+        $reembolsada = $porId[$this->ids['reembolsada']];
+        self::assertSame(['cancelada', 'pago-3', '7000.00', true], [$reembolsada['estado'], $reembolsada['pago_id'], $reembolsada['cobrado'], $reembolsada['reembolsada']]);
+        $pendiente = $porId[$this->ids['reembolso_pendiente']];
+        self::assertSame(['cancelada', 'pago-4', '3500.00', false], [$pendiente['estado'], $pendiente['pago_id'], $pendiente['cobrado'], $pendiente['reembolsada']]);
+        // La cancelada que nunca se pagó no está: no hay nada que repartir ni que devolver.
+        self::assertArrayNotHasKey($this->ids['cancelada'], $porId);
     }
 
     public function testDeVariasEnUnPedidoConLasQueNoTienenReservasEnCero(): void
@@ -108,7 +134,7 @@ final class CobrosInternosTest extends TestCase
         $datos = json_decode($this->pedir('/interno/cobros?funciones=' . self::FUNCION . ',' . self::OTRA . ',' . self::SIN_RESERVAS)->cuerpo(), true);
 
         self::assertSame([self::FUNCION, self::OTRA, self::SIN_RESERVAS], array_keys($datos['cobros']));
-        self::assertSame('10500.50', $datos['cobros'][self::FUNCION]['neto']);
+        self::assertSame('14000.50', $datos['cobros'][self::FUNCION]['neto']);
         // A la gorra: la reserva está, con total y cobrado en cero.
         self::assertSame('0.00', $datos['cobros'][self::OTRA]['neto']);
         self::assertSame('0.00', $datos['cobros'][self::OTRA]['reservas'][0]['cobrado']);

@@ -426,17 +426,24 @@ final class ServicioDeFuncionesDelOrganizador
         if ($fechaHora <= new DateTimeImmutable()) {
             throw new ReglaIncumplida('La franja ganadora ya empezó: la función no se puede programar en esa fecha. Cerrá el acuerdo sin mínimo y proponé franjas nuevas.');
         }
-        // Entre la propuesta y ahora se pudo programar otra en ese horario (EF-05.5).
-        $pisada = $this->cierres()->motivoParaPisarse($funcion, $fechaHora);
-        if ($pisada !== null) {
-            throw new ReglaIncumplida("La franja ganadora {$pisada} Cerrá el acuerdo sin mínimo y proponé franjas nuevas.");
-        }
+        $acuerdos = $this->acuerdos;
 
-        $this->acuerdos->confirmar((string) $acuerdo['id']);
-        $funcion->fijarFechaHora($fechaHora);
-        $this->funciones->guardar($funcion);
+        // Con la sala bloqueada, como al programar (EF-05.6): el pedido a funciones va adentro, así
+        // nadie programa en ese horario entre el control y el guardado. Traba sólo esta sala, y
+        // funciones contesta en 2 segundos o falla.
+        return $this->salas->conLaSalaBloqueada($funcion->salaId, function () use ($funcion, $fechaHora, $acuerdo, $acuerdos): Funcion {
+            // Entre la propuesta y ahora se pudo programar otra en ese horario (EF-05.5).
+            $pisada = $this->cierres()->motivoParaPisarse($funcion, $fechaHora);
+            if ($pisada !== null) {
+                throw new ReglaIncumplida("La franja ganadora {$pisada} Cerrá el acuerdo sin mínimo y proponé franjas nuevas.");
+            }
 
-        return $funcion;
+            $acuerdos->confirmar((string) $acuerdo['id']);
+            $funcion->fijarFechaHora($fechaHora);
+            $this->funciones->guardar($funcion);
+
+            return $funcion;
+        });
     }
 
     /**

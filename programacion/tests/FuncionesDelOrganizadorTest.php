@@ -70,6 +70,7 @@ final class FuncionesDelOrganizadorTest extends TestCase
     protected function setUp(): void
     {
         @unlink(sys_get_temp_dir() . '/acuerdo_estado_global.txt');
+        @unlink(sys_get_temp_dir() . '/acuerdo_confirmado.txt');
         // Funciones contesta la ocupación: ninguna función tiene reservas salvo que la prueba las
         // ponga con ocupados() (F-01.1).
         file_put_contents(sys_get_temp_dir() . '/ocupacion_de_prueba.json', '{}');
@@ -102,6 +103,7 @@ final class FuncionesDelOrganizadorTest extends TestCase
     protected function tearDown(): void
     {
         @unlink(sys_get_temp_dir() . '/acuerdo_estado_global.txt');
+        @unlink(sys_get_temp_dir() . '/acuerdo_confirmado.txt');
         @unlink(sys_get_temp_dir() . '/ocupacion_de_prueba.json');
     }
 
@@ -2633,6 +2635,30 @@ final class FuncionesDelOrganizadorTest extends TestCase
         self::assertSame(422, $respuesta['estado']);
         self::assertStringContainsString('Se pisa con otra función de la sala, que va de 20:30 a 22:13', $respuesta['cuerpo']);
         self::assertSame('2030-10-25 23:00:00', $this->base->valor('SELECT fecha_hora FROM funcion WHERE id = ?', [$funcion->id]));
+    }
+
+    /**
+     * EF-05.6: confirmar el acuerdo también va de a uno. Mientras se confirma, otra conexión con la
+     * sala tomada programa una función a las 19:00 del día de la franja ganadora (las 20:00): la
+     * confirmación espera, ve que se pisa y no le pide a funciones que confirme; la función sigue
+     * en acuerdo.
+     */
+    public function testConfirmarElAcuerdoEsperaALaOtraDeLaSalaYVeQueSePisa(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $funcion = $this->funcion($sala);
+        $this->enviar("/organizador/funciones/{$funcion->id}/cerrar-votacion", []);
+        self::acuerdoEnFunciones('abierto');
+
+        $respuesta = $this->mientrasOtraTieneLaSala($sala, self::dentroDe(10, '19:00:00'), "/organizador/funciones/{$funcion->id}/confirmar-acuerdo", ['volver' => 'ficha']);
+
+        self::assertSame(303, $respuesta['estado']);
+        self::assertStringContainsString(
+            'La franja ganadora se pisa con otra función de la sala, que va de 19:00 a 20:43: entre una y otra tienen que quedar 15 minutos. Cerrá el acuerdo sin mínimo y proponé franjas nuevas.',
+            $this->pedir('GET', (string) $respuesta['location'])->cuerpo(),
+        );
+        self::assertFileDoesNotExist(sys_get_temp_dir() . '/acuerdo_confirmado.txt', 'Se le pidió a funciones que confirme.');
+        self::assertSame(EstadoFuncion::EnAcuerdoFecha, ($this->funciones->buscar($funcion->id) ?? self::fail('No se encontró la función.'))->estado);
     }
 
     /**

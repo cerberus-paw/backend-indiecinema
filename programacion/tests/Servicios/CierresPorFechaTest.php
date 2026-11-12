@@ -224,9 +224,32 @@ final class CierresPorFechaTest extends TestCase
         return new AcuerdosEnMemoria(new ClienteInterno('programacion', 'token', ['funciones' => 'http://127.0.0.1:1'], new Log('programacion', fopen('php://memory', 'w'))));
     }
 
-    private function cierresConAcuerdos(AcuerdosEnMemoria $acuerdos): CierresPorFecha
+    /**
+     * @param ?resource $log adónde escribe el log, para leerlo
+     */
+    private function cierresConAcuerdos(AcuerdosEnMemoria $acuerdos, $log = null): CierresPorFecha
     {
-        return new CierresPorFecha(new RepositorioDeFunciones($this->base), new RepositorioDeVotos($this->base), new RepositorioDeSalas($this->base), new RepositorioDeObras($this->base), $acuerdos);
+        return new CierresPorFecha(
+            new RepositorioDeFunciones($this->base),
+            new RepositorioDeVotos($this->base),
+            new RepositorioDeSalas($this->base),
+            new RepositorioDeObras($this->base),
+            $acuerdos,
+            $log === null ? null : new Log('programacion', $log),
+        );
+    }
+
+    /**
+     * Otra función de la sala, ya programada en $cuando con Nosferatu (100 minutos).
+     */
+    private function otraProgramada(string $cuando): void
+    {
+        $funciones = new RepositorioDeFunciones($this->base);
+        $otra = Funcion::nueva($this->sala->id, array_values($this->obras), 40, 3500.0, new DateTimeImmutable('+10 days'));
+        $funciones->agregar($otra);
+        $otra->cerrarVotacionTitulos([$this->obras['Nosferatu']]);
+        $otra->fijarFechaHora(new DateTimeImmutable($cuando));
+        $funciones->guardar($otra);
     }
 
     /**
@@ -299,6 +322,50 @@ final class CierresPorFechaTest extends TestCase
 
         self::assertSame('cancelada', $this->estadoDe($id));
         self::assertSame([['avisar-cancelacion', 'acuerdo-1', 'Zama']], $acuerdos->pedidos);
+    }
+
+    /**
+     * EF-05.5: la franja ganadora (mañana a las 20:00) se pisa con otra función de la sala que va
+     * de 19:00 a 20:40. Como una que ya empezó: cierra sin mínimo, cancela y avisa, pero con el
+     * motivo verdadero, y el log lo anota.
+     */
+    public function testLaGanadoraQueSePisaCancelaLaFuncionConElMotivo(): void
+    {
+        $id = $this->enAcuerdo();
+        $this->otraProgramada((new DateTimeImmutable('+1 day'))->format('Y-m-d') . ' 19:00:00');
+        $acuerdos = $this->acuerdos();
+        $acuerdos->porFuncion[$id] = self::acuerdo('abierto', '-1 hour', 2);
+        $log = fopen('php://memory', 'w+');
+
+        self::assertSame(['programadas' => 0, 'canceladas' => 1], $this->cierresConAcuerdos($acuerdos, $log)->cerrarAcuerdos());
+
+        self::assertSame('cancelada', $this->estadoDe($id));
+        self::assertSame([['cerrar-sin-minimo', 'acuerdo-1'], ['avisar-cancelacion', 'acuerdo-1', 'Zama', 'horario_ocupado']], $acuerdos->pedidos);
+        rewind($log);
+        $escrito = (string) stream_get_contents($log);
+        self::assertStringContainsString('se pisa con otra función de la sala, que va de 19:00 a 20:40', $escrito);
+        self::assertStringContainsString($id, $escrito);
+    }
+
+    /**
+     * La pasada anterior confirmó en funciones y se cortó, y en el medio se programó otra en ese
+     * horario: se cancela igual. Funciones no avisa a un acuerdo confirmado, así que sólo lo anota
+     * el log.
+     */
+    public function testUnConfirmadoSinProgramarQueSePisaSeCancela(): void
+    {
+        $id = $this->enAcuerdo();
+        $this->otraProgramada((new DateTimeImmutable('+1 day'))->format('Y-m-d') . ' 19:00:00');
+        $acuerdos = $this->acuerdos();
+        $acuerdos->porFuncion[$id] = self::acuerdo('confirmado', '-1 hour', 2);
+        $log = fopen('php://memory', 'w+');
+
+        self::assertSame(['programadas' => 0, 'canceladas' => 1], $this->cierresConAcuerdos($acuerdos, $log)->cerrarAcuerdos());
+
+        self::assertSame('cancelada', $this->estadoDe($id));
+        self::assertSame([], $acuerdos->pedidos);
+        rewind($log);
+        self::assertStringContainsString('se pisa con otra función de la sala', (string) stream_get_contents($log));
     }
 
     /**
@@ -390,11 +457,11 @@ final class AcuerdosEnMemoria extends AcuerdosDeFunciones
         return ['id' => $acuerdoId, 'estado' => 'sin_minimo'];
     }
 
-    public function avisarCancelacion(string $acuerdoId, string $titulo): void
+    public function avisarCancelacion(string $acuerdoId, string $titulo, string $motivo = 'sin_minimo'): void
     {
         if ($this->caido) {
             throw new \RuntimeException('funciones no responde.');
         }
-        $this->pedidos[] = ['avisar-cancelacion', $acuerdoId, $titulo];
+        $this->pedidos[] = $motivo === 'sin_minimo' ? ['avisar-cancelacion', $acuerdoId, $titulo] : ['avisar-cancelacion', $acuerdoId, $titulo, $motivo];
     }
 }

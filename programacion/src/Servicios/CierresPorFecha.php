@@ -112,6 +112,18 @@ final class CierresPorFecha
     }
 
     /**
+     * Para revisar la sala: la tarea canceló una función porque la franja ganadora se pisaba.
+     */
+    private function avisarPisada(Funcion $funcion, string $pisada): void
+    {
+        $this->log?->warning('La función {funcion} de la sala {sala} se cancela: la franja ganadora {pisada}', [
+            'funcion' => $funcion->id,
+            'sala' => $funcion->salaId,
+            'pisada' => $pisada,
+        ]);
+    }
+
+    /**
      * Los acuerdos de fecha que pasaron su fecha límite (EF-03.2). El acuerdo vive en funciones:
      * se le pregunta por cada función en acuerdo, y al leerlo funciones ya cierra sin mínimo el que
      * venció sin llegar (ServicioDeAcuerdos::cerrarSiVencio()).
@@ -168,22 +180,39 @@ final class CierresPorFecha
             if ($inicio === null || $inicio <= $ahora) {
                 return null;
             }
+            // Si en el medio se programó otra en ese horario (EF-05.5), se cancela. Funciones no
+            // avisa a los de un acuerdo confirmado, así que queda en el log.
+            $pisada = $this->motivoParaPisarse($funcion, $inicio);
+            if ($pisada !== null) {
+                $this->avisarPisada($funcion, $pisada);
+                $funcion->cancelar();
+                $this->funciones->guardar($funcion);
+
+                return 'canceladas';
+            }
             $funcion->fijarFechaHora($inicio, $ahora);
             $this->funciones->guardar($funcion);
 
             return 'programadas';
         }
 
+        $motivo = 'sin_minimo';
         if ($estado === 'abierto' && $limite !== null && $limite < $ahora && AcuerdosDeFunciones::alcanzoElMinimo($acuerdo)) {
             $inicio = self::fecha((AcuerdosDeFunciones::franjaQueLidera($acuerdo) ?? [])['inicio'] ?? null);
-            if ($inicio !== null && $inicio > $ahora) {
+            // La que se pisa con otra función de la sala (EF-05.5) tampoco se programa: se cancela
+            // como la que ya empezó, pero el aviso dice el motivo verdadero.
+            $pisada = $inicio !== null && $inicio > $ahora ? $this->motivoParaPisarse($funcion, $inicio) : null;
+            if ($pisada !== null) {
+                $this->avisarPisada($funcion, $pisada);
+                $motivo = 'horario_ocupado';
+            } elseif ($inicio !== null && $inicio > $ahora) {
                 $acuerdos->confirmar((string) $acuerdo['id']);
                 $funcion->fijarFechaHora($inicio, $ahora);
                 $this->funciones->guardar($funcion);
 
                 return 'programadas';
             }
-            // La franja que llegó al mínimo ya empezó: no se puede programar en el pasado, y la
+            // La franja que llegó al mínimo ya empezó, o se pisa: no se puede programar, y la
             // función se cancela como si no hubiera llegado (es la regla del cierre a mano).
             $acuerdo = $acuerdos->cerrarSinMinimo((string) $acuerdo['id']);
             $estado = 'sin_minimo';
@@ -196,7 +225,7 @@ final class CierresPorFecha
             return null;
         }
         $titulos = $this->funciones->resumen($funcionId)->titulos ?? [];
-        $acuerdos->avisarCancelacion((string) $acuerdo['id'], $titulos === [] ? 'la función' : implode(' + ', $titulos));
+        $acuerdos->avisarCancelacion((string) $acuerdo['id'], $titulos === [] ? 'la función' : implode(' + ', $titulos), $motivo);
         $funcion->cancelar();
         $this->funciones->guardar($funcion);
 

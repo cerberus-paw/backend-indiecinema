@@ -541,8 +541,10 @@ no duplica nada:
 
 - `liberar-vencidas`: cancela las reservas que vencieron sin pagar (ver «Mercado Pago»).
 - `cerrar-por-fecha`: cierra las votaciones vencidas con las obras más votadas que entran
-  en la duración de la sala, tantas como películas por función tiene. En los acuerdos vencidos, programa la franja que llegó al mínimo, o cancela la función y avisa a los que
-  marcaron «Me sirve».
+  en la duración de la sala, tantas como películas por función tiene. En los acuerdos
+  vencidos, programa la franja que llegó al mínimo, o cancela la función y avisa a los que
+  marcaron «Me sirve». También la cancela si la franja ganadora se pisa con otra función de la
+  sala, y el correo dice ese motivo.
 - `finalizar-funciones`: pasa a finalizada cada función terminada (su hora más la duración de
   las funciones de la sala) y deja «ausente» a quien no fue.
 - `recordar-funciones`: manda el recordatorio por correo a las reservas confirmadas de las

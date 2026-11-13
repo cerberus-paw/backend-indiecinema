@@ -111,6 +111,23 @@ final class ServicioDeReservas
     }
 
     /**
+     * Por qué se canceló cada una de esas reservas (EF-06.3), para que «Mis reservas» y el
+     * comprobante lo digan en lugar de dejar un «Cancelada» sin explicación. Sólo pregunta por las
+     * canceladas: las demás no tienen nada que explicar, y si no hay ninguna no consulta la base.
+     *
+     * @param list<Reserva> $reservas
+     *
+     * @return array<string, string> reserva_id => motivo; sólo las que tienen uno
+     */
+    public function motivosDeCancelacion(array $reservas): array
+    {
+        return $this->reservas->motivosDeCancelacion(array_values(array_map(
+            static fn (Reserva $reserva): string => $reserva->id,
+            array_filter($reservas, static fn (Reserva $reserva): bool => $reserva->estado === EstadoReserva::Cancelada),
+        )));
+    }
+
+    /**
      * Si el espectador todavía puede cancelar la reserva: confirmada, y antes de que empiece la
      * función. Después ya no tiene sentido soltar los lugares, y quien entró ya usó la entrada.
      * Si programación ya no muestra la función (su sala se dio de baja), se puede.

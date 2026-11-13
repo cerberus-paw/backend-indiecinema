@@ -79,12 +79,15 @@ final class Reservas extends Controlador
         // Las funciones que ya calificó, para no ofrecer el botón otra vez (EF-04.2).
         $calificadas = $this->calificaciones->deLasReservas($espectador, $reservas);
 
+        // Por qué se canceló cada una de las canceladas (EF-06.3), en una sola consulta.
+        $motivos = $this->servicio->motivosDeCancelacion($reservas);
+
         return $this->vista('mis_reservas.html.twig', [
-            'reservas' => array_map(static function (Reserva $reserva) use ($funciones, $sinProgramacion, $calificadas): array {
+            'reservas' => array_map(static function (Reserva $reserva) use ($funciones, $sinProgramacion, $calificadas, $motivos): array {
                 $funcion = $funciones[$reserva->funcionId] ?? null;
 
                 return [
-                    ...self::datosDeReserva($reserva, $funcion),
+                    ...self::datosDeReserva($reserva, $funcion, $motivos[$reserva->id] ?? null),
                     'estado_etiqueta' => $reserva->estado->etiqueta(),
                     // Sin programación no se sabe si empezó: el botón queda en el comprobante.
                     'cancelable' => !$sinProgramacion && ServicioDeReservas::seCancela($reserva, $funcion),
@@ -195,7 +198,7 @@ final class Reservas extends Controlador
         [$reserva, $funcion] = $this->servicio->delEspectador(self::usuario($peticion), (string) $peticion->parametro('id'));
 
         return $this->vista('reserva_confirmada.html.twig', [
-            'reserva' => self::datosDeReserva($reserva, $funcion),
+            'reserva' => self::datosDeReserva($reserva, $funcion, $this->motivoDe($reserva)),
             'funcion' => $funcion === null ? null : self::datosDeFuncion($funcion),
             // Los tres pasos sólo si esta reserva se cobra; las demás siguen con dos.
             'con_pago' => $reserva->preferenciaId !== null,
@@ -218,7 +221,7 @@ final class Reservas extends Controlador
         [$reserva, $funcion] = $this->servicio->delEspectador(self::usuario($peticion), (string) $peticion->parametro('id'));
 
         return $this->vista('reserva_confirmada.html.twig', [
-            'reserva' => self::datosDeReserva($reserva, $funcion),
+            'reserva' => self::datosDeReserva($reserva, $funcion, $this->motivoDe($reserva)),
             'funcion' => $funcion === null ? null : self::datosDeFuncion($funcion),
             'con_pago' => $reserva->preferenciaId !== null,
             'regreso' => match ($reserva->estado) {
@@ -256,7 +259,7 @@ final class Reservas extends Controlador
             [$reserva, $funcion] = $this->servicio->delEspectador($usuario, $id);
 
             return $enJson
-                ? $this->json(['error' => $error->getMessage(), 'reserva' => self::datosDeReserva($reserva, $funcion)], 422)
+                ? $this->json(['error' => $error->getMessage(), 'reserva' => self::datosDeReserva($reserva, $funcion, $this->motivoDe($reserva))], 422)
                 : $this->pantallaDeCancelacion($reserva, $funcion, $error->getMessage(), 422);
         }
 
@@ -265,6 +268,7 @@ final class Reservas extends Controlador
         // los lugares libres: después se va al comprobante, que no los muestra.
         if ($enJson) {
             return $this->json([
+                // Sin el motivo: la canceló el espectador, que está mirando la pantalla.
                 'reserva' => self::datosDeReserva($reserva, null),
                 'url' => $this->ruta("/reservas/{$reserva->id}?cancelada=1"),
             ]);
@@ -297,7 +301,7 @@ final class Reservas extends Controlador
     private function pantallaDeCancelacion(Reserva $reserva, ?FuncionDeProgramacion $funcion, ?string $error = null, int $estado = 200): Respuesta
     {
         $datos = [
-            'reserva' => self::datosDeReserva($reserva, $funcion),
+            'reserva' => self::datosDeReserva($reserva, $funcion, $this->motivoDe($reserva)),
             'funcion' => $funcion === null ? null : self::datosDeFuncion($funcion),
         ];
         // La plantilla lo muestra si la variable existe: sólo se pasa cuando hay algo que decir.
@@ -309,12 +313,27 @@ final class Reservas extends Controlador
     }
 
     /**
+     * El motivo de la cancelación de una sola reserva (EF-06.3). Una consulta más, y sólo si está
+     * cancelada: motivosDeCancelacion() no pregunta nada por las demás.
+     */
+    private function motivoDe(Reserva $reserva): ?string
+    {
+        return $this->servicio->motivosDeCancelacion([$reserva])[$reserva->id] ?? null;
+    }
+
+    /**
      * enlace_de_pago y vence sólo en una pendiente de pago que todavía está a tiempo: después ya
      * no hay qué pagar.
      *
-     * @return array{id: string, codigo: string, cantidad: int, total: string, estado: string, cancelable: bool, enlace_de_pago: ?string, vence: ?string}
+     * motivo y reembolsada_en son de una cancelada (EF-06.3): por qué se canceló —«Venció el plazo
+     * para pagar.», «Se canceló la función.»— y cuándo se le devolvió la plata. Así una cancelada
+     * no queda en un «Cancelada» pelado, que no dice si el espectador tiene que esperar algo.
+     *
+     * @param ?string $motivo el del historial, de ServicioDeReservas::motivosDeCancelacion()
+     *
+     * @return array{id: string, codigo: string, cantidad: int, total: string, estado: string, cancelable: bool, enlace_de_pago: ?string, vence: ?string, motivo: ?string, reembolsada_en: ?string}
      */
-    private static function datosDeReserva(Reserva $reserva, ?FuncionDeProgramacion $funcion): array
+    private static function datosDeReserva(Reserva $reserva, ?FuncionDeProgramacion $funcion, ?string $motivo = null): array
     {
         $aTiempo = $reserva->estado === EstadoReserva::PendientePago && !$reserva->vencida();
 
@@ -327,6 +346,8 @@ final class Reservas extends Controlador
             'cancelable' => ServicioDeReservas::seCancela($reserva, $funcion),
             'enlace_de_pago' => $aTiempo ? $reserva->enlaceDePago : null,
             'vence' => $aTiempo && $reserva->venceEn !== null ? self::hora($reserva->venceEn) : null,
+            'motivo' => $reserva->estado === EstadoReserva::Cancelada ? $motivo : null,
+            'reembolsada_en' => $reserva->reembolsadaEn === null ? null : self::fecha($reserva->reembolsadaEn),
         ];
     }
 
@@ -336,6 +357,14 @@ final class Reservas extends Controlador
     private static function hora(DateTimeImmutable $momento): string
     {
         return $momento->setTimezone(new DateTimeZone(date_default_timezone_get()))->format('H:i');
+    }
+
+    /**
+     * «19 sep · 20:30», en la hora del sitio: la base la guarda en UTC.
+     */
+    private static function fecha(DateTimeImmutable $momento): string
+    {
+        return TextoParaMostrar::dia($momento->setTimezone(new DateTimeZone(date_default_timezone_get())));
     }
 
     /**

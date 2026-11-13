@@ -31,6 +31,20 @@ final class TextoParaMostrar
     }
 
     /**
+     * «19 sep · 20:30»: igual que fecha() pero sin el día de la semana, para algo que ya pasó —el
+     * reembolso— y a lo que nadie tiene que llegar.
+     */
+    public static function dia(DateTimeImmutable $fecha): string
+    {
+        return sprintf(
+            '%d %s · %s',
+            (int) $fecha->format('j'),
+            self::MESES[(int) $fecha->format('n') - 1],
+            $fecha->format('H:i'),
+        );
+    }
+
+    /**
      * «$ 3.500», con los centavos sólo si tiene; 0 es «a la gorra».
      */
     public static function monto(float $monto): string

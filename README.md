@@ -45,9 +45,9 @@ backend-indiecinema/
 ├── docs/guion-de-prueba.md  el recorrido de punta a punta en el sitio publicado, con cada rol
 ├── nucleo/                MVC común: ruteo, middleware, base de datos, vistas y errores
 ├── cuentas/               /cuenta/   registro, ingreso, sesión, roles y usuarios del administrador
-├── programacion/          /          obras, salas, funciones, cartelera, votación de títulos y solicitudes de sala
+├── programacion/          /          obras, salas, funciones, cartelera y votación de títulos
 ├── funciones/             /funcion/  las reservas con el cupo de cada función, sus paneles y el acuerdo de fecha
-├── moderacion/            /moderacion/  armado (EF-01): las solicitudes de sala, las denuncias y los términos llegan con EF-07 y EF-16
+├── moderacion/            /moderacion/  las solicitudes de sala y su bandeja (EF-07.2); lo demás de EF-07 y los términos llegan con EF-07 y EF-16
 └── recaudacion/           /recaudacion/ armado (EF-02): el reparto, las liquidaciones y la reportería llegan con EF-08 y EF-09
 ```
 
@@ -199,9 +199,12 @@ todo el sitio se vea igual aunque lo sirvan subsistemas distintos.
   estado, la fecha, el precio, el cupo, los títulos, la sala y el organizador de una función;
   `GET /interno/funciones?ids=…` da lo mismo de hasta 20 juntas, para una página de «Mis
   reservas».
-  Cuentas tiene `GET /interno/usuarios/{id}` (el nombre y el correo, para programación y para los
-  correos de funciones) y `POST /interno/usuarios/{id}/roles`, que llama programación desde la
+  Cuentas tiene `GET /interno/usuarios/{id}` (el nombre y el correo, para moderación y para los
+  correos de funciones) y `POST /interno/usuarios/{id}/roles`, que llama moderación desde la
   bandeja de solicitudes de sala.
+  Programación tiene la API de salas para moderación (EF-07.1): `POST /interno/salas` crea la sala
+  de una solicitud aprobada (o completa la que ya existía), `POST /interno/salas/{id}/habilitacion`
+  la publica o la retira con un motivo, y `GET /interno/salas?ids=…` la lee para la bandeja.
   Funciones tiene `GET /interno/funciones/{id}/ocupacion` y `GET /interno/ocupacion?funciones=…`
   (una página de tarjetas en un solo pedido): los lugares ocupados, con los que programación
   muestra los libres. Si funciones no responde, la cartelera y la ficha se muestran sin ese dato.
@@ -217,13 +220,15 @@ todo el sitio se vea igual aunque lo sirvan subsistemas distintos.
   votar, quitar el voto, confirmar y cerrar sin mínimo). La votación de títulos, en cambio, es
   toda de programación (tabla `voto`).
 - **Pedir ser organizador es pedir una sala**, como el recorrido de la E2 (sección 7): la
-  solicitud de sala (`/solicitar-sala`) guarda la sala sin publicar y le avisa al equipo por
-  correo; aprobarla la publica y programación le pide a cuentas el rol de organizador. Primero el
-  rol: si cuentas no responde no cambia nada, y nunca queda una sala publicada cuyo dueño no
-  puede entrar a «Mis salas». La resuelve el administrador mientras no haya moderación.
+  solicitud de sala (`/solicitar-sala`, de moderación desde EF-07.2) guarda la sala que propone y
+  le avisa al equipo por correo; la sala recién existe en programación cuando se aprueba. Aprobarla
+  le pide a cuentas el rol de organizador, después le pide a programación la sala publicada y
+  recién ahí queda aprobada: si alguno no responde, sigue pendiente y se puede reintentar, y nunca
+  queda una sala publicada cuyo dueño no puede entrar a «Mis salas». La resuelve el administrador
+  hasta que haya moderador.
 - **Los correos salen por SMTP con el curl de PHP** (`ClienteSmtp` del núcleo), sin librerías.
   El servidor y el remitente están en `[correo]` del `config.ini` de cada subsistema que manda
-  correos: programación, el aviso de cada solicitud de sala, y funciones, los de los espectadores
+  correos: moderación, el aviso de cada solicitud de sala, y funciones, los de los espectadores
   (la reserva confirmada, con el código y el enlace al comprobante, y la función cancelada). El
   enlace sale de `[sitio] url` de funciones, la dirección pública del sitio sin la barra final:
   si falta o no es http(s), reservar responde 500 y el motivo queda en el log. Si un correo no
@@ -307,8 +312,8 @@ docker run --rm -u "$(id -u):$(id -g)" -v "$PWD/..:/app" -w /app/backend-indieci
 | http://localhost:8080/organizador/obras | las obras del catálogo, con sesión de organizador: el alta y la edición con el afiche, y la baja de una obra sin funciones futuras |
 | http://localhost:8080/organizador/funciones | «Mis funciones»: las de sus salas, en cualquier estado y con su fecha; desde ahí se programa una función o se la abre a votación de títulos, y se proponen las franjas del acuerdo |
 | http://localhost:8080/cuenta/ | «Mi cuenta», con sesión: el nombre, el correo y los roles, y el enlace a «Mis reservas». Sin sesión, `/cuenta/ingresar` y `/cuenta/registro` |
-| http://localhost:8080/solicitar-sala | la solicitud de sala, con sesión: se guarda la sala sin publicar y le llega al equipo por correo |
-| http://localhost:8080/administracion/solicitudes | la bandeja de solicitudes de sala, para aprobarlas (publica la sala y da el rol de organizador) o rechazarlas con un motivo, y el historial; sólo el administrador |
+| http://localhost:8080/solicitar-sala | la solicitud de sala, con sesión: se guarda la sala propuesta y le llega al equipo por correo |
+| http://localhost:8080/moderacion/solicitudes | la bandeja de solicitudes de sala, para aprobarlas (publica la sala y da el rol de organizador) o rechazarlas con un motivo, el historial, y retirar o volver a publicar la sala con un motivo; sólo el administrador |
 | http://localhost:8025 | el buzón de prueba (Mailpit): los correos que mandan los subsistemas, sin que salgan a nadie |
 | http://localhost:8080/cuenta/administracion/usuarios | usuarios y roles, con los números de las cuentas, buscador por nombre o correo, filtros de rol, estado y año de alta, y el rol de cada uno en un desplegable (espectador u organizador), con «Guardar cambios» para toda la tabla; sólo el administrador |
 | http://localhost:8080/funcion/reservas | «Mis reservas», con sesión: las del espectador, con su estado, el comprobante (que se imprime) y cancelar mientras se pueda |
@@ -642,16 +647,13 @@ paginado e intentos de inyección SQL, y `/cartelera` con los filtros por la URL
 inválidos y el 404, la misma consulta en JSON según la cabecera `Accept`, `/cartelera.csv` con los
 mismos filtros, la ficha de la función en cada estado, con sus 404, la ficha de la sala, con quién
 la ve, sus próximas funciones y el camino de la función a su sala y de vuelta, el buscador del
-listado de salas, la solicitud de sala con las mismas validaciones en el navegador y en el
-servidor, la foto y el correo al equipo, la bandeja del administrador contra una cuentas de
-mentira (aprobar pide el rol y publica la sala, rechazar exige motivo, el historial y retirar la
-sala, y quién entra), la tabla de solicitudes con una pendiente por sala, la votación de títulos
+listado de salas, la API interna de salas para moderación, la votación de títulos
 (votar, cambiar el voto y cerrarla con la más votada), el acuerdo de fecha visto desde
 programación, los lugares libres de la ficha y de las tarjetas, la cancelación de una función con
 reservas, la portada con las destacadas y las próximas funciones, «Acerca de», con los enlaces del encabezado y del pie, las opciones del
 menú y del pie que ve cada rol, y la página de error, que vuelve a la portada); en cuentas, el
 registro de punta a punta, la API interna de usuarios (quién es y el rol de organizador, sólo para
-programación), el listado de usuarios del administrador con su buscador, su paginado, dar y quitar
+moderación), el listado de usuarios del administrador con su buscador, su paginado, dar y quitar
 el rol de organizador y quién entra (en cuentas y en programación, una prueba recorre todas las
 rutas del panel y comprueba que sólo entra el administrador; en programación, otra hace lo
 mismo con las del organizador y fija cuáles son públicas), y las restricciones de las tablas
@@ -662,7 +664,12 @@ token CSRF, cantidad inválida, sin lugares, la reserva de otro y la cancelació
 reserva confirmada (también sin cuentas, sin servidor de correo o sin `[sitio] url`), «Mis
 reservas» (el orden, el paginado, sólo las propias y programación caída), los paneles de reservas
 del organizador y del administrador (la asistencia, el CSV y la anulación), la ocupación que lee
-programación y la API interna del acuerdo de fecha. Para correrlas con el PHP
+programación y la API interna del acuerdo de fecha; en moderación, la solicitud de sala con las
+mismas validaciones en el navegador y en el servidor, la foto y el correo al equipo, la bandeja del
+administrador contra una cuentas y una programación de mentira (aprobar pide el rol y crea la
+sala, rechazar exige motivo, el historial, retirar y volver a publicar la sala con motivo, y quién
+entra), la tabla de solicitudes con una pendiente por sala y la migración que mudó las de
+programación. Para correrlas con el PHP
 de la máquina (8.4 o superior, con `pdo_mysql`), contra un MySQL descartable:
 
 ```

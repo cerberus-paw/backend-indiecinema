@@ -4,7 +4,7 @@
  * Cuentas de mentira, atendiendo con `php -S` las dos rutas que llama la bandeja de solicitudes de
  * sala: así AdministracionDeSolicitudesTest prueba la llamada por la red, como en el compose.
  * Responde lo mismo que /interno/usuarios/{id} de cuentas (UsuariosInternosTest de cuentas prueba
- * ese mismo JSON del otro lado), y como ella, sólo a programación con su token.
+ * ese mismo JSON del otro lado), y como ella, sólo a moderación con su token (EF-07.2).
  *
  * Cada rol que le piden lo anota en el archivo de la variable REGISTRO, para que la prueba vea qué
  * le llegó.
@@ -18,7 +18,7 @@ const LENTO = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
 
 header('Content-Type: application/json');
 $cabeceras = getallheaders();
-if (($cabeceras['X-Llamador'] ?? null) !== 'programacion' || ($cabeceras['Authorization'] ?? null) !== 'Bearer token-de-programacion') {
+if (($cabeceras['X-Llamador'] ?? null) !== 'moderacion' || ($cabeceras['Authorization'] ?? null) !== 'Bearer token-de-moderacion') {
     http_response_code(403);
     echo '{"error":"Llamador no autorizado."}';
 
@@ -36,6 +36,12 @@ if (!preg_match('#^/interno/usuarios/([^/]+)(/roles)?$#', (string) parse_url($_S
     return;
 }
 $id = $partes[1];
+// Cuentas caída: la prueba lo pide creando el archivo de la variable CAIDA.
+if (is_file((string) getenv('CAIDA'))) {
+    http_response_code(500);
+
+    return;
+}
 if ($id === LENTO) {
     sleep(3);
 }

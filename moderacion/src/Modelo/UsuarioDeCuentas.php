@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace IndieCinema\Programacion\Modelo;
+namespace IndieCinema\Moderacion\Modelo;
 
 use DateTimeImmutable;
 

@@ -18,8 +18,8 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * El control de acceso del panel del organizador, ruta por ruta, como PanelDeAdministracionTest
- * con el del administrador: todas las de /organizador/ piden ese rol, y un espectador o alguien
- * sin sesión no llega al controlador. Que no toque lo de otro organizador lo prueban
+ * de cuentas con el del administrador: todas las de /organizador/ piden ese rol, y un espectador o
+ * alguien sin sesión no llega al controlador. Que no toque lo de otro organizador lo prueban
  * SalasDelOrganizadorTest y FuncionesDelOrganizadorTest, porque eso sí necesita la base.
  *
  * También fija cuáles son las rutas públicas: una ruta nueva que se olvide del rol hace fallar la

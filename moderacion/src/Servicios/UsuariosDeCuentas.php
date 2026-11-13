@@ -2,14 +2,14 @@
 
 declare(strict_types=1);
 
-namespace IndieCinema\Programacion\Servicios;
+namespace IndieCinema\Moderacion\Servicios;
 
 use DateTimeImmutable;
 use DateTimeZone;
 use IndieCinema\Nucleo\Http\ClienteInterno;
 use IndieCinema\Nucleo\Http\ExcepcionHttp;
 use IndieCinema\Nucleo\Uuid;
-use IndieCinema\Programacion\Modelo\UsuarioDeCuentas;
+use IndieCinema\Moderacion\Modelo\UsuarioDeCuentas;
 use RuntimeException;
 
 /**

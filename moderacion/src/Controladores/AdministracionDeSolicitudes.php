@@ -2,27 +2,28 @@
 
 declare(strict_types=1);
 
-namespace IndieCinema\Programacion\Controladores;
+namespace IndieCinema\Moderacion\Controladores;
 
+use IndieCinema\Moderacion\Modelo\SolicitudDeSala;
+use IndieCinema\Moderacion\Servicios\ServicioDeSolicitudes;
 use IndieCinema\Nucleo\Controlador;
 use IndieCinema\Nucleo\Http\ExcepcionHttp;
 use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Seguridad\Usuario;
-use IndieCinema\Programacion\Modelo\EstadoSolicitud;
-use IndieCinema\Programacion\Modelo\SolicitudDeSala;
-use IndieCinema\Programacion\Servicios\ServicioDeSalas;
-use IndieCinema\Programacion\Servicios\ServicioDeSolicitudes;
 use LogicException;
 
 /**
- * La bandeja de solicitudes de sala del administrador, en /administracion/solicitudes, como el
+ * La bandeja de solicitudes de sala, en /moderacion/solicitudes desde EF-07.2, como el
  * wireframe de la E2 (moderacion-solicitudes): el buscador y la lista a la izquierda y la elegida
  * (?id=) a la derecha, con la sala, quién la mandó y la resolución, que lleva un motivo
  * obligatorio. «Ver historial de decisiones» (?ver=historial) lista las resueltas; desde una
- * aprobada se puede retirar la sala del sitio y volver a publicarla.
+ * aprobada la sala se retira del sitio o se vuelve a publicar, con un motivo, por la API interna de
+ * programación.
  *
- * Las rutas piden el rol de administrador y el núcleo ya controló el token CSRF de los POST.
+ * La solicitud trae la sala que propone; la sala recién existe en programación cuando se aprueba.
+ * Las rutas piden el rol de administrador (el de moderador llega con EF-07.3) y el núcleo ya
+ * controló el token CSRF de los POST.
  */
 final class AdministracionDeSolicitudes extends Controlador
 {
@@ -30,10 +31,8 @@ final class AdministracionDeSolicitudes extends Controlador
     private const MAXIMO_MOTIVO = 1000;
     private const RESOLUCIONES = ['aprobar', 'rechazar'];
 
-    public function __construct(
-        private readonly ServicioDeSolicitudes $servicio,
-        private readonly ServicioDeSalas $salas,
-    ) {
+    public function __construct(private readonly ServicioDeSolicitudes $servicio)
+    {
     }
 
     /**
@@ -48,7 +47,8 @@ final class AdministracionDeSolicitudes extends Controlador
     }
 
     /**
-     * @throws ExcepcionHttp 404 si la solicitud no existe; 503 si cuentas no responde al aprobar
+     * @throws ExcepcionHttp 404 si la solicitud no existe; 503 si cuentas o programación no
+     *                       responden al aprobar
      */
     public function resolver(Peticion $peticion): Respuesta
     {
@@ -80,7 +80,7 @@ final class AdministracionDeSolicitudes extends Controlador
 
         // 303 a las pendientes con el aviso: recargar no vuelve a mandar la resolución, y sigue la
         // próxima.
-        return $this->redirigir('/administracion/solicitudes?' . http_build_query([$aviso => $solicitud->id]));
+        return $this->redirigir('/solicitudes?' . http_build_query([$aviso => $solicitud->id]));
     }
 
     /**
@@ -88,7 +88,7 @@ final class AdministracionDeSolicitudes extends Controlador
      */
     public function deshabilitarSala(Peticion $peticion): Respuesta
     {
-        return $this->cambiarHabilitacion($peticion, false);
+        return $this->cambiarLaSala($peticion, false);
     }
 
     /**
@@ -96,29 +96,35 @@ final class AdministracionDeSolicitudes extends Controlador
      */
     public function habilitarSala(Peticion $peticion): Respuesta
     {
-        return $this->cambiarHabilitacion($peticion, true);
+        return $this->cambiarLaSala($peticion, true);
     }
 
     /**
-     * Retira del sitio, o vuelve a publicar, la sala de una solicitud aprobada: sus funciones dejan
-     * de verse en la cartelera mientras está retirada.
+     * Retira del sitio, o vuelve a publicar, la sala de una solicitud aprobada, con un motivo que
+     * queda en el registro de programación junto con quién lo hizo.
      */
-    private function cambiarHabilitacion(Peticion $peticion, bool $habilitada): Respuesta
+    private function cambiarLaSala(Peticion $peticion, bool $habilitada): Respuesta
     {
         $solicitud = $this->servicio->buscar((string) $peticion->parametro('id'));
-        if ($solicitud->estado !== EstadoSolicitud::Aprobada) {
-            throw ExcepcionHttp::noEncontrada();
+        $motivo = self::motivo($peticion->campo('motivo_sala'));
+        $error = match (true) {
+            $motivo === '' => 'Escribí por qué: queda en el registro.',
+            mb_strlen($motivo) > self::MAXIMO_MOTIVO => 'El motivo puede tener hasta ' . self::MAXIMO_MOTIVO . ' caracteres.',
+            default => null,
+        };
+        if ($error !== null && $solicitud->estado->value === 'aprobada') {
+            return $this->bandeja($peticion, $solicitud, ['motivo_sala' => $motivo], ['motivo_sala' => $error], estado: 422);
         }
-        $this->salas->cambiarHabilitacion($solicitud->sala->id, $habilitada, self::administrador($peticion)->id);
+        $this->servicio->cambiarLaSala($solicitud->id, $habilitada, self::administrador($peticion), $motivo);
 
-        return $this->redirigir('/administracion/solicitudes?' . http_build_query([
+        return $this->redirigir('/solicitudes?' . http_build_query([
             'id' => $solicitud->id,
             $habilitada ? 'habilitada' : 'deshabilitada' => $solicitud->id,
         ]));
     }
 
     /**
-     * @param array{resolucion?: string, motivo?: string} $valores lo que mandó, si hubo errores
+     * @param array{resolucion?: string, motivo?: string, motivo_sala?: string} $valores lo que mandó, si hubo errores
      * @param array<string, string>                       $errores campo => qué está mal
      */
     private function bandeja(Peticion $peticion, ?SolicitudDeSala $elegida, array $valores = [], array $errores = [], ?string $mensaje = null, int $estado = 200): Respuesta
@@ -138,13 +144,13 @@ final class AdministracionDeSolicitudes extends Controlador
             'solicitudes' => array_map(static fn (SolicitudDeSala $solicitud): array => [
                 'id' => $solicitud->id,
                 'estado' => $solicitud->estado->value,
-                'sala' => $solicitud->sala->datos->nombre,
-                'localidad' => $solicitud->sala->datos->localidad,
+                'sala' => $solicitud->datos->nombre,
+                'localidad' => $solicitud->datos->localidad,
                 'solicitante' => $solicitud->solicitanteNombre,
                 'enviada' => FechaParaMostrar::diaCorto($solicitud->enviadaEn),
                 'elegida' => $solicitud->id === $elegida?->id,
             ], $lista),
-            'elegida' => $elegida === null ? null : $this->detalle($elegida),
+            'elegida' => $elegida === null ? null : $this->detalle($elegida, $this->enElSitio($elegida)),
             'valores' => $valores,
             'errores' => $errores,
             'maximo_motivo' => self::MAXIMO_MOTIVO,
@@ -164,14 +170,14 @@ final class AdministracionDeSolicitudes extends Controlador
      *
      * @return array<string, mixed>
      */
-    private function detalle(SolicitudDeSala $solicitud): array
+    private function detalle(SolicitudDeSala $solicitud, ?string $enElSitio): array
     {
         try {
             $usuario = $this->servicio->solicitante($solicitud);
         } catch (ExcepcionHttp) {
             $usuario = false;
         }
-        $sala = $solicitud->sala;
+        $datos = $solicitud->datos;
 
         return [
             'id' => $solicitud->id,
@@ -180,13 +186,18 @@ final class AdministracionDeSolicitudes extends Controlador
             'resuelta' => $solicitud->resueltaEn === null ? null : FechaParaMostrar::diaYHora($solicitud->resueltaEn),
             'motivo' => $solicitud->motivo,
             'sala' => [
-                ...TarjetaDeSala::datos($sala),
-                'descripcion' => $sala->datos->descripcion,
-                'direccion' => $sala->datos->direccion,
-                'peliculas_por_funcion' => $sala->datos->peliculasPorFuncion,
-                'duracion_funcion' => $sala->datos->duracionFuncion,
-                'tiempo_entre_funciones' => $sala->datos->tiempoEntreFunciones,
+                'id' => $solicitud->salaId,
+                'nombre' => $datos->nombre,
+                'localidad' => $datos->localidad,
+                'capacidad' => $datos->capacidad,
+                'imagen' => $this->foto($solicitud),
+                'descripcion' => $datos->descripcion,
+                'direccion' => $datos->direccion,
+                'peliculas_por_funcion' => $datos->peliculasPorFuncion,
+                'duracion_funcion' => $datos->duracionFuncion,
+                'tiempo_entre_funciones' => $datos->tiempoEntreFunciones,
             ],
+            'en_el_sitio' => $enElSitio,
             // false: cuentas no respondió; null: el usuario ya no existe.
             'solicitante' => match (true) {
                 $usuario === false => false,
@@ -201,6 +212,19 @@ final class AdministracionDeSolicitudes extends Controlador
             'solicitante_nombre' => $solicitud->solicitanteNombre,
             'solicitudes_previas' => $this->servicio->cuantasDe($solicitud->usuarioId) - 1,
         ];
+    }
+
+    /**
+     * Cómo está su sala en el sitio, si está aprobada. Si programación no responde, la bandeja se ve
+     * igual: 'desconocido', y sin ofrecer publicarla ni retirarla.
+     */
+    private function enElSitio(SolicitudDeSala $solicitud): ?string
+    {
+        try {
+            return $this->servicio->salaEnElSitio($solicitud);
+        } catch (ExcepcionHttp) {
+            return 'desconocido';
+        }
     }
 
     /**
@@ -221,13 +245,24 @@ final class AdministracionDeSolicitudes extends Controlador
                 continue;
             }
             try {
-                return sprintf($texto, $this->servicio->buscar($id)->sala->datos->nombre);
+                return sprintf($texto, $this->servicio->buscar($id)->datos->nombre);
             } catch (ExcepcionHttp) {
                 return null;
             }
         }
 
         return null;
+    }
+
+    /**
+     * La foto que mandó la solicitud; la de una que se mudó de programación sin foto propia es la
+     * de su sala allá, que el administrador ve aunque no esté publicada.
+     */
+    private function foto(SolicitudDeSala $solicitud): string
+    {
+        return $solicitud->imagen === null
+            ? "/salas/{$solicitud->salaId}/imagen"
+            : $this->ruta("/solicitudes/{$solicitud->id}/foto");
     }
 
     /**

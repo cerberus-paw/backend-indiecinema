@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace IndieCinema\Programacion\Servicios;
+namespace IndieCinema\Moderacion\Servicios;
 
 use RuntimeException;
 

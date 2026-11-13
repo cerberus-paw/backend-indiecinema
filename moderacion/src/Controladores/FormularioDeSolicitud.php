@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace IndieCinema\Programacion\Controladores;
+namespace IndieCinema\Moderacion\Controladores;
 
-use IndieCinema\Programacion\Modelo\DatosDeSala;
+use IndieCinema\Moderacion\Modelo\DatosDeSala;
 
 /**
  * El formulario de la solicitud de sala: los datos de la sala, con las mismas reglas que el alta

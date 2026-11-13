@@ -2,16 +2,16 @@
 
 declare(strict_types=1);
 
-namespace IndieCinema\Programacion\Controladores;
+namespace IndieCinema\Moderacion\Controladores;
 
+use IndieCinema\Moderacion\Modelo\EstadoSolicitud;
+use IndieCinema\Moderacion\Modelo\SolicitudDeSala as Solicitud;
+use IndieCinema\Moderacion\Servicios\ServicioDeSolicitudes;
+use IndieCinema\Moderacion\Servicios\SolicitudPendiente;
 use IndieCinema\Nucleo\Controlador;
 use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Seguridad\Usuario;
-use IndieCinema\Programacion\Modelo\EstadoSolicitud;
-use IndieCinema\Programacion\Modelo\SolicitudDeSala as Solicitud;
-use IndieCinema\Programacion\Servicios\ServicioDeSolicitudes;
-use IndieCinema\Programacion\Servicios\SolicitudPendiente;
 use LogicException;
 
 /**
@@ -20,9 +20,14 @@ use LogicException;
  * suma otra sala: es el mismo trámite. Con una pendiente se ve su estado en lugar del
  * formulario; si la rechazaron, el motivo y el formulario con la sala, para corregirla y volver a
  * mandarla.
+ *
+ * Es de moderación desde EF-07.2, pero la dirección es la de siempre: nginx la trae sin el prefijo
+ * /moderacion, así que acá las direcciones a sí misma van sin él.
  */
 final class SolicitudDeSala extends Controlador
 {
+    private const URL = '/solicitar-sala';
+
     public function __construct(private readonly ServicioDeSolicitudes $servicio)
     {
     }
@@ -30,7 +35,7 @@ final class SolicitudDeSala extends Controlador
     public function mostrar(Peticion $peticion): Respuesta
     {
         $ultima = $this->servicio->ultimaDe(self::usuario($peticion));
-        $formulario = $ultima?->estado === EstadoSolicitud::Rechazada ? FormularioDeSolicitud::desdeDatos($ultima->sala->datos) : null;
+        $formulario = $ultima?->estado === EstadoSolicitud::Rechazada ? FormularioDeSolicitud::desdeDatos($ultima->datos) : null;
 
         return $this->pantalla($ultima, $formulario, mensaje: $peticion->consulta('enviada') === '1' ? 'La vas a ver acá hasta que te respondan.' : null);
     }
@@ -58,7 +63,7 @@ final class SolicitudDeSala extends Controlador
         }
 
         // 303: recargar no la vuelve a mandar.
-        return $this->redirigir('/solicitar-sala?enviada=1');
+        return Respuesta::redireccion(self::URL . '?enviada=1');
     }
 
     private function pantalla(?Solicitud $ultima, ?FormularioDeSolicitud $formulario, ?string $error = null, ?string $mensaje = null, int $estado = 200): Respuesta
@@ -66,13 +71,13 @@ final class SolicitudDeSala extends Controlador
         $corrigiendo = $ultima?->estado === EstadoSolicitud::Rechazada;
         $datos = [
             'reglas' => FormularioDeSolicitud::reglas(imagenObligatoria: !$corrigiendo),
-            'valores' => $formulario?->valores ?? [],
-            'errores' => $formulario?->errores ?? [],
+            'valores' => $formulario === null ? [] : $formulario->valores,
+            'errores' => $formulario === null ? [] : $formulario->errores,
             'corrigiendo' => $corrigiendo,
             'solicitud' => $ultima === null ? null : [
                 'estado' => $ultima->estado->value,
-                'sala' => $ultima->sala->datos->nombre,
-                'imagen' => $ultima->sala->imagen === null ? null : "/salas/{$ultima->sala->id}/imagen",
+                'sala' => $ultima->datos->nombre,
+                'imagen' => $this->foto($ultima),
                 'enviada' => FechaParaMostrar::diaYHora($ultima->enviadaEn),
                 'resuelta' => $ultima->resueltaEn === null ? null : FechaParaMostrar::diaYHora($ultima->resueltaEn),
                 'motivo' => $ultima->motivo,
@@ -88,6 +93,17 @@ final class SolicitudDeSala extends Controlador
         }
 
         return $this->vista('solicitar_sala.html.twig', $datos, $estado);
+    }
+
+    /**
+     * La foto de la solicitud, que entrega moderación; la de una que se mudó de programación sin
+     * foto propia es la de su sala, que su organizador ve aunque no esté publicada.
+     */
+    private function foto(Solicitud $solicitud): string
+    {
+        return $solicitud->imagen === null
+            ? "/salas/{$solicitud->salaId}/imagen"
+            : $this->ruta("/solicitudes/{$solicitud->id}/foto");
     }
 
     private static function usuario(Peticion $peticion): Usuario

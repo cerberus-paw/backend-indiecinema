@@ -352,6 +352,32 @@ final class SalasInternasTest extends TestCase
         self::assertSame(1, $this->cuantasSalas());
     }
 
+    /**
+     * EF-07.2: la solicitud que se mudó a moderación no tiene foto propia, porque la suya quedó en
+     * su sala: completarla sin foto le pone los datos corregidos y le deja la que tiene. Una sala
+     * nueva sin foto sigue siendo un error.
+     */
+    public function testCompletarSinFotoLeDejaLaQueTiene(): void
+    {
+        $vieja = $this->sala(habilitada: false, nombre: 'El Galponcito');
+        $foto = (new ArchivosDeSalas($this->configuracion))->guardar(new ImagenSubida(Imagenes::subida('sala.jpg')['tmp_name'], 'jpg'));
+        $this->base->ejecutar('UPDATE sala SET imagen = ? WHERE id = ?', [$foto, $vieja->id]);
+        $campos = ['id' => $vieja->id, 'organizador_id' => self::ORGANIZADORA] + FormularioDeSalaTest::camposValidos();
+
+        $respuesta = $this->pedir('POST', '/interno/salas', cuerpo: $campos);
+
+        self::assertSame(200, $respuesta->estado(), $respuesta->cuerpo());
+        $sala = $this->salas->buscar($vieja->id) ?? self::fail('No está la sala.');
+        self::assertTrue($sala->habilitada);
+        self::assertSame('Cine Club El Galpón', $sala->datos->nombre);
+        self::assertSame($foto, $sala->imagen);
+        self::assertSame([$foto], $this->fotosGuardadas());
+
+        $nueva = $this->pedir('POST', '/interno/salas', cuerpo: ['id' => Uuid::nuevo()] + $campos);
+        self::assertSame(422, $nueva->estado());
+        self::assertSame('Falta la foto de la sala.', json_decode($nueva->cuerpo(), true)['errores']['imagen'] ?? null);
+    }
+
     public function testLaSalaDeOtroOrganizadorEs409(): void
     {
         $ajena = $this->sala();

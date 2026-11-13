@@ -2,9 +2,11 @@
 
 declare(strict_types=1);
 
-namespace IndieCinema\Programacion\Pruebas;
+namespace IndieCinema\Moderacion\Pruebas;
 
 use Dom\HTMLDocument;
+use IndieCinema\Moderacion\Controladores\FormularioDeSolicitud;
+use IndieCinema\Moderacion\Pruebas\Dobles\Imagenes;
 use IndieCinema\Nucleo\Aplicacion;
 use IndieCinema\Nucleo\BaseDeDatos;
 use IndieCinema\Nucleo\Configuracion;
@@ -12,18 +14,16 @@ use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Log;
 use IndieCinema\Nucleo\Pruebas\Dobles\Formularios;
+use IndieCinema\Nucleo\Pruebas\Dobles\PaginasParaValidar;
 use IndieCinema\Nucleo\Pruebas\Dobles\ServidorSmtpDePrueba;
-use IndieCinema\Programacion\Controladores\FormularioDeSolicitud;
-use IndieCinema\Programacion\Pruebas\Controladores\FormularioDeSalaTest;
-use IndieCinema\Programacion\Pruebas\Dobles\Imagenes;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
-use IndieCinema\Nucleo\Pruebas\Dobles\PaginasParaValidar;
 
 /**
- * La solicitud de sala de punta a punta: la aplicación entera con las rutas de programación, las
- * plantillas del paquete front, un MySQL de verdad y un servidor SMTP de mentira, que recibe el
- * aviso al equipo. En desarrollo, para que Twig falle si la plantilla usa una variable que el
+ * La solicitud de sala de punta a punta, ya en moderación (EF-07.2): la aplicación entera con las
+ * rutas de moderación, las plantillas del paquete front, un MySQL de verdad y un servidor SMTP de
+ * mentira, que recibe el aviso al equipo. Mandarla no toca programación: la sala recién existe allá
+ * cuando se aprueba. En desarrollo, para que Twig falle si la plantilla usa una variable que el
  * controlador no le pasa.
  */
 final class SolicitudDeSalaTest extends TestCase
@@ -34,6 +34,7 @@ final class SolicitudDeSalaTest extends TestCase
     private const CSRF = 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc';
     private const ESPECTADORA = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
     private const OTRO = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+    private const ADMINISTRADOR = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
     private const EQUIPO = 'equipo@indiecinema.test';
     private const URL = '/solicitar-sala';
 
@@ -66,8 +67,8 @@ final class SolicitudDeSalaTest extends TestCase
 
     protected function tearDown(): void
     {
-        array_map('unlink', glob("{$this->carpeta}/salas/*") ?: []);
-        @rmdir("{$this->carpeta}/salas");
+        array_map('unlink', glob("{$this->carpeta}/solicitudes/*") ?: []);
+        @rmdir("{$this->carpeta}/solicitudes");
         @rmdir($this->carpeta);
     }
 
@@ -77,13 +78,13 @@ final class SolicitudDeSalaTest extends TestCase
     private function configuracion(?string $servidorDeCorreo = null): Configuracion
     {
         return new Configuracion([
-            'app' => ['subsistema' => 'programacion', 'entorno' => 'desarrollo'],
+            'app' => ['subsistema' => 'moderacion', 'prefijo' => '/moderacion', 'entorno' => 'desarrollo'],
             'archivos' => ['carpeta' => $this->carpeta],
             'base' => self::baseDePruebas(),
             'nginx' => ['secreto' => self::SECRETO],
-            // Mandarla no llama a cuentas (eso es al aprobarla), pero el servicio tiene el cliente.
-            'subsistemas' => ['cuentas' => 'http://127.0.0.1:1'],
-            'interno' => ['token' => 'token-de-programacion'],
+            // Mandarla no llama a nadie (eso es al aprobarla), pero el servicio tiene el cliente.
+            'subsistemas' => ['cuentas' => 'http://127.0.0.1:1', 'programacion' => 'http://127.0.0.1:1'],
+            'interno' => ['token' => 'token-de-moderacion'],
             'correo' => ['servidor' => $servidorDeCorreo ?? self::$correo->url(), 'remitente' => 'no-responder@indiecinema.test'],
             'solicitudes' => ['destino' => self::EQUIPO],
         ]);
@@ -104,9 +105,11 @@ final class SolicitudDeSalaTest extends TestCase
             'X-Rol' => $rol,
             'X-Usuario-Nombre' => rawurlencode('Eva Prueba'),
         ];
-        $aplicacion = new Aplicacion(dirname(__DIR__), $configuracion ?? $this->configuracion(), new Log('programacion', $this->salidaDelLog));
+        $aplicacion = new Aplicacion(dirname(__DIR__), $configuracion ?? $this->configuracion(), new Log('moderacion', $this->salidaDelLog));
+        $respuesta = $aplicacion->atender(new Peticion($metodo, (string) parse_url($url, PHP_URL_PATH), $consulta, $cuerpo, $cabeceras, ['csrf' => self::CSRF], $archivos));
 
-        return PaginasParaValidar::anotar($metodo, $url, $aplicacion->atender(new Peticion($metodo, (string) parse_url($url, PHP_URL_PATH), $consulta, $cuerpo, $cabeceras, ['csrf' => self::CSRF], $archivos)));
+        // Las páginas, para el validador del W3C; la foto no.
+        return str_contains($url, '/foto') ? $respuesta : PaginasParaValidar::anotar($metodo, $url, $respuesta);
     }
 
     /**
@@ -114,7 +117,19 @@ final class SolicitudDeSalaTest extends TestCase
      */
     private static function camposValidos(): array
     {
-        return ['_csrf' => self::CSRF, 'habilitacion' => '1', 'derechos' => '1'] + FormularioDeSalaTest::camposValidos();
+        return [
+            '_csrf' => self::CSRF,
+            'habilitacion' => '1',
+            'derechos' => '1',
+            'nombre' => 'Cine Club El Galpón',
+            'descripcion' => "Un galpón con proyector.\nSesenta butacas.",
+            'direccion' => 'Av. San Martín 450',
+            'localidad' => 'Luján',
+            'capacidad' => '60',
+            'peliculas_por_funcion' => '2',
+            'duracion_funcion' => '120',
+            'tiempo_entre_funciones' => '0',
+        ];
     }
 
     /**
@@ -129,11 +144,11 @@ final class SolicitudDeSalaTest extends TestCase
     }
 
     /**
-     * @return list<string> las imágenes guardadas en el volumen
+     * @return list<string> las fotos guardadas en el volumen
      */
-    private function imagenesGuardadas(): array
+    private function fotosGuardadas(): array
     {
-        return array_map('basename', glob("{$this->carpeta}/salas/*") ?: []);
+        return array_map('basename', glob("{$this->carpeta}/solicitudes/*") ?: []);
     }
 
     private function log(): string
@@ -152,6 +167,11 @@ final class SolicitudDeSalaTest extends TestCase
         self::assertCount(1, $correos);
 
         return (string) base64_decode(str_replace("\r\n", '', explode("\r\n\r\n", $correos[0]['mensaje'], 2)[1]), true);
+    }
+
+    private function rechazarLaUltima(string $motivo = 'Falta la póliza.'): void
+    {
+        $this->base->ejecutar("UPDATE solicitud_sala SET estado = 'rechazada', motivo = ?, resuelta_en = NOW()", [$motivo]);
     }
 
     public function testMuestraElFormularioConElTokenYParaSubirLaFoto(): void
@@ -215,8 +235,8 @@ final class SolicitudDeSalaTest extends TestCase
         // Arriba, el resumen con un link al campo y el mismo mensaje (E4-10.5).
         self::assertSame(["#{$campo}" => $mensaje], Formularios::resumen($respuesta->cuerpo())['enlaces'] ?? null);
         self::assertMatchesRegularExpression('#id="error-' . $campo . '"[^>]*>.*' . preg_quote($mensaje, '#') . '#s', $respuesta->cuerpo());
-        self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM sala'));
-        self::assertSame([], $this->imagenesGuardadas());
+        self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM solicitud_sala'));
+        self::assertSame([], $this->fotosGuardadas());
         self::assertSame([], self::$correo->correos());
     }
 
@@ -235,8 +255,8 @@ final class SolicitudDeSalaTest extends TestCase
     {
         self::assertStringContainsString('Falta la foto de la sala.', $this->enviar(imagen: null)->cuerpo());
         self::assertStringContainsString('La foto tiene que ser JPG, PNG o WebP.', $this->enviar(imagen: 'documento.jpg')->cuerpo());
-        self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM sala'));
-        self::assertSame([], $this->imagenesGuardadas());
+        self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM solicitud_sala'));
+        self::assertSame([], $this->fotosGuardadas());
     }
 
     public function testSinElTokenCsrfOSinSesionNoSeManda(): void
@@ -244,27 +264,29 @@ final class SolicitudDeSalaTest extends TestCase
         self::assertSame(403, $this->enviar(['_csrf' => str_repeat('d', 64)])->estado());
         self::assertSame(401, $this->pedir(rol: null)->estado());
         self::assertSame(401, $this->enviar(rol: null)->estado());
-        self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM sala'));
+        self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM solicitud_sala'));
     }
 
-    public function testConTodoBienGuardaLaSalaSinPublicarConSuSolicitudYAvisaAlEquipo(): void
+    public function testConTodoBienGuardaLaSolicitudConLaSalaPropuestaYAvisaAlEquipo(): void
     {
-        $respuesta = $this->enviar(['habilitada' => '1', 'organizador_id' => self::OTRO]);
+        $respuesta = $this->enviar(['usuario_id' => self::OTRO, 'sala_id' => self::OTRO]);
 
-        // 303: recargar no la vuelve a mandar.
+        // 303: recargar no la vuelve a mandar. Sin el prefijo de moderación: la dirección pública
+        // es la de siempre.
         self::assertSame(303, $respuesta->estado());
         self::assertSame('/solicitar-sala?enviada=1', $respuesta->cabecera('Location'));
-        // La sala, sin publicar y de quien la mandó, aunque el POST diga otra cosa.
-        $sala = $this->base->fila('SELECT id, organizador_id, nombre, capacidad, imagen, habilitada FROM sala');
-        self::assertSame(['organizador_id' => self::ESPECTADORA, 'nombre' => 'Cine Club El Galpón', 'capacidad' => 60, 'habilitada' => 0], array_diff_key($sala ?? [], ['id' => true, 'imagen' => true]));
-        // La foto, en el volumen con un nombre al azar.
-        self::assertMatchesRegularExpression('/^[0-9a-f]{32}\.png$/', (string) $sala['imagen']);
-        self::assertSame([$sala['imagen']], $this->imagenesGuardadas());
-        // La solicitud, pendiente y con el nombre de quien la mandó.
+        // La solicitud, pendiente, de quien la mandó aunque el POST diga otra cosa, con la sala
+        // propuesta y un id nuevo para ella.
+        $solicitud = $this->base->fila('SELECT sala_id, usuario_id, solicitante_nombre, estado, nombre, localidad, capacidad, tiempo_entre_funciones, imagen FROM solicitud_sala') ?? [];
         self::assertSame(
-            ['sala_id' => $sala['id'], 'usuario_id' => self::ESPECTADORA, 'solicitante_nombre' => 'Eva Prueba', 'estado' => 'pendiente'],
-            $this->base->fila('SELECT sala_id, usuario_id, solicitante_nombre, estado FROM solicitud_sala'),
+            ['usuario_id' => self::ESPECTADORA, 'solicitante_nombre' => 'Eva Prueba', 'estado' => 'pendiente', 'nombre' => 'Cine Club El Galpón', 'localidad' => 'Luján', 'capacidad' => 60, 'tiempo_entre_funciones' => 0],
+            array_diff_key($solicitud, ['sala_id' => true, 'imagen' => true]),
         );
+        self::assertMatchesRegularExpression('/^[0-9a-f-]{36}$/', (string) $solicitud['sala_id']);
+        self::assertNotSame(self::OTRO, $solicitud['sala_id']);
+        // La foto, en el volumen de moderación con un nombre al azar.
+        self::assertMatchesRegularExpression('/^[0-9a-f]{32}\.png$/', (string) $solicitud['imagen']);
+        self::assertSame([$solicitud['imagen']], $this->fotosGuardadas());
         // Le llegó al equipo, a la dirección de la configuración.
         self::assertSame(['<' . self::EQUIPO . '>'], self::$correo->correos()[0]['para']);
 
@@ -274,7 +296,7 @@ final class SolicitudDeSalaTest extends TestCase
         self::assertStringNotContainsString('action="/solicitar-sala"', $aviso->cuerpo());
     }
 
-    public function testElCorreoAlEquipoTraeLaSala(): void
+    public function testElCorreoAlEquipoTraeLaSalaYLaBandejaDeModeracion(): void
     {
         $this->enviar();
 
@@ -285,7 +307,7 @@ final class SolicitudDeSalaTest extends TestCase
             'Dirección: Av. San Martín 450, Luján',
             'Capacidad: 60 lugares',
             "Un galpón con proyector.\r\nSesenta butacas.",
-            '/administracion/solicitudes',
+            '/moderacion/solicitudes',
         ] as $parte) {
             self::assertStringContainsString($parte, $texto);
         }
@@ -293,8 +315,13 @@ final class SolicitudDeSalaTest extends TestCase
 
     public function testUnOrganizadorTambienLaMandaParaSumarOtraSala(): void
     {
-        self::assertSame(303, $this->enviar(rol: 'organizador')->estado());
-        self::assertSame(1, $this->base->valor("SELECT COUNT(*) FROM solicitud_sala WHERE estado = 'pendiente'"));
+        $this->enviar(rol: 'organizador');
+        $this->base->ejecutar("UPDATE solicitud_sala SET estado = 'aprobada', motivo = 'Bien.', resuelta_en = NOW()");
+
+        self::assertSame(303, $this->enviar(['nombre' => 'El Microcine'], rol: 'organizador')->estado());
+
+        // Otra sala, con su propio id.
+        self::assertSame(2, $this->base->valor('SELECT COUNT(DISTINCT sala_id) FROM solicitud_sala'));
     }
 
     public function testNoSePuedeMandarOtraMientrasEstaPendiente(): void
@@ -304,16 +331,16 @@ final class SolicitudDeSalaTest extends TestCase
 
         self::assertSame(409, $otra->estado());
         self::assertStringContainsString('En revisión', $otra->cuerpo());
-        self::assertSame(1, $this->base->valor('SELECT COUNT(*) FROM sala'));
+        self::assertSame(1, $this->base->valor('SELECT COUNT(*) FROM solicitud_sala'));
         self::assertCount(1, self::$correo->correos());
     }
 
     public function testSiLaRechazaronMuestraElMotivoYSeCorrigeLaMismaSala(): void
     {
         $this->enviar();
-        $sala = (string) $this->base->valor('SELECT id FROM sala');
-        $foto = (string) $this->base->valor('SELECT imagen FROM sala');
-        $this->base->ejecutar("UPDATE solicitud_sala SET estado = 'rechazada', motivo = 'Falta <b>la habilitación</b>.', resuelta_en = NOW()");
+        $sala = (string) $this->base->valor('SELECT sala_id FROM solicitud_sala');
+        $foto = (string) $this->base->valor('SELECT imagen FROM solicitud_sala');
+        $this->rechazarLaUltima('Falta <b>la habilitación</b>.');
 
         $pantalla = $this->pedir()->cuerpo();
         self::assertStringContainsString('Requiere corrección', $pantalla);
@@ -325,22 +352,66 @@ final class SolicitudDeSalaTest extends TestCase
 
         self::$correo->vaciar();
         self::assertSame(303, $this->enviar(['nombre' => 'El Galpón Habilitado'], imagen: null)->estado());
-        // La misma sala, corregida y con su foto, y una solicitud nueva.
-        self::assertSame([['id' => $sala, 'nombre' => 'El Galpón Habilitado', 'imagen' => $foto]], $this->base->filas('SELECT id, nombre, imagen FROM sala'));
+        // Una solicitud nueva de la misma sala, corregida y con la foto de la anterior.
+        self::assertSame(
+            ['sala_id' => $sala, 'nombre' => 'El Galpón Habilitado', 'imagen' => $foto],
+            $this->base->fila("SELECT sala_id, nombre, imagen FROM solicitud_sala WHERE estado = 'pendiente'"),
+        );
         self::assertSame(2, $this->base->valor('SELECT COUNT(*) FROM solicitud_sala WHERE sala_id = ?', [$sala]));
         self::assertStringContainsString('corrigió la sala que le rechazaron', self::textoDelCorreo());
     }
 
-    public function testAlCorregirConOtraFotoSeBorraLaAnterior(): void
+    /**
+     * Las fotos son el historial de lo que se pidió: la de la rechazada queda.
+     */
+    public function testAlCorregirConOtraFotoQuedanLasDos(): void
     {
         $this->enviar();
-        $this->base->ejecutar("UPDATE solicitud_sala SET estado = 'rechazada', motivo = 'Otra foto, por favor.', resuelta_en = NOW()");
+        $this->rechazarLaUltima('Otra foto, por favor.');
 
         $this->enviar(imagen: 'sala.webp');
 
-        $foto = (string) $this->base->valor('SELECT imagen FROM sala');
+        $foto = (string) $this->base->valor("SELECT imagen FROM solicitud_sala WHERE estado = 'pendiente'");
         self::assertStringEndsWith('.webp', $foto);
-        self::assertSame([$foto], $this->imagenesGuardadas());
+        self::assertCount(2, $this->fotosGuardadas());
+        self::assertContains($foto, $this->fotosGuardadas());
+    }
+
+    /**
+     * La foto la ven quien mandó la solicitud y el administrador; para los demás no existe.
+     */
+    public function testLaFotoLaVenElSolicitanteYElAdministrador(): void
+    {
+        $this->enviar();
+        $id = (string) $this->base->valor('SELECT id FROM solicitud_sala');
+        $url = "/solicitudes/{$id}/foto";
+
+        $suya = $this->pedir(url: $url);
+        self::assertSame(200, $suya->estado());
+        self::assertSame(file_get_contents(Imagenes::ruta('sala.png')), $suya->cuerpo());
+        self::assertSame('image/png', $suya->cabecera('Content-Type'));
+        self::assertSame(200, $this->pedir(rol: 'administrador', usuario: self::ADMINISTRADOR, url: $url)->estado());
+        self::assertSame(404, $this->pedir(usuario: self::OTRO, url: $url)->estado());
+        self::assertSame(404, $this->pedir(url: '/solicitudes/no-es-un-id/foto')->estado());
+        self::assertSame(401, $this->pedir(rol: null, url: $url)->estado());
+
+        // Al corregirla, la pantalla la muestra con la dirección de moderación.
+        $this->rechazarLaUltima();
+        self::assertStringContainsString("src=\"/moderacion/solicitudes/{$id}/foto\"", $this->pedir()->cuerpo());
+    }
+
+    /**
+     * Una solicitud que se mudó de programación no tiene foto propia: se ve la de su sala allá,
+     * que su organizador puede ver aunque no esté publicada.
+     */
+    public function testUnaMudadaSinFotoMuestraLaDeSuSala(): void
+    {
+        $this->enviar();
+        $sala = (string) $this->base->valor('SELECT sala_id FROM solicitud_sala');
+        $this->base->ejecutar('UPDATE solicitud_sala SET imagen = NULL');
+        $this->rechazarLaUltima();
+
+        self::assertStringContainsString("src=\"/salas/{$sala}/imagen\"", $this->pedir()->cuerpo());
     }
 
     /**

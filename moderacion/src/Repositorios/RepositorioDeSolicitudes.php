@@ -2,31 +2,29 @@
 
 declare(strict_types=1);
 
-namespace IndieCinema\Programacion\Repositorios;
+namespace IndieCinema\Moderacion\Repositorios;
 
 use DateTimeImmutable;
 use DateTimeZone;
+use IndieCinema\Moderacion\Modelo\DatosDeSala;
+use IndieCinema\Moderacion\Modelo\EstadoSolicitud;
+use IndieCinema\Moderacion\Modelo\SolicitudDeSala;
+use IndieCinema\Moderacion\Servicios\SolicitudPendiente;
 use IndieCinema\Nucleo\BaseDeDatos;
-use IndieCinema\Programacion\Modelo\EstadoSolicitud;
-use IndieCinema\Programacion\Modelo\SolicitudDeSala;
-use IndieCinema\Programacion\Servicios\SolicitudPendiente;
 use PDOException;
 
 /**
- * Las solicitudes de sala, cada una con su sala en la misma consulta: la bandeja muestra las dos
- * cosas juntas. Las de salas dadas de baja no se ven.
+ * Las solicitudes de sala, con la sala que proponen (EF-07.2): la bandeja y el solicitante ven lo
+ * que se pidió sin preguntarle a programación.
  */
 final class RepositorioDeSolicitudes
 {
     private const CLAVE_DUPLICADA = 1062;
 
-    private const SELECT = 'SELECT so.id AS solicitud_id, so.usuario_id, so.solicitante_nombre, so.estado,
-                                   so.enviada_en, so.resuelta_en, so.motivo,
-                                   sa.id, sa.organizador_id, sa.nombre, sa.descripcion, sa.direccion, sa.localidad,
-                                   sa.capacidad, sa.peliculas_por_funcion, sa.duracion_funcion,
-                                   sa.tiempo_entre_funciones, sa.imagen, sa.habilitada
-                            FROM solicitud_sala so
-                            JOIN sala sa ON sa.id = so.sala_id AND sa.dada_de_baja_en IS NULL';
+    private const SELECT = 'SELECT id, sala_id, usuario_id, solicitante_nombre, nombre, descripcion, direccion, localidad,
+                                   capacidad, peliculas_por_funcion, duracion_funcion, tiempo_entre_funciones, imagen,
+                                   estado, enviada_en, resuelta_en, motivo
+                            FROM solicitud_sala';
 
     public function __construct(private readonly BaseDeDatos $base)
     {
@@ -35,12 +33,20 @@ final class RepositorioDeSolicitudes
     /**
      * @throws SolicitudPendiente si la sala ya tiene una sin resolver
      */
-    public function agregar(string $id, string $salaId, string $usuarioId, ?string $solicitanteNombre, DateTimeImmutable $enviadaEn): void
+    public function agregar(SolicitudDeSala $solicitud): void
     {
+        $datos = $solicitud->datos;
         try {
             $this->base->ejecutar(
-                'INSERT INTO solicitud_sala (id, sala_id, usuario_id, solicitante_nombre, enviada_en) VALUES (?, ?, ?, ?, ?)',
-                [$id, $salaId, $usuarioId, $solicitanteNombre, $enviadaEn],
+                'INSERT INTO solicitud_sala (id, sala_id, usuario_id, solicitante_nombre, nombre, descripcion, direccion,
+                    localidad, capacidad, peliculas_por_funcion, duracion_funcion, tiempo_entre_funciones, imagen, estado, enviada_en)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                [
+                    $solicitud->id, $solicitud->salaId, $solicitud->usuarioId, $solicitud->solicitanteNombre,
+                    $datos->nombre, $datos->descripcion, $datos->direccion, $datos->localidad, $datos->capacidad,
+                    $datos->peliculasPorFuncion, $datos->duracionFuncion, $datos->tiempoEntreFunciones,
+                    $solicitud->imagen, $solicitud->estado->value, $solicitud->enviadaEn,
+                ],
             );
         } catch (PDOException $error) {
             if (($error->errorInfo[1] ?? null) === self::CLAVE_DUPLICADA) {
@@ -52,7 +58,7 @@ final class RepositorioDeSolicitudes
 
     public function buscar(string $id): ?SolicitudDeSala
     {
-        $fila = $this->base->fila(self::SELECT . ' WHERE so.id = ?', [$id]);
+        $fila = $this->base->fila(self::SELECT . ' WHERE id = ?', [$id]);
 
         return $fila === null ? null : self::solicitud($fila);
     }
@@ -62,7 +68,7 @@ final class RepositorioDeSolicitudes
      */
     public function ultimaDe(string $usuarioId): ?SolicitudDeSala
     {
-        $fila = $this->base->fila(self::SELECT . ' WHERE so.usuario_id = ? ORDER BY so.enviada_en DESC, so.id LIMIT 1', [$usuarioId]);
+        $fila = $this->base->fila(self::SELECT . ' WHERE usuario_id = ? ORDER BY enviada_en DESC, id LIMIT 1', [$usuarioId]);
 
         return $fila === null ? null : self::solicitud($fila);
     }
@@ -90,7 +96,7 @@ final class RepositorioDeSolicitudes
     public function lista(bool $pendientes, ?string $texto, int $limite): array
     {
         [$filtro, $parametros] = self::filtro($pendientes, $texto);
-        $orden = $pendientes ? 'so.enviada_en, so.id' : 'so.resuelta_en DESC, so.id';
+        $orden = $pendientes ? 'enviada_en, id' : 'resuelta_en DESC, id';
         $parametros[] = $limite;
 
         return array_map(self::solicitud(...), $this->base->filas(self::SELECT . " WHERE {$filtro} ORDER BY {$orden} LIMIT ?", $parametros));
@@ -103,10 +109,7 @@ final class RepositorioDeSolicitudes
     {
         [$filtro, $parametros] = self::filtro($pendientes, $texto);
 
-        return (int) $this->base->valor(
-            'SELECT COUNT(*) FROM solicitud_sala so JOIN sala sa ON sa.id = so.sala_id AND sa.dada_de_baja_en IS NULL WHERE ' . $filtro,
-            $parametros,
-        );
+        return (int) $this->base->valor('SELECT COUNT(*) FROM solicitud_sala WHERE ' . $filtro, $parametros);
     }
 
     /**
@@ -114,11 +117,11 @@ final class RepositorioDeSolicitudes
      *
      * @return bool false si ya estaba resuelta (otro administrador, o el mismo POST dos veces)
      */
-    public function resolver(string $id, EstadoSolicitud $estado, string $administradorId, string $motivo, DateTimeImmutable $resueltaEn): bool
+    public function resolver(string $id, EstadoSolicitud $estado, string $resueltaPor, string $motivo, DateTimeImmutable $resueltaEn): bool
     {
         return $this->base->ejecutar(
             'UPDATE solicitud_sala SET estado = ?, resuelta_por = ?, motivo = ?, resuelta_en = ? WHERE id = ? AND estado = ?',
-            [$estado->value, $administradorId, $motivo, $resueltaEn, $id, EstadoSolicitud::Pendiente->value],
+            [$estado->value, $resueltaPor, $motivo, $resueltaEn, $id, EstadoSolicitud::Pendiente->value],
         ) === 1;
     }
 
@@ -127,11 +130,11 @@ final class RepositorioDeSolicitudes
      */
     private static function filtro(bool $pendientes, ?string $texto): array
     {
-        $filtro = $pendientes ? 'so.estado = ?' : 'so.estado <> ?';
+        $filtro = $pendientes ? 'estado = ?' : 'estado <> ?';
         $parametros = [EstadoSolicitud::Pendiente->value];
         $texto = trim((string) $texto);
         if ($texto !== '') {
-            $filtro .= " AND (sa.nombre LIKE ? ESCAPE '!' OR sa.localidad LIKE ? ESCAPE '!' OR so.solicitante_nombre LIKE ? ESCAPE '!')";
+            $filtro .= " AND (nombre LIKE ? ESCAPE '!' OR localidad LIKE ? ESCAPE '!' OR solicitante_nombre LIKE ? ESCAPE '!')";
             array_push($parametros, Like::contiene($texto), Like::contiene($texto), Like::contiene($texto));
         }
 
@@ -144,10 +147,21 @@ final class RepositorioDeSolicitudes
     private static function solicitud(array $fila): SolicitudDeSala
     {
         return new SolicitudDeSala(
-            (string) $fila['solicitud_id'],
-            RepositorioDeSalas::sala($fila),
+            (string) $fila['id'],
+            (string) $fila['sala_id'],
             (string) $fila['usuario_id'],
             $fila['solicitante_nombre'] === null ? null : (string) $fila['solicitante_nombre'],
+            new DatosDeSala(
+                (string) $fila['nombre'],
+                (string) $fila['descripcion'],
+                (string) $fila['direccion'],
+                (string) $fila['localidad'],
+                (int) $fila['capacidad'],
+                (int) $fila['peliculas_por_funcion'],
+                (int) $fila['duracion_funcion'],
+                (int) $fila['tiempo_entre_funciones'],
+            ),
+            $fila['imagen'] === null ? null : (string) $fila['imagen'],
             EstadoSolicitud::from((string) $fila['estado']),
             self::fecha($fila['enviada_en']),
             $fila['resuelta_en'] === null ? null : self::fecha($fila['resuelta_en']),

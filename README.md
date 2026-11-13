@@ -719,6 +719,18 @@ Para pagar con el comprador de prueba, las tarjetas de prueba están en la docum
 Checkout Pro («Tarjetas de prueba»), con el titular `APRO` para un pago aprobado y `OTHE` para
 uno rechazado.
 
+Cancelar una reserva pagada le devuelve la plata al espectador (EF-06.4), y las tres cancelaciones
+pasan por lo mismo: la del espectador desde su reserva, la anulación del administrador y la
+cancelación de la función. Se devuelve el pago entero, y una sola vez: la reserva guarda el
+`reembolso_id` que contestó Mercado Pago, y el pedido va con la clave de idempotencia
+`reembolso-<pago>`, así que repetirlo no devuelve dos veces.
+
+Si Mercado Pago no responde o lo rechaza, la cancelación queda igual —el espectador no se come un
+error por algo que se arregla del otro lado— y la reserva queda con el **reembolso pendiente**:
+cancelada, con pago y sin reembolso. El panel del administrador la marca así y el motivo queda en
+el log. Lo que se devolvió no se reparte: el neto de `/interno/cobros` lo descuenta, y lo que quedó
+pendiente sigue contando, porque la plata todavía está en la cuenta.
+
 Las credenciales nunca van al repositorio: gitleaks frena un `APP_USR-…` o un `TEST-…` en el CI.
 
 ### Integración continua

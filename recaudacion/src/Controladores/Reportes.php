@@ -10,22 +10,31 @@ use IndieCinema\Nucleo\Controlador;
 use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Seguridad\Rol;
+use IndieCinema\Nucleo\Seguridad\Usuario;
 use IndieCinema\Recaudacion\Modelo\DiaFlojo;
+use IndieCinema\Recaudacion\Modelo\FuncionFinalizada;
+use IndieCinema\Recaudacion\Modelo\ObraVotada;
 use IndieCinema\Recaudacion\Modelo\PedidoDelPublico;
 use IndieCinema\Recaudacion\Modelo\Periodo;
 use IndieCinema\Recaudacion\Modelo\ReglaIncumplida;
 use IndieCinema\Recaudacion\Modelo\RendimientoDeSala;
 use IndieCinema\Recaudacion\Modelo\TituloParaRepetir;
+use IndieCinema\Recaudacion\Modelo\TotalDeFunciones;
 use IndieCinema\Recaudacion\Modelo\Umbrales;
 use IndieCinema\Recaudacion\Servicios\ServicioDeReportes;
 use IndieCinema\Recaudacion\Servicios\Sugerencias;
+use IndieCinema\Recaudacion\Servicios\TotalesDelPeriodo;
 use LogicException;
 
 /**
- * GET /recaudacion/reportes: lo que pasó en las salas en un período y qué conviene hacer
- * (EF-09.1). El organizador ve las suyas y el administrador, todas. Primero las sugerencias, que
- * es lo que pidió el profe el 11/11: un reporte que sólo muestra números es una máquina de
- * escribir; uno que dice qué día conviene una promoción sirve para decidir.
+ * Los reportes de recaudación: lo que pasó en las salas en un período. El organizador ve las suyas
+ * y el administrador, todas.
+ *
+ * - GET /recaudacion/reportes: qué conviene hacer (EF-09.1). Va primero porque es lo que pidió el
+ *   profe el 11/11: un reporte que sólo muestra números es una máquina de escribir; uno que dice
+ *   qué día conviene una promoción sirve para decidir.
+ * - GET /recaudacion/reportes/funciones: los totales de cada mes y las funciones de uno (EF-09.2).
+ * - GET /recaudacion/reportes/funciones.csv: todas las funciones del período, para una planilla.
  */
 final class Reportes extends Controlador
 {
@@ -44,24 +53,9 @@ final class Reportes extends Controlador
 
     public function mostrar(Peticion $peticion): Respuesta
     {
-        $usuario = $peticion->usuario() ?? throw new LogicException('Ruta de organizador sin usuario.');
-        $desde = $peticion->consulta('desde');
-        $hasta = $peticion->consulta('hasta');
-        $error = null;
-        $periodo = Periodo::porDefecto(new DateTimeImmutable('today'));
-        if (is_string($desde) || is_string($hasta)) {
-            try {
-                $periodo = Periodo::entre(is_string($desde) ? $desde : '', is_string($hasta) ? $hasta : '');
-            } catch (ReglaIncumplida $regla) {
-                $error = $regla->getMessage();
-            }
-        }
+        [$periodo, $periodoElegido, $error] = self::periodoPedido($peticion);
+        $usuario = self::usuario($peticion);
         $administrador = $usuario->alcanza(Rol::Administrador);
-        $periodoElegido = [
-            'desde' => is_string($desde) && $error !== null ? $desde : $periodo->desde->format('Y-m-d'),
-            'hasta' => is_string($hasta) && $error !== null ? $hasta : $periodo->hasta->format('Y-m-d'),
-            'texto' => self::periodo($periodo),
-        ];
         if ($error !== null) {
             return $this->vista('reportes.html.twig', ['periodo' => $periodoElegido, 'error' => $error, 'administrador' => $administrador], 422);
         }
@@ -107,6 +101,147 @@ final class Reportes extends Controlador
                 'pedido' => "{$this->umbrales->pedidoVotosMinimos} %",
             ],
         ]);
+    }
+
+    /**
+     * Los totales de cada mes del período y, debajo, las funciones de uno: el que se eligió con
+     * ?mes=AAAA-MM o, si no, el último con funciones. Un mes por página es el paginado natural de
+     * un reporte mensual; el CSV trae todas juntas.
+     */
+    public function funciones(Peticion $peticion): Respuesta
+    {
+        [$periodo, $periodoElegido, $error] = self::periodoPedido($peticion);
+        $usuario = self::usuario($peticion);
+        $administrador = $usuario->alcanza(Rol::Administrador);
+        $sala = $peticion->consulta('sala');
+        $sala = is_string($sala) && $sala !== '' ? $sala : null;
+        if ($error !== null) {
+            return $this->vista('reportes_funciones.html.twig', ['periodo' => $periodoElegido, 'error' => $error, 'administrador' => $administrador, 'sala' => $sala], 422);
+        }
+
+        $datos = $this->reportes->delOrganizador($periodo, $administrador ? null : $usuario->id);
+        $salas = TotalesDelPeriodo::salas($datos);
+        // Una sala que no tuvo funciones en el período (o que no es suya) no filtra nada: se ignora.
+        $sala = $sala !== null && isset($salas[$sala]) ? $sala : null;
+        $funciones = TotalesDelPeriodo::deLaSala($datos, $sala);
+        $meses = TotalesDelPeriodo::porMes($datos, $funciones);
+        $mes = $peticion->consulta('mes');
+        $mes = is_string($mes) && isset($meses[$mes]) ? $mes : array_key_last($meses);
+        $filtros = ['desde' => $periodoElegido['desde'], 'hasta' => $periodoElegido['hasta'], ...($sala === null ? [] : ['sala' => $sala])];
+
+        return $this->vista('reportes_funciones.html.twig', [
+            'periodo' => $periodoElegido,
+            'administrador' => $administrador,
+            'avisos' => $datos->avisos,
+            'sala' => $sala,
+            'salas' => array_map(static fn (string $id, string $nombre): array => ['valor' => $id, 'etiqueta' => $nombre], array_keys($salas), $salas),
+            'meses' => array_map(fn (string $clave, TotalDeFunciones $total): array => [
+                ...self::totales($total),
+                'nombre' => self::nombreDelMes($clave),
+                'url' => $this->ruta('/reportes/funciones?' . http_build_query([...$filtros, 'mes' => $clave])),
+                'actual' => $clave === $mes,
+            ], array_keys($meses), $meses),
+            'total' => self::totales(TotalesDelPeriodo::total($datos, $funciones)),
+            'mes' => $mes === null ? null : self::nombreDelMes($mes),
+            'funciones' => array_map(static fn (FuncionFinalizada $funcion): array => [
+                ...self::totales(TotalesDelPeriodo::deUna($datos, $funcion)),
+                'fecha' => self::DIAS[(int) $funcion->fechaHora->format('N')] . ' ' . $funcion->fechaHora->format('j') . ', ' . $funcion->fechaHora->format('H:i'),
+                'sala' => $funcion->salaNombre,
+                'obras' => implode(' + ', array_map(static fn (ObraVotada $obra): string => $obra->titulo, $funcion->elegidas())),
+            ], array_values(array_filter($funciones, static fn (FuncionFinalizada $funcion): bool => $funcion->fechaHora->format('Y-m') === $mes))),
+            'csv' => $this->ruta('/reportes/funciones.csv?' . http_build_query($filtros)),
+        ]);
+    }
+
+    /**
+     * Todas las funciones del período (y de la sala, si se eligió una) en CSV. Con un período que
+     * no sirve, el mismo 422 que la pantalla: el enlace sale de ella, así que no debería pasar.
+     */
+    public function descargar(Peticion $peticion): Respuesta
+    {
+        [$periodo, $periodoElegido, $error] = self::periodoPedido($peticion);
+        $usuario = self::usuario($peticion);
+        if ($error !== null) {
+            return $this->vista('reportes_funciones.html.twig', ['periodo' => $periodoElegido, 'error' => $error, 'administrador' => $usuario->alcanza(Rol::Administrador), 'sala' => null], 422);
+        }
+        $datos = $this->reportes->delOrganizador($periodo, $usuario->alcanza(Rol::Administrador) ? null : $usuario->id);
+        $sala = $peticion->consulta('sala');
+
+        return (new Respuesta(CsvDeFunciones::armar($datos, TotalesDelPeriodo::deLaSala($datos, is_string($sala) && $sala !== '' ? $sala : null))))
+            ->conCabecera('Content-Type', 'text/csv; charset=utf-8')
+            ->conCabecera('Content-Disposition', "attachment; filename=\"funciones-{$periodo->desde->format('Y-m-d')}-al-{$periodo->hasta->format('Y-m-d')}.csv\"");
+    }
+
+    /**
+     * El período del filtro: el elegido o, si no se eligió nada, los últimos noventa días. Si el
+     * elegido no sirve, vuelve el error y lo que se había escrito, para mostrarlo en el formulario.
+     *
+     * @return array{Periodo, array{desde: string, hasta: string, texto: ?string}, ?string}
+     */
+    private static function periodoPedido(Peticion $peticion): array
+    {
+        $desde = $peticion->consulta('desde');
+        $hasta = $peticion->consulta('hasta');
+        $periodo = Periodo::porDefecto(new DateTimeImmutable('today'));
+        $error = null;
+        if (is_string($desde) || is_string($hasta)) {
+            try {
+                $periodo = Periodo::entre(is_string($desde) ? $desde : '', is_string($hasta) ? $hasta : '');
+            } catch (ReglaIncumplida $regla) {
+                $error = $regla->getMessage();
+            }
+        }
+
+        return [$periodo, [
+            'desde' => is_string($desde) && $error !== null ? $desde : $periodo->desde->format('Y-m-d'),
+            'hasta' => is_string($hasta) && $error !== null ? $hasta : $periodo->hasta->format('Y-m-d'),
+            // Con un error, el período por defecto no es el que se pidió: la bajada no lo nombra.
+            'texto' => $error === null ? self::periodo($periodo) : null,
+        ], $error];
+    }
+
+    private static function usuario(Peticion $peticion): Usuario
+    {
+        return $peticion->usuario() ?? throw new LogicException('Ruta de organizador sin usuario.');
+    }
+
+    /**
+     * Lo de una función, un mes o el período, ya escrito. Lo que no se pudo calcular (sin ventas,
+     * sin calificaciones) va en null y la plantilla pone una raya.
+     *
+     * @return array<string, mixed>
+     */
+    private static function totales(TotalDeFunciones $total): array
+    {
+        $conVentas = $total->sinVentas < $total->funciones;
+
+        return [
+            'funciones' => $total->funciones,
+            'cupo' => $total->cupo,
+            'vendidas' => $conVentas ? $total->vendidas : null,
+            'ocupacion' => $total->ocupacion() === null ? null : "{$total->ocupacion()} %",
+            'asistentes' => $conVentas ? $total->asistentes : null,
+            'asistencia' => $total->asistencia() === null ? null : "{$total->asistencia()} %",
+            'cobrado' => $conVentas ? self::pesos($total->cobradoCentavos) : null,
+            'promedio' => $total->promedio() === null ? null : self::promedio($total->promedio()),
+            'calificaciones' => $total->calificaciones,
+        ];
+    }
+
+    /** 15400000 → «$ 154.000», con los centavos sólo si los hay, como el resto del sitio. */
+    private static function pesos(int $centavos): string
+    {
+        $texto = number_format(intdiv($centavos, 100), 0, ',', '.');
+
+        return '$ ' . ($centavos % 100 === 0 ? $texto : $texto . ',' . sprintf('%02d', $centavos % 100));
+    }
+
+    /** «2026-11» → «Noviembre de 2026». */
+    private static function nombreDelMes(string $mes): string
+    {
+        [$anio, $numero] = explode('-', $mes);
+
+        return ucfirst(self::MESES[(int) $numero]) . " de {$anio}";
     }
 
     /**

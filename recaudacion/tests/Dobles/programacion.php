@@ -10,6 +10,11 @@
  * - «Rojo», los sábados, se llena, va casi todo el que reservó y tiene más de 4 de promedio.
  * - «La ciénaga» perdió la votación del primer miércoles con el 40 % de los votos.
  * - Cineclub Norte es de otra organizadora: sólo la ve el administrador.
+ * - En octubre hay una más en El Galpón, con un título que empieza como una fórmula de planilla,
+ *   para el CSV (EF-09.2).
+ *
+ * Como programación, devuelve sólo las del período, con los dos días incluidos, de la primera a la
+ * última.
  *
  * Las ventas y las calificaciones de estas funciones están en Dobles/funciones.php.
  */
@@ -23,6 +28,7 @@ const NORTE = '10000000-0000-4000-8000-000000000002';
 const ZAMA = '20000000-0000-4000-8000-000000000001';
 const CIENAGA = '20000000-0000-4000-8000-000000000002';
 const ROJO = '20000000-0000-4000-8000-000000000003';
+const FORMULA = '20000000-0000-4000-8000-000000000004';
 
 header('Content-Type: application/json');
 $cabeceras = getallheaders();
@@ -62,6 +68,7 @@ $delOrganizador = [
     $funcion('30000000-0000-4000-8000-000000000002', '2026-11-07T21:00:00', GALPON, 'El Galpón', [$obra(ROJO, 'Rojo', true)]),
     $funcion('30000000-0000-4000-8000-000000000003', '2026-11-11T21:00:00', GALPON, 'El Galpón', [$obra(ZAMA, 'Zama', true)]),
     $funcion('30000000-0000-4000-8000-000000000004', '2026-11-14T21:00:00', GALPON, 'El Galpón', [$obra(ROJO, 'Rojo', true)]),
+    $funcion('30000000-0000-4000-8000-000000000006', '2026-10-15T20:00:00', GALPON, 'El Galpón', [$obra(FORMULA, '=HIPERVINCULO("x")', true)]),
 ];
 $deOtra = [$funcion('30000000-0000-4000-8000-000000000005', '2026-11-08T20:00:00', NORTE, 'Cineclub Norte', [$obra(ZAMA, 'Zama', true)], [], 'cccccccc-cccc-4ccc-8ccc-cccccccccccc')];
 
@@ -70,4 +77,10 @@ $funciones = match ($_GET['organizador'] ?? null) {
     null => [...$delOrganizador, ...$deOtra],
     default => [],
 };
-echo json_encode(['funciones' => $funciones, 'completas' => true]);
+$delPeriodo = array_values(array_filter(
+    $funciones,
+    static fn (array $f): bool => substr($f['fecha_hora'], 0, 10) >= $_GET['desde'] && substr($f['fecha_hora'], 0, 10) <= $_GET['hasta'],
+));
+// De la primera a la última, como programación.
+usort($delPeriodo, static fn (array $a, array $b): int => [$a['fecha_hora'], $a['id']] <=> [$b['fecha_hora'], $b['id']]);
+echo json_encode(['funciones' => $delPeriodo, 'completas' => true]);

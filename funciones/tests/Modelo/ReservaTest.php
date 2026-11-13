@@ -244,4 +244,23 @@ final class ReservaTest extends TestCase
         self::assertTrue(EstadoReserva::Asistio->ocupaLugares());
         self::assertFalse(EstadoReserva::Cancelada->ocupaLugares());
     }
+
+    /**
+     * Lo que suman el total del panel del organizador (EF-06.5) y el neto que reparte recaudación
+     * (EF-02.5): la plata que entró por Mercado Pago y todavía no volvió.
+     */
+    public function testSoloEstaCobradaLaQueTieneSuPlataEnLaCuenta(): void
+    {
+        $sinCobro = Reserva::nueva($this->funcion(), self::ESPECTADOR, 1, $this->antes());
+        $pagada = Reserva::nueva($this->funcion(), self::ESPECTADOR, 1, $this->antes(), 15)
+            ->conPreferencia('pref-1', 'https://mp.test/pagar')
+            ->confirmarPago('1324567890');
+
+        // Confirmada con el cobro apagado: su total dice 3500 y nunca entró nada.
+        self::assertFalse($sinCobro->cobrada());
+        self::assertTrue($pagada->cobrada());
+        // Cancelarla no mueve la plata: sigue en la cuenta hasta que el reembolso sale.
+        self::assertTrue($pagada->cancelar()->cobrada());
+        self::assertFalse($pagada->cancelar()->conReembolso('reembolso-1')->cobrada());
+    }
 }

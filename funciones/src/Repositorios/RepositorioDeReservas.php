@@ -198,6 +198,36 @@ final class RepositorioDeReservas
         return $porFuncion;
     }
 
+    /**
+     * Por qué se canceló cada una de esas reservas (EF-06.3): el motivo que dejó el cambio que la
+     * canceló. Lo escribe quien cancela y ya viene redactado para el espectador —«Venció el plazo
+     * para pagar.», «Se canceló la función.», «Anulada por el administrador.»—, así que sale tal
+     * cual. Las que canceló el espectador no tienen ninguno: las canceló él y ya sabe por qué.
+     *
+     * @param list<string> $reservasIds
+     *
+     * @return array<string, string> reserva_id => motivo; sólo las que tienen uno
+     */
+    public function motivosDeCancelacion(array $reservasIds): array
+    {
+        if ($reservasIds === []) {
+            return [];
+        }
+        $motivos = [];
+        // De la más vieja a la más nueva, así gana la última: una pendiente puede cancelarse al
+        // vencer, volver a confirmarse con un pago que llegó tarde y cancelarse otra vez.
+        foreach ($this->base->filas(
+            'SELECT reserva_id, motivo FROM cambio_reserva WHERE reserva_id IN ('
+            . implode(', ', array_fill(0, count($reservasIds), '?')) . ')
+             AND estado_nuevo = ? AND motivo IS NOT NULL ORDER BY hecho_en, id',
+            [...$reservasIds, EstadoReserva::Cancelada],
+        ) as $fila) {
+            $motivos[$fila['reserva_id']] = $fila['motivo'];
+        }
+
+        return $motivos;
+    }
+
     public function buscar(string $id): ?Reserva
     {
         $fila = $this->base->fila('SELECT * FROM reserva WHERE id = ?', [$id]);

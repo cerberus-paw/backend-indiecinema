@@ -184,7 +184,7 @@ final class ReembolsoAlCancelarTest extends TestCase
     {
         $respuesta = $this->pedir('POST', '/reservar/' . self::PROXIMA, $usuario, cuerpo: ['cantidad' => $cantidad]);
         self::assertSame(303, $respuesta->estado(), $respuesta->cuerpo());
-        $reserva = $this->ultima();
+        $reserva = $this->ultima($usuario);
         self::pagoEnMercadoPago($pago, $reserva['id'], $reserva['total']);
         self::assertSame(200, $this->avisar($pago)->estado());
         $pagada = $this->reserva($reserva['id']);
@@ -196,11 +196,19 @@ final class ReembolsoAlCancelarTest extends TestCase
     }
 
     /**
+     * La última reserva de ese espectador. Filtra por usuario porque creada_en guarda segundos: dos
+     * reservas hechas en el mismo segundo empatan, y el desempate por id —un UUID al azar— devuelve
+     * cualquiera de las dos. Sin el filtro, la prueba que paga una y deja otra pendiente agarraba a
+     * veces la que no era.
+     *
      * @return array<string, mixed>
      */
-    private function ultima(): array
+    private function ultima(string $usuario = self::EVA): array
     {
-        return $this->base->fila('SELECT * FROM reserva ORDER BY creada_en DESC, id LIMIT 1') ?? self::fail('No quedó ninguna reserva.');
+        return $this->base->fila(
+            'SELECT * FROM reserva WHERE usuario_id = ? ORDER BY creada_en DESC, id LIMIT 1',
+            [$usuario],
+        ) ?? self::fail("No quedó ninguna reserva de {$usuario}.");
     }
 
     /**
@@ -290,7 +298,7 @@ final class ReembolsoAlCancelarTest extends TestCase
         $pagada = $this->pagada();
         $sinPagar = $this->pedir('POST', '/reservar/' . self::PROXIMA, self::ELIAS, cuerpo: ['cantidad' => '1']);
         self::assertSame(303, $sinPagar->estado(), $sinPagar->cuerpo());
-        $pendiente = $this->ultima();
+        $pendiente = $this->ultima(self::ELIAS);
         self::assertSame('pendiente_pago', $pendiente['estado']);
         self::vaciarMercadoPago();
 

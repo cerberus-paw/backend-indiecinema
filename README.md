@@ -48,7 +48,7 @@ backend-indiecinema/
 ├── programacion/          /          obras, salas, funciones, cartelera, votación de títulos y solicitudes de sala
 ├── funciones/             /funcion/  las reservas con el cupo de cada función, sus paneles y el acuerdo de fecha
 ├── moderacion/            /moderacion/  armado (EF-01): las solicitudes de sala, las denuncias y los términos llegan con EF-07 y EF-16
-└── recaudacion/           /recaudacion/ armado (EF-02): el reparto, las liquidaciones y la reportería llegan con EF-08 y EF-09
+└── recaudacion/           /recaudacion/: los reportes (EF-09); el reparto y las liquidaciones llegan con EF-08
 ```
 
 Lo que todavía no está (los beneficios, dentro de recaudación) se suma con la misma forma.
@@ -237,6 +237,10 @@ todo el sitio se vea igual aunque lo sirvan subsistemas distintos.
   para eso. Están en «Tareas programadas»: los cierres por fecha límite de la votación y del
   acuerdo, el fin de las funciones, el recordatorio del día antes y las reservas que vencieron sin
   pagar. El organizador puede cerrar la votación y el acuerdo antes desde la ficha.
+- **Los reportes los arma recaudación** (`/recaudacion/reportes`) pidiendo lo que necesita por la
+  API interna: las funciones finalizadas y sus votos a programación, y las ventas y calificaciones
+  a funciones. Si uno no responde, sale lo que hay con un aviso. Desde dónde sugiere una promoción,
+  un título para repetir o lo que el público pidió está en `[reportes]` de su `config.ini`.
 - **Las rutas dentro del contenedor copian las del disco** (`/src/backend-indiecinema/<subsistema>`
   y `/src/frontend-indiecinema`), así los repositorios `path` de Composer funcionan igual si se
   instala desde afuera o desde adentro del contenedor.

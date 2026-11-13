@@ -222,7 +222,7 @@ final class RepositorioDeReservas
              AND estado_nuevo = ? AND motivo IS NOT NULL ORDER BY hecho_en, id',
             [...$reservasIds, EstadoReserva::Cancelada],
         ) as $fila) {
-            $motivos[$fila['reserva_id']] = $fila['motivo'];
+            $motivos[(string) $fila['reserva_id']] = (string) $fila['motivo'];
         }
 
         return $motivos;

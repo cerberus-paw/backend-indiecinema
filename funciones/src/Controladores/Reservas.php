@@ -37,6 +37,13 @@ use RuntimeException;
  */
 final class Reservas extends Controlador
 {
+    /**
+     * La hora del sitio, como en los dos paneles (ReservasDeLaFuncion, ReservasDelAdministrador).
+     * Fija y no la del sistema: la base guarda UTC, y una imagen sin date.timezone le mostraría al
+     * espectador tres horas más que las que dice su reserva.
+     */
+    private const ZONA = 'America/Argentina/Buenos_Aires';
+
     public function __construct(
         private readonly ServicioDeReservas $servicio,
         private readonly AvisosDeReservas $avisos,
@@ -356,7 +363,7 @@ final class Reservas extends Controlador
      */
     private static function hora(DateTimeImmutable $momento): string
     {
-        return $momento->setTimezone(new DateTimeZone(date_default_timezone_get()))->format('H:i');
+        return $momento->setTimezone(new DateTimeZone(self::ZONA))->format('H:i');
     }
 
     /**
@@ -364,7 +371,7 @@ final class Reservas extends Controlador
      */
     private static function fecha(DateTimeImmutable $momento): string
     {
-        return TextoParaMostrar::dia($momento->setTimezone(new DateTimeZone(date_default_timezone_get())));
+        return TextoParaMostrar::dia($momento->setTimezone(new DateTimeZone(self::ZONA)));
     }
 
     /**

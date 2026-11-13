@@ -731,6 +731,13 @@ cancelada, con pago y sin reembolso. El panel del administrador la marca así y 
 el log. Lo que se devolvió no se reparte: el neto de `/interno/cobros` lo descuenta, y lo que quedó
 pendiente sigue contando, porque la plata todavía está en la cuenta.
 
+El total del panel del organizador cuenta lo mismo (EF-06.5): las reservas con pago de Mercado
+Pago que no se devolvió, `Reserva::cobrada()`. Una pendiente todavía no pagó, y una confirmada con
+el cobro apagado —o a la gorra— no pagó nunca, aunque su total diga 3500; una cancelada que espera
+su reembolso sigue contando, y el total baja recién cuando la plata vuelve. Por eso la tarjeta dice
+«Total cobrado» y no «Total de las reservas». Y «A la gorra» es de la función: si cobra entrada y
+todavía no entró nada, el panel muestra `$ 0`.
+
 Al espectador se le dice en qué quedó su reserva (EF-06.3). Una cancelada no se queda en
 «Cancelada»: «Mis reservas» y el comprobante muestran el motivo del historial —«Venció el plazo
 para pagar.», «Se canceló la función.», «Anulada por el administrador.»—, que lo escribe quien

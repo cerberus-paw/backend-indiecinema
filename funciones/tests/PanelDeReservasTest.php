@@ -46,6 +46,8 @@ final class PanelDeReservasTest extends TestCase
     private const PROXIMA = '12121212-1212-4212-8212-121212121212';
     private const EMPEZADA = '34343434-3434-4434-8434-343434343434';
     private const CANCELADA = '56565656-5656-4656-8656-565656565656';
+    /** La que no cobra entrada: su panel no muestra un total en pesos (EF-06.5). */
+    private const A_LA_GORRA = '78787878-7878-4878-8878-787878787878';
     private const TOKEN_DE_PROGRAMACION = 'token-de-programacion';
 
     private static ServidorSmtpDePrueba $correo;
@@ -115,15 +117,43 @@ final class PanelDeReservasTest extends TestCase
      *
      * @return string su código
      */
-    private function reserva(string $funcion, int $cantidad, string $estado = 'confirmada', string $usuario = self::EVA, string $creada = '2026-10-19 13:00:00'): string
-    {
+    private function reserva(
+        string $funcion,
+        int $cantidad,
+        string $estado = 'confirmada',
+        string $usuario = self::EVA,
+        string $creada = '2026-10-19 13:00:00',
+        ?string $total = null,
+    ): string {
         $codigo = strtoupper(substr(bin2hex(random_bytes(4)), 0, 8));
         $this->base->ejecutar(
             'INSERT INTO reserva (id, funcion_id, usuario_id, codigo, cantidad, total, estado, creada_en) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-            [Uuid::nuevo(), $funcion, $usuario, $codigo, $cantidad, number_format($cantidad * 3500, 2, '.', ''), $estado, $creada],
+            [Uuid::nuevo(), $funcion, $usuario, $codigo, $cantidad, $total ?? number_format($cantidad * 3500, 2, '.', ''), $estado, $creada],
         );
 
         return $codigo;
+    }
+
+    /**
+     * Le anota el pago de Mercado Pago a una reserva y, con $reembolsadaEn, también la devolución.
+     * La fecha va en UTC, como la guarda la base.
+     */
+    private function pagada(string $codigo, ?string $reembolsadaEn = null): void
+    {
+        $this->base->ejecutar(
+            'UPDATE reserva SET pago_id = ?, reembolso_id = ?, reembolsada_en = ? WHERE codigo = ?',
+            ["pago-{$codigo}", $reembolsadaEn === null ? null : "reembolso-{$codigo}", $reembolsadaEn, $codigo],
+        );
+    }
+
+    /**
+     * Lo que muestra la tarjeta del total del panel.
+     */
+    private static function totalCobrado(string $cuerpo): string
+    {
+        preg_match('#Total cobrado</dt>\s*<dd class="panel-dato-valor"[^>]*>(.*?)</dd>#', $cuerpo, $partes);
+
+        return $partes[1] ?? 'sin la tarjeta del total';
     }
 
     private function estadoDe(string $codigo): string
@@ -163,8 +193,70 @@ final class PanelDeReservasTest extends TestCase
         self::assertMatchesRegularExpression('#Lugares reservados</dt>\s*<dd class="panel-dato-valor"[^>]*>5</dd>#', $cuerpo);
         self::assertMatchesRegularExpression('#Lugares libres</dt>\s*<dd class="panel-dato-valor"[^>]*>35</dd>#', $cuerpo);
         self::assertMatchesRegularExpression('#Asistentes registrados</dt>\s*<dd class="panel-dato-valor"[^>]*>3</dd>#', $cuerpo);
-        self::assertStringContainsString('$ 17.500', $cuerpo);
+        // Ninguna se pagó: con el cobro apagado se confirman sin pasar por Mercado Pago (EF-06.5).
+        self::assertSame('$ 0', self::totalCobrado($cuerpo));
         self::assertStringContainsString('<td>Eva</td>', $cuerpo);
+    }
+
+    // ---- El total cobrado del panel (EF-06.5) ------------------------------------------------
+
+    /**
+     * El criterio de la subtarea: una función que cobra entrada y todavía no cobró nada muestra
+     * «$ 0» y no «A la gorra», que es lo que decía cuando el total daba cero.
+     */
+    public function testUnaFuncionQueCobraYNoCobroNadaMuestraCeroYNoALaGorra(): void
+    {
+        $this->reserva(self::PROXIMA, 2);
+
+        $cuerpo = $this->pedir('GET', '/organizador/funciones/' . self::PROXIMA . '/reservas')->cuerpo();
+
+        self::assertSame('$ 0', self::totalCobrado($cuerpo));
+        self::assertStringNotContainsString('A la gorra', $cuerpo);
+    }
+
+    /**
+     * «A la gorra» es de la función y no del número: lo dice la que no cobra entrada.
+     */
+    public function testUnaFuncionALaGorraLoDiceEnElTotal(): void
+    {
+        $this->reserva(self::A_LA_GORRA, 2, total: '0.00');
+
+        $cuerpo = $this->pedir('GET', '/organizador/funciones/' . self::A_LA_GORRA . '/reservas')->cuerpo();
+
+        self::assertSame('A la gorra', self::totalCobrado($cuerpo));
+    }
+
+    public function testElTotalCuentaSoloLasReservasQueSePagaron(): void
+    {
+        $pagada = $this->reserva(self::PROXIMA, 2);
+        $this->pagada($pagada);
+        // Confirmada con el cobro apagado: ocupa sus lugares, pero su plata nunca entró.
+        $this->reserva(self::PROXIMA, 3);
+
+        $cuerpo = $this->pedir('GET', '/organizador/funciones/' . self::PROXIMA . '/reservas')->cuerpo();
+
+        self::assertMatchesRegularExpression('#Lugares reservados</dt>\s*<dd class="panel-dato-valor"[^>]*>5</dd>#', $cuerpo);
+        self::assertSame('$ 7.000', self::totalCobrado($cuerpo));
+    }
+
+    /**
+     * El otro criterio: el total baja al reembolsar, y no antes. Una cancelada que todavía no se
+     * devolvió tiene la plata en la cuenta, igual que el neto que reparte recaudación (EF-02.5).
+     */
+    public function testElTotalBajaCuandoVuelveLaPlataYNoAlCancelar(): void
+    {
+        $codigo = $this->reserva(self::PROXIMA, 2);
+        $this->pagada($codigo);
+        $this->base->ejecutar('UPDATE reserva SET estado = ? WHERE codigo = ?', ['cancelada', $codigo]);
+
+        $conElReembolsoPendiente = $this->pedir('GET', '/organizador/funciones/' . self::PROXIMA . '/reservas')->cuerpo();
+        $this->pagada($codigo, '2026-10-20 12:00:00');
+        $devuelta = $this->pedir('GET', '/organizador/funciones/' . self::PROXIMA . '/reservas')->cuerpo();
+
+        self::assertSame('$ 7.000', self::totalCobrado($conElReembolsoPendiente));
+        self::assertSame('$ 0', self::totalCobrado($devuelta));
+        // Y los lugares los soltó al cancelarse, que es otra cosa.
+        self::assertMatchesRegularExpression('#Lugares reservados</dt>\s*<dd class="panel-dato-valor"[^>]*>0</dd>#', $devuelta);
     }
 
     /**

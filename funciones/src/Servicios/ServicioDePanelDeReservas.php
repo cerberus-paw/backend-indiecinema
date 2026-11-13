@@ -200,8 +200,14 @@ final class ServicioDePanelDeReservas
 
     /**
      * Los números del panel del organizador: cuántos lugares están reservados y cuántos quedan,
-     * cuántos ya entraron y cuánto suman las reservas que siguen en pie. Las pendientes de pago
-     * ocupan sus lugares pero todavía no suman a lo recaudado.
+     * cuántos ya entraron y cuánta plata entró.
+     *
+     * Lo recaudado es sólo lo que de verdad se cobró (EF-06.5): las reservas con pago de Mercado
+     * Pago que no se devolvió, el mismo criterio que el neto que reparte recaudación. Una
+     * pendiente todavía no pagó, y una confirmada con el cobro apagado —o a la gorra— no pagó
+     * nunca, aunque su total diga 3500. Por eso no se suma sobre las que ocupan lugares: una
+     * cancelada que todavía no se reembolsó tiene la plata en la cuenta y sigue contando, y el
+     * total baja en el momento en que vuelve.
      *
      * @param list<Reserva> $reservas las de la función
      *
@@ -221,8 +227,8 @@ final class ServicioDePanelDeReservas
                 $reservas,
             )),
             'recaudado' => array_sum(array_map(
-                static fn (Reserva $reserva): float => $reserva->estado === EstadoReserva::PendientePago ? 0.0 : (float) $reserva->total,
-                $enPie,
+                static fn (Reserva $reserva): float => $reserva->cobrada() ? (float) $reserva->total : 0.0,
+                $reservas,
             )),
             'reservas' => count($enPie),
         ];

@@ -179,6 +179,35 @@ final class ServicioDeSolicitudes
     }
 
     /**
+     * Cómo está en el sitio la sala de una aprobada, según programación: 'publicada', 'retirada'
+     * o 'dada_de_baja'; null si la solicitud no está aprobada, porque su sala no se publicó.
+     *
+     * @throws ExcepcionHttp 503 si programación no responde
+     */
+    public function salaEnElSitio(SolicitudDeSala $solicitud): ?string
+    {
+        return $solicitud->estado === EstadoSolicitud::Aprobada ? $this->salas->enElSitio($solicitud->salaId) : null;
+    }
+
+    /**
+     * Retira del sitio, o vuelve a publicar, la sala de una solicitud aprobada: sus funciones dejan
+     * de verse en la cartelera mientras está retirada.
+     *
+     * @throws ExcepcionHttp 404 si la solicitud no existe o no está aprobada; 503 si programación
+     *                       no responde
+     */
+    public function cambiarLaSala(string $id, bool $habilitada, Usuario $administrador, string $motivo): SolicitudDeSala
+    {
+        $solicitud = $this->buscar($id);
+        if ($solicitud->estado !== EstadoSolicitud::Aprobada) {
+            throw ExcepcionHttp::noEncontrada();
+        }
+        $this->salas->cambiarHabilitacion($solicitud->salaId, $habilitada, $motivo, $administrador->id);
+
+        return $solicitud;
+    }
+
+    /**
      * @throws ExcepcionHttp 404 si no existe, también si el id no tiene forma de id
      */
     public function buscar(string $id): SolicitudDeSala

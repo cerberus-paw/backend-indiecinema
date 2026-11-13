@@ -30,6 +30,9 @@ return static function (Router $router): void {
     // (EF-07.3).
     $router->get('/solicitudes', [AdministracionDeSolicitudes::class, 'listar'], Rol::Administrador);
     $router->post('/solicitudes/{id}/resolver', [AdministracionDeSolicitudes::class, 'resolver'], Rol::Administrador);
+    // Desde una aprobada, la sala se retira del sitio o se vuelve a publicar, con un motivo.
+    $router->post('/solicitudes/{id}/deshabilitar-sala', [AdministracionDeSolicitudes::class, 'deshabilitarSala'], Rol::Administrador);
+    $router->post('/solicitudes/{id}/habilitar-sala', [AdministracionDeSolicitudes::class, 'habilitarSala'], Rol::Administrador);
 
     // Para comprobar que los otros subsistemas llegan hasta acá con su token.
     $router->interna('GET', '/interno/estado', [EstadoInterno::class, 'mostrar'], ['cuentas', 'programacion', 'funciones', 'recaudacion']);

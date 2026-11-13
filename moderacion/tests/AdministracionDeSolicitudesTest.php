@@ -400,6 +400,99 @@ final class AdministracionDeSolicitudesTest extends TestCase
     }
 
     /**
+     * Una aprobada, con su sala ya publicada en programación.
+     */
+    private function aprobada(string $sala = 'El Galpón'): string
+    {
+        $id = $this->solicitar(self::ORGANIZADOR, $sala);
+        self::assertSame(303, $this->resolver($id, ['resolucion' => 'aprobar', 'motivo' => 'Todo en orden.'])->estado());
+        file_put_contents(self::$registros['programacion'], '');
+
+        return $id;
+    }
+
+    /**
+     * @param array<string, string> $campos
+     */
+    private function cambiarLaSala(string $id, string $accion, array $campos = ['motivo_sala' => 'Venció la póliza del seguro.']): Respuesta
+    {
+        return $this->pedir('POST', "/solicitudes/{$id}/{$accion}", cuerpo: $campos + ['_csrf' => self::CSRF]);
+    }
+
+    /**
+     * EF-07.2: el estado de la sala lo cuenta programación, y retirarla o volver a publicarla se le
+     * pide por la API interna, con un motivo que queda en su registro con el administrador.
+     */
+    public function testLaSalaDeUnaAprobadaSeRetiraYSeVuelveAPublicarConMotivo(): void
+    {
+        $id = $this->aprobada();
+        $sala = $this->salaId($id);
+        self::assertStringContainsString('Publicada: se ve en el listado de salas', $this->pedir('GET', "/solicitudes?id={$id}")->cuerpo());
+
+        $retirar = $this->cambiarLaSala($id, 'deshabilitar-sala');
+
+        self::assertSame(303, $retirar->estado(), $retirar->cuerpo());
+        self::assertSame([['ruta' => 'habilitacion', 'sala' => $sala, 'habilitada' => false, 'motivo' => 'Venció la póliza del seguro.', 'moderador_id' => self::ADMINISTRADOR]], self::pedidosA('programacion'));
+        // nginx le saca el prefijo antes de pasársela a moderación.
+        $pantalla = $this->pedir('GET', substr((string) $retirar->cabecera('Location'), strlen('/moderacion')))->cuerpo();
+        self::assertStringContainsString('Retiraste «El Galpón» del sitio', $pantalla);
+        self::assertStringContainsString('Retirada: no se ve en el sitio.', $pantalla);
+        self::assertStringContainsString('Volver a publicar', $pantalla);
+
+        self::assertSame(303, $this->cambiarLaSala($id, 'habilitar-sala', ['motivo_sala' => 'Mandó la póliza nueva.'])->estado());
+        self::assertTrue(self::salasDeProgramacion()[$sala]['habilitada']);
+    }
+
+    public function testSinMotivoNoSeRetira(): void
+    {
+        $id = $this->aprobada();
+
+        $respuesta = $this->cambiarLaSala($id, 'deshabilitar-sala', ['motivo_sala' => '  ']);
+
+        self::assertSame(422, $respuesta->estado());
+        self::assertStringContainsString('Escribí por qué: queda en el registro.', $respuesta->cuerpo());
+        self::assertSame([], self::pedidosA('programacion'));
+    }
+
+    public function testSoloSeRetiraLaSalaDeUnaAprobada(): void
+    {
+        $id = $this->solicitar(self::ESPECTADORA, 'El Galpón');
+
+        self::assertSame(404, $this->cambiarLaSala($id, 'habilitar-sala')->estado());
+        self::assertSame([], self::pedidosA('programacion'));
+    }
+
+    /**
+     * Sin programación, la bandeja se ve igual y las pendientes se resuelven: sólo falta el estado
+     * de las salas, y sin él no se ofrece publicarlas ni retirarlas.
+     */
+    public function testSiProgramacionNoRespondeLaBandejaSeVeSinElEstadoDeLaSala(): void
+    {
+        $id = $this->aprobada();
+        $pendiente = $this->solicitar(self::ESPECTADORA, 'La Terraza');
+        self::tirar('programacion');
+
+        $respuesta = $this->pedir('GET', "/solicitudes?id={$id}");
+
+        self::assertSame(200, $respuesta->estado());
+        self::assertStringContainsString('No pudimos consultar si está publicada.', $respuesta->cuerpo());
+        self::assertDoesNotMatchRegularExpression('#/(des)?habilitar-sala"#', $respuesta->cuerpo());
+        self::assertSame(303, $this->resolver($pendiente, ['resolucion' => 'rechazar', 'motivo' => 'Falta la póliza.'])->estado());
+    }
+
+    public function testUnaSalaQueSuOrganizadorDioDeBajaSeMuestraAsi(): void
+    {
+        $id = $this->aprobada();
+        // Programación no devuelve las dadas de baja.
+        self::salasEnProgramacion([]);
+
+        $respuesta = $this->pedir('GET', "/solicitudes?id={$id}");
+
+        self::assertStringContainsString('Su organizador la dio de baja.', $respuesta->cuerpo());
+        self::assertDoesNotMatchRegularExpression('#/(des)?habilitar-sala"#', $respuesta->cuerpo());
+    }
+
+    /**
      * @return iterable<string, array{string}>
      */
     public static function idsQueNoExisten(): iterable

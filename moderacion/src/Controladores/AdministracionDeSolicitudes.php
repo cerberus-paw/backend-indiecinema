@@ -17,7 +17,9 @@ use LogicException;
  * La bandeja de solicitudes de sala, en /moderacion/solicitudes desde EF-07.2, como el
  * wireframe de la E2 (moderacion-solicitudes): el buscador y la lista a la izquierda y la elegida
  * (?id=) a la derecha, con la sala, quién la mandó y la resolución, que lleva un motivo
- * obligatorio. «Ver historial de decisiones» (?ver=historial) lista las resueltas.
+ * obligatorio. «Ver historial de decisiones» (?ver=historial) lista las resueltas; desde una
+ * aprobada la sala se retira del sitio o se vuelve a publicar, con un motivo, por la API interna de
+ * programación.
  *
  * La solicitud trae la sala que propone; la sala recién existe en programación cuando se aprueba.
  * Las rutas piden el rol de administrador (el de moderador llega con EF-07.3) y el núcleo ya
@@ -82,7 +84,47 @@ final class AdministracionDeSolicitudes extends Controlador
     }
 
     /**
-     * @param array{resolucion?: string, motivo?: string} $valores lo que mandó, si hubo errores
+     * @throws ExcepcionHttp 404 si la solicitud no existe o no está aprobada
+     */
+    public function deshabilitarSala(Peticion $peticion): Respuesta
+    {
+        return $this->cambiarLaSala($peticion, false);
+    }
+
+    /**
+     * @throws ExcepcionHttp 404 si la solicitud no existe o no está aprobada
+     */
+    public function habilitarSala(Peticion $peticion): Respuesta
+    {
+        return $this->cambiarLaSala($peticion, true);
+    }
+
+    /**
+     * Retira del sitio, o vuelve a publicar, la sala de una solicitud aprobada, con un motivo que
+     * queda en el registro de programación junto con quién lo hizo.
+     */
+    private function cambiarLaSala(Peticion $peticion, bool $habilitada): Respuesta
+    {
+        $solicitud = $this->servicio->buscar((string) $peticion->parametro('id'));
+        $motivo = self::motivo($peticion->campo('motivo_sala'));
+        $error = match (true) {
+            $motivo === '' => 'Escribí por qué: queda en el registro.',
+            mb_strlen($motivo) > self::MAXIMO_MOTIVO => 'El motivo puede tener hasta ' . self::MAXIMO_MOTIVO . ' caracteres.',
+            default => null,
+        };
+        if ($error !== null && $solicitud->estado->value === 'aprobada') {
+            return $this->bandeja($peticion, $solicitud, ['motivo_sala' => $motivo], ['motivo_sala' => $error], estado: 422);
+        }
+        $this->servicio->cambiarLaSala($solicitud->id, $habilitada, self::administrador($peticion), $motivo);
+
+        return $this->redirigir('/solicitudes?' . http_build_query([
+            'id' => $solicitud->id,
+            $habilitada ? 'habilitada' : 'deshabilitada' => $solicitud->id,
+        ]));
+    }
+
+    /**
+     * @param array{resolucion?: string, motivo?: string, motivo_sala?: string} $valores lo que mandó, si hubo errores
      * @param array<string, string>                       $errores campo => qué está mal
      */
     private function bandeja(Peticion $peticion, ?SolicitudDeSala $elegida, array $valores = [], array $errores = [], ?string $mensaje = null, int $estado = 200): Respuesta
@@ -108,7 +150,7 @@ final class AdministracionDeSolicitudes extends Controlador
                 'enviada' => FechaParaMostrar::diaCorto($solicitud->enviadaEn),
                 'elegida' => $solicitud->id === $elegida?->id,
             ], $lista),
-            'elegida' => $elegida === null ? null : $this->detalle($elegida, null),
+            'elegida' => $elegida === null ? null : $this->detalle($elegida, $this->enElSitio($elegida)),
             'valores' => $valores,
             'errores' => $errores,
             'maximo_motivo' => self::MAXIMO_MOTIVO,
@@ -170,6 +212,19 @@ final class AdministracionDeSolicitudes extends Controlador
             'solicitante_nombre' => $solicitud->solicitanteNombre,
             'solicitudes_previas' => $this->servicio->cuantasDe($solicitud->usuarioId) - 1,
         ];
+    }
+
+    /**
+     * Cómo está su sala en el sitio, si está aprobada. Si programación no responde, la bandeja se ve
+     * igual: 'desconocido', y sin ofrecer publicarla ni retirarla.
+     */
+    private function enElSitio(SolicitudDeSala $solicitud): ?string
+    {
+        try {
+            return $this->servicio->salaEnElSitio($solicitud);
+        } catch (ExcepcionHttp) {
+            return 'desconocido';
+        }
     }
 
     /**

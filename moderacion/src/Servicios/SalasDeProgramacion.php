@@ -55,4 +55,44 @@ final class SalasDeProgramacion
             throw new RuntimeException("programación no respondió la sala {$solicitud->salaId} a POST /interno/salas.");
         }
     }
+
+    /**
+     * Cómo está la sala en el sitio: 'publicada', 'retirada', o 'dada_de_baja' si programación ya
+     * no la devuelve (su organizador la dio de baja).
+     *
+     * @throws ExcepcionHttp    503 si programación no responde
+     * @throws RuntimeException si responde otra cosa
+     */
+    public function enElSitio(string $salaId): string
+    {
+        $salas = $this->cliente->get('programacion', '/interno/salas', ['ids' => $salaId]);
+        if (!is_array($salas)) {
+            throw new RuntimeException('programación no respondió las salas a GET /interno/salas.');
+        }
+        $sala = $salas[$salaId] ?? null;
+        if (!is_array($sala)) {
+            return 'dada_de_baja';
+        }
+
+        return ($sala['habilitada'] ?? null) === true ? 'publicada' : 'retirada';
+    }
+
+    /**
+     * La publica o la retira del sitio. El motivo y quién lo hizo quedan en el registro de
+     * programación.
+     *
+     * @throws ExcepcionHttp    404 si programación ya no la tiene; 503 si no responde
+     * @throws RuntimeException si responde otra cosa
+     */
+    public function cambiarHabilitacion(string $salaId, bool $habilitada, string $motivo, string $quien): void
+    {
+        $respuesta = $this->cliente->post('programacion', "/interno/salas/{$salaId}/habilitacion", [
+            'habilitada' => $habilitada,
+            'motivo' => $motivo,
+            'moderador_id' => $quien,
+        ]);
+        if ($respuesta === null) {
+            throw ExcepcionHttp::noEncontrada();
+        }
+    }
 }

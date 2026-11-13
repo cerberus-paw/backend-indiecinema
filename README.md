@@ -241,7 +241,8 @@ todo el sitio se vea igual aunque lo sirvan subsistemas distintos.
   API interna: las funciones finalizadas y sus votos a programación, y las ventas y calificaciones
   a funciones. Si uno no responde, sale lo que hay con un aviso. Desde dónde sugiere una promoción,
   un título para repetir o lo que el público pidió está en `[reportes]` de su `config.ini`. Los
-  totales van de a un mes por página, y el CSV trae todas las funciones del período.
+  totales van de a un mes por página, y el CSV trae todas las funciones del período. El dueño de
+  una obra ve cómo le fue en cualquier sala, también en las votaciones que perdió.
 - **Las rutas dentro del contenedor copian las del disco** (`/src/backend-indiecinema/<subsistema>`
   y `/src/frontend-indiecinema`), así los repositorios `path` de Composer funcionan igual si se
   instala desde afuera o desde adentro del contenedor.

@@ -7,6 +7,7 @@ namespace IndieCinema\Recaudacion\Controladores;
 use DateTimeImmutable;
 use IndieCinema\Nucleo\Configuracion;
 use IndieCinema\Nucleo\Controlador;
+use IndieCinema\Nucleo\Http\ExcepcionHttp;
 use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Seguridad\Rol;
@@ -17,10 +18,12 @@ use IndieCinema\Recaudacion\Modelo\ObraVotada;
 use IndieCinema\Recaudacion\Modelo\PedidoDelPublico;
 use IndieCinema\Recaudacion\Modelo\Periodo;
 use IndieCinema\Recaudacion\Modelo\ReglaIncumplida;
+use IndieCinema\Recaudacion\Modelo\ReporteDeObra;
 use IndieCinema\Recaudacion\Modelo\RendimientoDeSala;
 use IndieCinema\Recaudacion\Modelo\TituloParaRepetir;
 use IndieCinema\Recaudacion\Modelo\TotalDeFunciones;
 use IndieCinema\Recaudacion\Modelo\Umbrales;
+use IndieCinema\Recaudacion\Servicios\ObrasDelDueno;
 use IndieCinema\Recaudacion\Servicios\ServicioDeReportes;
 use IndieCinema\Recaudacion\Servicios\Sugerencias;
 use IndieCinema\Recaudacion\Servicios\TotalesDelPeriodo;
@@ -35,6 +38,8 @@ use LogicException;
  *   qué día conviene una promoción sirve para decidir.
  * - GET /recaudacion/reportes/funciones: los totales de cada mes y las funciones de uno (EF-09.2).
  * - GET /recaudacion/reportes/funciones.csv: todas las funciones del período, para una planilla.
+ * - GET /recaudacion/reportes/obras: para el dueño, cómo le fue a cada obra suya, y con ?obra= el
+ *   detalle de una (EF-09.3).
  */
 final class Reportes extends Controlador
 {
@@ -170,6 +175,90 @@ final class Reportes extends Controlador
         return (new Respuesta(CsvDeFunciones::armar($datos, TotalesDelPeriodo::deLaSala($datos, is_string($sala) && $sala !== '' ? $sala : null))))
             ->conCabecera('Content-Type', 'text/csv; charset=utf-8')
             ->conCabecera('Content-Disposition', "attachment; filename=\"funciones-{$periodo->desde->format('Y-m-d')}-al-{$periodo->hasta->format('Y-m-d')}.csv\"");
+    }
+
+    /**
+     * Las obras del dueño en las funciones finalizadas del período, en cualquier sala, y con
+     * ?obra= el detalle de una. Una obra que no aparece es un 404: no se distingue una ajena de
+     * una propia sin funciones en el período, así no se sabe si existe. Desde la lista se llega
+     * con el mismo período, donde sí aparece.
+     *
+     * @throws ExcepcionHttp 404 si la obra no está entre las suyas del período
+     */
+    public function obras(Peticion $peticion): Respuesta
+    {
+        [$periodo, $periodoElegido, $error] = self::periodoPedido($peticion);
+        $usuario = self::usuario($peticion);
+        $administrador = $usuario->alcanza(Rol::Administrador);
+        if ($error !== null) {
+            return $this->vista('reportes_obras.html.twig', ['periodo' => $periodoElegido, 'error' => $error, 'administrador' => $administrador], 422);
+        }
+        $datos = $this->reportes->delDueno($periodo, $usuario->id);
+        $obras = ObrasDelDueno::obras($datos, $usuario->id);
+        $filtros = ['desde' => $periodoElegido['desde'], 'hasta' => $periodoElegido['hasta']];
+        $pedida = $peticion->consulta('obra');
+        // Si programación no respondió no hay obras, pero tampoco es un 404: va la lista con el aviso.
+        if (is_string($pedida) && $pedida !== '' && $datos->avisos === []) {
+            $obra = $obras[$pedida] ?? throw ExcepcionHttp::noEncontrada();
+
+            return $this->vista('reportes_obra.html.twig', [
+                'periodo' => $periodoElegido,
+                'administrador' => $administrador,
+                'avisos' => $datos->avisos,
+                'volver' => $this->ruta('/reportes/obras?' . http_build_query($filtros)),
+                'obra' => [
+                    ...self::totales($obra->proyecciones),
+                    'titulo' => $obra->titulo,
+                    'votaciones' => count($obra->votaciones),
+                    'ganadas' => $obra->ganadas(),
+                    'votos' => $obra->votos(),
+                ],
+                'funciones' => array_map(static fn (FuncionFinalizada $funcion): array => [
+                    ...self::totales(TotalesDelPeriodo::deUna($datos, $funcion)),
+                    'fecha' => self::fechaLarga($funcion),
+                    'sala' => $funcion->salaNombre,
+                ], $obra->funciones),
+                'votaciones_de_la_obra' => array_map(static fn (array $votacion): array => [
+                    'fecha' => self::fechaLarga($votacion['funcion']),
+                    'sala' => $votacion['funcion']->salaNombre,
+                    'votos' => $votacion['votos'],
+                    'total' => $votacion['total'],
+                    'porcentaje' => intdiv(200 * $votacion['votos'] + $votacion['total'], 2 * $votacion['total']) . ' %',
+                    'gano' => $votacion['gano'],
+                ], $obra->votaciones),
+            ]);
+        }
+
+        // Las tarjetas suman cada función una vez, aunque proyectara dos obras suyas.
+        $proyectadas = [];
+        foreach ($obras as $obra) {
+            foreach ($obra->funciones as $funcion) {
+                $proyectadas[$funcion->id] = $funcion;
+            }
+        }
+
+        return $this->vista('reportes_obras.html.twig', [
+            'periodo' => $periodoElegido,
+            'administrador' => $administrador,
+            'avisos' => $datos->avisos,
+            'resumen' => [...self::totales(TotalesDelPeriodo::total($datos, array_values($proyectadas))), 'obras' => count($obras)],
+            'obras' => array_values(array_map(fn (ReporteDeObra $obra): array => [
+                ...self::totales($obra->proyecciones),
+                'titulo' => $obra->titulo,
+                'url' => $this->ruta('/reportes/obras?' . http_build_query([...$filtros, 'obra' => $obra->obraId])),
+                'votaciones' => count($obra->votaciones),
+                'ganadas' => $obra->ganadas(),
+                'votos' => $obra->votos(),
+            ], $obras)),
+        ]);
+    }
+
+    /** «sábado 7 de noviembre, 21:00»: el dueño ve funciones de varios meses juntas. */
+    private static function fechaLarga(FuncionFinalizada $funcion): string
+    {
+        $fecha = $funcion->fechaHora;
+
+        return self::DIAS[(int) $fecha->format('N')] . " {$fecha->format('j')} de " . self::MESES[(int) $fecha->format('n')] . ", {$fecha->format('H:i')}";
     }
 
     /**

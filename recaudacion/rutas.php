@@ -21,6 +21,8 @@ return static function (Router $router): void {
     // Los totales de cada mes y las funciones de uno (EF-09.2), y todas en CSV.
     $router->get('/reportes/funciones', [Reportes::class, 'funciones'], Rol::Organizador);
     $router->get('/reportes/funciones.csv', [Reportes::class, 'descargar'], Rol::Organizador);
+    // Para el dueño, cómo le fue a cada obra suya en cualquier sala (EF-09.3).
+    $router->get('/reportes/obras', [Reportes::class, 'obras'], Rol::Organizador);
 
     // Para comprobar que los otros subsistemas llegan hasta acá con su token.
     $router->interna('GET', '/interno/estado', [EstadoInterno::class, 'mostrar'], ['cuentas', 'programacion', 'funciones', 'moderacion']);

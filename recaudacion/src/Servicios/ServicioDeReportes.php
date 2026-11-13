@@ -33,9 +33,23 @@ final class ServicioDeReportes
      */
     public function delOrganizador(Periodo $periodo, ?string $organizadorId): DatosDelReporte
     {
+        return $this->datos($periodo, $organizadorId, null);
+    }
+
+    /**
+     * Las funciones que proyectaron alguna obra del dueño o la tuvieron en su votación, en
+     * cualquier sala (EF-09.3).
+     */
+    public function delDueno(Periodo $periodo, string $duenoId): DatosDelReporte
+    {
+        return $this->datos($periodo, null, $duenoId);
+    }
+
+    private function datos(Periodo $periodo, ?string $organizadorId, ?string $duenoId): DatosDelReporte
+    {
         $avisos = [];
         try {
-            $respuesta = $this->finalizadas->delPeriodo($periodo, $organizadorId);
+            $respuesta = $this->finalizadas->delPeriodo($periodo, $organizadorId, $duenoId);
         } catch (ExcepcionHttp|RuntimeException $error) {
             $this->log->warning('El reporte salió sin las funciones de programación: {error}', ['error' => $error->getMessage()]);
 

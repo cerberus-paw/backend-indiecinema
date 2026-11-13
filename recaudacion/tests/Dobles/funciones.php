@@ -53,6 +53,7 @@ $cobros = static fn (string $id): array => match ($id) {
     '30000000-0000-4000-8000-000000000003' => $vendidas(6, 5),
     '30000000-0000-4000-8000-000000000004' => $vendidas(36, 34),
     '30000000-0000-4000-8000-000000000005' => $vendidas(20, 15),
+    '30000000-0000-4000-8000-000000000006' => $vendidas(20, 18),
     PAGADA => ['reservas' => [
         ['id' => '11111111-1111-4111-8111-111111111111', 'usuario_id' => '99999999-9999-4999-8999-999999999999', 'cantidad' => 2, 'total' => '7000.00', 'cobrado' => '7000.00', 'pago_id' => 'pago-1', 'estado' => 'asistio', 'reembolsada' => false],
         ['id' => '22222222-2222-4222-8222-222222222222', 'usuario_id' => '99999999-9999-4999-8999-999999999999', 'cantidad' => 1, 'total' => '3500.00', 'cobrado' => '0.00', 'pago_id' => null, 'estado' => 'confirmada', 'reembolsada' => false],

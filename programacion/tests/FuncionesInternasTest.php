@@ -34,6 +34,9 @@ final class FuncionesInternasTest extends TestCase
     private const ORGANIZADORA = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
     private const TOKEN_DE_FUNCIONES = 'token-de-funciones';
     private const TOKEN_DE_CUENTAS = 'token-de-cuentas';
+    private const TOKEN_DE_RECAUDACION = 'token-de-recaudacion';
+    private const OTRO_ORGANIZADOR = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+    private const DUENA = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
 
     private BaseDeDatos $base;
     private Configuracion $configuracion;
@@ -53,6 +56,7 @@ final class FuncionesInternasTest extends TestCase
             'llamadores' => [
                 'funciones' => hash('sha256', self::TOKEN_DE_FUNCIONES),
                 'cuentas' => hash('sha256', self::TOKEN_DE_CUENTAS),
+                'recaudacion' => hash('sha256', self::TOKEN_DE_RECAUDACION),
             ],
         ]);
         $this->base = self::baseConTablasNuevas($this->configuracion);
@@ -296,5 +300,90 @@ final class FuncionesInternasTest extends TestCase
         self::assertSame(400, $this->pedirProximas(['desde' => '2026-12-01T20:00:00', 'hasta' => '2027-01-01T20:00:00'])->estado());
         self::assertSame(400, $this->pedirProximas(['desde' => 'mañana', 'hasta' => '2026-12-01T20:00:00'])->estado());
         self::assertSame(403, $this->pedirProximas(['desde' => '2026-12-01T20:00:00', 'hasta' => '2026-12-02T20:00:00'], 'cuentas', self::TOKEN_DE_CUENTAS)->estado());
+    }
+
+    /**
+     * @param array<string, string> $consulta
+     */
+    private function pedirFinalizadas(array $consulta, string $llamador = 'recaudacion', string $token = self::TOKEN_DE_RECAUDACION): Respuesta
+    {
+        $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion, new Log('programacion', fopen('php://memory', 'w')));
+
+        return $aplicacion->atender(new Peticion('GET', '/interno/funciones/finalizadas', $consulta, [], [
+            'X-Llamador' => $llamador,
+            'Authorization' => "Bearer {$token}",
+        ], [], []));
+    }
+
+    /**
+     * Una función que se votó, se programó y terminó: «Zama» le gana a «La ciénaga» por los votos
+     * que se pasen, uno por espectador.
+     *
+     * @param list<string> $votos el título que votó cada espectador
+     */
+    private function finalizadaEl(string $cuando, array $votos = [], ?Sala $sala = null): string
+    {
+        $funcion = ($sala ?? $this->sala)->crearFuncion(array_values($this->obras), 40, 3500.0);
+        $this->funciones->agregar($funcion);
+        foreach ($votos as $titulo) {
+            $this->base->ejecutar('INSERT INTO voto (funcion_id, usuario_id, obra_id) VALUES (?, ?, ?)', [$funcion->id, Uuid::nuevo(), $this->obras[$titulo]]);
+        }
+        $funcion->cerrarVotacionTitulos([$this->obras['Zama']]);
+        $funcion->fijarFechaHora(new DateTimeImmutable($cuando), new DateTimeImmutable('2026-01-01 00:00:00'));
+        $funcion->finalizar(new DateTimeImmutable('2026-12-31 23:00:00'));
+        $this->funciones->guardar($funcion);
+
+        return $funcion->id;
+    }
+
+    public function testFinalizadasDaLasDelPeriodoConSusObrasYSusVotos(): void
+    {
+        $conVotos = $this->finalizadaEl('2026-11-04 21:00:00', ['Zama', 'Zama', 'La ciénaga']);
+        $ultimoDia = $this->finalizadaEl('2026-11-30 23:30:00');
+        $this->finalizadaEl('2026-12-01 00:00:00');
+        $this->finalizadaEl('2026-10-31 23:59:00');
+        // Programada todavía: no terminó.
+        $this->programadaEl('2026-11-10 20:00:00');
+
+        $datos = $this->json($this->pedirFinalizadas(['desde' => '2026-11-01', 'hasta' => '2026-11-30']));
+
+        self::assertTrue($datos['completas']);
+        self::assertSame([$conVotos, $ultimoDia], array_column($datos['funciones'], 'id'));
+        $funcion = $datos['funciones'][0];
+        self::assertSame(['2026-11-04T21:00:00', 40, '3500.00', self::ORGANIZADORA], [$funcion['fecha_hora'], $funcion['cupo'], $funcion['precio_base'], $funcion['organizador_id']]);
+        self::assertSame(['id' => $this->sala->id, 'nombre' => 'Cine Club El Galpón'], $funcion['sala']);
+        self::assertSame([
+            ['id' => $this->obras['La ciénaga'], 'titulo' => 'La ciénaga', 'dueno_id' => self::ORGANIZADORA, 'elegida' => false, 'votos' => 1],
+            ['id' => $this->obras['Zama'], 'titulo' => 'Zama', 'dueno_id' => self::ORGANIZADORA, 'elegida' => true, 'votos' => 2],
+        ], $funcion['obras']);
+        self::assertCount(3, $funcion['votantes_ids']);
+        self::assertSame([], $datos['funciones'][1]['votantes_ids']);
+    }
+
+    public function testFinalizadasDeUnOrganizadorODeUnDueno(): void
+    {
+        $otraSala = Sala::nueva(self::OTRO_ORGANIZADOR, new DatosDeSala('El Cineclub', 'Otro.', 'Mitre 10', 'Luján', 50, 2, 120, 15), 'sala.jpg');
+        $this->salas->agregar($otraSala);
+        $this->base->ejecutar('UPDATE sala SET habilitada = TRUE WHERE id = ?', [$otraSala->id]);
+        $propia = $this->finalizadaEl('2026-11-04 21:00:00');
+        $ajena = $this->finalizadaEl('2026-11-05 21:00:00', [], $this->salas->buscar($otraSala->id));
+        $this->base->ejecutar('UPDATE obra SET dueno_id = ? WHERE id = ?', [self::DUENA, $this->obras['La ciénaga']]);
+        $periodo = ['desde' => '2026-11-01', 'hasta' => '2026-11-30'];
+
+        self::assertSame([$propia], array_column($this->json($this->pedirFinalizadas([...$periodo, 'organizador' => self::ORGANIZADORA]))['funciones'], 'id'));
+        self::assertSame([$ajena], array_column($this->json($this->pedirFinalizadas([...$periodo, 'organizador' => self::OTRO_ORGANIZADOR]))['funciones'], 'id'));
+        // La ciénaga perdió en las dos, pero estuvo: su dueña ve las dos.
+        self::assertSame([$propia, $ajena], array_column($this->json($this->pedirFinalizadas([...$periodo, 'dueno' => self::DUENA]))['funciones'], 'id'));
+        self::assertSame([$propia, $ajena], array_column($this->json($this->pedirFinalizadas($periodo))['funciones'], 'id'));
+    }
+
+    public function testFinalizadasPideUnPeriodoValidoYSoloLaPideRecaudacion(): void
+    {
+        self::assertSame(400, $this->pedirFinalizadas([])->estado());
+        self::assertSame(400, $this->pedirFinalizadas(['desde' => '2026-11-30', 'hasta' => '2026-11-01'])->estado());
+        self::assertSame(400, $this->pedirFinalizadas(['desde' => '2026-02-31', 'hasta' => '2026-03-10'])->estado());
+        self::assertSame(400, $this->pedirFinalizadas(['desde' => '2025-01-01', 'hasta' => '2026-11-30'])->estado());
+        self::assertSame(400, $this->pedirFinalizadas(['desde' => '2026-11-01', 'hasta' => '2026-11-30', 'organizador' => 'yo'])->estado());
+        self::assertSame(403, $this->pedirFinalizadas(['desde' => '2026-11-01', 'hasta' => '2026-11-30'], 'funciones', self::TOKEN_DE_FUNCIONES)->estado());
     }
 }

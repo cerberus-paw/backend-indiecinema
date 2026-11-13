@@ -23,6 +23,7 @@ final class CalificacionesInternasTest extends TestCase
     use ConCuentasDePrueba;
 
     private const TOKEN_DE_PROGRAMACION = 'token-de-programacion';
+    private const TOKEN_DE_RECAUDACION = 'token-de-recaudacion';
     private const SALA = '5a5a5a5a-5a5a-45a5-85a5-5a5a5a5a5a5a';
     private const OTRA_SALA = '6b6b6b6b-6b6b-46b6-86b6-6b6b6b6b6b6b';
     private const ORGANIZADORA = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
@@ -54,18 +55,21 @@ final class CalificacionesInternasTest extends TestCase
             'nginx' => ['secreto' => 'secreto-de-nginx'],
             'subsistemas' => ['cuentas' => self::$urlCuentas],
             'interno' => ['token' => 'token-de-funciones'],
-            'llamadores' => ['programacion' => hash('sha256', self::TOKEN_DE_PROGRAMACION)],
+            'llamadores' => [
+                'programacion' => hash('sha256', self::TOKEN_DE_PROGRAMACION),
+                'recaudacion' => hash('sha256', self::TOKEN_DE_RECAUDACION),
+            ],
         ]);
         $this->base = self::baseConTablasNuevas($this->configuracion);
     }
 
-    private function pedir(string $ruta, string $token = self::TOKEN_DE_PROGRAMACION): Respuesta
+    private function pedir(string $ruta, string $token = self::TOKEN_DE_PROGRAMACION, string $llamador = 'programacion'): Respuesta
     {
         $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion, new Log('funciones', fopen('php://memory', 'w')));
         parse_str((string) parse_url($ruta, PHP_URL_QUERY), $consulta);
 
         return $aplicacion->atender(new Peticion('GET', (string) parse_url($ruta, PHP_URL_PATH), $consulta, [], [
-            'X-Llamador' => 'programacion',
+            'X-Llamador' => $llamador,
             'Authorization' => "Bearer {$token}",
         ], [], []));
     }
@@ -162,5 +166,15 @@ final class CalificacionesInternasTest extends TestCase
         self::assertSame(403, $this->pedir('/interno/calificaciones/resumen', 'otro-token')->estado());
         $muchas = implode(',', array_map(static fn (): string => Uuid::nuevo(), range(1, 101)));
         self::assertSame(400, $this->pedir("/interno/calificaciones/resumen?salas={$muchas}")->estado());
+    }
+
+    /**
+     * La reportería de recaudación (EF-09) pide los promedios de las funciones; las últimas, con el
+     * nombre de cada espectador, siguen siendo sólo para las fichas de programación.
+     */
+    public function testRecaudacionPideElResumenPeroNoLasUltimas(): void
+    {
+        self::assertSame(200, $this->pedir('/interno/calificaciones/resumen?funciones=' . self::UNA, self::TOKEN_DE_RECAUDACION, 'recaudacion')->estado());
+        self::assertSame(403, $this->pedir('/interno/calificaciones?sala=' . self::SALA, self::TOKEN_DE_RECAUDACION, 'recaudacion')->estado());
     }
 }

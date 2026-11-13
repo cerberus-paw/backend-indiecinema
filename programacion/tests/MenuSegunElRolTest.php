@@ -39,8 +39,8 @@ final class MenuSegunElRolTest extends TestCase
     private const SIN_SESION = ['/cuenta/ingresar', '/cuenta/registro'];
     private const CON_SESION = ['/cuenta/', '/funcion/reservas'];
     private const DEL_ESPECTADOR = ['/solicitar-sala'];
-    private const DEL_ORGANIZADOR = ['/organizador/salas', '/organizador/obras', '/organizador/obras/nueva', '/organizador/funciones', '/organizador/funciones/nueva', '/solicitar-sala'];
-    private const DEL_ADMINISTRADOR = ['/cuenta/administracion/usuarios', '/administracion/solicitudes'];
+    private const DEL_ORGANIZADOR = ['/organizador/salas', '/organizador/obras', '/organizador/obras/nueva', '/organizador/funciones', '/organizador/funciones/nueva', '/recaudacion/reportes', '/solicitar-sala'];
+    private const DEL_ADMINISTRADOR = ['/cuenta/administracion/usuarios', '/recaudacion/reportes', '/administracion/solicitudes'];
 
     /**
      * El encabezado y el pie de /acerca-de, por separado.
@@ -200,12 +200,12 @@ final class MenuSegunElRolTest extends TestCase
     {
         $organizador = [
             'Mi cuenta' => ['/cuenta/', '/funcion/reservas'],
-            'Panel del Organizador' => ['/organizador/salas', '/organizador/obras', '/organizador/obras/nueva', '/organizador/funciones', '/organizador/funciones/nueva', '/solicitar-sala'],
+            'Panel del Organizador' => ['/organizador/salas', '/organizador/obras', '/organizador/obras/nueva', '/organizador/funciones', '/organizador/funciones/nueva', '/recaudacion/reportes', '/solicitar-sala'],
         ];
         yield 'espectador' => ['espectador', ['Mi cuenta' => ['/cuenta/', '/funcion/reservas', '/solicitar-sala']]];
         yield 'organizador' => ['organizador', $organizador];
         yield 'moderador' => ['moderador', $organizador];
-        yield 'administrador' => ['administrador', ['Administración' => ['/cuenta/administracion/usuarios', '/administracion/solicitudes']]];
+        yield 'administrador' => ['administrador', ['Administración' => ['/cuenta/administracion/usuarios', '/recaudacion/reportes', '/administracion/solicitudes']]];
     }
 
     /**

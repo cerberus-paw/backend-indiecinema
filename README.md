@@ -48,7 +48,7 @@ backend-indiecinema/
 ├── programacion/          /          obras, salas, funciones, cartelera, votación de títulos y solicitudes de sala
 ├── funciones/             /funcion/  las reservas con el cupo de cada función, sus paneles y el acuerdo de fecha
 ├── moderacion/            /moderacion/  armado (EF-01): las solicitudes de sala, las denuncias y los términos llegan con EF-07 y EF-16
-└── recaudacion/           /recaudacion/ armado (EF-02): el reparto, las liquidaciones y la reportería llegan con EF-08 y EF-09
+└── recaudacion/           /recaudacion/: los reportes (EF-09); el reparto y las liquidaciones llegan con EF-08
 ```
 
 Lo que todavía no está (los beneficios, dentro de recaudación) se suma con la misma forma.
@@ -66,7 +66,7 @@ Cada subsistema tiene la misma estructura por dentro:
 │   ├── Modelo/            entidades y enumeraciones de estado
 │   └── Repositorios/      todo el SQL del subsistema, con consultas preparadas
 ├── migraciones/           001_*.sql, 002_*.sql… sólo sobre el esquema propio
-├── herramientas/          datos-de-prueba.php, que carga los de la demo (cuentas y programación)
+├── herramientas/          datos-de-prueba.php, que carga los de la demo (cuentas y programación), e historial-de-prueba.php (programación y funciones)
 ├── datos-prueba/          las fotos de las salas y los afiches de la demo (sólo programación)
 ├── tests/
 └── config/
@@ -237,6 +237,12 @@ todo el sitio se vea igual aunque lo sirvan subsistemas distintos.
   para eso. Están en «Tareas programadas»: los cierres por fecha límite de la votación y del
   acuerdo, el fin de las funciones, el recordatorio del día antes y las reservas que vencieron sin
   pagar. El organizador puede cerrar la votación y el acuerdo antes desde la ficha.
+- **Los reportes los arma recaudación** (`/recaudacion/reportes`) pidiendo lo que necesita por la
+  API interna: las funciones finalizadas y sus votos a programación, y las ventas y calificaciones
+  a funciones. Si uno no responde, sale lo que hay con un aviso. Desde dónde sugiere una promoción,
+  un título para repetir o lo que el público pidió está en `[reportes]` de su `config.ini`. Los
+  totales van de a un mes por página, y el CSV trae todas las funciones del período. El dueño de
+  una obra ve cómo le fue en cualquier sala, también en las votaciones que perdió.
 - **Las rutas dentro del contenedor copian las del disco** (`/src/backend-indiecinema/<subsistema>`
   y `/src/frontend-indiecinema`), así los repositorios `path` de Composer funcionan igual si se
   instala desde afuera o desde adentro del contenedor.
@@ -440,6 +446,24 @@ La segunda vez, todo sale en «ya estaban». Para comprobar la carga en el naveg
   cuatro como `PUBLICADA`, y cada una se puede editar.
 - http://localhost:8080/cartelera muestra las quince funciones, cada una con su afiche.
 
+Para que los reportes de recaudación tengan qué mostrar, hay además un historial: dos meses de
+funciones que ya terminaron en tres de esas salas, con sus votaciones, sus ventas, la asistencia y
+las calificaciones. Programación carga las funciones y los votos, y funciones, lo que se vendió y
+quiénes fueron. Va después de los datos de prueba y en ese orden:
+
+```
+docker compose exec programacion php herramientas/historial-de-prueba.php
+docker compose exec funciones php herramientas/historial-de-prueba.php
+#   funciones         28 agregadas,  0 ya estaban
+#   reservas        1112 agregadas
+#   calificaciones   620 agregadas
+```
+
+Está armado para que el reporte (`/recaudacion/reportes`, como Omar Organizador) muestre cada
+sugerencia: los miércoles flojos del Alambique, «Metrópolis» y «Nosferatu» para repetir, y
+«El gabinete del Dr. Caligari», que pierde todas sus votaciones y no se proyecta. Las fechas se
+cuentan hacia atrás desde el día en que se carga, y correrlo de nuevo no agrega nada.
+
 En producción (cualquier `entorno` que no sea `"desarrollo"`) no hace nada sin la confirmación
 explícita, para que los datos inventados no lleguen al sitio real por un comando copiado de acá.
 Para cargarlos en el servidor, a propósito:
@@ -448,6 +472,8 @@ Para cargarlos en el servidor, a propósito:
 docker compose exec cuentas php herramientas/datos-de-prueba.php --confirmar-produccion
 docker compose exec programacion php herramientas/datos-de-prueba.php --confirmar-produccion
 ```
+
+El historial, igual: los dos scripts con `--confirmar-produccion`.
 
 En producción, cuentas carga sólo el administrador, el organizador y Eva, con las contraseñas
 de la sección `[datos_de_prueba]` de su `config.ini` (está comentada en el ejemplo). Si falta

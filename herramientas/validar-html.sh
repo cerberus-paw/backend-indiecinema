@@ -20,7 +20,7 @@ readonly -A PRUEBAS=(
 	[cuentas]='IngresoTest|RegistroTest|MiCuentaTest|AdministracionDeUsuariosTest'
 	[funciones]='ReservasTest|PanelDeReservasTest|CalificacionesTest'
 	[moderacion]='ArranqueTest'
-	[recaudacion]='ArranqueTest'
+	[recaudacion]='ArranqueTest|ReportesTest'
 )
 
 main() {

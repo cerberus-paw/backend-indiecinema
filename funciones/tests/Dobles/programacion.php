@@ -23,6 +23,11 @@ const FINALIZADA = '13131313-1313-4313-8313-131313131313';
 const VIEJA = '24242424-2424-4424-8424-242424242424';
 // Empieza en cinco horas: la que pide el recordatorio del día antes (EF-03.3).
 const EN_CINCO_HORAS = '45454545-4545-4545-8545-454545454545';
+// Las tres primeras del historial de prueba de programación (EF-09.4): un miércoles y un sábado
+// que terminaron, y una todavía programada.
+const HISTORIAL_MIERCOLES = '00000005-0000-4000-8000-000000000001';
+const HISTORIAL_SABADO = '00000005-0000-4000-8000-000000000002';
+const HISTORIAL_PROGRAMADA = '00000005-0000-4000-8000-000000000003';
 
 header('Content-Type: application/json');
 $cabeceras = getallheaders();
@@ -63,6 +68,9 @@ $responder = static function (string $id) use ($funcion): ?array {
         // plazo (EF-04.2).
         FINALIZADA => $funcion($id, 'finalizada', date('Y-m-d\\TH:i:s', strtotime('-2 days')), ['Zama'], true),
         VIEJA => $funcion($id, 'finalizada', date('Y-m-d\\TH:i:s', strtotime('-40 days')), ['Zama'], true),
+        HISTORIAL_MIERCOLES => $funcion($id, 'finalizada', '2026-11-11T20:30:00', ['Zama'], true),
+        HISTORIAL_SABADO => $funcion($id, 'finalizada', '2026-11-07T21:00:00', ['La ciénaga'], true),
+        HISTORIAL_PROGRAMADA => $funcion($id, 'programada', '2026-12-05T21:00:00', ['Zama'], true),
         // Sin precio: no hay nada que cobrar (X-01).
         A_LA_GORRA => $funcion($id, 'programada', date('Y-m-d\\TH:i:s', strtotime('+30 days')), ['Zama'], true, precio: 0),
         // El organizador la canceló: el panel de sus reservas no registra asistencia.

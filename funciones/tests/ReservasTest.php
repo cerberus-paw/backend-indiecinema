@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace IndieCinema\Funciones\Pruebas;
 
+use IndieCinema\Funciones\Servicios\LiberacionDeVencidas;
 use IndieCinema\Nucleo\Aplicacion;
 use IndieCinema\Nucleo\BaseDeDatos;
 use IndieCinema\Nucleo\Configuracion;
@@ -849,5 +850,130 @@ final class ReservasTest extends TestCase
                 self::assertStringNotContainsString($interno, $respuesta->cuerpo());
             }
         }
+    }
+
+    // ---- Por qué se canceló y si volvió la plata (EF-06.3) -----------------------------------
+
+    private function idDe(string $codigo): string
+    {
+        return (string) $this->base->valor('SELECT id FROM reserva WHERE codigo = ?', [$codigo]);
+    }
+
+    /**
+     * Una cancelada con su línea en el historial, como la dejan la liberación de las vencidas, la
+     * cancelación de la función o el administrador. Con $reembolsadaEn, también con la plata
+     * devuelta: la fecha va en UTC, como la guarda la base.
+     *
+     * @return string su código
+     */
+    private function canceladaCon(
+        ?string $motivo,
+        string $anterior = 'pendiente_pago',
+        ?string $reembolsadaEn = null,
+        string $creada = '2026-10-01 10:00:00',
+    ): string {
+        $codigo = $this->hecha(self::PROXIMA, $creada, 'cancelada');
+        $id = $this->idDe($codigo);
+        if ($reembolsadaEn !== null) {
+            $this->base->ejecutar(
+                'UPDATE reserva SET pago_id = ?, reembolso_id = ?, reembolsada_en = ? WHERE id = ?',
+                ["pago-{$codigo}", "reembolso-{$codigo}", $reembolsadaEn, $id],
+            );
+        }
+        $this->base->ejecutar(
+            'INSERT INTO cambio_reserva (reserva_id, estado_anterior, estado_nuevo, autor_id, autor_rol, motivo, hecho_en)
+             VALUES (?, ?, ?, ?, ?, ?, ?)',
+            [$id, $anterior, 'cancelada', self::EVA, 'espectador', $motivo, $creada],
+        );
+
+        return $codigo;
+    }
+
+    /**
+     * El criterio de la subtarea: una cancelada por vencimiento lo dice, en lugar de un «Cancelada»
+     * pelado que deja al espectador sin saber si tiene que esperar algo.
+     */
+    public function testMisReservasDiceQueVencioElPlazoParaPagar(): void
+    {
+        $codigo = $this->canceladaCon(LiberacionDeVencidas::MOTIVO);
+
+        $cuerpo = $this->pedir('GET', '/reservas')->cuerpo();
+
+        self::assertStringContainsString(self::partido($codigo), $cuerpo);
+        self::assertStringContainsString(LiberacionDeVencidas::MOTIVO, $cuerpo);
+    }
+
+    /**
+     * El otro criterio: una reembolsada dice cuándo. La base guarda UTC y la página lo escribe en
+     * la hora del sitio, tres horas antes.
+     */
+    public function testMisReservasDiceCuandoVolvioLaPlata(): void
+    {
+        $codigo = $this->canceladaCon('Se canceló la función.', 'confirmada', '2026-09-19 23:30:00');
+
+        $cuerpo = $this->pedir('GET', '/reservas')->cuerpo();
+
+        self::assertStringContainsString(self::partido($codigo), $cuerpo);
+        self::assertStringContainsString('Se canceló la función.', $cuerpo);
+        self::assertStringContainsString('Reembolsada el 19 sep · 20:30', $cuerpo);
+    }
+
+    public function testElComprobanteDeUnaCanceladaDiceElMotivoYElReembolso(): void
+    {
+        $codigo = $this->canceladaCon('Anulada por el administrador.', 'confirmada', '2026-09-19 23:30:00');
+
+        $cuerpo = $this->pedir('GET', '/reservas/' . $this->idDe($codigo))->cuerpo();
+
+        self::assertStringContainsString('Reserva cancelada', $cuerpo);
+        self::assertStringContainsString('Anulada por el administrador.', $cuerpo);
+        self::assertStringContainsString('Reembolsada el 19 sep · 20:30', $cuerpo);
+    }
+
+    /**
+     * La que canceló el espectador no tiene motivo: la canceló él y ya sabe por qué.
+     */
+    public function testLaCanceladaPorElEspectadorNoExplicaNada(): void
+    {
+        $codigo = $this->canceladaCon(null, 'confirmada');
+
+        $cuerpo = $this->pedir('GET', '/reservas')->cuerpo();
+
+        self::assertStringContainsString(self::partido($codigo), $cuerpo);
+        self::assertStringNotContainsString('Venció', $cuerpo);
+        self::assertStringNotContainsString('Reembolsada', $cuerpo);
+    }
+
+    /**
+     * Vale el último motivo: una pendiente puede vencer, volver a confirmarse con un pago que
+     * llegó tarde y después anularla el administrador.
+     */
+    public function testValeElMotivoDeLaUltimaCancelacion(): void
+    {
+        $codigo = $this->canceladaCon(LiberacionDeVencidas::MOTIVO);
+        $this->base->ejecutar(
+            'INSERT INTO cambio_reserva (reserva_id, estado_anterior, estado_nuevo, autor_id, autor_rol, motivo, hecho_en)
+             VALUES (?, ?, ?, ?, ?, ?, ?)',
+            [$this->idDe($codigo), 'confirmada', 'cancelada', self::EVA, 'administrador', 'Anulada por el administrador.', '2026-10-02 10:00:00'],
+        );
+
+        $cuerpo = $this->pedir('GET', '/reservas')->cuerpo();
+
+        self::assertStringContainsString('Anulada por el administrador.', $cuerpo);
+        self::assertStringNotContainsString('Venció el plazo', $cuerpo);
+    }
+
+    /**
+     * El motivo es de las canceladas: si el pago llegó tarde y la reserva volvió a confirmarse
+     * (X-01.5), la fila no sigue diciendo que venció.
+     */
+    public function testUnaQueVolvioAConfirmarseNoDiceQueSeCancelo(): void
+    {
+        $codigo = $this->canceladaCon(LiberacionDeVencidas::MOTIVO);
+        $this->base->ejecutar('UPDATE reserva SET estado = ? WHERE codigo = ?', ['confirmada', $codigo]);
+
+        $cuerpo = $this->pedir('GET', '/reservas')->cuerpo();
+
+        self::assertStringContainsString(self::partido($codigo), $cuerpo);
+        self::assertStringNotContainsString('Venció el plazo', $cuerpo);
     }
 }

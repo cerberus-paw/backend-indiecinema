@@ -731,6 +731,13 @@ cancelada, con pago y sin reembolso. El panel del administrador la marca así y 
 el log. Lo que se devolvió no se reparte: el neto de `/interno/cobros` lo descuenta, y lo que quedó
 pendiente sigue contando, porque la plata todavía está en la cuenta.
 
+Al espectador se le dice en qué quedó su reserva (EF-06.3). Una cancelada no se queda en
+«Cancelada»: «Mis reservas» y el comprobante muestran el motivo del historial —«Venció el plazo
+para pagar.», «Se canceló la función.», «Anulada por el administrador.»—, que lo escribe quien
+cancela y ya está redactado para el espectador, y la fecha del reembolso si la plata volvió. La que
+canceló el espectador no muestra ningún motivo: la canceló él. Un reembolso pendiente no se le
+anuncia, que todavía no hay nada que reintentar: lo ve el administrador en su panel.
+
 Las credenciales nunca van al repositorio: gitleaks frena un `APP_USR-…` o un `TEST-…` en el CI.
 
 ### Integración continua

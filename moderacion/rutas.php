@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use IndieCinema\Moderacion\Controladores\AdministracionDeSolicitudes;
 use IndieCinema\Moderacion\Controladores\FotoDeSolicitud;
 use IndieCinema\Moderacion\Controladores\SolicitudDeSala;
 use IndieCinema\Nucleo\Http\EstadoInterno;
@@ -24,6 +25,11 @@ return static function (Router $router): void {
     $router->post('/solicitar-sala', [SolicitudDeSala::class, 'enviar'], Rol::Espectador);
     // La foto que mandó, para quien la mandó y el administrador (lo decide el servicio).
     $router->get('/solicitudes/{id}/foto', [FotoDeSolicitud::class, 'mostrar'], Rol::Espectador);
+    // La bandeja de solicitudes de sala: aprobar una crea la sala en programación y le da el rol
+    // de organizador a quien la mandó. La resuelve el administrador hasta que haya moderador
+    // (EF-07.3).
+    $router->get('/solicitudes', [AdministracionDeSolicitudes::class, 'listar'], Rol::Administrador);
+    $router->post('/solicitudes/{id}/resolver', [AdministracionDeSolicitudes::class, 'resolver'], Rol::Administrador);
 
     // Para comprobar que los otros subsistemas llegan hasta acá con su token.
     $router->interna('GET', '/interno/estado', [EstadoInterno::class, 'mostrar'], ['cuentas', 'programacion', 'funciones', 'recaudacion']);

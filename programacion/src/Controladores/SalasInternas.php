@@ -51,7 +51,8 @@ final class SalasInternas extends Controlador
     /**
      * POST /interno/salas (multipart): la sala de una solicitud aprobada, con el id que eligió
      * moderación, el organizador, los datos y la foto como archivo. Queda habilitada; con el id de
-     * una sin habilitar del mismo organizador, la completa (ServicioDeSalas::crearParaSolicitud()).
+     * una sin habilitar del mismo organizador, la completa (ServicioDeSalas::crearParaSolicitud()),
+     * y ahí la foto es opcional.
      * Los datos se validan como en el formulario de sala, y los errores vuelven por campo, con los
      * mismos mensajes, para que moderación se los muestre al moderador. Programación no le pregunta
      * a cuentas por el organizador: moderación lo sacó de la sesión del solicitante.
@@ -65,9 +66,11 @@ final class SalasInternas extends Controlador
         if (!is_string($id) || !Uuid::esValido($id) || !is_string($organizador) || !Uuid::esValido($organizador)) {
             return $this->json(['error' => '«id» y «organizador_id» son UUID.'], 400);
         }
-        $formulario = FormularioDeSala::desdeCampos($peticion->cuerpo(), $peticion->archivo('imagen'), imagenObligatoria: true);
+        // Una sala que ya existe (la de una solicitud que se mudó a moderación, EF-07.2) se completa
+        // sin foto: se queda con la suya.
+        $formulario = FormularioDeSala::desdeCampos($peticion->cuerpo(), $peticion->archivo('imagen'), imagenObligatoria: !$this->salas->existe($id));
         $datos = $formulario->datos();
-        if ($datos === null || $formulario->imagen === null) {
+        if ($datos === null) {
             return $this->json(['errores' => $formulario->errores], 422);
         }
 

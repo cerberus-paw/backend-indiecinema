@@ -36,8 +36,9 @@ return static function (Router $router): void {
     // El auth_request de nginx, en cada pedido del sitio: quién es el de la cookie.
     $router->interna('GET', '/interno/sesion', [SesionInterna::class, 'validar'], ['nginx']);
 
-    // Para la bandeja de solicitudes de sala de programación: quién la mandó y, al aprobarla, el
-    // rol de organizador (pedir ser organizador es pedir una sala, como en la E2). Funciones lee
+    // Para la bandeja de solicitudes de sala, que es de moderación desde EF-07.2: quién la mandó y,
+    // al aprobarla, el rol de organizador (pedir ser organizador es pedir una sala, como en la E2).
+    // Funciones lee
     // el usuario para avisarle por correo que se canceló la función que reservó (E4-03.4), pero
     // no da roles.
     // Varios usuarios en un solo pedido, para el listado y el CSV de reservas de funciones (IC-464).
@@ -45,7 +46,7 @@ return static function (Router $router): void {
     $router->interna('GET', '/interno/usuarios', [UsuariosInternos::class, 'varios'], ['programacion', 'funciones', 'recaudacion']);
     // Moderación, para el nombre y el correo de quien manda una solicitud de sala (EF-07).
     $router->interna('GET', '/interno/usuarios/{id}', [UsuariosInternos::class, 'mostrar'], ['programacion', 'funciones', 'moderacion']);
-    $router->interna('POST', '/interno/usuarios/{id}/roles', [UsuariosInternos::class, 'darRol'], ['programacion']);
+    $router->interna('POST', '/interno/usuarios/{id}/roles', [UsuariosInternos::class, 'darRol'], ['moderacion']);
 
     // Para comprobar que los otros subsistemas llegan hasta acá con su token.
     $router->interna('GET', '/interno/estado', [EstadoInterno::class, 'mostrar'], ['programacion', 'funciones', 'moderacion', 'recaudacion']);

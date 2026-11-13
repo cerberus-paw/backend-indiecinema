@@ -10,6 +10,7 @@ use IndieCinema\Moderacion\Modelo\DatosDeSala;
 use IndieCinema\Moderacion\Modelo\EstadoSolicitud;
 use IndieCinema\Moderacion\Modelo\ImagenSubida;
 use IndieCinema\Moderacion\Modelo\SolicitudDeSala;
+use IndieCinema\Moderacion\Modelo\UsuarioDeCuentas;
 use IndieCinema\Moderacion\Repositorios\RepositorioDeSolicitudes;
 use IndieCinema\Nucleo\Configuracion;
 use IndieCinema\Nucleo\Correo\ClienteSmtp;
@@ -31,9 +32,14 @@ use Throwable;
  */
 final class ServicioDeSolicitudes
 {
+    /** Las que muestra la bandeja: se resuelven a medida que llegan, y más no entran en la pantalla. */
+    private const EN_LA_BANDEJA = 50;
+
     public function __construct(
         private readonly RepositorioDeSolicitudes $solicitudes,
         private readonly ArchivosDeSolicitudes $archivos,
+        private readonly UsuariosDeCuentas $usuarios,
+        private readonly SalasDeProgramacion $salas,
         private readonly ClienteSmtp $correo,
         private readonly Configuracion $configuracion,
         private readonly LoggerInterface $log,
@@ -103,6 +109,76 @@ final class ServicioDeSolicitudes
     }
 
     /**
+     * Las que esperan, primero la que lleva más tiempo; o el historial de decisiones, primero la
+     * última que se resolvió.
+     *
+     * @return list<SolicitudDeSala>
+     */
+    public function lista(bool $pendientes, ?string $texto = null): array
+    {
+        return $this->solicitudes->lista($pendientes, $texto, self::EN_LA_BANDEJA);
+    }
+
+    public function cuantas(bool $pendientes, ?string $texto = null): int
+    {
+        return $this->solicitudes->cuantas($pendientes, $texto);
+    }
+
+    /**
+     * Cuántas mandó el usuario en total, contando ésta.
+     */
+    public function cuantasDe(string $usuarioId): int
+    {
+        return $this->solicitudes->cuantasDe($usuarioId);
+    }
+
+    /**
+     * Quién la mandó, según cuentas, o null si el usuario ya no existe.
+     *
+     * @throws ExcepcionHttp 503 si cuentas no responde
+     */
+    public function solicitante(SolicitudDeSala $solicitud): ?UsuarioDeCuentas
+    {
+        return $this->usuarios->buscar($solicitud->usuarioId);
+    }
+
+    /**
+     * Le da el rol de organizador a quien la mandó, crea su sala en programación (o completa la que
+     * ya existía) y recién ahí la deja aprobada. Si cuentas o programación no responden, la
+     * solicitud sigue pendiente y se puede reintentar: el rol que ya estaba no cambia nada, y la
+     * sala tiene el id que guardó la solicitud, así que no se crea otra. Al revés, quedaría una
+     * aprobada sin sala, o una sala publicada cuyo dueño no puede entrar a «Mis salas».
+     *
+     * @return bool false si ya estaba resuelta: no cambia nada
+     *
+     * @throws ExcepcionHttp 404 si no existe; 503 si cuentas o programación no responden
+     */
+    public function aprobar(string $id, Usuario $administrador, string $motivo): bool
+    {
+        $solicitud = $this->buscar($id);
+        if (!$solicitud->estaPendiente()) {
+            return false;
+        }
+        $this->usuarios->darOrganizador($solicitud->usuarioId, $administrador->id);
+        $this->salas->crearParaSolicitud($solicitud);
+
+        return $this->resolver($solicitud, EstadoSolicitud::Aprobada, $administrador, $motivo);
+    }
+
+    /**
+     * Quien la mandó ve el motivo para corregirla. Programación no se entera: la sala no existe
+     * todavía, o, si se mudó con la solicitud, sigue sin publicar.
+     *
+     * @return bool false si ya estaba resuelta: no cambia nada
+     *
+     * @throws ExcepcionHttp 404 si no existe
+     */
+    public function rechazar(string $id, Usuario $administrador, string $motivo): bool
+    {
+        return $this->resolver($this->buscar($id), EstadoSolicitud::Rechazada, $administrador, $motivo);
+    }
+
+    /**
      * @throws ExcepcionHttp 404 si no existe, también si el id no tiene forma de id
      */
     public function buscar(string $id): SolicitudDeSala
@@ -124,6 +200,21 @@ final class ServicioDeSolicitudes
         }
 
         return $solicitud->imagen;
+    }
+
+    private function resolver(SolicitudDeSala $solicitud, EstadoSolicitud $estado, Usuario $administrador, string $motivo): bool
+    {
+        if (!$this->solicitudes->resolver($solicitud->id, $estado, $administrador->id, $motivo, self::ahora())) {
+            return false;
+        }
+        // Es el registro de auditoría: quién resolvió qué.
+        $this->log->notice('{administrador} resolvió la solicitud de sala {solicitud}: {estado}.', [
+            'administrador' => $administrador->id,
+            'solicitud' => $solicitud->id,
+            'estado' => $estado->value,
+        ]);
+
+        return true;
     }
 
     private function avisarAlEquipo(SolicitudDeSala $solicitud, Usuario $usuario, bool $corregida): void

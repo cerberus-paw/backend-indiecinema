@@ -17,6 +17,7 @@ use IndieCinema\Programacion\Modelo\Sala;
 use IndieCinema\Programacion\Repositorios\RepositorioDeCartelera;
 use IndieCinema\Programacion\Repositorios\RepositorioDeFunciones;
 use IndieCinema\Programacion\Repositorios\RepositorioDeSalas;
+use LogicException;
 use Psr\Log\LoggerInterface;
 use Throwable;
 
@@ -67,11 +68,14 @@ final class ServicioDeSalas
      * - Si hay una habilitada del mismo organizador, es el reintento de un pedido que ya se hizo: no
      *   la toca, porque sus datos ya son de su organizador.
      *
+     * @param ?ImagenSubida $imagen obligatoria para una sala nueva; al completar una, sin foto queda la
+     *                              que tenía
+     *
      * @return array{Sala, bool} la sala y si se creó
      *
      * @throws ExcepcionHttp 409 si el id es de una sala de otro organizador o de una dada de baja
      */
-    public function crearParaSolicitud(string $id, string $organizadorId, DatosDeSala $datos, ImagenSubida $imagen): array
+    public function crearParaSolicitud(string $id, string $organizadorId, DatosDeSala $datos, ?ImagenSubida $imagen): array
     {
         $existente = $this->salas->buscar($id);
         if ($existente === null ? $this->salas->idUsado($id) : !$existente->esDe($organizadorId)) {
@@ -81,20 +85,29 @@ final class ServicioDeSalas
             return [$existente, false];
         }
 
-        $foto = $this->archivos->guardar($imagen);
-        $sala = $existente ?? new Sala($id, $organizadorId, $datos, $foto, habilitada: true);
-        $anterior = $existente?->imagen;
+        if ($existente === null && $imagen === null) {
+            throw new LogicException('Una sala nueva necesita su foto: la API la pide.');
+        }
+
+        $foto = $imagen === null ? null : $this->archivos->guardar($imagen);
+        $sala = $existente ?? new Sala($id, $organizadorId, $datos, (string) $foto, habilitada: true);
+        // Sin foto nueva, la sala que ya existía se queda con la suya (EF-07.2).
+        $anterior = $foto === null ? null : $existente?->imagen;
         try {
             if ($existente === null) {
                 $this->salas->agregar($sala);
             } else {
                 $sala->cambiarDatos($datos);
-                $sala->cambiarImagen($foto);
+                if ($foto !== null) {
+                    $sala->cambiarImagen($foto);
+                }
                 $this->salas->guardar($sala);
             }
         } catch (Throwable $error) {
             // Que no quede en el volumen una foto que nadie usa.
-            $this->archivos->borrar($foto);
+            if ($foto !== null) {
+                $this->archivos->borrar($foto);
+            }
             throw $error;
         }
         // La anterior se borra recién cuando la base apunta a la nueva. Si habilitarla falla, el
@@ -112,6 +125,14 @@ final class ServicioDeSalas
         ]);
 
         return [$sala, $existente === null];
+    }
+
+    /**
+     * Si hay una sala con ese id, sin contar las dadas de baja.
+     */
+    public function existe(string $id): bool
+    {
+        return $this->salas->buscar($id) !== null;
     }
 
     /**

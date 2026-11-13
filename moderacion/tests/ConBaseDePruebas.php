@@ -68,10 +68,50 @@ trait ConBaseDePruebas
         $base->ejecutar('SET FOREIGN_KEY_CHECKS = 0');
         $base->ejecutar('DROP TABLE IF EXISTS solicitud_sala');
         $base->ejecutar('SET FOREIGN_KEY_CHECKS = 1');
+        self::programacionConSolicitudes($base);
         foreach (glob(dirname(__DIR__) . '/migraciones/*.sql') ?: [] as $migracion) {
             $base->ejecutar((string) file_get_contents($migracion));
         }
 
         return $base;
+    }
+
+    /**
+     * Las dos tablas de programación que leen las migraciones que mudaron las solicitudes de sala
+     * (EF-07.2), vacías, como en una base nueva: la segunda borra la de solicitudes, así que se
+     * vuelven a crear antes de cada prueba. Sólo las columnas que se copian.
+     */
+    private static function programacionConSolicitudes(BaseDeDatos $base): void
+    {
+        $base->ejecutar('CREATE SCHEMA IF NOT EXISTS programacion');
+        $base->ejecutar('DROP TABLE IF EXISTS programacion.solicitud_sala');
+        $base->ejecutar('DROP TABLE IF EXISTS programacion.sala');
+        $base->ejecutar(
+            'CREATE TABLE programacion.sala (
+                id CHAR(36) CHARACTER SET ascii NOT NULL PRIMARY KEY,
+                nombre VARCHAR(100) NOT NULL,
+                descripcion VARCHAR(2000) NOT NULL,
+                direccion VARCHAR(150) NOT NULL,
+                localidad VARCHAR(100) NOT NULL,
+                capacidad SMALLINT UNSIGNED NOT NULL,
+                peliculas_por_funcion TINYINT UNSIGNED NOT NULL,
+                duracion_funcion SMALLINT UNSIGNED NOT NULL,
+                tiempo_entre_funciones SMALLINT UNSIGNED NOT NULL,
+                dada_de_baja_en DATETIME NULL
+            )',
+        );
+        $base->ejecutar(
+            "CREATE TABLE programacion.solicitud_sala (
+                id CHAR(36) CHARACTER SET ascii NOT NULL PRIMARY KEY,
+                sala_id CHAR(36) CHARACTER SET ascii NOT NULL,
+                usuario_id CHAR(36) CHARACTER SET ascii NOT NULL,
+                solicitante_nombre VARCHAR(100) NULL,
+                estado ENUM('pendiente', 'aprobada', 'rechazada') NOT NULL DEFAULT 'pendiente',
+                enviada_en DATETIME NOT NULL,
+                resuelta_por CHAR(36) CHARACTER SET ascii NULL,
+                resuelta_en DATETIME NULL,
+                motivo VARCHAR(1000) NULL
+            )",
+        );
     }
 }

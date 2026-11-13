@@ -7,7 +7,6 @@ use IndieCinema\Nucleo\Ruteo\Router;
 use IndieCinema\Nucleo\Seguridad\Rol;
 use IndieCinema\Programacion\Controladores\AcercaDe;
 use IndieCinema\Programacion\Controladores\AficheDeObra;
-use IndieCinema\Programacion\Controladores\AdministracionDeSolicitudes;
 use IndieCinema\Programacion\Controladores\Cartelera;
 use IndieCinema\Programacion\Controladores\FuncionesDelOrganizador;
 use IndieCinema\Programacion\Controladores\FuncionesInternas;
@@ -18,7 +17,6 @@ use IndieCinema\Programacion\Controladores\ObrasDelOrganizador;
 use IndieCinema\Programacion\Controladores\Salas;
 use IndieCinema\Programacion\Controladores\SalasInternas;
 use IndieCinema\Programacion\Controladores\SalasDelOrganizador;
-use IndieCinema\Programacion\Controladores\SolicitudDeSala;
 
 /*
  * Las rutas de programación, sin el prefijo que saca nginx. Cada una declara su rol mínimo; el
@@ -39,11 +37,6 @@ return static function (Router $router): void {
     $router->post('/cartelera/{id}/votar', [Cartelera::class, 'votar'], Rol::Espectador);
     $router->post('/cartelera/{id}/votar-franja', [Cartelera::class, 'votar'], Rol::Espectador);
     $router->post('/cartelera/{id}/acuerdo/votar', [Cartelera::class, 'votar'], Rol::Espectador);
-
-    // La solicitud para abrir una sala (E2): la manda el espectador que quiere ser organizador y
-    // el organizador que suma otra sala. Aprobarla habilita la sala y da el rol.
-    $router->get('/solicitar-sala', [SolicitudDeSala::class, 'mostrar'], Rol::Espectador);
-    $router->post('/solicitar-sala', [SolicitudDeSala::class, 'enviar'], Rol::Espectador);
 
     // «Mis salas» y la edición de la sala propia; las nuevas entran por la solicitud. Que la sala
     // sea del que la edita lo controla el servicio.
@@ -80,13 +73,6 @@ return static function (Router $router): void {
     $router->get('/organizador/funciones/{id}/proponer-franjas', [FuncionesDelOrganizador::class, 'mostrarProponerFranjas'], Rol::Organizador);
     $router->get('/organizador/funciones/{id}/franjas', [FuncionesDelOrganizador::class, 'mostrarProponerFranjas'], Rol::Organizador);
     $router->post('/organizador/funciones/{id}/franjas', [FuncionesDelOrganizador::class, 'proponerAcuerdo'], Rol::Organizador);
-    // La bandeja de solicitudes de sala del administrador: aprobar una habilita la sala y le da el
-    // rol de organizador a quien la mandó. Desde una aprobada, la sala se retira o se vuelve a
-    // publicar.
-    $router->get('/administracion/solicitudes', [AdministracionDeSolicitudes::class, 'listar'], Rol::Administrador);
-    $router->post('/administracion/solicitudes/{id}/resolver', [AdministracionDeSolicitudes::class, 'resolver'], Rol::Administrador);
-    $router->post('/administracion/solicitudes/{id}/deshabilitar-sala', [AdministracionDeSolicitudes::class, 'deshabilitarSala'], Rol::Administrador);
-    $router->post('/administracion/solicitudes/{id}/habilitar-sala', [AdministracionDeSolicitudes::class, 'habilitarSala'], Rol::Administrador);
     // El listado público: sólo las habilitadas, sin sesión.
     $router->get('/salas', [Salas::class, 'listar']);
     // La ficha de una, con sus próximas funciones. Una sin habilitar sólo la ve su organizador.

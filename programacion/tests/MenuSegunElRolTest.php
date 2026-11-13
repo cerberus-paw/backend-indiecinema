@@ -40,7 +40,7 @@ final class MenuSegunElRolTest extends TestCase
     private const CON_SESION = ['/cuenta/', '/funcion/reservas'];
     private const DEL_ESPECTADOR = ['/solicitar-sala'];
     private const DEL_ORGANIZADOR = ['/organizador/salas', '/organizador/obras', '/organizador/obras/nueva', '/organizador/funciones', '/organizador/funciones/nueva', '/solicitar-sala'];
-    private const DEL_ADMINISTRADOR = ['/cuenta/administracion/usuarios', '/administracion/solicitudes'];
+    private const DEL_ADMINISTRADOR = ['/cuenta/administracion/usuarios', '/moderacion/solicitudes'];
 
     /**
      * El encabezado y el pie de /acerca-de, por separado.
@@ -205,7 +205,7 @@ final class MenuSegunElRolTest extends TestCase
         yield 'espectador' => ['espectador', ['Mi cuenta' => ['/cuenta/', '/funcion/reservas', '/solicitar-sala']]];
         yield 'organizador' => ['organizador', $organizador];
         yield 'moderador' => ['moderador', $organizador];
-        yield 'administrador' => ['administrador', ['Administración' => ['/cuenta/administracion/usuarios', '/administracion/solicitudes']]];
+        yield 'administrador' => ['administrador', ['Administración' => ['/cuenta/administracion/usuarios', '/moderacion/solicitudes']]];
     }
 
     /**

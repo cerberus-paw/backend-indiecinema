@@ -151,8 +151,7 @@ final class RepositorioDeSalas
     }
 
     /**
-     * La sala de una fila con las columnas de COLUMNAS. Pública para el repositorio de solicitudes,
-     * que trae cada solicitud con su sala en la misma consulta.
+     * La sala de una fila con las columnas de COLUMNAS.
      *
      * @param array<string, mixed> $fila
      */

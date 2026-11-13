@@ -13,8 +13,9 @@ use LogicException;
 
 /**
  * «Mis salas» y la edición de la sala, en /organizador/salas/…; las nuevas entran por la
- * solicitud de sala (SolicitudDeSala). Las rutas piden el rol de organizador y el núcleo ya
- * controló el token CSRF de los POST antes de llegar acá.
+ * solicitud de sala, que es de moderación: la sala existe recién cuando se aprueba (EF-07.2). Las
+ * rutas piden el rol de organizador y el núcleo ya controló el token CSRF de los POST antes de
+ * llegar acá.
  */
 final class SalasDelOrganizador extends Controlador
 {

@@ -66,7 +66,7 @@ Cada subsistema tiene la misma estructura por dentro:
 │   ├── Modelo/            entidades y enumeraciones de estado
 │   └── Repositorios/      todo el SQL del subsistema, con consultas preparadas
 ├── migraciones/           001_*.sql, 002_*.sql… sólo sobre el esquema propio
-├── herramientas/          datos-de-prueba.php, que carga los de la demo (cuentas y programación)
+├── herramientas/          datos-de-prueba.php, que carga los de la demo (cuentas y programación), e historial-de-prueba.php (programación y funciones)
 ├── datos-prueba/          las fotos de las salas y los afiches de la demo (sólo programación)
 ├── tests/
 └── config/
@@ -446,6 +446,24 @@ La segunda vez, todo sale en «ya estaban». Para comprobar la carga en el naveg
   cuatro como `PUBLICADA`, y cada una se puede editar.
 - http://localhost:8080/cartelera muestra las quince funciones, cada una con su afiche.
 
+Para que los reportes de recaudación tengan qué mostrar, hay además un historial: dos meses de
+funciones que ya terminaron en tres de esas salas, con sus votaciones, sus ventas, la asistencia y
+las calificaciones. Programación carga las funciones y los votos, y funciones, lo que se vendió y
+quiénes fueron. Va después de los datos de prueba y en ese orden:
+
+```
+docker compose exec programacion php herramientas/historial-de-prueba.php
+docker compose exec funciones php herramientas/historial-de-prueba.php
+#   funciones         28 agregadas,  0 ya estaban
+#   reservas        1112 agregadas
+#   calificaciones   620 agregadas
+```
+
+Está armado para que el reporte (`/recaudacion/reportes`, como Omar Organizador) muestre cada
+sugerencia: los miércoles flojos del Alambique, «Metrópolis» y «Nosferatu» para repetir, y
+«El gabinete del Dr. Caligari», que pierde todas sus votaciones y no se proyecta. Las fechas se
+cuentan hacia atrás desde el día en que se carga, y correrlo de nuevo no agrega nada.
+
 En producción (cualquier `entorno` que no sea `"desarrollo"`) no hace nada sin la confirmación
 explícita, para que los datos inventados no lleguen al sitio real por un comando copiado de acá.
 Para cargarlos en el servidor, a propósito:
@@ -454,6 +472,8 @@ Para cargarlos en el servidor, a propósito:
 docker compose exec cuentas php herramientas/datos-de-prueba.php --confirmar-produccion
 docker compose exec programacion php herramientas/datos-de-prueba.php --confirmar-produccion
 ```
+
+El historial, igual: los dos scripts con `--confirmar-produccion`.
 
 En producción, cuentas carga sólo el administrador, el organizador y Eva, con las contraseñas
 de la sección `[datos_de_prueba]` de su `config.ini` (está comentada en el ejemplo). Si falta

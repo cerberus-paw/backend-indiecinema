@@ -269,7 +269,42 @@ final class AdministracionDeSolicitudes extends Controlador
                 'url' => $this->ruta("/documentos/{$documento->id}"),
             ], $this->servicio->documentosDe($solicitud)),
             'solicitudes_previas' => $this->servicio->cuantasDe($solicitud->usuarioId) - 1,
+            'revisiones' => $this->revisiones($solicitud),
         ];
+    }
+
+    /**
+     * Qué tildó cada moderador (EF-07.9), de solo lectura. Quién lo firmó lo cuenta cuentas: si no
+     * responde, el registro se ve igual, sin el nombre, y no se le vuelve a preguntar por cada uno.
+     *
+     * @return list<array{resolucion: string, fecha: string, moderador: ?string, puntos: list<array{nombre: string, cumple: bool}>}>
+     */
+    private function revisiones(SolicitudDeSala $solicitud): array
+    {
+        $nombres = [];
+        $cuentasResponde = true;
+        $revisiones = [];
+        foreach ($this->servicio->revisionesDe($solicitud) as $revision) {
+            $id = $revision['moderador_id'];
+            if ($cuentasResponde && !array_key_exists($id, $nombres)) {
+                try {
+                    $nombres[$id] = $this->servicio->nombreDe($id);
+                } catch (ExcepcionHttp) {
+                    $cuentasResponde = false;
+                }
+            }
+            $revisiones[] = [
+                'resolucion' => $revision['resolucion']->value,
+                'fecha' => FechaParaMostrar::diaYHora($revision['revisado_en']),
+                'moderador' => $nombres[$id] ?? null,
+                'puntos' => array_map(static fn (RequisitoDeSala $requisito): array => [
+                    'nombre' => $requisito->nombre(),
+                    'cumple' => in_array($requisito, $revision['tildados'], true),
+                ], RequisitoDeSala::cases()),
+            ];
+        }
+
+        return $revisiones;
     }
 
     /**

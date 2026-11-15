@@ -152,9 +152,9 @@ final class MigracionesTest extends TestCase
     {
         $solicitud = $this->solicitar(Uuid::nuevo());
         $revisar = fn (string $solicitudId, string $resolucion, int $condiciones) => $this->base->ejecutar(
-            "INSERT INTO revision_requisitos (id, solicitud_id, moderador_id, resolucion, revisado_en, seguro_vigente, habilitacion, capacidad, condiciones)
-             VALUES (?, ?, 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', ?, NOW(), TRUE, TRUE, TRUE, ?)",
-            [Uuid::nuevo(), $solicitudId, $resolucion, $condiciones],
+            "INSERT INTO revision_requisitos (solicitud_id, moderador_id, resolucion, revisado_en, seguro_vigente, habilitacion, capacidad, condiciones)
+             VALUES (?, 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', ?, NOW(), TRUE, TRUE, TRUE, ?)",
+            [$solicitudId, $resolucion, $condiciones],
         );
 
         $this->assertRechaza(self::RESTRICCION_CHECK, fn () => $revisar($solicitud, 'aprobada', 0));

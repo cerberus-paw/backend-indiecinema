@@ -313,6 +313,27 @@ final class ServicioDeSolicitudes
     }
 
     /**
+     * Lo que tildó cada moderador en cada resolución (EF-07.9), del registro más viejo al más
+     * nuevo. Las resueltas antes del checklist no tienen.
+     *
+     * @return list<array{resolucion: EstadoSolicitud, moderador_id: string, revisado_en: DateTimeImmutable, tildados: list<RequisitoDeSala>}>
+     */
+    public function revisionesDe(SolicitudDeSala $solicitud): array
+    {
+        return $this->solicitudes->revisionesDe($solicitud->id);
+    }
+
+    /**
+     * El nombre de un moderador, según cuentas, o null si ya no existe.
+     *
+     * @throws ExcepcionHttp 503 si cuentas no responde
+     */
+    public function nombreDe(string $usuarioId): ?string
+    {
+        return $this->usuarios->buscar($usuarioId)?->nombre;
+    }
+
+    /**
      * Los puntos del checklist cuyo papel está vencido (EF-07.9): no cuentan aunque se tilden, así
      * que no se puede aprobar. Una solicitud sin documentos (las mudadas) no tiene.
      *

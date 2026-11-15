@@ -14,7 +14,6 @@ use IndieCinema\Moderacion\Modelo\RequisitoDeSala;
 use IndieCinema\Moderacion\Modelo\SolicitudDeSala;
 use IndieCinema\Moderacion\Servicios\SolicitudPendiente;
 use IndieCinema\Nucleo\BaseDeDatos;
-use IndieCinema\Nucleo\Uuid;
 use PDOException;
 
 /**
@@ -198,6 +197,27 @@ final class RepositorioDeSolicitudes
     }
 
     /**
+     * Lo que tildó cada moderador al resolverla (EF-07.9), del registro más viejo al más nuevo.
+     *
+     * @return list<array{resolucion: EstadoSolicitud, moderador_id: string, revisado_en: DateTimeImmutable, tildados: list<RequisitoDeSala>}>
+     */
+    public function revisionesDe(string $solicitudId): array
+    {
+        $columnas = array_map(static fn (RequisitoDeSala $requisito): string => $requisito->value, RequisitoDeSala::cases());
+
+        return array_map(static fn (array $fila): array => [
+            'resolucion' => EstadoSolicitud::from((string) $fila['resolucion']),
+            'moderador_id' => (string) $fila['moderador_id'],
+            'revisado_en' => new DateTimeImmutable((string) $fila['revisado_en'], new DateTimeZone('UTC')),
+            'tildados' => array_values(array_filter(RequisitoDeSala::cases(), static fn (RequisitoDeSala $requisito): bool => (bool) $fila[$requisito->value])),
+        ], $this->base->filas(
+            'SELECT resolucion, moderador_id, revisado_en, ' . implode(', ', $columnas) . ' FROM revision_requisitos
+             WHERE solicitud_id = ? ORDER BY id',
+            [$solicitudId],
+        ));
+    }
+
+    /**
      * Qué tildó el moderador al resolverla: una fila por resolución, con una columna por punto.
      *
      * @param list<RequisitoDeSala> $tildados
@@ -206,10 +226,10 @@ final class RepositorioDeSolicitudes
     {
         $columnas = array_map(static fn (RequisitoDeSala $requisito): string => $requisito->value, RequisitoDeSala::cases());
         $base->ejecutar(
-            'INSERT INTO revision_requisitos (id, solicitud_id, moderador_id, resolucion, revisado_en, ' . implode(', ', $columnas) . ')
-             VALUES (?, ?, ?, ?, ?' . str_repeat(', ?', count($columnas)) . ')',
+            'INSERT INTO revision_requisitos (solicitud_id, moderador_id, resolucion, revisado_en, ' . implode(', ', $columnas) . ')
+             VALUES (?, ?, ?, ?' . str_repeat(', ?', count($columnas)) . ')',
             [
-                Uuid::nuevo(), $solicitudId, $moderadorId, $resolucion->value, $revisadoEn,
+                $solicitudId, $moderadorId, $resolucion->value, $revisadoEn,
                 ...array_map(static fn (RequisitoDeSala $requisito): int => (int) in_array($requisito, $tildados, true), RequisitoDeSala::cases()),
             ],
         );

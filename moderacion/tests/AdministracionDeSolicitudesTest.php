@@ -143,7 +143,7 @@ final class AdministracionDeSolicitudesTest extends TestCase
             'tildados' => array_values(array_filter(self::REQUISITOS, static fn (string $requisito): bool => (bool) $fila[$requisito])),
         ], $this->base->filas(
             'SELECT resolucion, moderador_id, seguro_vigente, habilitacion, capacidad, condiciones FROM revision_requisitos
-             WHERE solicitud_id = ? ORDER BY revisado_en, id',
+             WHERE solicitud_id = ? ORDER BY id',
             [$solicitud],
         ));
     }
@@ -557,6 +557,70 @@ final class AdministracionDeSolicitudesTest extends TestCase
 
         self::assertSame('rechazada', $this->estado($id));
         self::assertSame([['resolucion' => 'rechazada', 'moderador' => self::ADMINISTRADOR, 'tildados' => []]], $this->revisiones($id));
+    }
+
+    /**
+     * EF-07.9: el detalle de una resuelta muestra qué tildó cada moderador, de solo lectura, del
+     * registro más viejo al más nuevo.
+     */
+    public function testUnaResueltaMuestraQueTildoCadaModerador(): void
+    {
+        $id = $this->solicitar(self::ESPECTADORA, 'El Galpón');
+        $this->resolver($id, ['resolucion' => 'revision', 'motivo' => 'Coordinamos una visita.', 'requisitos' => ['seguro_vigente', 'habilitacion']], 'moderador');
+        $this->resolver($id, ['resolucion' => 'aprobar', 'motivo' => 'La visita salió bien.']);
+
+        $pantalla = $this->pedir('GET', "/solicitudes?id={$id}")->cuerpo();
+
+        self::assertStringContainsString('Requisitos revisados', $pantalla);
+        self::assertMatchesRegularExpression('#En revisión manual el [0-9/]+ [0-9:]+ por Mora Prueba.*Aprobada el [0-9/]+ [0-9:]+#s', $pantalla);
+        self::assertSame(6, substr_count($pantalla, 'bandeja-checklist-punto cumple'));
+        self::assertSame(2, substr_count($pantalla, 'bandeja-checklist-punto no-cumple'));
+        self::assertStringContainsString('<span class="sr-only">Sin tildar:</span> Capacidad declarada', $pantalla);
+        self::assertStringNotContainsString('name="requisitos[]"', $pantalla);
+    }
+
+    /**
+     * EF-07.9: quien retoma una en revisión manual ve lo que tildó quien la pasó, y su checklist
+     * arranca vacío: firma lo que revisó él.
+     */
+    public function testUnaEnRevisionMuestraElRegistroYElChecklistVacio(): void
+    {
+        $id = $this->solicitar(self::ESPECTADORA, 'El Galpón');
+        $this->resolver($id, ['resolucion' => 'revision', 'motivo' => 'Coordinamos una visita.', 'requisitos' => ['seguro_vigente', 'habilitacion']], 'moderador');
+
+        $pantalla = $this->pedir('GET', "/solicitudes?id={$id}")->cuerpo();
+
+        self::assertMatchesRegularExpression('#En revisión manual el [0-9/]+ [0-9:]+ por Mora Prueba#', $pantalla);
+        self::assertSame(4, preg_match_all('#<input type="checkbox" name="requisitos\[\]"#', $pantalla));
+        self::assertDoesNotMatchRegularExpression('#name="requisitos\[\]"[^>]*checked#', $pantalla);
+    }
+
+    /**
+     * EF-07.9: si cuentas no responde, el registro se ve igual, sin el nombre de quien lo firmó.
+     */
+    public function testSiCuentasNoRespondeElRegistroSeVeSinElNombre(): void
+    {
+        $id = $this->solicitar(self::ESPECTADORA, 'El Galpón');
+        self::assertSame(303, $this->pedir('POST', "/solicitudes/{$id}/resolver", 'moderador', ['resolucion' => 'rechazar', 'motivo' => 'Falta la póliza.', '_csrf' => self::CSRF], self::LENTO)->estado());
+
+        $respuesta = $this->pedir('GET', "/solicitudes?id={$id}");
+
+        self::assertSame(200, $respuesta->estado());
+        self::assertMatchesRegularExpression('#Rechazada el [0-9/]+ [0-9:]+</p>\s*<ul class="bandeja-checklist">#', $respuesta->cuerpo());
+    }
+
+    /**
+     * EF-07.9: las resueltas antes del checklist no tienen registro, y no se muestra.
+     */
+    public function testUnaResueltaSinChecklistNoLoMuestra(): void
+    {
+        $id = $this->solicitar(self::ESPECTADORA, 'El Galpón');
+        $this->base->ejecutar("UPDATE solicitud_sala SET estado = 'rechazada', motivo = 'Falta la póliza.', resuelta_por = ?, resuelta_en = NOW() WHERE id = ?", [self::ADMINISTRADOR, $id]);
+
+        $pantalla = $this->pedir('GET', "/solicitudes?id={$id}")->cuerpo();
+
+        self::assertStringContainsString('Falta la póliza.', $pantalla);
+        self::assertStringNotContainsString('Requisitos revisados', $pantalla);
     }
 
     /**

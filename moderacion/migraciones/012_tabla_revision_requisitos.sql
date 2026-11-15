@@ -8,9 +8,10 @@
 -- se tildaron, que es justamente lo que no cumplía.
 --
 -- Las solicitudes resueltas antes de esta tarea no tienen filas. revisado_en la pone la
--- aplicación, en UTC.
+-- aplicación, en UTC. Va al segundo: dos resoluciones en el mismo segundo se ordenan por el id, que
+-- crece con cada una.
 CREATE TABLE revision_requisitos (
-    id CHAR(36) CHARACTER SET ascii NOT NULL,
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     solicitud_id CHAR(36) CHARACTER SET ascii NOT NULL,
     moderador_id CHAR(36) CHARACTER SET ascii NOT NULL,
     resolucion ENUM('aprobada', 'rechazada', 'en_revision_manual') NOT NULL,
@@ -20,8 +21,8 @@ CREATE TABLE revision_requisitos (
     capacidad BOOLEAN NOT NULL,
     condiciones BOOLEAN NOT NULL,
     PRIMARY KEY (id),
-    -- Los de una solicitud, del más viejo al más nuevo, para el detalle de la bandeja.
-    INDEX revision_requisitos_por_solicitud (solicitud_id, revisado_en),
+    -- Los de una solicitud, del más viejo al más nuevo (por el id), para el detalle de la bandeja.
+    INDEX revision_requisitos_por_solicitud (solicitud_id),
     CONSTRAINT revision_requisitos_de_la_solicitud FOREIGN KEY (solicitud_id) REFERENCES solicitud_sala (id),
     CONSTRAINT revision_requisitos_aprobada_completa CHECK (
         resolucion <> 'aprobada' OR (seguro_vigente AND habilitacion AND capacidad AND condiciones)

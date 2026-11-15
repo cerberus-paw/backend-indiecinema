@@ -208,6 +208,8 @@ todo el sitio se vea igual aunque lo sirvan subsistemas distintos.
   EF-07.6 el alta lleva el `solicitud_id`: con otra solicitud que la última que se le aplicó, a una
   sala habilitada le pone los datos de un cambio de dirección aprobado; con la misma, es un
   reintento y no la toca.
+  Las obras nuevas (EF-07.7) quedan pendientes hasta que la moderación las revisa por
+  `GET /interno/obras/pendientes` y `POST /interno/obras/{id}/revision` de programación.
   Moderación tiene `GET /interno/solicitudes/ultima/{usuario}` para cuentas (EF-07.6): el estado
   y el motivo de la última solicitud de sala, que «Mi cuenta» muestra si moderación responde.
   Funciones tiene `GET /interno/funciones/{id}/ocupacion` y `GET /interno/ocupacion?funciones=…`

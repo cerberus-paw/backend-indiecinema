@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use IndieCinema\Moderacion\Controladores\AdministracionDeSolicitudes;
 use IndieCinema\Moderacion\Controladores\BandejaDeDocumentos;
+use IndieCinema\Moderacion\Controladores\BandejaDeObras;
 use IndieCinema\Moderacion\Controladores\DocumentacionDeSala;
 use IndieCinema\Moderacion\Controladores\DocumentoDeSala;
 use IndieCinema\Moderacion\Controladores\FotoDeSolicitud;
@@ -43,6 +44,8 @@ return static function (Router $router): void {
     // La bandeja de solicitudes de sala: aprobar una crea la sala en programación y le da el rol
     // de organizador a quien la mandó. Es del moderador (EF-07.3); el administrador también entra,
     // porque lo alcanza.
+    $router->get('/obras', [BandejaDeObras::class, 'listar'], Rol::Moderador);
+    $router->post('/obras/{id}/resolver', [BandejaDeObras::class, 'resolver'], Rol::Moderador);
     $router->get('/solicitudes', [AdministracionDeSolicitudes::class, 'listar'], Rol::Moderador);
     $router->post('/solicitudes/{id}/resolver', [AdministracionDeSolicitudes::class, 'resolver'], Rol::Moderador);
     // Desde una aprobada, la sala se retira del sitio o se vuelve a publicar, con un motivo.

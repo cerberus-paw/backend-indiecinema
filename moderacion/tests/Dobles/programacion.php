@@ -9,7 +9,8 @@
  * Cada pedido lo anota en el archivo de la variable REGISTRO, con la foto como su SHA-1, para que
  * la prueba vea qué le llegó. Las salas que conoce son las del JSON de la variable SALAS (id =>
  * {nombre, localidad, organizador_id, habilitada} y, si la prueba los carga, los demás datos), y
- * las va actualizando. Si existe el archivo de
+ * las va actualizando; las obras (EF-07.7), las del JSON de la variable OBRAS, como las devuelve
+ * ObrasInternas. Si existe el archivo de
  * la variable CAIDA, responde 500 a todo, como si estuviera caída.
  */
 
@@ -82,6 +83,39 @@ if ($metodo === 'POST' && preg_match('#^/interno/salas/([^/]+)/habilitacion$#', 
     $salas[$partes[1]]['habilitada'] = (bool) $pedido['habilitada'];
     $guardar($salas);
     echo json_encode(['id' => $partes[1], 'habilitada' => (bool) $pedido['habilitada']]);
+
+    return;
+}
+
+$archivoDeObras = (string) getenv('OBRAS');
+/** @var array<string, array<string, mixed>> $obras */
+$obras = is_file($archivoDeObras) ? (array) json_decode((string) file_get_contents($archivoDeObras), true) : [];
+
+if ($metodo === 'GET' && $ruta === '/interno/obras/pendientes') {
+    $pendientes = array_values(array_filter($obras, static fn (array $obra): bool => $obra['estado'] === 'pendiente'));
+    usort($pendientes, static fn (array $una, array $otra): int => [$una['creada_en'], $una['id']] <=> [$otra['creada_en'], $otra['id']]);
+    echo json_encode($pendientes);
+
+    return;
+}
+
+if ($metodo === 'POST' && preg_match('#^/interno/obras/([^/]+)/revision$#', $ruta, $partes) === 1) {
+    $pedido = (array) json_decode((string) file_get_contents('php://input'), true);
+    $anotar(['ruta' => 'revision', 'obra' => $partes[1]] + $pedido);
+    if (!isset($obras[$partes[1]])) {
+        http_response_code(404);
+
+        return;
+    }
+    $estado = $pedido['resolucion'] === 'aprobar' ? 'aprobada' : 'rechazada';
+    $cambio = $obras[$partes[1]]['estado'] !== $estado;
+    if ($cambio) {
+        $obras[$partes[1]]['estado'] = $estado;
+        $obras[$partes[1]]['motivo'] = $pedido['motivo'];
+        file_put_contents($archivoDeObras, json_encode($obras));
+    }
+    $obra = $obras[$partes[1]];
+    echo json_encode(['id' => $obra['id'], 'titulo' => $obra['titulo'], 'dueno_id' => $obra['dueno_id'], 'estado' => $estado, 'cambio' => $cambio]);
 
     return;
 }

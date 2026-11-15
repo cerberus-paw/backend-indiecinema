@@ -13,6 +13,7 @@ use IndieCinema\Programacion\Controladores\FuncionesInternas;
 use IndieCinema\Programacion\Controladores\ImagenDeSala;
 use IndieCinema\Programacion\Controladores\Inicio;
 use IndieCinema\Programacion\Controladores\Obras;
+use IndieCinema\Programacion\Controladores\ObrasInternas;
 use IndieCinema\Programacion\Controladores\ObrasDelOrganizador;
 use IndieCinema\Programacion\Controladores\Salas;
 use IndieCinema\Programacion\Controladores\SalasInternas;
@@ -98,6 +99,9 @@ return static function (Router $router): void {
     // suspende.
     $router->interna('GET', '/interno/salas', [SalasInternas::class, 'varias'], ['moderacion']);
     $router->interna('POST', '/interno/salas', [SalasInternas::class, 'crear'], ['moderacion']);
+    // Las obras que revisa la moderación (EF-07.7).
+    $router->interna('GET', '/interno/obras/pendientes', [ObrasInternas::class, 'pendientes'], ['moderacion']);
+    $router->interna('POST', '/interno/obras/{id}/revision', [ObrasInternas::class, 'revisar'], ['moderacion']);
     $router->interna('POST', '/interno/salas/{id}/habilitacion', [SalasInternas::class, 'habilitacion'], ['moderacion']);
 
     // Para comprobar que los otros subsistemas llegan hasta acá con su token.

@@ -27,9 +27,13 @@ trait ConServidoresDePrueba
     /** El JSON con las salas que conoce programación. */
     private static string $salas;
 
+    /** El JSON con las obras que conoce programación (EF-07.7). */
+    private static string $obras;
+
     private static function iniciarServidores(): void
     {
         self::$salas = (string) tempnam(sys_get_temp_dir(), 'salas');
+        self::$obras = (string) tempnam(sys_get_temp_dir(), 'obras');
         foreach (['cuentas', 'programacion'] as $servidor) {
             self::$registros[$servidor] = (string) tempnam(sys_get_temp_dir(), "registro-{$servidor}");
             self::$caidas[$servidor] = sys_get_temp_dir() . "/caida-{$servidor}-" . bin2hex(random_bytes(4));
@@ -44,7 +48,7 @@ trait ConServidoresDePrueba
                 [['pipe', 'r'], ['file', '/dev/null', 'w'], ['file', '/dev/null', 'w']],
                 $tuberias,
                 null,
-                ['REGISTRO' => self::$registros[$servidor], 'CAIDA' => self::$caidas[$servidor], 'SALAS' => self::$salas] + getenv(),
+                ['REGISTRO' => self::$registros[$servidor], 'CAIDA' => self::$caidas[$servidor], 'SALAS' => self::$salas, 'OBRAS' => self::$obras] + getenv(),
             );
             self::assertNotFalse($proceso);
             self::$procesos[$servidor] = $proceso;
@@ -59,11 +63,11 @@ trait ConServidoresDePrueba
             proc_close($proceso);
         }
         self::$procesos = [];
-        array_map(static fn (string $archivo) => @unlink($archivo), [...self::$registros, ...self::$caidas, self::$salas]);
+        array_map(static fn (string $archivo) => @unlink($archivo), [...self::$registros, ...self::$caidas, self::$salas, self::$obras]);
     }
 
     /**
-     * Sin pedidos anotados, de pie, y programación sin salas.
+     * Sin pedidos anotados, de pie, y programación sin salas ni obras.
      */
     private static function reiniciarServidores(): void
     {
@@ -72,6 +76,44 @@ trait ConServidoresDePrueba
             @unlink(self::$caidas[$servidor]);
         }
         file_put_contents(self::$salas, '{}');
+        file_put_contents(self::$obras, '{}');
+    }
+
+    /**
+     * Las obras que programación ya tiene, como las devuelve su API interna (EF-07.7): lo que no se
+     * pase toma el valor de una pendiente cualquiera.
+     *
+     * @param array<string, array<string, mixed>> $obras id => datos
+     */
+    private static function obrasEnProgramacion(array $obras): void
+    {
+        $completas = [];
+        foreach ($obras as $id => $obra) {
+            $completas[$id] = ['id' => $id] + $obra + [
+                'titulo' => 'Una obra',
+                'tipo' => 'pelicula',
+                'anio' => 2020,
+                'director' => 'Rocío Paz',
+                'duracion' => 95,
+                'sinopsis' => 'Un pueblo y su río.',
+                'generos' => ['Drama'],
+                'origen_copia' => 'obra_propia',
+                'afiche' => true,
+                'dueno_id' => 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+                'estado' => 'pendiente',
+                'motivo' => null,
+                'creada_en' => '2026-10-01T10:00:00',
+            ];
+        }
+        file_put_contents(self::$obras, json_encode((object) $completas));
+    }
+
+    /**
+     * @return array<string, array<string, mixed>>
+     */
+    private static function obrasDeProgramacion(): array
+    {
+        return (array) json_decode((string) file_get_contents(self::$obras), true);
     }
 
     private static function tirar(string $servidor): void

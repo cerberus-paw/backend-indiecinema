@@ -138,6 +138,45 @@ final class RepositorioDeObras
     }
 
     /**
+     * Las pendientes de revisión (EF-07.7), primero la que lleva más tiempo, con cuándo se cargó
+     * (en la hora del sitio, como la guarda la base).
+     *
+     * @return list<array{Obra, string}>
+     */
+    public function pendientes(): array
+    {
+        $filas = $this->base->filas(
+            'SELECT ' . self::COLUMNAS . ", creada_en FROM obra
+             WHERE dada_de_baja_en IS NULL AND estado = 'pendiente'
+             ORDER BY creada_en, id",
+        );
+        $generos = [];
+        foreach ($this->base->filas(
+            "SELECT og.obra_id, og.genero_id FROM obra_genero og
+             JOIN obra o ON o.id = og.obra_id
+             WHERE o.dada_de_baja_en IS NULL AND o.estado = 'pendiente'
+             ORDER BY og.genero_id",
+        ) as $genero) {
+            $generos[$genero['obra_id']][] = $genero['genero_id'];
+        }
+
+        return array_map(static fn (array $fila): array => [self::obra($fila, $generos[$fila['id']] ?? []), (string) $fila['creada_en']], $filas);
+    }
+
+    /**
+     * La deja en ese estado con el motivo, si no lo estaba.
+     *
+     * @return bool false si ya estaba en ese estado (o no existe): no cambia nada
+     */
+    public function revisar(string $id, EstadoObra $estado, string $motivo): bool
+    {
+        return $this->base->ejecutar(
+            'UPDATE obra SET estado = ?, motivo = ? WHERE id = ? AND dada_de_baja_en IS NULL AND estado <> ?',
+            [$estado->value, $motivo, $id, $estado->value],
+        ) === 1;
+    }
+
+    /**
      * Si la obra participa en funciones futuras (en votación de títulos, en acuerdo de fecha o
      * programada para hoy o más adelante en salas habilitadas).
      */

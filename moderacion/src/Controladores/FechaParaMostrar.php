@@ -13,7 +13,7 @@ use DateTimeZone;
  */
 final class FechaParaMostrar
 {
-    private const ZONA = 'America/Argentina/Buenos_Aires';
+    public const ZONA = 'America/Argentina/Buenos_Aires';
     /** Sin depender de la extensión intl, que la imagen de PHP no trae. */
     private const MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
 

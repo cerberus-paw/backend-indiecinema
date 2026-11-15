@@ -72,6 +72,41 @@ final class ServicioDeObras
     }
 
     /**
+     * Las pendientes de revisión, para la bandeja de moderación (EF-07.7).
+     *
+     * @return list<array{Obra, string}> la obra y cuándo se cargó
+     */
+    public function pendientes(): array
+    {
+        return $this->obras->pendientes();
+    }
+
+    /**
+     * La aprueba o la rechaza (EF-07.7). Lo decidió un moderador en la bandeja de moderación, que
+     * guarda el historial; acá queda en el log.
+     *
+     * @return array{Obra, bool} la obra como quedó y si cambió: resolver lo mismo otra vez no
+     *                           cambia nada, ni el motivo
+     *
+     * @throws ExcepcionHttp 404 si no existe o se dio de baja
+     */
+    public function revisar(string $id, EstadoObra $estado, string $motivo, string $moderadorId): array
+    {
+        $this->buscar($id);
+        $cambio = $this->obras->revisar($id, $estado, $motivo);
+        if ($cambio) {
+            $this->log->notice('{moderador} revisó la obra {obra}: {estado} ({motivo})', [
+                'moderador' => $moderadorId,
+                'obra' => $id,
+                'estado' => $estado->value,
+                'motivo' => $motivo,
+            ]);
+        }
+
+        return [$this->buscar($id), $cambio];
+    }
+
+    /**
      * Una obra del catálogo público: sólo las aprobadas (EF-07.7). Las demás no existen para el
      * sitio, tampoco para su dueño, que las ve en «Mis obras».
      *

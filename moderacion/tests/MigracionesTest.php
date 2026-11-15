@@ -21,6 +21,9 @@ final class MigracionesTest extends TestCase
     /** El error de MySQL de una restricción CHECK. */
     private const RESTRICCION_CHECK = 3819;
 
+    /** El error de MySQL de una clave foránea que no existe. */
+    private const CLAVE_FORANEA = 1452;
+
     /** El error de MySQL de una clave única repetida. */
     private const CLAVE_REPETIDA = 1062;
 
@@ -86,6 +89,34 @@ final class MigracionesTest extends TestCase
         foreach (['capacidad', 'peliculas_por_funcion', 'duracion_funcion'] as $columna) {
             $this->assertRechaza(self::RESTRICCION_CHECK, fn () => $this->base->ejecutar("UPDATE solicitud_sala SET {$columna} = 0 WHERE id = ?", [$solicitud]));
         }
+    }
+
+    private function documento(?string $solicitudId, string $tipo = 'seguro', ?string $salaId = null): void
+    {
+        $this->base->ejecutar(
+            "INSERT INTO documento (id, sala_id, solicitud_id, tipo, archivo, vence_en, subido_en)
+             VALUES (?, ?, ?, ?, '0123456789abcdef0123456789abcdef.pdf', CURDATE() + INTERVAL 1 YEAR, NOW())",
+            [Uuid::nuevo(), $salaId ?? Uuid::nuevo(), $solicitudId, $tipo],
+        );
+    }
+
+    /**
+     * EF-07.4: una solicitud lleva un seguro y una habilitación, de una solicitud que existe; una
+     * renovación (sin solicitud) puede haber varias por sala.
+     */
+    public function testCadaSolicitudTieneUnDocumentoDeCadaTipo(): void
+    {
+        $solicitud = $this->solicitar(Uuid::nuevo());
+        $this->documento($solicitud);
+        $this->documento($solicitud, 'habilitacion');
+
+        $this->assertRechaza(self::CLAVE_REPETIDA, fn () => $this->documento($solicitud));
+        $this->assertRechaza(self::CLAVE_FORANEA, fn () => $this->documento(Uuid::nuevo()));
+        $sala = Uuid::nuevo();
+        $this->documento(null, salaId: $sala);
+        $this->documento(null, salaId: $sala);
+        self::assertSame(2, $this->base->valor('SELECT COUNT(*) FROM documento WHERE sala_id = ?', [$sala]));
+        self::assertSame('pendiente', $this->base->valor('SELECT DISTINCT estado FROM documento'));
     }
 
     /**

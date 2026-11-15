@@ -49,7 +49,11 @@ final class SolicitudDeSala extends Controlador
             return $this->pantalla($ultima, null, estado: 409);
         }
         $corrigiendo = $ultima?->estado === EstadoSolicitud::Rechazada;
-        $formulario = FormularioDeSolicitud::desdeCampos($peticion->cuerpo(), $peticion->archivo('imagen'), imagenObligatoria: !$corrigiendo);
+        $archivos = [];
+        foreach (['imagen', ...array_column(FormularioDeDocumentos::CAMPOS, 0)] as $campo) {
+            $archivos[$campo] = $peticion->archivo($campo);
+        }
+        $formulario = FormularioDeSolicitud::desdeCampos($peticion->cuerpo(), $archivos, imagenObligatoria: !$corrigiendo);
         $datos = $formulario->datos();
         if ($datos === null) {
             // Sin mensaje general: la plantilla resume los errores de los campos (E4-10.5).
@@ -57,7 +61,7 @@ final class SolicitudDeSala extends Controlador
         }
 
         try {
-            $this->servicio->solicitar($usuario, $datos, $formulario->sala->imagen);
+            $this->servicio->solicitar($usuario, $datos, $formulario->sala->imagen, $formulario->documentos);
         } catch (SolicitudPendiente) {
             return $this->pantalla($this->servicio->ultimaDe($usuario), null, estado: 409);
         }

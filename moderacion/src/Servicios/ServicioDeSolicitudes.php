@@ -7,6 +7,9 @@ namespace IndieCinema\Moderacion\Servicios;
 use DateTimeImmutable;
 use DateTimeZone;
 use IndieCinema\Moderacion\Modelo\DatosDeSala;
+use IndieCinema\Moderacion\Modelo\Documento;
+use IndieCinema\Moderacion\Modelo\DocumentoSubido;
+use IndieCinema\Moderacion\Modelo\EstadoDocumento;
 use IndieCinema\Moderacion\Modelo\EstadoSolicitud;
 use IndieCinema\Moderacion\Modelo\ImagenSubida;
 use IndieCinema\Moderacion\Modelo\SolicitudDeSala;
@@ -38,6 +41,7 @@ final class ServicioDeSolicitudes
     public function __construct(
         private readonly RepositorioDeSolicitudes $solicitudes,
         private readonly ArchivosDeSolicitudes $archivos,
+        private readonly ArchivosDeDocumentos $documentos,
         private readonly UsuariosDeCuentas $usuarios,
         private readonly SalasDeProgramacion $salas,
         private readonly ClienteSmtp $correo,
@@ -61,12 +65,16 @@ final class ServicioDeSolicitudes
      * va a crear al aprobarla. Si el correo falla, la solicitud queda igual: el moderador la ve
      * en la bandeja, y el correo es sólo el aviso. El motivo queda en el log.
      *
-     * @param ?ImagenSubida $imagen obligatoria para una sala nueva; al corregir, sin una queda la
-     *                              que tenía
+     * El seguro y la habilitación (EF-07.4) se guardan con la solicitud, pendientes, en la misma
+     * transacción; si algo falla, los PDF que ya se movieron al volumen se borran.
+     *
+     * @param ?ImagenSubida          $imagen     obligatoria para una sala nueva; al corregir, sin una
+     *                                           queda la que tenía
+     * @param list<DocumentoSubido>  $documentos los que mandó, ya validados
      *
      * @throws SolicitudPendiente si ya tiene una sin resolver
      */
-    public function solicitar(Usuario $usuario, DatosDeSala $datos, ?ImagenSubida $imagen): SolicitudDeSala
+    public function solicitar(Usuario $usuario, DatosDeSala $datos, ?ImagenSubida $imagen, array $documentos = []): SolicitudDeSala
     {
         $ultima = $this->solicitudes->ultimaDe($usuario->id);
         if ($ultima?->estaPendiente()) {
@@ -78,6 +86,7 @@ final class ServicioDeSolicitudes
         }
 
         $fotoNueva = $imagen === null ? null : $this->archivos->guardar($imagen);
+        $pdfsNuevos = [];
         [$salaId, $fotoAnterior] = $corregida === null ? [Uuid::nuevo(), null] : [$corregida->salaId, $corregida->imagen];
         $solicitud = new SolicitudDeSala(
             Uuid::nuevo(),
@@ -90,12 +99,27 @@ final class ServicioDeSolicitudes
             self::ahora(),
         );
         try {
-            $this->solicitudes->agregar($solicitud);
+            $papeles = [];
+            foreach ($documentos as $documento) {
+                $pdfsNuevos[] = $this->documentos->guardar($documento->rutaTemporal);
+                $papeles[] = new Documento(
+                    Uuid::nuevo(),
+                    $salaId,
+                    $solicitud->id,
+                    $documento->tipo,
+                    $pdfsNuevos[array_key_last($pdfsNuevos)],
+                    $documento->venceEn,
+                    $solicitud->enviadaEn,
+                    EstadoDocumento::Pendiente,
+                );
+            }
+            $this->solicitudes->agregar($solicitud, $papeles);
         } catch (Throwable $error) {
-            // Que no quede en el volumen una foto que nadie usa.
+            // Que no queden en el volumen una foto ni unos PDF que nadie usa.
             if ($fotoNueva !== null) {
                 $this->archivos->borrar($fotoNueva);
             }
+            array_map($this->documentos->borrar(...), $pdfsNuevos);
             throw $error;
         }
         $this->log->info('El usuario {usuario} pidió abrir la sala {sala} (solicitud {solicitud}).', [

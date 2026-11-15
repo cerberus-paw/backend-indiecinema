@@ -66,6 +66,7 @@ trait ConBaseDePruebas
     {
         $base = BaseDeDatos::conectar($configuracion);
         $base->ejecutar('SET FOREIGN_KEY_CHECKS = 0');
+        $base->ejecutar('DROP TABLE IF EXISTS documento');
         $base->ejecutar('DROP TABLE IF EXISTS solicitud_sala');
         $base->ejecutar('SET FOREIGN_KEY_CHECKS = 1');
         self::programacionConSolicitudes($base);

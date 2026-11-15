@@ -6,6 +6,8 @@ namespace IndieCinema\Moderacion\Pruebas;
 
 use Dom\HTMLDocument;
 use IndieCinema\Moderacion\Controladores\FormularioDeSolicitud;
+use DateTimeImmutable;
+use IndieCinema\Moderacion\Pruebas\Dobles\Documentos;
 use IndieCinema\Moderacion\Pruebas\Dobles\Imagenes;
 use IndieCinema\Nucleo\Aplicacion;
 use IndieCinema\Nucleo\BaseDeDatos;
@@ -37,6 +39,8 @@ final class SolicitudDeSalaTest extends TestCase
     private const ADMINISTRADOR = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
     private const EQUIPO = 'equipo@indiecinema.test';
     private const URL = '/solicitar-sala';
+    /** Los dos PDF que pide la solicitud (EF-07.4), de tests/Dobles/documentos. */
+    private const DOCUMENTOS = ['seguro' => 'poliza.pdf', 'habilitacion_pdf' => 'habilitacion.pdf'];
 
     private static ServidorSmtpDePrueba $correo;
 
@@ -67,8 +71,10 @@ final class SolicitudDeSalaTest extends TestCase
 
     protected function tearDown(): void
     {
-        array_map('unlink', glob("{$this->carpeta}/solicitudes/*") ?: []);
-        @rmdir("{$this->carpeta}/solicitudes");
+        foreach (['solicitudes', 'documentos'] as $carpeta) {
+            array_map('unlink', glob("{$this->carpeta}/{$carpeta}/*") ?: []);
+            @rmdir("{$this->carpeta}/{$carpeta}");
+        }
         @rmdir($this->carpeta);
     }
 
@@ -129,18 +135,42 @@ final class SolicitudDeSalaTest extends TestCase
             'peliculas_por_funcion' => '2',
             'duracion_funcion' => '120',
             'tiempo_entre_funciones' => '0',
+            'vence_seguro' => self::dentroDe('+1 year'),
+            'vence_habilitacion' => self::dentroDe('+2 years'),
         ];
     }
 
     /**
-     * @param array<string, string> $cambios
-     * @param ?string               $imagen  de tests/Dobles/imagenes, o null para no mandar ninguna
+     * Una fecha como la manda el campo de fecha, contada desde hoy en la hora del sitio.
      */
-    private function enviar(array $cambios = [], ?string $rol = 'espectador', ?string $imagen = 'sala.png', string $usuario = self::ESPECTADORA, ?Configuracion $configuracion = null): Respuesta
+    private static function dentroDe(string $cuanto): string
+    {
+        return new DateTimeImmutable('today')->modify($cuanto)->format('Y-m-d');
+    }
+
+    /**
+     * @param array<string, string>                                    $cambios
+     * @param ?string                                                  $imagen     de tests/Dobles/imagenes, o null para no mandar ninguna
+     * @param array<string, string|array<string, mixed>|null>          $documentos campo => de tests/Dobles/documentos, el archivo ya armado, o null para no mandarlo
+     */
+    private function enviar(array $cambios = [], ?string $rol = 'espectador', ?string $imagen = 'sala.png', string $usuario = self::ESPECTADORA, ?Configuracion $configuracion = null, array $documentos = []): Respuesta
     {
         $archivos = $imagen === null ? [] : ['imagen' => Imagenes::subida($imagen)];
+        foreach ($documentos + self::DOCUMENTOS as $campo => $documento) {
+            if ($documento !== null) {
+                $archivos[$campo] = is_string($documento) ? Documentos::subida($documento) : $documento;
+            }
+        }
 
         return $this->pedir('POST', $cambios + self::camposValidos(), $rol, $archivos, $usuario, configuracion: $configuracion);
+    }
+
+    /**
+     * @return list<string> los PDF guardados en el volumen
+     */
+    private function documentosGuardados(): array
+    {
+        return array_map('basename', glob("{$this->carpeta}/documentos/*") ?: []);
     }
 
     /**
@@ -238,6 +268,83 @@ final class SolicitudDeSalaTest extends TestCase
         self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM solicitud_sala'));
         self::assertSame([], $this->fotosGuardadas());
         self::assertSame([], self::$correo->correos());
+    }
+
+    /**
+     * @return iterable<string, array{array<string, string>, array<string, mixed>, string, string}>
+     */
+    public static function documentosInvalidos(): iterable
+    {
+        yield 'sin el seguro' => [[], ['seguro' => null], 'seguro', 'Falta el PDF del seguro.'];
+        yield 'sin la habilitación' => [[], ['habilitacion_pdf' => null], 'habilitacion_pdf', 'Falta el PDF de la habilitación.'];
+        yield 'un ejecutable con extensión .pdf' => [[], ['seguro' => 'programa.pdf'], 'seguro', 'El seguro tiene que ser un PDF.'];
+        yield 'una foto en lugar del PDF' => [[], ['habilitacion_pdf' => Imagenes::subida('sala.png', 'habilitacion.pdf')], 'habilitacion_pdf', 'La habilitación tiene que ser un PDF.'];
+        yield 'uno que PHP cortó por grande' => [[], ['seguro' => Documentos::cortadoPorPhp()], 'seguro', 'El PDF del seguro puede pesar hasta 5 MB.'];
+        yield 'uno de más de 5 MB' => [[], ['habilitacion_pdf' => Documentos::grande()], 'habilitacion_pdf', 'El PDF de la habilitación puede pesar hasta 5 MB.'];
+        yield 'sin vencimiento' => [['vence_seguro' => ''], [], 'vence_seguro', 'Falta la fecha de vencimiento del seguro.'];
+        yield 'un vencimiento que no es fecha' => [['vence_habilitacion' => '2027-02-30'], [], 'vence_habilitacion', 'Falta la fecha de vencimiento de la habilitación.'];
+        yield 'que vence hoy' => [['vence_seguro' => self::dentroDe('today')], [], 'vence_seguro', 'El seguro tiene que vencer después de hoy.'];
+        yield 'ya vencido' => [['vence_habilitacion' => self::dentroDe('-1 day')], [], 'vence_habilitacion', 'La habilitación tiene que vencer después de hoy.'];
+        yield 'a más de 10 años' => [['vence_seguro' => self::dentroDe('+10 years +1 day')], [], 'vence_seguro', 'El vencimiento del seguro no puede pasar de 10 años: revisá el año.'];
+    }
+
+    /**
+     * EF-07.4: la solicitud lleva el seguro y la habilitación en PDF, cada uno con su vencimiento.
+     * El PDF se juzga por su contenido, no por la extensión ni por lo que dice el navegador.
+     *
+     * @param array<string, string> $cambios
+     * @param array<string, mixed>  $documentos
+     */
+    #[DataProvider('documentosInvalidos')]
+    public function testRechazaLosDocumentosQueNoVan(array $cambios, array $documentos, string $campo, string $mensaje): void
+    {
+        $respuesta = $this->enviar($cambios, documentos: $documentos);
+
+        self::assertSame(422, $respuesta->estado());
+        self::assertSame(["#{$campo}" => $mensaje], Formularios::resumen($respuesta->cuerpo())['enlaces'] ?? null);
+        self::assertMatchesRegularExpression('#id="error-' . $campo . '"[^>]*>.*' . preg_quote($mensaje, '#') . '#s', $respuesta->cuerpo());
+        self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM solicitud_sala'));
+        self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM documento'));
+        self::assertSame([], $this->documentosGuardados());
+        self::assertSame([], $this->fotosGuardadas());
+    }
+
+    public function testElVencimientoVuelveAlFormularioSiOtroCampoFalla(): void
+    {
+        $vence = self::dentroDe('+1 year');
+
+        $cuerpo = $this->enviar(['nombre' => '', 'vence_seguro' => $vence])->cuerpo();
+
+        self::assertMatchesRegularExpression('/name="vence_seguro"[^>]*value="' . $vence . '"/', $cuerpo);
+        self::assertSame([], $this->documentosGuardados());
+    }
+
+    public function testGuardaLosDosDocumentosPendientesConSuVencimiento(): void
+    {
+        self::assertSame(303, $this->enviar()->estado());
+
+        $solicitud = $this->base->fila('SELECT id, sala_id FROM solicitud_sala') ?? [];
+        $documentos = $this->base->filas('SELECT sala_id, solicitud_id, tipo, archivo, vence_en, estado FROM documento ORDER BY tipo');
+        self::assertCount(2, $documentos);
+        self::assertSame(
+            [
+                ['sala_id' => $solicitud['sala_id'], 'solicitud_id' => $solicitud['id'], 'tipo' => 'seguro', 'vence_en' => self::dentroDe('+1 year'), 'estado' => 'pendiente'],
+                ['sala_id' => $solicitud['sala_id'], 'solicitud_id' => $solicitud['id'], 'tipo' => 'habilitacion', 'vence_en' => self::dentroDe('+2 years'), 'estado' => 'pendiente'],
+            ],
+            array_map(static fn (array $fila): array => array_diff_key($fila, ['archivo' => true]), $documentos),
+        );
+        // En el volumen de moderación, con un nombre al azar, el contenido tal cual y sin permisos
+        // para otros.
+        $guardados = $this->documentosGuardados();
+        sort($guardados);
+        $archivos = array_column($documentos, 'archivo');
+        sort($archivos);
+        self::assertSame($archivos, $guardados);
+        foreach ($documentos as $documento) {
+            self::assertMatchesRegularExpression('/^[0-9a-f]{32}\.pdf$/', (string) $documento['archivo']);
+            self::assertSame(0640, fileperms("{$this->carpeta}/documentos/{$documento['archivo']}") & 0777);
+        }
+        self::assertFileEquals(Documentos::ruta('poliza.pdf'), "{$this->carpeta}/documentos/{$documentos[0]['archivo']}");
     }
 
     public function testConErroresVuelveConLoCargadoYEscapado(): void

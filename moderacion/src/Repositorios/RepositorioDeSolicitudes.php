@@ -7,6 +7,7 @@ namespace IndieCinema\Moderacion\Repositorios;
 use DateTimeImmutable;
 use DateTimeZone;
 use IndieCinema\Moderacion\Modelo\DatosDeSala;
+use IndieCinema\Moderacion\Modelo\Documento;
 use IndieCinema\Moderacion\Modelo\EstadoSolicitud;
 use IndieCinema\Moderacion\Modelo\SolicitudDeSala;
 use IndieCinema\Moderacion\Servicios\SolicitudPendiente;
@@ -31,23 +32,39 @@ final class RepositorioDeSolicitudes
     }
 
     /**
-     * @throws SolicitudPendiente si la sala ya tiene una sin resolver
+     * La solicitud y sus documentos (EF-07.4), juntos o ninguno.
+     *
+     * @param list<Documento> $documentos
+     *
+     * @throws SolicitudPendiente si la sala ya tiene una pendiente
      */
-    public function agregar(SolicitudDeSala $solicitud): void
+    public function agregar(SolicitudDeSala $solicitud, array $documentos = []): void
     {
         $datos = $solicitud->datos;
         try {
-            $this->base->ejecutar(
-                'INSERT INTO solicitud_sala (id, sala_id, usuario_id, solicitante_nombre, nombre, descripcion, direccion,
-                    localidad, capacidad, peliculas_por_funcion, duracion_funcion, tiempo_entre_funciones, imagen, estado, enviada_en)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                [
-                    $solicitud->id, $solicitud->salaId, $solicitud->usuarioId, $solicitud->solicitanteNombre,
-                    $datos->nombre, $datos->descripcion, $datos->direccion, $datos->localidad, $datos->capacidad,
-                    $datos->peliculasPorFuncion, $datos->duracionFuncion, $datos->tiempoEntreFunciones,
-                    $solicitud->imagen, $solicitud->estado->value, $solicitud->enviadaEn,
-                ],
-            );
+            $this->base->enTransaccion(function (BaseDeDatos $base) use ($solicitud, $datos, $documentos): void {
+                $base->ejecutar(
+                    'INSERT INTO solicitud_sala (id, sala_id, usuario_id, solicitante_nombre, nombre, descripcion, direccion,
+                        localidad, capacidad, peliculas_por_funcion, duracion_funcion, tiempo_entre_funciones, imagen, estado, enviada_en)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                    [
+                        $solicitud->id, $solicitud->salaId, $solicitud->usuarioId, $solicitud->solicitanteNombre,
+                        $datos->nombre, $datos->descripcion, $datos->direccion, $datos->localidad, $datos->capacidad,
+                        $datos->peliculasPorFuncion, $datos->duracionFuncion, $datos->tiempoEntreFunciones,
+                        $solicitud->imagen, $solicitud->estado->value, $solicitud->enviadaEn,
+                    ],
+                );
+                foreach ($documentos as $documento) {
+                    $base->ejecutar(
+                        'INSERT INTO documento (id, sala_id, solicitud_id, tipo, archivo, vence_en, subido_en, estado)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                        [
+                            $documento->id, $documento->salaId, $documento->solicitudId, $documento->tipo->value,
+                            $documento->archivo, $documento->venceEn->format('Y-m-d'), $documento->subidoEn, $documento->estado->value,
+                        ],
+                    );
+                }
+            });
         } catch (PDOException $error) {
             if (($error->errorInfo[1] ?? null) === self::CLAVE_DUPLICADA) {
                 throw new SolicitudPendiente('La sala ya tiene una solicitud pendiente.', previous: $error);

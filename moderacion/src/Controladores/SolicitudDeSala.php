@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace IndieCinema\Moderacion\Controladores;
 
+use IndieCinema\Moderacion\Modelo\Documento;
 use IndieCinema\Moderacion\Modelo\EstadoSolicitud;
 use IndieCinema\Moderacion\Modelo\SolicitudDeSala as Solicitud;
 use IndieCinema\Moderacion\Servicios\ServicioDeSolicitudes;
@@ -85,6 +86,11 @@ final class SolicitudDeSala extends Controlador
                 'enviada' => FechaParaMostrar::diaYHora($ultima->enviadaEn),
                 'resuelta' => $ultima->resueltaEn === null ? null : FechaParaMostrar::diaYHora($ultima->resueltaEn),
                 'motivo' => $ultima->motivo,
+                'documentos' => array_map(fn (Documento $documento): array => [
+                    'nombre' => $documento->tipo->nombre(),
+                    'vence' => $documento->venceEn->format('d/m/Y'),
+                    'url' => $this->ruta("/documentos/{$documento->id}"),
+                ], $this->servicio->documentosDe($ultima)),
             ],
         ];
         // La plantilla muestra cada mensaje si la variable existe: sólo se pasan cuando hay algo

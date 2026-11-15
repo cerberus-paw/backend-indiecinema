@@ -115,7 +115,7 @@ final class SolicitudDeSalaTest extends TestCase
         $respuesta = $aplicacion->atender(new Peticion($metodo, (string) parse_url($url, PHP_URL_PATH), $consulta, $cuerpo, $cabeceras, ['csrf' => self::CSRF], $archivos));
 
         // Las páginas, para el validador del W3C; la foto no.
-        return str_contains($url, '/foto') ? $respuesta : PaginasParaValidar::anotar($metodo, $url, $respuesta);
+        return str_contains($url, '/foto') || str_contains($url, '/documentos/') ? $respuesta : PaginasParaValidar::anotar($metodo, $url, $respuesta);
     }
 
     /**
@@ -345,6 +345,54 @@ final class SolicitudDeSalaTest extends TestCase
             self::assertSame(0640, fileperms("{$this->carpeta}/documentos/{$documento['archivo']}") & 0777);
         }
         self::assertFileEquals(Documentos::ruta('poliza.pdf'), "{$this->carpeta}/documentos/{$documentos[0]['archivo']}");
+    }
+
+    /**
+     * @return array<string, string> tipo => id del documento de la última solicitud
+     */
+    private function idsDeLosDocumentos(): array
+    {
+        return array_column($this->base->filas('SELECT tipo, id FROM documento ORDER BY subido_en DESC, tipo'), 'id', 'tipo');
+    }
+
+    /**
+     * EF-07.4: el PDF lo bajan quien mandó la solicitud y la moderación, como adjunto y sin que el
+     * navegador lo pueda tomar por otra cosa. Para los demás no existe.
+     */
+    public function testElDocumentoLoBajanElSolicitanteYElModerador(): void
+    {
+        $this->enviar();
+        $url = '/documentos/' . $this->idsDeLosDocumentos()['seguro'];
+
+        foreach ([['espectador', self::ESPECTADORA], ['moderador', self::OTRO], ['administrador', self::ADMINISTRADOR]] as [$rol, $usuario]) {
+            $respuesta = $this->pedir(rol: $rol, usuario: $usuario, url: $url);
+            self::assertSame(200, $respuesta->estado(), $rol);
+            self::assertSame(file_get_contents(Documentos::ruta('poliza.pdf')), $respuesta->cuerpo());
+            self::assertSame('application/pdf', $respuesta->cabecera('Content-Type'));
+            self::assertSame('attachment; filename="seguro.pdf"', $respuesta->cabecera('Content-Disposition'));
+            self::assertSame('nosniff', $respuesta->cabecera('X-Content-Type-Options'));
+            self::assertSame('private, no-store', $respuesta->cabecera('Cache-Control'));
+        }
+        self::assertSame('attachment; filename="habilitacion.pdf"', $this->pedir(url: '/documentos/' . $this->idsDeLosDocumentos()['habilitacion'])->cabecera('Content-Disposition'));
+
+        self::assertSame(404, $this->pedir(usuario: self::OTRO, url: $url)->estado());
+        self::assertSame(404, $this->pedir(rol: 'organizador', usuario: self::OTRO, url: $url)->estado());
+        self::assertSame(404, $this->pedir(url: '/documentos/0f0f0f0f-0f0f-4f0f-8f0f-0f0f0f0f0f0f')->estado());
+        self::assertSame(404, $this->pedir(url: '/documentos/no-es-un-id')->estado());
+        self::assertSame(401, $this->pedir(rol: null, url: $url)->estado());
+    }
+
+    public function testElEstadoDeLaSolicitudMuestraLosDocumentos(): void
+    {
+        $this->enviar();
+        $ids = $this->idsDeLosDocumentos();
+
+        $cuerpo = $this->pedir()->cuerpo();
+
+        self::assertStringContainsString("href=\"/moderacion/documentos/{$ids['seguro']}\"", $cuerpo);
+        self::assertStringContainsString("href=\"/moderacion/documentos/{$ids['habilitacion']}\"", $cuerpo);
+        self::assertStringContainsString('vence el ' . new DateTimeImmutable(self::dentroDe('+1 year'))->format('d/m/Y'), $cuerpo);
+        self::assertStringContainsString('vence el ' . new DateTimeImmutable(self::dentroDe('+2 years'))->format('d/m/Y'), $cuerpo);
     }
 
     public function testConErroresVuelveConLoCargadoYEscapado(): void

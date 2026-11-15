@@ -14,6 +14,7 @@ use IndieCinema\Moderacion\Modelo\EstadoSolicitud;
 use IndieCinema\Moderacion\Modelo\ImagenSubida;
 use IndieCinema\Moderacion\Modelo\SolicitudDeSala;
 use IndieCinema\Moderacion\Modelo\UsuarioDeCuentas;
+use IndieCinema\Moderacion\Repositorios\RepositorioDeDocumentos;
 use IndieCinema\Moderacion\Repositorios\RepositorioDeSolicitudes;
 use IndieCinema\Nucleo\Configuracion;
 use IndieCinema\Nucleo\Correo\ClienteSmtp;
@@ -42,6 +43,7 @@ final class ServicioDeSolicitudes
         private readonly RepositorioDeSolicitudes $solicitudes,
         private readonly ArchivosDeSolicitudes $archivos,
         private readonly ArchivosDeDocumentos $documentos,
+        private readonly RepositorioDeDocumentos $papeles,
         private readonly UsuariosDeCuentas $usuarios,
         private readonly SalasDeProgramacion $salas,
         private readonly ClienteSmtp $correo,
@@ -205,6 +207,35 @@ final class ServicioDeSolicitudes
         $this->controlarQueLaPuedeResolver($solicitud, $moderador);
 
         return $this->resolver($solicitud, EstadoSolicitud::Rechazada, $moderador, $motivo);
+    }
+
+    /**
+     * El seguro y la habilitación que mandó con la solicitud (EF-07.4), primero el seguro. Las que
+     * se mandaron antes de que se pidieran no tienen.
+     *
+     * @return list<Documento>
+     */
+    public function documentosDe(SolicitudDeSala $solicitud): array
+    {
+        return $this->papeles->deSolicitud($solicitud->id);
+    }
+
+    /**
+     * Un documento, si lo puede bajar: quien mandó su solicitud y la moderación. Para los demás no
+     * existe.
+     *
+     * @throws ExcepcionHttp 404
+     */
+    public function documentoParaBajar(string $id, Usuario $usuario): Documento
+    {
+        $documento = Uuid::esValido($id) ? $this->papeles->buscar($id) : null;
+        $solicitud = $documento?->solicitudId === null ? null : $this->solicitudes->buscar($documento->solicitudId);
+        $esSuyo = $solicitud !== null && hash_equals($solicitud->usuarioId, $usuario->id);
+        if ($documento === null || (!$esSuyo && !$usuario->alcanza(Rol::Moderador))) {
+            throw ExcepcionHttp::noEncontrada();
+        }
+
+        return $documento;
     }
 
     /**

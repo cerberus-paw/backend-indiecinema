@@ -224,8 +224,10 @@ todo el sitio se vea igual aunque lo sirvan subsistemas distintos.
   le avisa al equipo por correo; la sala recién existe en programación cuando se aprueba. Aprobarla
   le pide a cuentas el rol de organizador, después le pide a programación la sala publicada y
   recién ahí queda aprobada: si alguno no responde, sigue pendiente y se puede reintentar, y nunca
-  queda una sala publicada cuyo dueño no puede entrar a «Mis salas». La resuelve el administrador
-  hasta que haya moderador.
+  queda una sala publicada cuyo dueño no puede entrar a «Mis salas». La resuelve un moderador
+  (EF-07.3), que no resuelve la suya. Lleva el seguro y la habilitación en PDF con su vencimiento
+  (EF-07.4), en el volumen de moderación; los bajan quien la mandó y la moderación
+  (`/moderacion/documentos/{id}`).
 - **Los correos salen por SMTP con el curl de PHP** (`ClienteSmtp` del núcleo), sin librerías.
   El servidor y el remitente están en `[correo]` del `config.ini` de cada subsistema que manda
   correos: moderación, el aviso de cada solicitud de sala, y funciones, los de los espectadores
@@ -312,7 +314,7 @@ docker run --rm -u "$(id -u):$(id -g)" -v "$PWD/..:/app" -w /app/backend-indieci
 | http://localhost:8080/organizador/obras | las obras del catálogo, con sesión de organizador: el alta y la edición con el afiche, y la baja de una obra sin funciones futuras |
 | http://localhost:8080/organizador/funciones | «Mis funciones»: las de sus salas, en cualquier estado y con su fecha; desde ahí se programa una función o se la abre a votación de títulos, y se proponen las franjas del acuerdo |
 | http://localhost:8080/cuenta/ | «Mi cuenta», con sesión: el nombre, el correo y los roles, y el enlace a «Mis reservas». Sin sesión, `/cuenta/ingresar` y `/cuenta/registro` |
-| http://localhost:8080/solicitar-sala | la solicitud de sala, con sesión: se guarda la sala propuesta y le llega al equipo por correo |
+| http://localhost:8080/solicitar-sala | la solicitud de sala, con sesión: se guarda la sala propuesta con su seguro y su habilitación en PDF, y le llega al equipo por correo |
 | http://localhost:8080/moderacion/solicitudes | la bandeja de solicitudes de sala, para aprobarlas (publica la sala y da el rol de organizador) o rechazarlas con un motivo, el historial, y retirar o volver a publicar la sala con un motivo; para el moderador (y el administrador) |
 | http://localhost:8025 | el buzón de prueba (Mailpit): los correos que mandan los subsistemas, sin que salgan a nadie |
 | http://localhost:8080/cuenta/administracion/usuarios | usuarios y roles, con los números de las cuentas, buscador por nombre o correo, filtros de rol, estado y año de alta, y el rol de cada uno en un desplegable (espectador, organizador o moderador), con «Guardar cambios» para toda la tabla; sólo el administrador |

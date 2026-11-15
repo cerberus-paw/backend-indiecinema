@@ -13,6 +13,15 @@ enum TipoDocumento: string
     case Seguro = 'seguro';
     case Habilitacion = 'habilitacion';
 
+    /** Como título: «Seguro», «Habilitación». */
+    public function nombre(): string
+    {
+        return match ($this) {
+            self::Seguro => 'Seguro',
+            self::Habilitacion => 'Habilitación',
+        };
+    }
+
     /** Con su artículo, para armar los mensajes: «el seguro», «la habilitación». */
     public function conArticulo(): string
     {

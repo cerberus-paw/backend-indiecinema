@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use IndieCinema\Moderacion\Controladores\AdministracionDeSolicitudes;
+use IndieCinema\Moderacion\Controladores\DocumentoDeSala;
 use IndieCinema\Moderacion\Controladores\FotoDeSolicitud;
 use IndieCinema\Moderacion\Controladores\SolicitudDeSala;
 use IndieCinema\Nucleo\Http\EstadoInterno;
@@ -25,6 +26,9 @@ return static function (Router $router): void {
     $router->post('/solicitar-sala', [SolicitudDeSala::class, 'enviar'], Rol::Espectador);
     // La foto que mandó, para quien la mandó y el moderador (lo decide el servicio).
     $router->get('/solicitudes/{id}/foto', [FotoDeSolicitud::class, 'mostrar'], Rol::Espectador);
+    // El PDF del seguro o de la habilitación (EF-07.4), para quien mandó la solicitud y el
+    // moderador (lo decide el servicio).
+    $router->get('/documentos/{id}', [DocumentoDeSala::class, 'bajar'], Rol::Espectador);
     // La bandeja de solicitudes de sala: aprobar una crea la sala en programación y le da el rol
     // de organizador a quien la mandó. Es del moderador (EF-07.3); el administrador también entra,
     // porque lo alcanza.

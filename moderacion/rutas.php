@@ -8,6 +8,7 @@ use IndieCinema\Moderacion\Controladores\DocumentacionDeSala;
 use IndieCinema\Moderacion\Controladores\DocumentoDeSala;
 use IndieCinema\Moderacion\Controladores\FotoDeSolicitud;
 use IndieCinema\Moderacion\Controladores\SolicitudDeSala;
+use IndieCinema\Moderacion\Controladores\SolicitudesInternas;
 use IndieCinema\Nucleo\Http\EstadoInterno;
 use IndieCinema\Nucleo\Ruteo\Router;
 use IndieCinema\Nucleo\Seguridad\Rol;
@@ -49,5 +50,7 @@ return static function (Router $router): void {
     $router->post('/solicitudes/{id}/habilitar-sala', [AdministracionDeSolicitudes::class, 'habilitarSala'], Rol::Moderador);
 
     // Para comprobar que los otros subsistemas llegan hasta acá con su token.
+    // «Mi solicitud de sala» en «Mi cuenta» (EF-07.6).
+    $router->interna('GET', '/interno/solicitudes/ultima/{usuario}', [SolicitudesInternas::class, 'ultima'], ['cuentas']);
     $router->interna('GET', '/interno/estado', [EstadoInterno::class, 'mostrar'], ['cuentas', 'programacion', 'funciones', 'recaudacion']);
 };

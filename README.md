@@ -205,6 +205,8 @@ todo el sitio se vea igual aunque lo sirvan subsistemas distintos.
   Programación tiene la API de salas para moderación (EF-07.1): `POST /interno/salas` crea la sala
   de una solicitud aprobada (o completa la que ya existía), `POST /interno/salas/{id}/habilitacion`
   la publica o la retira con un motivo, y `GET /interno/salas?ids=…` la lee para la bandeja.
+  Moderación tiene `GET /interno/solicitudes/ultima/{usuario}` para cuentas (EF-07.6): el estado
+  y el motivo de la última solicitud de sala, que «Mi cuenta» muestra si moderación responde.
   Funciones tiene `GET /interno/funciones/{id}/ocupacion` y `GET /interno/ocupacion?funciones=…`
   (una página de tarjetas en un solo pedido): los lugares ocupados, con los que programación
   muestra los libres. Si funciones no responde, la cartelera y la ficha se muestran sin ese dato.

@@ -41,6 +41,10 @@ final class OrdenDeEncabezadosTest extends TestCase
             'app' => ['subsistema' => 'cuentas', 'prefijo' => '/cuenta', 'entorno' => 'desarrollo'],
             'base' => self::baseDePruebas(),
             'nginx' => ['secreto' => self::SECRETO],
+            // «Mi cuenta» le pide la solicitud de sala a moderación (EF-07.6): en el puerto 1 no
+            // escucha nadie, y la página se ve sin ese bloque.
+            'subsistemas' => ['moderacion' => 'http://127.0.0.1:1'],
+            'interno' => ['token' => 'token-de-cuentas'],
         ]);
     }
 

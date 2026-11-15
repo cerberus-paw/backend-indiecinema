@@ -6,6 +6,7 @@ namespace IndieCinema\Moderacion\Controladores;
 
 use IndieCinema\Moderacion\Modelo\Documento;
 use IndieCinema\Moderacion\Modelo\EstadoSolicitud;
+use IndieCinema\Moderacion\Modelo\TipoDocumento;
 use IndieCinema\Moderacion\Modelo\SolicitudDeSala as Solicitud;
 use IndieCinema\Moderacion\Servicios\ServicioDeSolicitudes;
 use IndieCinema\Moderacion\Servicios\SolicitudPendiente;
@@ -36,7 +37,7 @@ final class SolicitudDeSala extends Controlador
     public function mostrar(Peticion $peticion): Respuesta
     {
         $ultima = $this->servicio->ultimaDe(self::usuario($peticion));
-        $formulario = $ultima?->estado === EstadoSolicitud::Rechazada ? FormularioDeSolicitud::desdeDatos($ultima->datos) : null;
+        $formulario = $ultima?->estado === EstadoSolicitud::Rechazada ? FormularioDeSolicitud::desdeDatos($ultima->datos, $this->servicio->documentosDe($ultima)) : null;
 
         return $this->pantalla($ultima, $formulario, mensaje: $peticion->consulta('enviada') === '1' ? 'La vas a ver acá hasta que te respondan.' : null);
     }
@@ -54,7 +55,7 @@ final class SolicitudDeSala extends Controlador
         foreach (['imagen', ...array_column(FormularioDeDocumentos::CAMPOS, 0)] as $campo) {
             $archivos[$campo] = $peticion->archivo($campo);
         }
-        $formulario = FormularioDeSolicitud::desdeCampos($peticion->cuerpo(), $archivos, imagenObligatoria: !$corrigiendo);
+        $formulario = FormularioDeSolicitud::desdeCampos($peticion->cuerpo(), $archivos, imagenObligatoria: !$corrigiendo, yaMandados: $this->yaMandados($ultima));
         $datos = $formulario->datos();
         if ($datos === null) {
             // Sin mensaje general: la plantilla resume los errores de los campos (E4-10.5).
@@ -75,7 +76,7 @@ final class SolicitudDeSala extends Controlador
     {
         $corrigiendo = $ultima?->estado === EstadoSolicitud::Rechazada;
         $datos = [
-            'reglas' => FormularioDeSolicitud::reglas(imagenObligatoria: !$corrigiendo),
+            'reglas' => FormularioDeSolicitud::reglas(imagenObligatoria: !$corrigiendo, yaMandados: $this->yaMandados($ultima)),
             'valores' => $formulario === null ? [] : $formulario->valores,
             'errores' => $formulario === null ? [] : $formulario->errores,
             'corrigiendo' => $corrigiendo,
@@ -88,6 +89,8 @@ final class SolicitudDeSala extends Controlador
                 'motivo' => $ultima->motivo,
                 'documentos' => array_map(fn (Documento $documento): array => [
                     'nombre' => $documento->tipo->nombre(),
+                    // El campo del formulario, para mostrarlo junto al suyo al corregir.
+                    'campo' => FormularioDeDocumentos::CAMPOS[$documento->tipo->value][0],
                     'vence' => $documento->venceEn->format('d/m/Y'),
                     'url' => $this->ruta("/documentos/{$documento->id}"),
                 ], $this->servicio->documentosDe($ultima)),
@@ -103,6 +106,21 @@ final class SolicitudDeSala extends Controlador
         }
 
         return $this->vista('solicitar_sala.html.twig', $datos, $estado);
+    }
+
+    /**
+     * Los documentos que mandó con la solicitud que le rechazaron: al corregirla, no los tiene que
+     * volver a subir (EF-07.4).
+     *
+     * @return list<TipoDocumento>
+     */
+    private function yaMandados(?Solicitud $ultima): array
+    {
+        if ($ultima?->estado !== EstadoSolicitud::Rechazada) {
+            return [];
+        }
+
+        return array_map(static fn (Documento $documento): TipoDocumento => $documento->tipo, $this->servicio->documentosDe($ultima));
     }
 
     /**

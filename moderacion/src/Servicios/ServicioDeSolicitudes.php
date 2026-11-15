@@ -68,7 +68,8 @@ final class ServicioDeSolicitudes
      * en la bandeja, y el correo es sólo el aviso. El motivo queda en el log.
      *
      * El seguro y la habilitación (EF-07.4) se guardan con la solicitud, pendientes, en la misma
-     * transacción; si algo falla, los PDF que ya se movieron al volumen se borran.
+     * transacción; si algo falla, los PDF que ya se movieron al volumen se borran. Al corregir, el
+     * que no se vuelve a subir apunta al archivo que mandó con la anterior.
      *
      * @param ?ImagenSubida          $imagen     obligatoria para una sala nueva; al corregir, sin una
      *                                           queda la que tenía
@@ -102,14 +103,24 @@ final class ServicioDeSolicitudes
         );
         try {
             $papeles = [];
+            $anteriores = [];
+            foreach ($corregida === null ? [] : $this->papeles->deSolicitud($corregida->id) as $anterior) {
+                $anteriores[$anterior->tipo->value] = $anterior->archivo;
+            }
             foreach ($documentos as $documento) {
-                $pdfsNuevos[] = $this->documentos->guardar($documento->rutaTemporal);
+                if ($documento->rutaTemporal === null) {
+                    // Al corregir, sin un PDF nuevo queda el que mandó: el mismo archivo.
+                    $archivo = $anteriores[$documento->tipo->value] ?? throw new LogicException('Sin un PDF anterior, el formulario pide uno nuevo.');
+                } else {
+                    $archivo = $this->documentos->guardar($documento->rutaTemporal);
+                    $pdfsNuevos[] = $archivo;
+                }
                 $papeles[] = new Documento(
                     Uuid::nuevo(),
                     $salaId,
                     $solicitud->id,
                     $documento->tipo,
-                    $pdfsNuevos[array_key_last($pdfsNuevos)],
+                    $archivo,
                     $documento->venceEn,
                     $solicitud->enviadaEn,
                     EstadoDocumento::Pendiente,

@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace IndieCinema\Moderacion\Controladores;
 
 use IndieCinema\Moderacion\Modelo\DatosDeSala;
+use IndieCinema\Moderacion\Modelo\Documento;
 use IndieCinema\Moderacion\Modelo\DocumentoSubido;
+use IndieCinema\Moderacion\Modelo\TipoDocumento;
 
 /**
  * El formulario de la solicitud de sala: los datos de la sala, con las mismas reglas que el alta
@@ -42,12 +44,14 @@ final class FormularioDeSolicitud
      * @param array<string, array<string, mixed>|null> $archivos          campo => el archivo, como lo arma PHP
      * @param bool                                     $imagenObligatoria para una sala nueva; al corregir una
      *                                                                    rechazada, sin foto queda la que tenía
+     * @param list<TipoDocumento>                      $yaMandados        los documentos de la rechazada: sin un
+     *                                                                    PDF nuevo, queda el que mandó
      */
-    public static function desdeCampos(array $campos, array $archivos, bool $imagenObligatoria): self
+    public static function desdeCampos(array $campos, array $archivos, bool $imagenObligatoria, array $yaMandados = []): self
     {
         $formulario = new self(
             FormularioDeSala::desdeCampos($campos, $archivos['imagen'] ?? null, $imagenObligatoria),
-            FormularioDeDocumentos::desdeCampos($campos, $archivos, obligatorios: true),
+            FormularioDeDocumentos::desdeCampos($campos, $archivos, $yaMandados),
         );
         foreach (self::DECLARACIONES as $casilla => $mensaje) {
             $tildada = ($campos[$casilla] ?? null) === '1';
@@ -61,12 +65,14 @@ final class FormularioDeSolicitud
     }
 
     /**
-     * Con los datos de la sala que le rechazaron, para corregirla. Las declaraciones se vuelven a
-     * tildar.
+     * Con los datos de la sala que le rechazaron y los vencimientos de sus documentos, para
+     * corregirla. Las declaraciones se vuelven a tildar.
+     *
+     * @param list<Documento> $documentos
      */
-    public static function desdeDatos(DatosDeSala $datos): self
+    public static function desdeDatos(DatosDeSala $datos, array $documentos = []): self
     {
-        return new self(FormularioDeSala::desdeDatos($datos));
+        return new self(FormularioDeSala::desdeDatos($datos), FormularioDeDocumentos::desdeDocumentos($documentos));
     }
 
     /**
@@ -82,15 +88,17 @@ final class FormularioDeSolicitud
      * mensaje, el mismo que contesta el servidor si no se tilda (E4-09.1): sin tildar es lo único
      * que el navegador puede ver de ellas.
      *
+     * @param list<TipoDocumento> $yaMandados
+     *
      * @return array<string, array<string, mixed>>
      */
-    public static function reglas(bool $imagenObligatoria): array
+    public static function reglas(bool $imagenObligatoria, array $yaMandados = []): array
     {
         $declaraciones = [];
         foreach (self::DECLARACIONES as $casilla => $mensaje) {
             $declaraciones[$casilla] = ['requerido' => true, 'mensajes' => ['requerido' => $mensaje]];
         }
 
-        return FormularioDeSala::reglas($imagenObligatoria) + FormularioDeDocumentos::reglas(obligatorios: true) + $declaraciones;
+        return FormularioDeSala::reglas($imagenObligatoria) + FormularioDeDocumentos::reglas($yaMandados) + $declaraciones;
     }
 }

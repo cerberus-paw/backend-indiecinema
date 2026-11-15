@@ -6,6 +6,7 @@ namespace IndieCinema\Moderacion\Controladores;
 
 use DateTimeImmutable;
 use finfo;
+use IndieCinema\Moderacion\Modelo\Documento;
 use IndieCinema\Moderacion\Modelo\DocumentoSubido;
 use IndieCinema\Moderacion\Modelo\TipoDocumento;
 
@@ -14,6 +15,9 @@ use IndieCinema\Moderacion\Modelo\TipoDocumento;
  * vencimiento cada uno. El PDF se juzga por su contenido, nunca por la extensión ni por el tipo
  * que dice el navegador, que los elige quien lo manda. El vencimiento tiene que ser posterior a hoy
  * (en la hora del sitio) y no pasar de diez años, que frena un año mal tipeado.
+ *
+ * Al corregir una solicitud rechazada, el PDF que ya mandó no es obligatorio: si no sube otro,
+ * queda ése, con el vencimiento que diga el formulario (que viene cargado con el anterior).
  */
 final class FormularioDeDocumentos
 {
@@ -41,20 +45,24 @@ final class FormularioDeDocumentos
     }
 
     /**
-     * @param array<string, mixed>                     $campos       el cuerpo del POST
-     * @param array<string, array<string, mixed>|null> $archivos     campo => el archivo, como lo arma PHP
-     * @param bool                                     $obligatorios en una sala nueva
+     * @param array<string, mixed>                     $campos     el cuerpo del POST
+     * @param array<string, array<string, mixed>|null> $archivos   campo => el archivo, como lo arma PHP
+     * @param list<TipoDocumento>                      $yaMandados los que mandó con la solicitud que
+     *                                                             corrige: no son obligatorios
      */
-    public static function desdeCampos(array $campos, array $archivos, bool $obligatorios): self
+    public static function desdeCampos(array $campos, array $archivos, array $yaMandados = []): self
     {
         $formulario = new self();
         foreach (TipoDocumento::cases() as $tipo) {
             [$campoArchivo, $campoFecha] = self::CAMPOS[$tipo->value];
             $fecha = $campos[$campoFecha] ?? null;
             $formulario->valores[$campoFecha] = is_string($fecha) ? trim($fecha) : '';
-            $ruta = $formulario->validarArchivo($tipo, $archivos[$campoArchivo] ?? null, $obligatorios);
+            $yaMandado = in_array($tipo, $yaMandados, true);
+            $archivo = $archivos[$campoArchivo] ?? null;
+            $nuevo = ($archivo['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_NO_FILE;
+            $ruta = $formulario->validarArchivo($tipo, $archivo, obligatorio: !$yaMandado);
             $vence = $formulario->validarFecha($tipo, $formulario->valores[$campoFecha]);
-            if ($ruta !== null && $vence !== null) {
+            if ($vence !== null && ($ruta !== null || ($yaMandado && !$nuevo))) {
                 $formulario->documentos[] = new DocumentoSubido($tipo, $ruta, $vence);
             }
         }
@@ -63,17 +71,34 @@ final class FormularioDeDocumentos
     }
 
     /**
+     * Con los vencimientos de los que mandó la solicitud rechazada, para corregirla.
+     *
+     * @param list<Documento> $anteriores
+     */
+    public static function desdeDocumentos(array $anteriores): self
+    {
+        $formulario = new self();
+        foreach ($anteriores as $documento) {
+            $formulario->valores[self::CAMPOS[$documento->tipo->value][1]] = $documento->venceEn->format('Y-m-d');
+        }
+
+        return $formulario;
+    }
+
+    /**
      * Como las de FormularioDeSala, con los mismos mensajes que contesta el servidor.
+     *
+     * @param list<TipoDocumento> $yaMandados los que no son obligatorios, al corregir
      *
      * @return array<string, array<string, mixed>>
      */
-    public static function reglas(bool $obligatorios): array
+    public static function reglas(array $yaMandados = []): array
     {
         $reglas = [];
         foreach (TipoDocumento::cases() as $tipo) {
             [$campoArchivo, $campoFecha] = self::CAMPOS[$tipo->value];
             $reglas[$campoArchivo] = [
-                'requerido' => $obligatorios,
+                'requerido' => !in_array($tipo, $yaMandados, true),
                 'aceptar' => 'application/pdf,.pdf',
                 'mensajes' => ['requerido' => self::faltaElPdf($tipo), 'aceptar' => self::noEsPdf($tipo)],
             ];

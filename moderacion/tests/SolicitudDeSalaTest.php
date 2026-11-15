@@ -202,6 +202,86 @@ final class SolicitudDeSalaTest extends TestCase
     private function rechazarLaUltima(string $motivo = 'Falta la póliza.'): void
     {
         $this->base->ejecutar("UPDATE solicitud_sala SET estado = 'rechazada', motivo = ?, resuelta_en = NOW()", [$motivo]);
+        // Como la bandeja: rechazarla rechaza sus documentos (EF-07.4).
+        $this->base->ejecutar("UPDATE documento SET estado = 'rechazado'");
+    }
+
+    /**
+     * @return list<array<string, mixed>> los documentos de la pendiente, primero el seguro
+     */
+    private function documentosDeLaPendiente(): array
+    {
+        return $this->base->filas(
+            "SELECT d.tipo, d.archivo, d.vence_en, d.estado FROM documento d JOIN solicitud_sala s ON s.id = d.solicitud_id
+             WHERE s.estado = 'pendiente' ORDER BY d.tipo",
+        );
+    }
+
+    /**
+     * EF-07.4: al corregir una rechazada, el PDF que no se vuelve a subir es el que mandó, como la
+     * foto. La solicitud nueva tiene sus propios documentos, pendientes, que apuntan al mismo
+     * archivo: los de la rechazada quedan rechazados, son el historial.
+     */
+    public function testAlCorregirSinPdfNuevosQuedanLosQueMando(): void
+    {
+        $this->enviar();
+        $antes = $this->base->filas('SELECT tipo, archivo, vence_en FROM documento ORDER BY tipo');
+        $this->rechazarLaUltima('Falta la descripción del acceso.');
+
+        $pantalla = $this->pedir()->cuerpo();
+        // Los campos ya no son obligatorios, el vencimiento viene cargado y se ve lo que mandó.
+        self::assertDoesNotMatchRegularExpression('/name="seguro"[^>]*required/', $pantalla);
+        self::assertDoesNotMatchRegularExpression('/name="habilitacion_pdf"[^>]*required/', $pantalla);
+        self::assertMatchesRegularExpression('/name="vence_seguro"[^>]*value="' . $antes[0]['vence_en'] . '"/', $pantalla);
+        self::assertStringContainsString('Si no subís otro, queda el que mandaste.', $pantalla);
+        self::assertStringContainsString('href="/moderacion/documentos/', $pantalla);
+
+        self::assertSame(303, $this->enviar(imagen: null, documentos: ['seguro' => null, 'habilitacion_pdf' => null], cambios: [
+            'vence_seguro' => (string) $antes[0]['vence_en'],
+            'vence_habilitacion' => (string) $antes[1]['vence_en'],
+        ])->estado());
+
+        self::assertSame(
+            array_map(static fn (array $fila): array => $fila + ['estado' => 'pendiente'], $antes),
+            $this->documentosDeLaPendiente(),
+        );
+        self::assertSame(4, $this->base->valor('SELECT COUNT(*) FROM documento'));
+        self::assertSame(2, $this->base->valor("SELECT COUNT(*) FROM documento WHERE estado = 'rechazado'"));
+        self::assertCount(2, $this->documentosGuardados());
+    }
+
+    public function testAlCorregirConOtroSeguroQuedaElNuevoYLaMismaHabilitacion(): void
+    {
+        $this->enviar();
+        $antes = array_column($this->base->filas('SELECT tipo, archivo FROM documento'), 'archivo', 'tipo');
+        $this->rechazarLaUltima('La póliza no cubre el espacio.');
+        $vence = self::dentroDe('+3 years');
+
+        self::assertSame(303, $this->enviar(['vence_seguro' => $vence], imagen: null, documentos: ['habilitacion_pdf' => null])->estado());
+
+        $despues = $this->documentosDeLaPendiente();
+        self::assertNotSame($antes['seguro'], $despues[0]['archivo']);
+        self::assertSame($vence, $despues[0]['vence_en']);
+        self::assertSame($antes['habilitacion'], $despues[1]['archivo']);
+        // Los archivos no se borran: el seguro rechazado sigue en el volumen.
+        self::assertCount(3, $this->documentosGuardados());
+    }
+
+    /**
+     * Una que se mandó antes de que se pidieran los documentos no tiene qué reusar: al corregirla,
+     * los dos son obligatorios.
+     */
+    public function testAlCorregirUnaSinDocumentosLosPide(): void
+    {
+        $this->enviar();
+        $this->base->ejecutar('DELETE FROM documento');
+        $this->rechazarLaUltima();
+
+        self::assertMatchesRegularExpression('/name="seguro"[^>]*required/', $this->pedir()->cuerpo());
+        $respuesta = $this->enviar(imagen: null, documentos: ['seguro' => null]);
+
+        self::assertSame(422, $respuesta->estado());
+        self::assertSame(['#seguro' => 'Falta el PDF del seguro.'], Formularios::resumen($respuesta->cuerpo())['enlaces'] ?? null);
     }
 
     public function testMuestraElFormularioConElTokenYParaSubirLaFoto(): void

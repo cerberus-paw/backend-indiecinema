@@ -91,9 +91,59 @@ final class ServicioDeSolicitudes
             throw new LogicException('Una sala nueva necesita su foto: el formulario la pide.');
         }
 
+        // Corregir un pedido de cambio de dirección (EF-07.6) sigue siendo un pedido de cambio.
+        return $corregida === null
+            ? $this->guardar($usuario, Uuid::nuevo(), $datos, $imagen, $documentos, null, false)
+            : $this->guardar($usuario, $corregida->salaId, $datos, $imagen, $documentos, $corregida, $corregida->cambio);
+    }
+
+    /**
+     * Lo que programación tiene de una sala publicada, para pedir el cambio de dirección (EF-07.6):
+     * sólo su organizador, y si la sala no tiene otra solicitud abierta. Para los demás, la sala no
+     * existe.
+     *
+     * @return DatosDeSala los datos que tiene ahora
+     *
+     * @throws ExcepcionHttp 404; 503 si programación no responde
+     */
+    public function salaParaCambiar(Usuario $usuario, string $salaId): DatosDeSala
+    {
+        $sala = Uuid::esValido($salaId) ? $this->salas->completa($salaId) : null;
+        if ($sala === null || !$sala['habilitada'] || !hash_equals($sala['organizador_id'], $usuario->id) || $this->solicitudes->hayAbiertaDe($salaId)) {
+            throw ExcepcionHttp::noEncontrada();
+        }
+
+        return $sala['datos'];
+    }
+
+    /**
+     * Guarda el pedido de cambio de dirección de una sala publicada (EF-07.6): una solicitud de esa
+     * sala, marcada como cambio, con los PDF del lugar nuevo y, si mandó una, otra foto. La sala
+     * sigue publicada con la dirección vieja hasta que se aprueba.
+     *
+     * @param list<DocumentoSubido> $documentos el seguro y la habilitación, ya validados
+     *
+     * @throws ExcepcionHttp      404 si no la puede pedir (salaParaCambiar()); 503 si programación
+     *                            no responde
+     * @throws SolicitudPendiente si la sala ya tiene una abierta
+     */
+    public function pedirCambio(Usuario $usuario, string $salaId, DatosDeSala $datos, ?ImagenSubida $imagen, array $documentos): SolicitudDeSala
+    {
+        $this->salaParaCambiar($usuario, $salaId);
+
+        return $this->guardar($usuario, $salaId, $datos, $imagen, $documentos, null, true);
+    }
+
+    /**
+     * @param list<DocumentoSubido> $documentos
+     * @param ?SolicitudDeSala      $corregida  la rechazada que corrige: sin foto o sin un PDF
+     *                                          nuevos, quedan los de ella
+     */
+    private function guardar(Usuario $usuario, string $salaId, DatosDeSala $datos, ?ImagenSubida $imagen, array $documentos, ?SolicitudDeSala $corregida, bool $cambio): SolicitudDeSala
+    {
         $fotoNueva = $imagen === null ? null : $this->archivos->guardar($imagen);
         $pdfsNuevos = [];
-        [$salaId, $fotoAnterior] = $corregida === null ? [Uuid::nuevo(), null] : [$corregida->salaId, $corregida->imagen];
+        $fotoAnterior = $corregida?->imagen;
         $solicitud = new SolicitudDeSala(
             Uuid::nuevo(),
             $salaId,
@@ -103,6 +153,7 @@ final class ServicioDeSolicitudes
             $fotoNueva ?? $fotoAnterior,
             EstadoSolicitud::Pendiente,
             self::ahora(),
+            cambio: $cambio,
         );
         try {
             $papeles = [];
@@ -138,7 +189,9 @@ final class ServicioDeSolicitudes
             array_map($this->documentos->borrar(...), $pdfsNuevos);
             throw $error;
         }
-        $this->log->info('El usuario {usuario} pidió abrir la sala {sala} (solicitud {solicitud}).', [
+        $this->log->info($cambio
+            ? 'El usuario {usuario} pidió cambiar la dirección de la sala {sala} (solicitud {solicitud}).'
+            : 'El usuario {usuario} pidió abrir la sala {sala} (solicitud {solicitud}).', [
             'usuario' => $usuario->id,
             'sala' => $solicitud->salaId,
             'solicitud' => $solicitud->id,
@@ -303,6 +356,25 @@ final class ServicioDeSolicitudes
     }
 
     /**
+     * La dirección y la localidad que tiene ahora la sala de un pedido de cambio abierto (EF-07.6),
+     * según programación, para mostrarla al lado de la nueva. null si no es un cambio abierto o si
+     * programación ya no la tiene.
+     *
+     * @return ?array{direccion: string, localidad: string}
+     *
+     * @throws ExcepcionHttp 503 si programación no responde
+     */
+    public function direccionActual(SolicitudDeSala $solicitud): ?array
+    {
+        if (!$solicitud->cambio || !$solicitud->estaAbierta()) {
+            return null;
+        }
+        $datos = $this->salas->completa($solicitud->salaId)['datos'] ?? null;
+
+        return $datos === null ? null : ['direccion' => $datos->direccion, 'localidad' => $datos->localidad];
+    }
+
+    /**
      * Cómo está en el sitio la sala de una aprobada, según programación: 'publicada', 'retirada'
      * o 'dada_de_baja'; null si la solicitud no está aprobada, porque su sala no se publicó.
      *
@@ -394,7 +466,7 @@ final class ServicioDeSolicitudes
     {
         try {
             $usuario = $this->usuarios->buscar($solicitud->usuarioId) ?? throw new RuntimeException('cuentas ya no tiene al usuario.');
-            [$asunto, $texto] = self::textoParaElSolicitante($solicitud->datos->nombre, $estado, $motivo);
+            [$asunto, $texto] = self::textoParaElSolicitante($solicitud->datos->nombre, $estado, $motivo, $solicitud->cambio);
             $this->correo->enviar(new Correo($usuario->correo, $asunto, $texto));
         } catch (Throwable $error) {
             $this->log->warning('La solicitud de sala {solicitud} quedó {estado}, pero no se le avisó a quien la mandó: {mensaje}', [
@@ -408,8 +480,23 @@ final class ServicioDeSolicitudes
     /**
      * @return array{string, string} el asunto y el texto
      */
-    private static function textoParaElSolicitante(string $sala, EstadoSolicitud $estado, string $motivo): array
+    private static function textoParaElSolicitante(string $sala, EstadoSolicitud $estado, string $motivo, bool $cambio): array
     {
+        if ($cambio && $estado !== EstadoSolicitud::EnRevisionManual) {
+            $aprobado = $estado === EstadoSolicitud::Aprobada;
+
+            return [($aprobado ? 'Aprobamos' : 'Rechazamos') . " el cambio de dirección de «{$sala}»", implode("\n", [
+                $aprobado
+                    ? "Aprobamos el cambio de dirección de «{$sala}»: la sala ya figura en el sitio con la dirección nueva."
+                    : "Rechazamos el cambio de dirección de «{$sala}»: la sala sigue publicada con la dirección de antes.",
+                '',
+                'Lo que anotó la moderación:',
+                $motivo,
+                '',
+                $aprobado ? 'El pedido sigue a la vista en /solicitar-sala.' : 'Podés corregirlo y volver a mandarlo en /solicitar-sala.',
+            ])];
+        }
+
         return match ($estado) {
             EstadoSolicitud::Aprobada => ["Aprobamos tu sala «{$sala}»", implode("\n", [
                 "Aprobamos la solicitud de «{$sala}»: la sala ya se ve en IndieCinema y sos organizador.",
@@ -441,20 +528,22 @@ final class ServicioDeSolicitudes
         try {
             $this->correo->enviar(new Correo(
                 (string) $this->configuracion->requerir('solicitudes.destino'),
-                ($corregida ? 'Solicitud de sala corregida: ' : 'Solicitud de sala: ') . $solicitud->datos->nombre,
-                self::texto($solicitud->datos, $usuario, $corregida),
+                ($corregida ? 'Solicitud de sala corregida: ' : ($solicitud->cambio ? 'Cambio de dirección: ' : 'Solicitud de sala: ')) . $solicitud->datos->nombre,
+                self::texto($solicitud->datos, $usuario, $corregida, $solicitud->cambio),
             ));
         } catch (CorreoNoEnviado) {
             $this->log->warning('La solicitud de sala {solicitud} quedó guardada, pero no se le avisó al equipo por correo.', ['solicitud' => $solicitud->id]);
         }
     }
 
-    private static function texto(DatosDeSala $datos, Usuario $usuario, bool $corregida): string
+    private static function texto(DatosDeSala $datos, Usuario $usuario, bool $corregida, bool $cambio): string
     {
         return implode("\n", [
-            ($usuario->nombre ?? 'Un usuario') . ($corregida
-                ? ' corrigió la sala que le rechazaron y la volvió a mandar.'
-                : ' pidió abrir una sala en IndieCinema.'),
+            ($usuario->nombre ?? 'Un usuario') . match (true) {
+                $corregida => ' corrigió la sala que le rechazaron y la volvió a mandar.',
+                $cambio => ' pidió cambiar la dirección de la sala, que sigue publicada con la de antes.',
+                default => ' pidió abrir una sala en IndieCinema.',
+            },
             '',
             "Sala: {$datos->nombre}",
             "Dirección: {$datos->direccion}, {$datos->localidad}",

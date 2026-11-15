@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace IndieCinema\Moderacion\Servicios;
 
+use IndieCinema\Moderacion\Modelo\DatosDeSala;
 use IndieCinema\Moderacion\Modelo\SolicitudDeSala;
 use IndieCinema\Nucleo\Http\ClienteInterno;
 use IndieCinema\Nucleo\Http\ExcepcionHttp;
@@ -144,6 +145,51 @@ final class SalasDeProgramacion
         }
 
         return $datos;
+    }
+
+    /**
+     * Todo lo que programación tiene de la sala, para el pedido de cambio de dirección (EF-07.6):
+     * el organizador, si está publicada y sus datos. null si ya no la tiene.
+     *
+     * @return ?array{organizador_id: string, habilitada: bool, datos: DatosDeSala}
+     *
+     * @throws ExcepcionHttp    503 si programación no responde
+     * @throws RuntimeException si responde otra cosa
+     */
+    public function completa(string $salaId): ?array
+    {
+        $salas = $this->cliente->get('programacion', '/interno/salas', ['ids' => $salaId]);
+        if (!is_array($salas)) {
+            throw new RuntimeException('programación no respondió las salas a GET /interno/salas.');
+        }
+        $sala = $salas[$salaId] ?? null;
+        if ($sala === null) {
+            return null;
+        }
+        if (
+            !is_array($sala) || !is_string($sala['organizador_id'] ?? null) || !is_bool($sala['habilitada'] ?? null)
+            || !is_string($sala['nombre'] ?? null) || !is_string($sala['descripcion'] ?? null)
+            || !is_string($sala['direccion'] ?? null) || !is_string($sala['localidad'] ?? null)
+            || !is_int($sala['capacidad'] ?? null) || !is_int($sala['peliculas_por_funcion'] ?? null)
+            || !is_int($sala['duracion_funcion'] ?? null) || !is_int($sala['tiempo_entre_funciones'] ?? null)
+        ) {
+            throw new RuntimeException("programación no respondió los datos de la sala {$salaId} a GET /interno/salas.");
+        }
+
+        return [
+            'organizador_id' => $sala['organizador_id'],
+            'habilitada' => $sala['habilitada'],
+            'datos' => new DatosDeSala(
+                $sala['nombre'],
+                $sala['descripcion'],
+                $sala['direccion'],
+                $sala['localidad'],
+                $sala['capacidad'],
+                $sala['peliculas_por_funcion'],
+                $sala['duracion_funcion'],
+                $sala['tiempo_entre_funciones'],
+            ),
+        ];
     }
 
     /**

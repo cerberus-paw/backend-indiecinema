@@ -25,7 +25,7 @@ final class RepositorioDeSolicitudes
 
     private const SELECT = 'SELECT id, sala_id, usuario_id, solicitante_nombre, nombre, descripcion, direccion, localidad,
                                    capacidad, peliculas_por_funcion, duracion_funcion, tiempo_entre_funciones, imagen,
-                                   estado, enviada_en, resuelta_en, motivo, revision_motivo, revision_en
+                                   estado, enviada_en, resuelta_en, motivo, revision_motivo, revision_en, cambio
                             FROM solicitud_sala';
 
     public function __construct(private readonly BaseDeDatos $base)
@@ -46,13 +46,13 @@ final class RepositorioDeSolicitudes
             $this->base->enTransaccion(function (BaseDeDatos $base) use ($solicitud, $datos, $documentos): void {
                 $base->ejecutar(
                     'INSERT INTO solicitud_sala (id, sala_id, usuario_id, solicitante_nombre, nombre, descripcion, direccion,
-                        localidad, capacidad, peliculas_por_funcion, duracion_funcion, tiempo_entre_funciones, imagen, estado, enviada_en)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                        localidad, capacidad, peliculas_por_funcion, duracion_funcion, tiempo_entre_funciones, imagen, estado, enviada_en, cambio)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
                     [
                         $solicitud->id, $solicitud->salaId, $solicitud->usuarioId, $solicitud->solicitanteNombre,
                         $datos->nombre, $datos->descripcion, $datos->direccion, $datos->localidad, $datos->capacidad,
                         $datos->peliculasPorFuncion, $datos->duracionFuncion, $datos->tiempoEntreFunciones,
-                        $solicitud->imagen, $solicitud->estado->value, $solicitud->enviadaEn,
+                        $solicitud->imagen, $solicitud->estado->value, $solicitud->enviadaEn, (int) $solicitud->cambio,
                     ],
                 );
                 foreach ($documentos as $documento) {
@@ -89,6 +89,14 @@ final class RepositorioDeSolicitudes
         $fila = $this->base->fila(self::SELECT . ' WHERE usuario_id = ? ORDER BY enviada_en DESC, id LIMIT 1', [$usuarioId]);
 
         return $fila === null ? null : self::solicitud($fila);
+    }
+
+    /**
+     * Si la sala tiene una abierta (pendiente o en revisión manual).
+     */
+    public function hayAbiertaDe(string $salaId): bool
+    {
+        return (int) $this->base->valor('SELECT COUNT(*) FROM solicitud_sala WHERE sala_id = ? AND estado IN (?, ?)', [$salaId, ...self::abiertas()]) > 0;
     }
 
     /**
@@ -222,6 +230,7 @@ final class RepositorioDeSolicitudes
             $fila['motivo'] === null ? null : (string) $fila['motivo'],
             $fila['revision_motivo'] === null ? null : (string) $fila['revision_motivo'],
             $fila['revision_en'] === null ? null : self::fecha($fila['revision_en']),
+            (bool) $fila['cambio'],
         );
     }
 

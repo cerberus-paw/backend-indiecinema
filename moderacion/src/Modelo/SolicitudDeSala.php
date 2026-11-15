@@ -20,6 +20,8 @@ final readonly class SolicitudDeSala
      *                                   mudaron de programación, cuya foto quedó en su sala
      * @param ?string $revisionMotivo    por qué pasó a revisión manual (EF-07.6), aparte del motivo
      *                                   de la resolución; null si no pasó
+     * @param bool    $cambio            si pide cambiar la dirección de una sala ya publicada
+     *                                   (EF-07.6), en lugar de abrir una
      */
     public function __construct(
         public string $id,
@@ -34,6 +36,7 @@ final readonly class SolicitudDeSala
         public ?string $motivo = null,
         public ?string $revisionMotivo = null,
         public ?DateTimeImmutable $revisionEn = null,
+        public bool $cambio = false,
     ) {
     }
 

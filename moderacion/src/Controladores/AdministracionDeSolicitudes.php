@@ -161,6 +161,7 @@ final class AdministracionDeSolicitudes extends Controlador
                 'localidad' => $solicitud->datos->localidad,
                 'solicitante' => $solicitud->solicitanteNombre,
                 'enviada' => FechaParaMostrar::diaCorto($solicitud->enviadaEn),
+                'cambio' => $solicitud->cambio,
                 'elegida' => $solicitud->id === $elegida?->id,
             ], $lista),
             'elegida' => $elegida === null ? null : $this->detalle($elegida, $this->enElSitio($elegida)) + [
@@ -219,6 +220,9 @@ final class AdministracionDeSolicitudes extends Controlador
                 'tiempo_entre_funciones' => $datos->tiempoEntreFunciones,
             ],
             'en_el_sitio' => $enElSitio,
+            // EF-07.6: un pedido de cambio de dirección de una sala publicada.
+            'cambio' => $solicitud->cambio,
+            'direccion_actual' => $this->direccionActual($solicitud),
             // false: cuentas no respondió; null: el usuario ya no existe.
             'solicitante' => match (true) {
                 $usuario === false => false,
@@ -254,6 +258,22 @@ final class AdministracionDeSolicitudes extends Controlador
         } catch (ExcepcionHttp) {
             return 'desconocido';
         }
+    }
+
+    /**
+     * La dirección que tiene ahora la sala de un pedido de cambio abierto, «Av. San Martín 450,
+     * Luján»; null si no es un cambio abierto. Si programación no responde, false: la bandeja se ve
+     * igual, sin ese dato.
+     */
+    private function direccionActual(SolicitudDeSala $solicitud): string|false|null
+    {
+        try {
+            $actual = $this->servicio->direccionActual($solicitud);
+        } catch (ExcepcionHttp) {
+            return false;
+        }
+
+        return $actual === null ? null : "{$actual['direccion']}, {$actual['localidad']}";
     }
 
     /**

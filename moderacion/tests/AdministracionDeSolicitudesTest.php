@@ -124,7 +124,7 @@ final class AdministracionDeSolicitudesTest extends TestCase
      * Una solicitud pendiente, como la deja el formulario, con su foto en el volumen; sin foto, como
      * una que se mudó de programación.
      */
-    private function solicitar(string $usuario, string $sala, string $enviada = '2026-10-01 10:00:00', string $localidad = 'Luján', ?string $nombre = 'Eva Prueba', bool $conFoto = true, ?string $salaId = null): string
+    private function solicitar(string $usuario, string $sala, string $enviada = '2026-10-01 10:00:00', string $localidad = 'Luján', ?string $nombre = 'Eva Prueba', bool $conFoto = true, ?string $salaId = null, bool $cambio = false): string
     {
         $foto = $conFoto ? (new ArchivosDeSolicitudes($this->configuracion()))->guardar(new ImagenSubida(Imagenes::subida('sala.png')['tmp_name'], 'png')) : null;
         $id = Uuid::nuevo();
@@ -137,6 +137,7 @@ final class AdministracionDeSolicitudesTest extends TestCase
             $foto,
             EstadoSolicitud::Pendiente,
             new DateTimeImmutable($enviada),
+            cambio: $cambio,
         ));
 
         return $id;
@@ -541,6 +542,49 @@ final class AdministracionDeSolicitudesTest extends TestCase
         self::assertNull($this->base->valor('SELECT revision_motivo FROM solicitud_sala WHERE id = ?', [$resuelta]));
         self::assertSame('Coordinamos una visita.', $this->base->valor('SELECT revision_motivo FROM solicitud_sala WHERE id = ?', [$enRevision]));
         self::assertSame([], self::correos());
+    }
+
+    /**
+     * EF-07.6: el pedido de cambio de dirección de una sala publicada, con la dirección que tiene
+     * ahora según programación al lado de la nueva.
+     */
+    private function pedirCambio(): string
+    {
+        $sala = Uuid::nuevo();
+        self::salasEnProgramacion([$sala => [
+            'nombre' => 'El Galpón', 'localidad' => 'Luján', 'organizador_id' => self::ORGANIZADOR, 'habilitada' => true,
+            'descripcion' => 'Un galpón con proyector.', 'direccion' => 'Av. San Martín 450', 'capacidad' => 40,
+            'peliculas_por_funcion' => 2, 'duracion_funcion' => 120, 'tiempo_entre_funciones' => 15,
+        ]]);
+
+        return $this->solicitar(self::ORGANIZADOR, 'El Galpón', localidad: 'Mercedes', conFoto: false, salaId: $sala, cambio: true);
+    }
+
+    public function testUnCambioDeDireccionSeVeConSuMarcaYLaDireccionActual(): void
+    {
+        $id = $this->pedirCambio();
+
+        $pantalla = $this->pedir('GET', "/solicitudes?id={$id}")->cuerpo();
+
+        self::assertSame(2, substr_count($pantalla, 'Cambio de dirección'), 'En la lista y en la elegida.');
+        self::assertStringContainsString('Calle 1, Mercedes', $pantalla);
+        self::assertStringContainsString('Ahora: Av. San Martín 450, Luján', $pantalla);
+    }
+
+    public function testAprobarUnCambioActualizaLaSalaYRechazarloNoLaToca(): void
+    {
+        $rechazado = $this->pedirCambio();
+        $sala = $this->salaId($rechazado);
+        self::assertSame(303, $this->resolver($rechazado, ['resolucion' => 'rechazar', 'motivo' => 'Falta la habilitación del lugar nuevo.'])->estado());
+        self::assertSame([], self::pedidosA('programacion'));
+
+        $aprobado = $this->solicitar(self::ORGANIZADOR, 'El Galpón', localidad: 'Mercedes', conFoto: false, salaId: $sala, cambio: true);
+        self::assertSame(303, $this->resolver($aprobado, ['resolucion' => 'aprobar', 'motivo' => 'Todo en orden.'])->estado());
+
+        $pedidos = self::pedidosA('programacion');
+        self::assertCount(1, $pedidos);
+        self::assertSame([$sala, $aprobado, 'Calle 1', 'Mercedes', null], [$pedidos[0]['id'], $pedidos[0]['solicitud_id'], $pedidos[0]['direccion'], $pedidos[0]['localidad'], $pedidos[0]['foto']]);
+        self::assertSame('Calle 1', self::salasDeProgramacion()[$sala]['direccion']);
     }
 
     public function testSiCuentasNoRespondeNoSeApruebaNiSeCreaLaSala(): void

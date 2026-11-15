@@ -23,6 +23,10 @@ use LogicException;
  * su estado en lugar del formulario; si la rechazaron, el motivo y el formulario con la sala, para corregirla y volver a
  * mandarla.
  *
+ * Con ?sala={id} es el pedido de cambio de dirección de una sala publicada (EF-07.6): el mismo
+ * formulario, cargado con los datos que tiene la sala en programación, con la foto opcional y los
+ * PDF del lugar nuevo. Sólo para su organizador; para los demás, 404.
+ *
  * Es de moderación desde EF-07.2, pero la dirección es la de siempre: nginx la trae sin el prefijo
  * /moderacion, así que acá las direcciones a sí misma van sin él.
  */
@@ -36,6 +40,12 @@ final class SolicitudDeSala extends Controlador
 
     public function mostrar(Peticion $peticion): Respuesta
     {
+        $sala = self::salaDelCambio($peticion);
+        if ($sala !== null) {
+            $datos = $this->servicio->salaParaCambiar(self::usuario($peticion), $sala);
+
+            return $this->pantallaDelCambio($sala, $datos->nombre, FormularioDeSolicitud::desdeDatos($datos));
+        }
         $ultima = $this->servicio->ultimaDe(self::usuario($peticion));
         $formulario = $ultima?->estado === EstadoSolicitud::Rechazada ? FormularioDeSolicitud::desdeDatos($ultima->datos, $this->servicio->documentosDe($ultima)) : null;
 
@@ -44,6 +54,10 @@ final class SolicitudDeSala extends Controlador
 
     public function enviar(Peticion $peticion): Respuesta
     {
+        $sala = self::salaDelCambio($peticion);
+        if ($sala !== null) {
+            return $this->enviarCambio($peticion, $sala);
+        }
         $usuario = self::usuario($peticion);
         $ultima = $this->servicio->ultimaDe($usuario);
         if ($ultima?->estaAbierta()) {
@@ -72,6 +86,56 @@ final class SolicitudDeSala extends Controlador
         return Respuesta::redireccion(self::URL . '?enviada=1');
     }
 
+    /**
+     * El pedido de cambio de dirección: los PDF del lugar nuevo son obligatorios, porque los que
+     * tiene la sala son de otra dirección; la foto, no.
+     */
+    private function enviarCambio(Peticion $peticion, string $sala): Respuesta
+    {
+        $usuario = self::usuario($peticion);
+        $actuales = $this->servicio->salaParaCambiar($usuario, $sala);
+        $archivos = [];
+        foreach (['imagen', ...array_column(FormularioDeDocumentos::CAMPOS, 0)] as $campo) {
+            $archivos[$campo] = $peticion->archivo($campo);
+        }
+        $formulario = FormularioDeSolicitud::desdeCampos($peticion->cuerpo(), $archivos, imagenObligatoria: false);
+        $datos = $formulario->datos();
+        if ($datos === null) {
+            return $this->pantallaDelCambio($sala, $actuales->nombre, $formulario, 422);
+        }
+        try {
+            $this->servicio->pedirCambio($usuario, $sala, $datos, $formulario->sala->imagen, $formulario->documentos);
+        } catch (SolicitudPendiente) {
+            // Otro pedido de la misma sala llegó antes: se ve ése.
+            return Respuesta::redireccion(self::URL);
+        }
+
+        return Respuesta::redireccion(self::URL . '?enviada=1');
+    }
+
+    private function pantallaDelCambio(string $sala, string $nombre, FormularioDeSolicitud $formulario, int $estado = 200): Respuesta
+    {
+        return $this->vista('solicitar_sala.html.twig', [
+            'reglas' => FormularioDeSolicitud::reglas(imagenObligatoria: false),
+            'valores' => $formulario->valores,
+            'errores' => $formulario->errores,
+            'corrigiendo' => false,
+            'solicitud' => null,
+            'cambio' => ['sala_id' => $sala, 'nombre' => $nombre],
+        ], $estado);
+    }
+
+    /**
+     * El id de ?sala=, si es un pedido de cambio de dirección. Con otra cosa que un texto, también
+     * es un pedido: de una sala que no existe.
+     */
+    private static function salaDelCambio(Peticion $peticion): ?string
+    {
+        $sala = $peticion->consulta('sala');
+
+        return $sala === null ? null : (is_string($sala) ? $sala : '');
+    }
+
     private function pantalla(?Solicitud $ultima, ?FormularioDeSolicitud $formulario, ?string $error = null, ?string $mensaje = null, int $estado = 200): Respuesta
     {
         $corrigiendo = $ultima?->estado === EstadoSolicitud::Rechazada;
@@ -80,6 +144,7 @@ final class SolicitudDeSala extends Controlador
             'valores' => $formulario === null ? [] : $formulario->valores,
             'errores' => $formulario === null ? [] : $formulario->errores,
             'corrigiendo' => $corrigiendo,
+            'cambio' => null,
             'solicitud' => $ultima === null ? null : [
                 'estado' => $ultima->estado->value,
                 'sala' => $ultima->datos->nombre,

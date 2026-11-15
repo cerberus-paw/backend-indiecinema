@@ -26,11 +26,13 @@ use PHPUnit\Framework\TestCase;
  * rutas de moderación, las plantillas del paquete front, un MySQL de verdad y un servidor SMTP de
  * mentira, que recibe el aviso al equipo. Mandarla no toca programación: la sala recién existe allá
  * cuando se aprueba. En desarrollo, para que Twig falle si la plantilla usa una variable que el
- * controlador no le pasa.
+ * controlador no le pasa. El pedido de cambio de dirección (EF-07.6) lee la sala de una
+ * programación de mentira (ConServidoresDePrueba).
  */
 final class SolicitudDeSalaTest extends TestCase
 {
     use ConBaseDePruebas;
+    use ConServidoresDePrueba;
 
     private const SECRETO = 'secreto-de-nginx';
     private const CSRF = 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc';
@@ -53,11 +55,13 @@ final class SolicitudDeSalaTest extends TestCase
     public static function setUpBeforeClass(): void
     {
         self::$correo = ServidorSmtpDePrueba::iniciar();
+        self::iniciarServidores();
     }
 
     public static function tearDownAfterClass(): void
     {
         self::$correo->detener();
+        self::detenerServidores();
     }
 
     protected function setUp(): void
@@ -65,6 +69,7 @@ final class SolicitudDeSalaTest extends TestCase
         // Antes de saltearla: tearDown() corre igual y la usa.
         $this->carpeta = sys_get_temp_dir() . '/archivos-' . bin2hex(random_bytes(4));
         self::$correo->vaciar();
+        self::reiniciarServidores();
         $this->salidaDelLog = fopen('php://memory', 'w+');
         $this->base = self::baseConTablasNuevas($this->configuracion());
     }
@@ -88,8 +93,9 @@ final class SolicitudDeSalaTest extends TestCase
             'archivos' => ['carpeta' => $this->carpeta],
             'base' => self::baseDePruebas(),
             'nginx' => ['secreto' => self::SECRETO],
-            // Mandarla no llama a nadie (eso es al aprobarla), pero el servicio tiene el cliente.
-            'subsistemas' => ['cuentas' => 'http://127.0.0.1:1', 'programacion' => 'http://127.0.0.1:1'],
+            // Mandarla no llama a nadie (eso es al aprobarla); el pedido de cambio de dirección lee
+            // la sala de programación.
+            'subsistemas' => ['cuentas' => self::$urls['cuentas'], 'programacion' => self::$urls['programacion']],
             'interno' => ['token' => 'token-de-moderacion'],
             'correo' => ['servidor' => $servidorDeCorreo ?? self::$correo->url(), 'remitente' => 'no-responder@indiecinema.test'],
             'solicitudes' => ['destino' => self::EQUIPO],
@@ -153,7 +159,7 @@ final class SolicitudDeSalaTest extends TestCase
      * @param ?string                                                  $imagen     de tests/Dobles/imagenes, o null para no mandar ninguna
      * @param array<string, string|array<string, mixed>|null>          $documentos campo => de tests/Dobles/documentos, el archivo ya armado, o null para no mandarlo
      */
-    private function enviar(array $cambios = [], ?string $rol = 'espectador', ?string $imagen = 'sala.png', string $usuario = self::ESPECTADORA, ?Configuracion $configuracion = null, array $documentos = []): Respuesta
+    private function enviar(array $cambios = [], ?string $rol = 'espectador', ?string $imagen = 'sala.png', string $usuario = self::ESPECTADORA, ?Configuracion $configuracion = null, array $documentos = [], string $url = self::URL): Respuesta
     {
         $archivos = $imagen === null ? [] : ['imagen' => Imagenes::subida($imagen)];
         foreach ($documentos + self::DOCUMENTOS as $campo => $documento) {
@@ -162,7 +168,7 @@ final class SolicitudDeSalaTest extends TestCase
             }
         }
 
-        return $this->pedir('POST', $cambios + self::camposValidos(), $rol, $archivos, $usuario, configuracion: $configuracion);
+        return $this->pedir('POST', $cambios + self::camposValidos(), $rol, $archivos, $usuario, $url, $configuracion);
     }
 
     /**
@@ -605,6 +611,130 @@ final class SolicitudDeSalaTest extends TestCase
         $otra = $this->enviar(['nombre' => 'Otra sala']);
         self::assertSame(409, $otra->estado());
         self::assertSame(1, $this->base->valor('SELECT COUNT(*) FROM solicitud_sala'));
+    }
+
+    /**
+     * EF-07.6: una sala publicada de la espectadora (organizadora, para programación), con todos sus
+     * datos.
+     */
+    private const SALA = '99999999-9999-4999-8999-999999999999';
+
+    private static function salaPublicada(bool $habilitada = true, string $organizador = self::ESPECTADORA): void
+    {
+        self::salasEnProgramacion([self::SALA => [
+            'nombre' => 'El Galpón',
+            'localidad' => 'Luján',
+            'organizador_id' => $organizador,
+            'habilitada' => $habilitada,
+            'descripcion' => 'Un galpón con proyector.',
+            'direccion' => 'Av. San Martín 450',
+            'capacidad' => 60,
+            'peliculas_por_funcion' => 2,
+            'duracion_funcion' => 120,
+            'tiempo_entre_funciones' => 15,
+        ]]);
+    }
+
+    public function testElPedidoDeCambioDeDireccionVieneConLosDatosDeLaSala(): void
+    {
+        self::salaPublicada();
+
+        $respuesta = $this->pedir(rol: 'organizador', url: self::URL . '?sala=' . self::SALA);
+
+        self::assertSame(200, $respuesta->estado(), $respuesta->cuerpo());
+        $pantalla = $respuesta->cuerpo();
+        self::assertStringContainsString('Pedir el cambio de dirección de «El Galpón»', $pantalla);
+        self::assertStringContainsString('action="/solicitar-sala?sala=' . self::SALA . '"', $pantalla);
+        self::assertStringContainsString('value="Av. San Martín 450"', $pantalla);
+        self::assertStringContainsString('value="60"', $pantalla);
+        // La foto es opcional; el seguro y la habilitación del lugar nuevo, no.
+        self::assertDoesNotMatchRegularExpression('/name="imagen"[^>]*required/', $pantalla);
+        self::assertMatchesRegularExpression('/name="seguro"[^>]*required/', $pantalla);
+        self::assertMatchesRegularExpression('/name="habilitacion_pdf"[^>]*required/', $pantalla);
+        self::assertStringContainsString('Enviar el pedido de cambio', $pantalla);
+    }
+
+    /**
+     * @return iterable<string, array{?callable(): void, string, string}>
+     */
+    public static function pedidosDeCambioQueNoVan(): iterable
+    {
+        yield 'de otro organizador' => [static fn () => self::salaPublicada(organizador: self::OTRO), self::ESPECTADORA, self::SALA];
+        yield 'sin publicar' => [static fn () => self::salaPublicada(habilitada: false), self::ESPECTADORA, self::SALA];
+        yield 'que no existe' => [null, self::ESPECTADORA, self::SALA];
+        yield 'sin forma de id' => [null, self::ESPECTADORA, 'no-es-un-id'];
+    }
+
+    /**
+     * Para los demás, la sala no existe: ni el formulario ni el envío.
+     *
+     * @param ?callable(): void $preparar
+     */
+    #[DataProvider('pedidosDeCambioQueNoVan')]
+    public function testSoloSuOrganizadorPideElCambioDeUnaSalaPublicada(?callable $preparar, string $usuario, string $sala): void
+    {
+        if ($preparar !== null) {
+            $preparar();
+        }
+
+        self::assertSame(404, $this->pedir(rol: 'organizador', usuario: $usuario, url: self::URL . "?sala={$sala}")->estado());
+        self::assertSame(404, $this->enviar(['direccion' => 'Mitre 1200'], 'organizador', null, $usuario, url: self::URL . "?sala={$sala}")->estado());
+        self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM solicitud_sala'));
+    }
+
+    /**
+     * Mandarlo deja una solicitud de la misma sala marcada como cambio, con los dos PDF del lugar
+     * nuevo; la sala sigue publicada (programación no se entera). Mientras está abierta, no se pide
+     * otro.
+     */
+    public function testElCambioQuedaMarcadoYLaSalaSiguePublicada(): void
+    {
+        self::salaPublicada();
+        $url = self::URL . '?sala=' . self::SALA;
+
+        $respuesta = $this->enviar(['nombre' => 'El Galpón', 'direccion' => 'Mitre 1200', 'localidad' => 'Mercedes'], 'organizador', null, url: $url);
+
+        self::assertSame(303, $respuesta->estado(), $respuesta->cuerpo());
+        self::assertSame(
+            ['sala_id' => self::SALA, 'cambio' => 1, 'estado' => 'pendiente', 'direccion' => 'Mitre 1200', 'localidad' => 'Mercedes', 'imagen' => null],
+            $this->base->fila('SELECT sala_id, cambio, estado, direccion, localidad, imagen FROM solicitud_sala'),
+        );
+        self::assertSame(2, $this->base->valor("SELECT COUNT(*) FROM documento WHERE sala_id = ? AND estado = 'pendiente'", [self::SALA]));
+        self::assertSame([], self::pedidosA('programacion'));
+        self::assertTrue(self::salasDeProgramacion()[self::SALA]['habilitada']);
+        self::assertStringContainsString('pidió cambiar la dirección de la sala', self::textoDelCorreo());
+        self::assertStringContainsString('En revisión', $this->pedir(rol: 'organizador')->cuerpo());
+
+        self::assertSame(404, $this->pedir(rol: 'organizador', url: $url)->estado());
+    }
+
+    /**
+     * Si se lo rechazan, lo corrige en /solicitar-sala como cualquier solicitud, y sigue siendo un
+     * pedido de cambio de la misma sala.
+     */
+    public function testCorregirUnCambioRechazadoSigueSiendoUnCambio(): void
+    {
+        self::salaPublicada();
+        $this->enviar(['direccion' => 'Mitre 1200'], 'organizador', null, url: self::URL . '?sala=' . self::SALA);
+        $this->rechazarLaUltima('Falta el número de la calle.');
+
+        self::assertSame(303, $this->enviar(['direccion' => 'Mitre 1250'], 'organizador', null)->estado());
+
+        self::assertSame(
+            ['sala_id' => self::SALA, 'cambio' => 1, 'direccion' => 'Mitre 1250'],
+            $this->base->fila("SELECT sala_id, cambio, direccion FROM solicitud_sala WHERE estado = 'pendiente'"),
+        );
+    }
+
+    public function testElCambioPideLosDosPdf(): void
+    {
+        self::salaPublicada();
+
+        $respuesta = $this->enviar(['direccion' => 'Mitre 1200'], 'organizador', null, documentos: ['seguro' => null], url: self::URL . '?sala=' . self::SALA);
+
+        self::assertSame(422, $respuesta->estado());
+        self::assertStringContainsString('action="/solicitar-sala?sala=' . self::SALA . '"', $respuesta->cuerpo());
+        self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM solicitud_sala'));
     }
 
     public function testSiLaRechazaronMuestraElMotivoYSeCorrigeLaMismaSala(): void

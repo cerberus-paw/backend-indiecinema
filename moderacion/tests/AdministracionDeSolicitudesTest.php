@@ -1005,8 +1005,8 @@ final class AdministracionDeSolicitudesTest extends TestCase
     public static function barras(): iterable
     {
         // El logo y las secciones que puede abrir: al moderador, sólo la bandeja.
-        yield 'moderador' => ['moderador', ['/moderacion/documentos', '/moderacion/obras', '/moderacion/solicitudes']];
-        yield 'administrador' => ['administrador', ['/cuenta/administracion/usuarios', '/funcion/administracion/reservas', '/moderacion/documentos', '/moderacion/obras', '/moderacion/solicitudes']];
+        yield 'moderador' => ['moderador', ['/moderacion/denuncias', '/moderacion/documentos', '/moderacion/obras', '/moderacion/solicitudes']];
+        yield 'administrador' => ['administrador', ['/cuenta/administracion/usuarios', '/funcion/administracion/reservas', '/moderacion/denuncias', '/moderacion/documentos', '/moderacion/obras', '/moderacion/solicitudes']];
     }
 
     /**

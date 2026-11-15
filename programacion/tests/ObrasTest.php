@@ -309,4 +309,23 @@ final class ObrasTest extends TestCase
         self::assertTrue($datosDueno['obra']['editable']);
         self::assertSame("/organizador/obras/{$obra->id}/editar", $datosDueno['obra']['url_editar']);
     }
+
+    /**
+     * EF-07.8: la ficha lleva a denunciar la obra, salvo a su dueño. Sin sesión también: el
+     * formulario lo manda a ingresar y vuelve.
+     */
+    public function testLaFichaLlevaADenunciarLaObraSalvoASuDueno(): void
+    {
+        [$generoId] = $this->genero('Drama');
+        $obra = Obra::crear(
+            self::ORGANIZADORA,
+            new DatosDeObra('Obra Propia', 'Sinopsis', 2021, 'Director Y', 90, TipoObra::Pelicula, OrigenCopia::ObraPropia, [$generoId]),
+        );
+        $this->repositorio->agregar($obra);
+        $link = "href=\"/moderacion/denuncias/nueva?tipo=obra&amp;id={$obra->id}\"";
+
+        self::assertStringContainsString($link, $this->pedir("/obras/{$obra->id}")->cuerpo());
+        self::assertStringContainsString($link, $this->pedir("/obras/{$obra->id}", [], ['X-Usuario-Id' => Uuid::nuevo(), 'X-Rol' => 'espectador'])->cuerpo());
+        self::assertStringNotContainsString('/moderacion/denuncias/nueva', $this->pedir("/obras/{$obra->id}", [], ['X-Usuario-Id' => self::ORGANIZADORA, 'X-Rol' => 'organizador'])->cuerpo());
+    }
 }

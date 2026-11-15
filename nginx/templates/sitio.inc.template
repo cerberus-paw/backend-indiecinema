@@ -124,6 +124,16 @@ location /funcion/ {
 location = /moderacion {
     return 301 /moderacion/;
 }
+# La denuncia de una sala, una función, una obra o un comentario (EF-07.8). 2 por minuto por IP,
+# como la solicitud de sala: pasan 3 seguidos y después una cada 30 segundos.
+location ~ ^/moderacion/denuncias/nueva/?$ {
+    limit_req zone=denuncia burst=2 nodelay;
+    set $subsistema moderacion;
+    set $secreto "${NGINX_SECRETO_MODERACION}";
+    rewrite ^/moderacion(/.*)$ $1 break;
+    include conf.d/subsistema.inc;
+}
+
 location /moderacion/ {
     set $subsistema moderacion;
     set $secreto "${NGINX_SECRETO_MODERACION}";

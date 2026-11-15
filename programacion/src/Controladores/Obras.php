@@ -95,6 +95,8 @@ final class Obras extends Controlador
             'editable' => $esDueno,
             'url_editar' => "/organizador/obras/{$obra->id}/editar",
             'tiene_funciones_futuras' => $this->servicio->tieneFuncionesFuturas($obra->id),
+            // EF-07.8: su dueño no la denuncia.
+            'denunciable' => $usuario === null || $obra->duenoId !== $usuario->id,
         ];
 
         if ($peticion->aceptaJson()) {

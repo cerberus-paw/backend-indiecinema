@@ -3,10 +3,12 @@
 declare(strict_types=1);
 
 use IndieCinema\Moderacion\Controladores\AdministracionDeSolicitudes;
+use IndieCinema\Moderacion\Controladores\BandejaDeDenuncias;
 use IndieCinema\Moderacion\Controladores\BandejaDeDocumentos;
 use IndieCinema\Moderacion\Controladores\BandejaDeObras;
 use IndieCinema\Moderacion\Controladores\DocumentacionDeSala;
 use IndieCinema\Moderacion\Controladores\DocumentoDeSala;
+use IndieCinema\Moderacion\Controladores\FormularioDeDenuncia;
 use IndieCinema\Moderacion\Controladores\FotoDeSolicitud;
 use IndieCinema\Moderacion\Controladores\SolicitudDeSala;
 use IndieCinema\Moderacion\Controladores\SolicitudesInternas;
@@ -41,6 +43,13 @@ return static function (Router $router): void {
     // habilitación, que el moderador acepta o rechaza con un motivo.
     $router->get('/documentos', [BandejaDeDocumentos::class, 'listar'], Rol::Moderador);
     $router->post('/documentos/{id}/resolver', [BandejaDeDocumentos::class, 'resolver'], Rol::Moderador);
+    // La denuncia de una sala, una función, una obra o un comentario (EF-07.8): la hace cualquiera
+    // con sesión, salvo sobre lo suyo (lo decide el controlador, con el subsistema dueño).
+    $router->get('/denuncias/nueva', [FormularioDeDenuncia::class, 'mostrar'], Rol::Espectador);
+    $router->post('/denuncias/nueva', [FormularioDeDenuncia::class, 'enviar'], Rol::Espectador);
+    // La pestaña «Denuncias» de la bandeja: el moderador las desestima o actúa sobre lo denunciado.
+    $router->get('/denuncias', [BandejaDeDenuncias::class, 'listar'], Rol::Moderador);
+    $router->post('/denuncias/{tipo}/{id}/resolver', [BandejaDeDenuncias::class, 'resolver'], Rol::Moderador);
     // La bandeja de solicitudes de sala: aprobar una crea la sala en programación y le da el rol
     // de organizador a quien la mandó. Es del moderador (EF-07.3); el administrador también entra,
     // porque lo alcanza.

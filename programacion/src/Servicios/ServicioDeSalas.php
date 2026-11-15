@@ -254,7 +254,7 @@ final class ServicioDeSalas
 
     /**
      * El nombre de la imagen de la sala, si quien pide la puede ver: una sala sin habilitar sólo
-     * la ven su organizador y el administrador, que la mira en su bandeja antes de habilitarla.
+     * la ven su organizador y el moderador, que la mira en la bandeja antes de habilitarla.
      * Si no, 404, como si no existiera.
      *
      * @throws ExcepcionHttp 404
@@ -262,8 +262,8 @@ final class ServicioDeSalas
     public function imagenParaMostrar(string $id, ?Usuario $usuario): string
     {
         $sala = $this->buscar($id);
-        $administrador = $usuario?->alcanza(Rol::Administrador) ?? false;
-        if ((!$sala->laPuedeVer($usuario?->id) && !$administrador) || $sala->imagen === null) {
+        $moderador = $usuario?->alcanza(Rol::Moderador) ?? false;
+        if ((!$sala->laPuedeVer($usuario?->id) && !$moderador) || $sala->imagen === null) {
             throw ExcepcionHttp::noEncontrada();
         }
 

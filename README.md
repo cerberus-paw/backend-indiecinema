@@ -313,7 +313,7 @@ docker run --rm -u "$(id -u):$(id -g)" -v "$PWD/..:/app" -w /app/backend-indieci
 | http://localhost:8080/organizador/funciones | «Mis funciones»: las de sus salas, en cualquier estado y con su fecha; desde ahí se programa una función o se la abre a votación de títulos, y se proponen las franjas del acuerdo |
 | http://localhost:8080/cuenta/ | «Mi cuenta», con sesión: el nombre, el correo y los roles, y el enlace a «Mis reservas». Sin sesión, `/cuenta/ingresar` y `/cuenta/registro` |
 | http://localhost:8080/solicitar-sala | la solicitud de sala, con sesión: se guarda la sala propuesta y le llega al equipo por correo |
-| http://localhost:8080/moderacion/solicitudes | la bandeja de solicitudes de sala, para aprobarlas (publica la sala y da el rol de organizador) o rechazarlas con un motivo, el historial, y retirar o volver a publicar la sala con un motivo; sólo el administrador |
+| http://localhost:8080/moderacion/solicitudes | la bandeja de solicitudes de sala, para aprobarlas (publica la sala y da el rol de organizador) o rechazarlas con un motivo, el historial, y retirar o volver a publicar la sala con un motivo; para el moderador (y el administrador) |
 | http://localhost:8025 | el buzón de prueba (Mailpit): los correos que mandan los subsistemas, sin que salgan a nadie |
 | http://localhost:8080/cuenta/administracion/usuarios | usuarios y roles, con los números de las cuentas, buscador por nombre o correo, filtros de rol, estado y año de alta, y el rol de cada uno en un desplegable (espectador u organizador), con «Guardar cambios» para toda la tabla; sólo el administrador |
 | http://localhost:8080/funcion/reservas | «Mis reservas», con sesión: las del espectador, con su estado, el comprobante (que se imprime) y cancelar mientras se pueda |
@@ -402,6 +402,7 @@ docker compose exec cuentas php herramientas/datos-de-prueba.php
 | Rol | Nombre | Correo | Contraseña |
 |---|---|---|---|
 | administrador | Ana Administradora | `administrador@indiecinema.test` | `administrador2026` |
+| moderador | Mora Moderadora | `moderador@indiecinema.test` | `moderador2026` |
 | organizador | Omar Organizador | `organizador@indiecinema.test` | `organizador2026` |
 | espectador | Eva Espectadora | `eva@indiecinema.test` | `espectador2026` |
 | espectador | Elías Espectador | `elias@indiecinema.test` | `espectador2026` |

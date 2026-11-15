@@ -188,13 +188,14 @@ final class SalasDelOrganizadorTest extends TestCase
         self::assertSame([$segunda], $this->imagenesGuardadas());
     }
 
-    public function testLaFotoDeUnaSalaSinHabilitarSoloLaVenSuOrganizadorYElAdministrador(): void
+    public function testLaFotoDeUnaSalaSinHabilitarSoloLaVenSuOrganizadorElModeradorYElAdministrador(): void
     {
         $id = $this->crearSala(self::ORGANIZADORA);
 
         self::assertSame(404, $this->pedir('GET', "/salas/{$id}/imagen", null)->estado());
         self::assertSame(404, $this->pedir('GET', "/salas/{$id}/imagen", self::OTRO_ORGANIZADOR)->estado());
-        // El administrador la mira en su bandeja antes de habilitarla.
+        // El moderador y el administrador la miran en la bandeja antes de habilitarla.
+        self::assertSame(200, $this->pedir('GET', "/salas/{$id}/imagen", self::OTRO_ORGANIZADOR, 'moderador')->estado());
         self::assertSame(200, $this->pedir('GET', "/salas/{$id}/imagen", self::OTRO_ORGANIZADOR, 'administrador')->estado());
 
         $propia = $this->pedir('GET', "/salas/{$id}/imagen", self::ORGANIZADORA);

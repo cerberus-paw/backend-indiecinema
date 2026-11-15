@@ -23,16 +23,16 @@ return static function (Router $router): void {
     // trae acá tal cual.
     $router->get('/solicitar-sala', [SolicitudDeSala::class, 'mostrar'], Rol::Espectador);
     $router->post('/solicitar-sala', [SolicitudDeSala::class, 'enviar'], Rol::Espectador);
-    // La foto que mandó, para quien la mandó y el administrador (lo decide el servicio).
+    // La foto que mandó, para quien la mandó y el moderador (lo decide el servicio).
     $router->get('/solicitudes/{id}/foto', [FotoDeSolicitud::class, 'mostrar'], Rol::Espectador);
     // La bandeja de solicitudes de sala: aprobar una crea la sala en programación y le da el rol
-    // de organizador a quien la mandó. La resuelve el administrador hasta que haya moderador
-    // (EF-07.3).
-    $router->get('/solicitudes', [AdministracionDeSolicitudes::class, 'listar'], Rol::Administrador);
-    $router->post('/solicitudes/{id}/resolver', [AdministracionDeSolicitudes::class, 'resolver'], Rol::Administrador);
+    // de organizador a quien la mandó. Es del moderador (EF-07.3); el administrador también entra,
+    // porque lo alcanza.
+    $router->get('/solicitudes', [AdministracionDeSolicitudes::class, 'listar'], Rol::Moderador);
+    $router->post('/solicitudes/{id}/resolver', [AdministracionDeSolicitudes::class, 'resolver'], Rol::Moderador);
     // Desde una aprobada, la sala se retira del sitio o se vuelve a publicar, con un motivo.
-    $router->post('/solicitudes/{id}/deshabilitar-sala', [AdministracionDeSolicitudes::class, 'deshabilitarSala'], Rol::Administrador);
-    $router->post('/solicitudes/{id}/habilitar-sala', [AdministracionDeSolicitudes::class, 'habilitarSala'], Rol::Administrador);
+    $router->post('/solicitudes/{id}/deshabilitar-sala', [AdministracionDeSolicitudes::class, 'deshabilitarSala'], Rol::Moderador);
+    $router->post('/solicitudes/{id}/habilitar-sala', [AdministracionDeSolicitudes::class, 'habilitarSala'], Rol::Moderador);
 
     // Para comprobar que los otros subsistemas llegan hasta acá con su token.
     $router->interna('GET', '/interno/estado', [EstadoInterno::class, 'mostrar'], ['cuentas', 'programacion', 'funciones', 'recaudacion']);

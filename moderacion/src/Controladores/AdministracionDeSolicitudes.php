@@ -22,7 +22,7 @@ use LogicException;
  * programación.
  *
  * La solicitud trae la sala que propone; la sala recién existe en programación cuando se aprueba.
- * Las rutas piden el rol de administrador (el de moderador llega con EF-07.3) y el núcleo ya
+ * Las rutas piden el rol de moderador (EF-07.3), que el administrador alcanza, y el núcleo ya
  * controló el token CSRF de los POST.
  */
 final class AdministracionDeSolicitudes extends Controlador
@@ -68,10 +68,10 @@ final class AdministracionDeSolicitudes extends Controlador
             return $this->bandeja($peticion, $solicitud, ['resolucion' => is_string($resolucion) ? $resolucion : '', 'motivo' => $motivo], $errores, estado: 422);
         }
 
-        $administrador = self::administrador($peticion);
+        $moderador = self::moderador($peticion);
         $resuelta = $resolucion === 'aprobar'
-            ? $this->servicio->aprobar($solicitud->id, $administrador, $motivo)
-            : $this->servicio->rechazar($solicitud->id, $administrador, $motivo);
+            ? $this->servicio->aprobar($solicitud->id, $moderador, $motivo)
+            : $this->servicio->rechazar($solicitud->id, $moderador, $motivo);
         $aviso = match (true) {
             !$resuelta => 'ya_resuelta',
             $resolucion === 'aprobar' => 'aprobada',
@@ -115,7 +115,7 @@ final class AdministracionDeSolicitudes extends Controlador
         if ($error !== null && $solicitud->estado->value === 'aprobada') {
             return $this->bandeja($peticion, $solicitud, ['motivo_sala' => $motivo], ['motivo_sala' => $error], estado: 422);
         }
-        $this->servicio->cambiarLaSala($solicitud->id, $habilitada, self::administrador($peticion), $motivo);
+        $this->servicio->cambiarLaSala($solicitud->id, $habilitada, self::moderador($peticion), $motivo);
 
         return $this->redirigir('/solicitudes?' . http_build_query([
             'id' => $solicitud->id,
@@ -256,7 +256,7 @@ final class AdministracionDeSolicitudes extends Controlador
 
     /**
      * La foto que mandó la solicitud; la de una que se mudó de programación sin foto propia es la
-     * de su sala allá, que el administrador ve aunque no esté publicada.
+     * de su sala allá, que el moderador ve aunque no esté publicada.
      */
     private function foto(SolicitudDeSala $solicitud): string
     {
@@ -278,8 +278,8 @@ final class AdministracionDeSolicitudes extends Controlador
         return trim((string) preg_replace('/(?!\n)\p{Cc}/u', '', str_replace(["\r\n", "\r"], "\n", $valor)));
     }
 
-    private static function administrador(Peticion $peticion): Usuario
+    private static function moderador(Peticion $peticion): Usuario
     {
-        return $peticion->usuario() ?? throw new LogicException('La ruta pide el rol de administrador: sin sesión no llega acá.');
+        return $peticion->usuario() ?? throw new LogicException('La ruta pide el rol de moderador: sin sesión no llega acá.');
     }
 }

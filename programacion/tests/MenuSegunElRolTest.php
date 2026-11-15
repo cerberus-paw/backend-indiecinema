@@ -40,6 +40,7 @@ final class MenuSegunElRolTest extends TestCase
     private const CON_SESION = ['/cuenta/', '/funcion/reservas'];
     private const DEL_ESPECTADOR = ['/solicitar-sala'];
     private const DEL_ORGANIZADOR = ['/organizador/salas', '/organizador/obras', '/organizador/obras/nueva', '/organizador/funciones', '/organizador/funciones/nueva', '/solicitar-sala'];
+    private const DEL_MODERADOR = ['/moderacion/solicitudes'];
     private const DEL_ADMINISTRADOR = ['/cuenta/administracion/usuarios', '/moderacion/solicitudes'];
 
     /**
@@ -105,7 +106,7 @@ final class MenuSegunElRolTest extends TestCase
         yield 'sin sesión' => [null, self::SIN_SESION];
         yield 'espectador' => ['espectador', [...self::CON_SESION, ...self::DEL_ESPECTADOR]];
         yield 'organizador' => ['organizador', [...self::CON_SESION, ...self::DEL_ORGANIZADOR]];
-        yield 'moderador' => ['moderador', [...self::CON_SESION, ...self::DEL_ORGANIZADOR]];
+        yield 'moderador' => ['moderador', [...self::CON_SESION, ...self::DEL_ORGANIZADOR, ...self::DEL_MODERADOR]];
         yield 'administrador' => ['administrador', self::DEL_ADMINISTRADOR];
     }
 
@@ -204,7 +205,7 @@ final class MenuSegunElRolTest extends TestCase
         ];
         yield 'espectador' => ['espectador', ['Mi cuenta' => ['/cuenta/', '/funcion/reservas', '/solicitar-sala']]];
         yield 'organizador' => ['organizador', $organizador];
-        yield 'moderador' => ['moderador', $organizador];
+        yield 'moderador' => ['moderador', $organizador + ['Moderación' => ['/moderacion/solicitudes']]];
         yield 'administrador' => ['administrador', ['Administración' => ['/cuenta/administracion/usuarios', '/moderacion/solicitudes']]];
     }
 

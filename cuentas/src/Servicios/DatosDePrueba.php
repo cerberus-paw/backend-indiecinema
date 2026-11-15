@@ -47,6 +47,8 @@ final class DatosDePrueba
         ['id' => '00000000-0000-4000-8000-000000000003', 'nombre' => 'Eva Espectadora', 'correo' => 'eva@indiecinema.test', 'contrasena' => 'espectador2026', 'roles' => [Rol::Espectador], 'produccion' => 'espectador'],
         // Con tilde: el nombre viaja en la cabecera X-Usuario-Nombre, y así se ve que llega bien.
         ['id' => '00000000-0000-4000-8000-000000000004', 'nombre' => 'Elías Espectador', 'correo' => 'elias@indiecinema.test', 'contrasena' => 'espectador2026', 'roles' => [Rol::Espectador], 'produccion' => null],
+        // Atiende la bandeja de moderación (EF-07.3); el moderador también alcanza a organizador.
+        ['id' => '00000000-0000-4000-8000-000000000005', 'nombre' => 'Mora Moderadora', 'correo' => 'moderador@indiecinema.test', 'contrasena' => 'moderador2026', 'roles' => [Rol::Espectador, Rol::Moderador], 'produccion' => null],
     ];
 
     /**

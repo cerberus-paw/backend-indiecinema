@@ -378,9 +378,10 @@ final class SolicitudDeSalaTest extends TestCase
     }
 
     /**
-     * La foto la ven quien mandó la solicitud y el administrador; para los demás no existe.
+     * La foto la ven quien mandó la solicitud, el moderador y el administrador; para los demás no
+     * existe.
      */
-    public function testLaFotoLaVenElSolicitanteYElAdministrador(): void
+    public function testLaFotoLaVenElSolicitanteElModeradorYElAdministrador(): void
     {
         $this->enviar();
         $id = (string) $this->base->valor('SELECT id FROM solicitud_sala');
@@ -391,6 +392,7 @@ final class SolicitudDeSalaTest extends TestCase
         self::assertSame(file_get_contents(Imagenes::ruta('sala.png')), $suya->cuerpo());
         self::assertSame('image/png', $suya->cabecera('Content-Type'));
         self::assertSame(200, $this->pedir(rol: 'administrador', usuario: self::ADMINISTRADOR, url: $url)->estado());
+        self::assertSame(200, $this->pedir(rol: 'moderador', usuario: self::OTRO, url: $url)->estado());
         self::assertSame(404, $this->pedir(usuario: self::OTRO, url: $url)->estado());
         self::assertSame(404, $this->pedir(url: '/solicitudes/no-es-un-id/foto')->estado());
         self::assertSame(401, $this->pedir(rol: null, url: $url)->estado());

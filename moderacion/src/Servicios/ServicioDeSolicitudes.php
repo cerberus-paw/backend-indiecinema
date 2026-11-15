@@ -26,7 +26,7 @@ use Throwable;
 
 /**
  * La solicitud de sala, como el recorrido de la E2 (sección 7), ya en moderación (EF-07.2): un
- * usuario pide abrir una sala, el equipo recibe el aviso por correo y el administrador la aprueba o
+ * usuario pide abrir una sala, el equipo recibe el aviso por correo y un moderador la aprueba o
  * la rechaza con un motivo. La solicitud guarda la sala que propone; programación no se entera
  * hasta que se aprueba.
  */
@@ -58,7 +58,7 @@ final class ServicioDeSolicitudes
      * Guarda la solicitud con la sala que propone y le avisa al equipo. Si la última que mandó la
      * rechazaron, es la misma sala corregida: una solicitud nueva con el mismo id de sala, y sin
      * foto nueva, la de la anterior. Una sala nueva lleva un id nuevo, con el que programación la
-     * va a crear al aprobarla. Si el correo falla, la solicitud queda igual: el administrador la ve
+     * va a crear al aprobarla. Si el correo falla, la solicitud queda igual: el moderador la ve
      * en la bandeja, y el correo es sólo el aviso. El motivo queda en el log.
      *
      * @param ?ImagenSubida $imagen obligatoria para una sala nueva; al corregir, sin una queda la
@@ -153,16 +153,16 @@ final class ServicioDeSolicitudes
      *
      * @throws ExcepcionHttp 404 si no existe; 503 si cuentas o programación no responden
      */
-    public function aprobar(string $id, Usuario $administrador, string $motivo): bool
+    public function aprobar(string $id, Usuario $moderador, string $motivo): bool
     {
         $solicitud = $this->buscar($id);
         if (!$solicitud->estaPendiente()) {
             return false;
         }
-        $this->usuarios->darOrganizador($solicitud->usuarioId, $administrador->id);
+        $this->usuarios->darOrganizador($solicitud->usuarioId, $moderador->id);
         $this->salas->crearParaSolicitud($solicitud);
 
-        return $this->resolver($solicitud, EstadoSolicitud::Aprobada, $administrador, $motivo);
+        return $this->resolver($solicitud, EstadoSolicitud::Aprobada, $moderador, $motivo);
     }
 
     /**
@@ -173,9 +173,9 @@ final class ServicioDeSolicitudes
      *
      * @throws ExcepcionHttp 404 si no existe
      */
-    public function rechazar(string $id, Usuario $administrador, string $motivo): bool
+    public function rechazar(string $id, Usuario $moderador, string $motivo): bool
     {
-        return $this->resolver($this->buscar($id), EstadoSolicitud::Rechazada, $administrador, $motivo);
+        return $this->resolver($this->buscar($id), EstadoSolicitud::Rechazada, $moderador, $motivo);
     }
 
     /**
@@ -196,13 +196,13 @@ final class ServicioDeSolicitudes
      * @throws ExcepcionHttp 404 si la solicitud no existe o no está aprobada; 503 si programación
      *                       no responde
      */
-    public function cambiarLaSala(string $id, bool $habilitada, Usuario $administrador, string $motivo): SolicitudDeSala
+    public function cambiarLaSala(string $id, bool $habilitada, Usuario $moderador, string $motivo): SolicitudDeSala
     {
         $solicitud = $this->buscar($id);
         if ($solicitud->estado !== EstadoSolicitud::Aprobada) {
             throw ExcepcionHttp::noEncontrada();
         }
-        $this->salas->cambiarHabilitacion($solicitud->salaId, $habilitada, $motivo, $administrador->id);
+        $this->salas->cambiarHabilitacion($solicitud->salaId, $habilitada, $motivo, $moderador->id);
 
         return $solicitud;
     }
@@ -216,7 +216,7 @@ final class ServicioDeSolicitudes
     }
 
     /**
-     * El nombre de la foto de la solicitud, si la puede ver: quien la mandó y el administrador.
+     * El nombre de la foto de la solicitud, si la puede ver: quien la mandó y el moderador.
      * Para los demás no existe, y una que se mudó de programación no tiene foto propia.
      *
      * @throws ExcepcionHttp 404
@@ -224,21 +224,21 @@ final class ServicioDeSolicitudes
     public function fotoParaMostrar(string $id, Usuario $usuario): string
     {
         $solicitud = $this->buscar($id);
-        if ($solicitud->imagen === null || (!hash_equals($solicitud->usuarioId, $usuario->id) && !$usuario->alcanza(Rol::Administrador))) {
+        if ($solicitud->imagen === null || (!hash_equals($solicitud->usuarioId, $usuario->id) && !$usuario->alcanza(Rol::Moderador))) {
             throw ExcepcionHttp::noEncontrada();
         }
 
         return $solicitud->imagen;
     }
 
-    private function resolver(SolicitudDeSala $solicitud, EstadoSolicitud $estado, Usuario $administrador, string $motivo): bool
+    private function resolver(SolicitudDeSala $solicitud, EstadoSolicitud $estado, Usuario $moderador, string $motivo): bool
     {
-        if (!$this->solicitudes->resolver($solicitud->id, $estado, $administrador->id, $motivo, self::ahora())) {
+        if (!$this->solicitudes->resolver($solicitud->id, $estado, $moderador->id, $motivo, self::ahora())) {
             return false;
         }
         // Es el registro de auditoría: quién resolvió qué.
-        $this->log->notice('{administrador} resolvió la solicitud de sala {solicitud}: {estado}.', [
-            'administrador' => $administrador->id,
+        $this->log->notice('{moderador} resolvió la solicitud de sala {solicitud}: {estado}.', [
+            'moderador' => $moderador->id,
             'solicitud' => $solicitud->id,
             'estado' => $estado->value,
         ]);

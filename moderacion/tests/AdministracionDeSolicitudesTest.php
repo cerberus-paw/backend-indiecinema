@@ -39,6 +39,7 @@ final class AdministracionDeSolicitudesTest extends TestCase
     private const SECRETO = 'secreto-de-nginx';
     private const CSRF = 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc';
     private const ADMINISTRADOR = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+    private const MODERADORA = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
     // Los usuarios que conoce Dobles/cuentas.php.
     private const ESPECTADORA = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
     private const ORGANIZADOR = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
@@ -93,9 +94,10 @@ final class AdministracionDeSolicitudesTest extends TestCase
     /**
      * @param array<string, mixed> $cuerpo
      */
-    private function pedir(string $metodo, string $url, ?string $rol = 'administrador', array $cuerpo = []): Respuesta
+    private function pedir(string $metodo, string $url, ?string $rol = 'administrador', array $cuerpo = [], ?string $usuario = null): Respuesta
     {
-        $cabeceras = $rol === null ? [] : ['X-Nginx-Secreto' => self::SECRETO, 'X-Usuario-Id' => self::ADMINISTRADOR, 'X-Rol' => $rol];
+        $usuario ??= $rol === 'moderador' ? self::MODERADORA : self::ADMINISTRADOR;
+        $cabeceras = $rol === null ? [] : ['X-Nginx-Secreto' => self::SECRETO, 'X-Usuario-Id' => $usuario, 'X-Rol' => $rol];
         parse_str((string) parse_url($url, PHP_URL_QUERY), $consulta);
         $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion(), new Log('moderacion', $this->salidaDelLog));
 
@@ -414,9 +416,9 @@ final class AdministracionDeSolicitudesTest extends TestCase
     /**
      * @param array<string, string> $campos
      */
-    private function cambiarLaSala(string $id, string $accion, array $campos = ['motivo_sala' => 'Venció la póliza del seguro.']): Respuesta
+    private function cambiarLaSala(string $id, string $accion, array $campos = ['motivo_sala' => 'Venció la póliza del seguro.'], ?string $rol = 'administrador'): Respuesta
     {
-        return $this->pedir('POST', "/solicitudes/{$id}/{$accion}", cuerpo: $campos + ['_csrf' => self::CSRF]);
+        return $this->pedir('POST', "/solicitudes/{$id}/{$accion}", $rol, $campos + ['_csrf' => self::CSRF]);
     }
 
     /**
@@ -527,16 +529,70 @@ final class AdministracionDeSolicitudesTest extends TestCase
         yield 'sin sesión' => [null, 401];
         yield 'espectador' => ['espectador', 403];
         yield 'organizador' => ['organizador', 403];
-        yield 'moderador' => ['moderador', 403];
     }
 
+    /**
+     * EF-07.3: la bandeja es del moderador; el administrador también entra, porque lo alcanza.
+     */
     #[DataProvider('quienNoEntra')]
-    public function testSoloEntraElAdministrador(?string $rol, int $estado): void
+    public function testSoloEntranElModeradorYElAdministrador(?string $rol, int $estado): void
     {
         $id = $this->solicitar(self::ESPECTADORA, 'El Galpón');
+        $aprobada = $this->aprobada('La Terraza');
 
         self::assertSame($estado, $this->pedir('GET', '/solicitudes', $rol)->estado());
         self::assertSame($estado, $this->resolver($id, ['resolucion' => 'aprobar', 'motivo' => 'Todo en orden.'], $rol)->estado());
+        self::assertSame($estado, $this->cambiarLaSala($aprobada, 'deshabilitar-sala', rol: $rol)->estado());
+        self::assertSame($estado, $this->cambiarLaSala($aprobada, 'habilitar-sala', rol: $rol)->estado());
         self::assertSame('pendiente', $this->estado($id));
+        self::assertSame([], self::pedidosA('programacion'));
+    }
+
+    /**
+     * El moderador resuelve como el administrador, y queda él como quien resolvió: en la solicitud,
+     * en el rol que da cuentas y en el retiro que registra programación.
+     */
+    public function testElModeradorAtiendeLaBandeja(): void
+    {
+        $id = $this->solicitar(self::ESPECTADORA, 'El Galpón');
+        $rechazada = $this->solicitar(self::ORGANIZADOR, 'La Terraza', '2026-10-02 10:00:00');
+
+        self::assertSame(['El Galpón', 'La Terraza'], self::nombres($this->pedir('GET', '/solicitudes', 'moderador')));
+        self::assertSame(303, $this->resolver($id, ['resolucion' => 'aprobar', 'motivo' => 'Todo en orden.'], 'moderador')->estado());
+        self::assertSame(303, $this->resolver($rechazada, ['resolucion' => 'rechazar', 'motivo' => 'Falta la póliza.'], 'moderador')->estado());
+
+        self::assertSame(['aprobada', 'rechazada'], [$this->estado($id), $this->estado($rechazada)]);
+        self::assertSame([['resuelta_por' => self::MODERADORA]], $this->base->filas('SELECT DISTINCT resuelta_por FROM solicitud_sala'));
+        self::assertSame(self::MODERADORA, self::pedidosA('cuentas')[0]['otorgado_por']);
+        file_put_contents(self::$registros['programacion'], '');
+
+        self::assertSame(303, $this->cambiarLaSala($id, 'deshabilitar-sala', rol: 'moderador')->estado());
+        self::assertSame(self::MODERADORA, self::pedidosA('programacion')[0]['moderador_id']);
+    }
+
+    /**
+     * @return iterable<string, array{string, list<string>}>
+     */
+    public static function barras(): iterable
+    {
+        // El logo y las secciones que puede abrir: al moderador, sólo la bandeja.
+        yield 'moderador' => ['moderador', ['/moderacion/solicitudes']];
+        yield 'administrador' => ['administrador', ['/cuenta/administracion/usuarios', '/funcion/administracion/reservas', '/moderacion/solicitudes']];
+    }
+
+    /**
+     * @param list<string> $enlaces
+     */
+    #[DataProvider('barras')]
+    public function testLaBarraLateralSoloTieneLoQuePuedeAbrir(string $rol, array $enlaces): void
+    {
+        $cuerpo = $this->pedir('GET', '/solicitudes', $rol)->cuerpo();
+
+        self::assertSame(1, preg_match('#<aside class="panel-menu">.*?</aside>#s', $cuerpo, $barra));
+        preg_match_all('#href="([^"]*)"#', $barra[0], $hrefs);
+        $unicos = array_values(array_unique($hrefs[1]));
+        sort($unicos);
+        self::assertSame($enlaces, $unicos);
+        self::assertStringContainsString("rol-{$rol}", $barra[0]);
     }
 }

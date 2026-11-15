@@ -556,7 +556,11 @@ no duplica nada:
 - `recordar-funciones`: manda el recordatorio por correo a las reservas confirmadas de las
   funciones de las próximas 24 horas.
 - `suspender-vencidas` (moderación, una vez por día): suspende las salas con el seguro o la
-  habilitación aceptados vencidos y las apaga en programación, hasta que se acepte uno nuevo.
+  habilitación aceptados vencidos y las apaga en programación, hasta que se acepte uno nuevo. Le
+  avisa por correo al organizador siete días antes y al suspenderla. Con `[documentos]
+  exigible_desde` en el `config.ini` de moderación, a las salas habilitadas que no tienen los dos
+  documentos les da 30 días desde esa fecha (con un aviso al empezar y otro siete días antes del
+  fin) y después las suspende. Al desplegar EF-07.5, poner ahí la fecha del despliegue.
 
 En local no se instalan: se prueban a mano con el `docker compose exec` de cada línea, y los correos
 llegan a Mailpit.

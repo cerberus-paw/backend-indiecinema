@@ -74,6 +74,30 @@ final class SalasDeProgramacion
     }
 
     /**
+     * Las habilitadas que no se dieron de baja, con el id como clave (EF-07.5).
+     *
+     * @return array<string, array{nombre: string, organizador_id: string}>
+     *
+     * @throws ExcepcionHttp    503 si programación no responde
+     * @throws RuntimeException si responde otra cosa
+     */
+    public function habilitadas(): array
+    {
+        $salas = $this->cliente->get('programacion', '/interno/salas', ['habilitadas' => '1']);
+        if (!is_array($salas)) {
+            throw new RuntimeException('programación no respondió las salas habilitadas a GET /interno/salas.');
+        }
+        $habilitadas = [];
+        foreach ($salas as $id => $sala) {
+            if (is_array($sala)) {
+                $habilitadas[(string) $id] = ['nombre' => (string) ($sala['nombre'] ?? ''), 'organizador_id' => (string) ($sala['organizador_id'] ?? '')];
+            }
+        }
+
+        return $habilitadas;
+    }
+
+    /**
      * Lo que programación cuenta de la sala, o null si ya no la tiene (se dio de baja).
      *
      * @return ?array{nombre: string, organizador_id: string, habilitada: bool}

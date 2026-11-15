@@ -61,6 +61,20 @@ final class RepositorioDeDocumentos
     }
 
     /**
+     * Los tipos de los que la sala tiene algún documento aceptado, aunque esté vencido (de ése se
+     * encarga el vencimiento).
+     *
+     * @return list<TipoDocumento>
+     */
+    public function tiposAceptadosDe(string $salaId): array
+    {
+        return array_map(
+            static fn (array $fila): TipoDocumento => TipoDocumento::from((string) $fila['tipo']),
+            $this->base->filas("SELECT DISTINCT tipo FROM documento WHERE sala_id = ? AND estado = 'aceptado' ORDER BY tipo", [$salaId]),
+        );
+    }
+
+    /**
      * Los documentos vigentes (el aceptado con el vencimiento más lejano de cada sala y tipo) que
      * vencen entre las dos fechas, incluidas.
      *

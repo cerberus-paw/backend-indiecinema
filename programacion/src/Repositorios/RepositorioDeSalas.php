@@ -63,6 +63,20 @@ final class RepositorioDeSalas
     }
 
     /**
+     * Las habilitadas que no se dieron de baja, con el id como clave.
+     *
+     * @return array<string, Sala>
+     */
+    public function habilitadas(): array
+    {
+        $salas = array_map(self::sala(...), $this->base->filas(
+            'SELECT ' . self::COLUMNAS . ' FROM sala WHERE habilitada = TRUE AND dada_de_baja_en IS NULL ORDER BY nombre',
+        ));
+
+        return array_column($salas, null, 'id');
+    }
+
+    /**
      * Las salas de un organizador, de la más nueva a la más vieja.
      *
      * @return list<Sala>

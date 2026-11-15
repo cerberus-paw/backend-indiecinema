@@ -46,6 +46,8 @@ try {
         new ServicioDeSuspensiones(new RepositorioDeSuspensiones($base), $salas, $log),
         new AvisosAlOrganizador(new RepositorioDeAvisos($base), $salas, new UsuariosDeCuentas($cliente), ClienteSmtp::desdeConfiguracion($configuracion, $log), $log),
         $log,
+        $configuracion,
+        $salas,
     );
     $suspendidas = $tarea->correr();
 } catch (Throwable $error) {

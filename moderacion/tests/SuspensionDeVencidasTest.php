@@ -62,9 +62,13 @@ final class SuspensionDeVencidasTest extends TestCase
         $this->salidaDelLog = fopen('php://memory', 'w+');
     }
 
-    private function configuracion(): Configuracion
+    /**
+     * @param ?string $exigibleDesde desde cuándo se exige la documentación, o null si no se exige
+     */
+    private function configuracion(?string $exigibleDesde = null): Configuracion
     {
         return new Configuracion([
+            'documentos' => $exigibleDesde === null ? [] : ['exigible_desde' => $exigibleDesde],
             'app' => ['subsistema' => 'moderacion'],
             'base' => self::baseDePruebas(),
             'subsistemas' => ['cuentas' => self::$urls['cuentas'], 'programacion' => self::$urls['programacion']],
@@ -73,9 +77,9 @@ final class SuspensionDeVencidasTest extends TestCase
         ]);
     }
 
-    private function tarea(): SuspensionDeVencidas
+    private function tarea(?string $exigibleDesde = null): SuspensionDeVencidas
     {
-        $configuracion = $this->configuracion();
+        $configuracion = $this->configuracion($exigibleDesde);
         $log = new Log('moderacion', $this->salidaDelLog);
         $cliente = ClienteInterno::desdeConfiguracion($configuracion, $log);
         $salas = new SalasDeProgramacion($cliente, new ArchivosDeSolicitudes($configuracion));
@@ -85,6 +89,8 @@ final class SuspensionDeVencidasTest extends TestCase
             new ServicioDeSuspensiones(new RepositorioDeSuspensiones($this->base), $salas, $log),
             new AvisosAlOrganizador(new RepositorioDeAvisos($this->base), $salas, new UsuariosDeCuentas($cliente), ClienteSmtp::desdeConfiguracion($configuracion, $log), $log),
             $log,
+            $configuracion,
+            $salas,
         );
     }
 
@@ -279,6 +285,84 @@ final class SuspensionDeVencidasTest extends TestCase
         self::salasEnProgramacion([$sala => ['nombre' => 'El Galpón', 'localidad' => 'Luján', 'organizador_id' => self::ORGANIZADOR, 'habilitada' => false]]);
         $this->tarea()->correr();
         self::assertCount(1, self::correos());
+    }
+
+    private static function haceDias(int $dias): string
+    {
+        return new DateTimeImmutable('today')->modify("-{$dias} days")->format('Y-m-d');
+    }
+
+    /**
+     * EF-07.5 (grilling de EF-07, Q4): las salas que ya existían tienen 30 días desde que se exige
+     * la documentación. Al empezar el plazo reciben un aviso, una sola vez.
+     */
+    public function testAlEmpezarElPlazoAvisaALasQueLesFaltaUnDocumento(): void
+    {
+        $sinNada = $this->sala('Sin Nada');
+        $sinSeguro = $this->sala('Sin Seguro');
+        $this->documento($sinSeguro, 'habilitacion', '+1 year');
+        $completa = $this->sala('Completa');
+        $this->documento($completa, 'seguro', '+1 year');
+        $this->documento($completa, 'habilitacion', '+1 year');
+
+        $this->tarea(self::haceDias(0))->correr();
+        $this->tarea(self::haceDias(0))->correr();
+
+        $correos = self::correos();
+        self::assertSame(['Cargá la documentación de «Sin Nada»', 'Cargá la documentación de «Sin Seguro»'], array_column($correos, 'asunto'));
+        self::assertStringContainsString('el seguro y la habilitación', $correos[0]['texto']);
+        self::assertStringContainsString('Te falta el seguro', $correos[1]['texto']);
+        self::assertStringContainsString('hasta el ' . new DateTimeImmutable('today')->modify('+30 days')->format('d/m/Y'), $correos[0]['texto']);
+        self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM suspension'));
+    }
+
+    public function testSieteDiasAntesDelFinDelPlazoAvisaOtraVez(): void
+    {
+        $sala = $this->sala();
+        $this->tarea(self::haceDias(23))->correr();
+        $this->tarea(self::haceDias(23))->correr();
+
+        self::assertSame(['Cargá la documentación de «El Galpón»', 'Quedan 7 días para cargar la documentación de «El Galpón»'], array_column(self::correos(), 'asunto'));
+        self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM suspension'));
+    }
+
+    public function testPasadosTreintaDiasLaSuspendePorFalta(): void
+    {
+        $sala = $this->sala();
+        $this->documento($sala, 'habilitacion', '+1 year');
+
+        self::assertSame(1, $this->tarea(self::haceDias(30))->correr());
+
+        self::assertSame([['causa' => 'vencimiento', 'tipo_documento' => 'seguro', 'motivo' => 'Falta el seguro.', 'abierta_por' => null]], $this->suspensiones($sala));
+        self::assertFalse(self::salasDeProgramacion()[$sala]['habilitada']);
+        self::assertContains('Suspendimos la sala «El Galpón»', array_column(self::correos(), 'asunto'));
+    }
+
+    /**
+     * Sin la clave en la configuración no se exige nada, y antes de la fecha, tampoco.
+     */
+    public function testSinLaClaveOAntesDeLaFechaNoMiraElPlazo(): void
+    {
+        $this->sala();
+
+        $this->tarea()->correr();
+        $this->tarea(new DateTimeImmutable('today')->modify('+1 day')->format('Y-m-d'))->correr();
+
+        self::assertSame([], self::correos());
+        self::assertSame([], array_filter(self::pedidosA('programacion'), static fn (array $pedido): bool => ($pedido['ruta'] ?? '') === 'habilitacion'));
+    }
+
+    /**
+     * Una sala retirada no cuenta: programación sólo devuelve las habilitadas.
+     */
+    public function testUnaSalaSinHabilitarNoEntraEnElPlazo(): void
+    {
+        $sala = $this->sala();
+        self::salasEnProgramacion([$sala => ['nombre' => 'El Galpón', 'localidad' => 'Luján', 'organizador_id' => self::ORGANIZADOR, 'habilitada' => false]]);
+
+        self::assertSame(0, $this->tarea(self::haceDias(40))->correr());
+
+        self::assertSame([], self::correos());
     }
 
     /**

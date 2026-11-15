@@ -41,6 +41,12 @@ $guardar = static function (array $salas) use ($archivoDeSalas): void {
     file_put_contents($archivoDeSalas, json_encode($salas));
 };
 
+if ($metodo === 'GET' && $ruta === '/interno/salas' && ($_GET['habilitadas'] ?? null) === '1') {
+    echo json_encode((object) array_filter($salas, static fn (array $sala): bool => $sala['habilitada'] === true));
+
+    return;
+}
+
 if ($metodo === 'GET' && $ruta === '/interno/salas') {
     $ids = explode(',', (string) ($_GET['ids'] ?? ''));
     echo json_encode((object) array_intersect_key($salas, array_flip($ids)));

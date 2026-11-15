@@ -35,6 +35,10 @@ final class SalasInternas extends Controlador
      */
     public function varias(Peticion $peticion): Respuesta
     {
+        // Todas las habilitadas: la tarea de moderación les exige la documentación (EF-07.5).
+        if ($peticion->consulta('habilitadas') === '1') {
+            return $this->json((object) array_map(self::datos(...), $this->salas->habilitadas()));
+        }
         $lista = $peticion->consulta('ids');
         $ids = is_string($lista) && $lista !== '' ? array_values(array_unique(explode(',', $lista))) : [];
         if ($ids === [] || count($ids) > self::MAXIMO_POR_PEDIDO) {

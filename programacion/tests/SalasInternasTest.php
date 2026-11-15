@@ -280,6 +280,26 @@ final class SalasInternasTest extends TestCase
         ], json_decode($respuesta->cuerpo(), true));
     }
 
+    /**
+     * EF-07.5: la tarea de moderación pide todas las habilitadas, para exigirles la documentación.
+     */
+    public function testLasHabilitadasSinLasDadasDeBaja(): void
+    {
+        $galpon = $this->sala();
+        $this->sala(habilitada: false, nombre: 'El Microcine');
+        $dadaDeBaja = $this->sala(nombre: 'La Vieja Usina');
+        $this->base->ejecutar('UPDATE sala SET dada_de_baja_en = NOW() WHERE id = ?', [$dadaDeBaja->id]);
+
+        $respuesta = $this->pedir('GET', '/interno/salas', ['habilitadas' => '1']);
+
+        self::assertSame(200, $respuesta->estado(), $respuesta->cuerpo());
+        self::assertEquals(
+            [$galpon->id => ['nombre' => 'Cine Club El Galpón', 'localidad' => 'Luján', 'organizador_id' => self::ORGANIZADORA, 'habilitada' => true]],
+            json_decode($respuesta->cuerpo(), true),
+        );
+        self::assertSame(403, $this->pedir('GET', '/interno/salas', ['habilitadas' => '1'], llamador: 'funciones', token: self::TOKEN_DE_FUNCIONES)->estado());
+    }
+
     public function testSinNingunaQueExistaEsUnObjetoVacio(): void
     {
         $respuesta = $this->pedir('GET', '/interno/salas', ['ids' => Uuid::nuevo()]);

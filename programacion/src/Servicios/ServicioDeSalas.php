@@ -148,6 +148,16 @@ final class ServicioDeSalas
     }
 
     /**
+     * Las habilitadas que no se dieron de baja, con el id como clave (EF-07.5).
+     *
+     * @return array<string, Sala>
+     */
+    public function habilitadas(): array
+    {
+        return $this->salas->habilitadas();
+    }
+
+    /**
      * @return list<Sala>
      */
     public function delOrganizador(Usuario $organizador): array

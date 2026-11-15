@@ -8,6 +8,7 @@ use IndieCinema\Nucleo\Seguridad\Rol;
 use IndieCinema\Programacion\Controladores\AcercaDe;
 use IndieCinema\Programacion\Controladores\AficheDeObra;
 use IndieCinema\Programacion\Controladores\AdministracionDeSolicitudes;
+use IndieCinema\Programacion\Controladores\BloqueosDelOrganizador;
 use IndieCinema\Programacion\Controladores\Cartelera;
 use IndieCinema\Programacion\Controladores\FuncionesDelOrganizador;
 use IndieCinema\Programacion\Controladores\FuncionesInternas;
@@ -49,6 +50,11 @@ return static function (Router $router): void {
     $router->get('/organizador/salas', [SalasDelOrganizador::class, 'listar'], Rol::Organizador);
     $router->get('/organizador/salas/{id}/editar', [SalasDelOrganizador::class, 'editar'], Rol::Organizador);
     $router->post('/organizador/salas/{id}/editar', [SalasDelOrganizador::class, 'actualizar'], Rol::Organizador);
+    // Bloqueos de espectadores en salas propias (EF-12.1 / IC-580). Que la sala sea del
+    // organizador lo controla el servicio.
+    $router->get('/organizador/bloqueados', [BloqueosDelOrganizador::class, 'listar'], Rol::Organizador);
+    $router->post('/organizador/salas/{id}/bloqueos', [BloqueosDelOrganizador::class, 'bloquear'], Rol::Organizador);
+    $router->post('/organizador/salas/{id}/bloqueos/{usuario}/quitar', [BloqueosDelOrganizador::class, 'desbloquear'], Rol::Organizador);
 
     // «Mis obras», alta y edición de obras del catálogo.
     $router->get('/organizador/obras', [ObrasDelOrganizador::class, 'listar'], Rol::Organizador);

@@ -119,7 +119,7 @@ final class ReservasDeLaFuncion extends Controlador
     }
 
     /**
-     * @return array{id: string, titulo: string, url: string, fecha: ?string, sala: string, estado: string, cupo: int}
+     * @return array{id: string, titulo: string, url: string, sala_id: string, fecha: ?string, sala: string, estado: string, cupo: int}
      */
     private static function datosDeFuncion(FuncionDeProgramacion $funcion): array
     {
@@ -128,6 +128,7 @@ final class ReservasDeLaFuncion extends Controlador
             'titulo' => $funcion->titulo(),
             // La ficha es de programación: va sin el prefijo de funciones.
             'url' => "/cartelera/{$funcion->id}",
+            'sala_id' => $funcion->salaId,
             'fecha' => $funcion->fechaHora === null ? null : TextoParaMostrar::fecha($funcion->fechaHora),
             'sala' => $funcion->salaNombre,
             'estado' => $funcion->estado,
@@ -136,13 +137,14 @@ final class ReservasDeLaFuncion extends Controlador
     }
 
     /**
-     * @return array{id: string, codigo: string, espectador: ?string, cantidad: int, total: string, estado: string, estado_etiqueta: string, creada: string, registrable: bool}
+     * @return array{id: string, codigo: string, usuario_id: string, espectador: ?string, cantidad: int, total: string, estado: string, estado_etiqueta: string, creada: string, registrable: bool}
      */
     private static function fila(Reserva $reserva, ?string $espectador = null): array
     {
         return [
             'id' => $reserva->id,
             'codigo' => $reserva->codigo,
+            'usuario_id' => $reserva->usuarioId,
             'espectador' => $espectador,
             'cantidad' => $reserva->cantidad,
             'total' => TextoParaMostrar::monto((float) $reserva->total),

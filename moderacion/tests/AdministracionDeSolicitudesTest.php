@@ -45,6 +45,8 @@ final class AdministracionDeSolicitudesTest extends TestCase
     private const ESPECTADORA = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
     private const ORGANIZADOR = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
     private const LENTO = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+    /** Los puntos del checklist de la revisión (EF-07.9), en orden. */
+    private const REQUISITOS = ['seguro_vigente', 'habilitacion', 'capacidad', 'condiciones'];
 
     private static ServidorSmtpDePrueba $correo;
 
@@ -113,11 +115,37 @@ final class AdministracionDeSolicitudesTest extends TestCase
     }
 
     /**
-     * @param array<string, string> $campos
+     * Al aprobar, con los cuatro puntos del checklist tildados (EF-07.9), salvo que la prueba mande
+     * los suyos.
+     *
+     * @param array<string, string|list<string>> $campos
      */
     private function resolver(string $id, array $campos, ?string $rol = 'administrador'): Respuesta
     {
+        if (($campos['resolucion'] ?? null) === 'aprobar') {
+            $campos += ['requisitos' => self::REQUISITOS];
+        }
+
         return $this->pedir('POST', "/solicitudes/{$id}/resolver", $rol, $campos + ['_csrf' => self::CSRF]);
+    }
+
+    /**
+     * Los registros del checklist de una solicitud (EF-07.9), del más viejo al más nuevo: la
+     * resolución, quién y los puntos que tildó.
+     *
+     * @return list<array{resolucion: string, moderador: string, tildados: list<string>}>
+     */
+    private function revisiones(string $solicitud): array
+    {
+        return array_map(static fn (array $fila): array => [
+            'resolucion' => (string) $fila['resolucion'],
+            'moderador' => (string) $fila['moderador_id'],
+            'tildados' => array_values(array_filter(self::REQUISITOS, static fn (string $requisito): bool => (bool) $fila[$requisito])),
+        ], $this->base->filas(
+            'SELECT resolucion, moderador_id, seguro_vigente, habilitacion, capacidad, condiciones FROM revision_requisitos
+             WHERE solicitud_id = ? ORDER BY revisado_en, id',
+            [$solicitud],
+        ));
     }
 
     /**
@@ -397,6 +425,109 @@ final class AdministracionDeSolicitudesTest extends TestCase
         self::assertStringContainsString($error, $respuesta->cuerpo());
         self::assertSame('pendiente', $this->estado($id));
         self::assertSame([], self::pedidosA('cuentas'));
+    }
+
+    /**
+     * EF-07.9: una abierta muestra el checklist con los cuatro puntos, cada uno con lo que hay que
+     * mirar, sin tildar.
+     */
+    public function testUnaAbiertaMuestraElChecklistConLosCuatroPuntos(): void
+    {
+        $id = $this->solicitar(self::ESPECTADORA, 'El Galpón');
+
+        $pantalla = $this->pedir('GET', "/solicitudes?id={$id}")->cuerpo();
+
+        self::assertStringContainsString('<fieldset id="requisitos"', $pantalla);
+        foreach ([
+            'Seguro vigente' => 'La póliza es del espacio declarado y está al día.',
+            'Habilitación del espacio' => 'El certificado es de la dirección declarada.',
+            'Capacidad declarada' => 'La capacidad coincide con la que figura en la habilitación.',
+            'Condiciones del espacio' => 'La foto y la descripción muestran un lugar apto para proyectar.',
+        ] as $nombre => $aclaracion) {
+            self::assertStringContainsString($nombre, $pantalla);
+            self::assertStringContainsString($aclaracion, $pantalla);
+        }
+        self::assertSame(4, preg_match_all('#<input type="checkbox" name="requisitos\[\]"#', $pantalla));
+        self::assertDoesNotMatchRegularExpression('#name="requisitos\[\]"[^>]*checked#', $pantalla);
+    }
+
+    /**
+     * EF-07.9: aprobar pide los cuatro puntos. Sin uno, vuelve con el error y con lo que había
+     * tildado, elegido y escrito, y no se aprueba ni se registra nada.
+     */
+    public function testAprobarSinLosCuatroPuntosNoSeApruebaYConservaLoTildado(): void
+    {
+        $id = $this->solicitar(self::ESPECTADORA, 'El Galpón');
+
+        $respuesta = $this->resolver($id, ['resolucion' => 'aprobar', 'motivo' => 'Todo en orden.', 'requisitos' => ['seguro_vigente', 'habilitacion', 'capacidad']]);
+
+        self::assertSame(422, $respuesta->estado());
+        $pantalla = $respuesta->cuerpo();
+        self::assertStringContainsString('Para aprobarla, tildá los cuatro puntos.', $pantalla);
+        self::assertMatchesRegularExpression('#aria-describedby="[^"]*error-requisitos"#', $pantalla);
+        self::assertSame(3, preg_match_all('#name="requisitos\[\]" value="[a-z_]+" checked#', $pantalla));
+        self::assertDoesNotMatchRegularExpression('#value="condiciones" checked#', $pantalla);
+        self::assertMatchesRegularExpression('#value="aprobar" required checked#', $pantalla);
+        self::assertStringContainsString('Todo en orden.', $pantalla);
+        self::assertSame('pendiente', $this->estado($id));
+        self::assertSame([], self::pedidosA('cuentas'));
+        self::assertSame([], self::pedidosA('programacion'));
+        self::assertSame([], $this->revisiones($id));
+    }
+
+    /**
+     * EF-07.9: aprobar deja registrado quién la aprobó y que tildó los cuatro puntos.
+     */
+    public function testAprobarDejaRegistradoElChecklist(): void
+    {
+        $id = $this->solicitar(self::ESPECTADORA, 'El Galpón');
+
+        self::assertSame(303, $this->resolver($id, ['resolucion' => 'aprobar', 'motivo' => 'Todo en orden.'], 'moderador')->estado());
+
+        self::assertSame([['resolucion' => 'aprobada', 'moderador' => self::MODERADORA, 'tildados' => self::REQUISITOS]], $this->revisiones($id));
+    }
+
+    /**
+     * EF-07.9: lo que no es un punto del checklist no cuenta, y uno repetido cuenta una vez.
+     *
+     * @param list<string>|string $requisitos
+     */
+    #[DataProvider('checklistsIncompletos')]
+    public function testLoQueNoEsUnPuntoNoCuenta(array|string $requisitos): void
+    {
+        $id = $this->solicitar(self::ESPECTADORA, 'El Galpón');
+
+        $respuesta = $this->pedir('POST', "/solicitudes/{$id}/resolver", cuerpo: ['resolucion' => 'aprobar', 'motivo' => 'Todo en orden.', 'requisitos' => $requisitos, '_csrf' => self::CSRF]);
+
+        self::assertSame(422, $respuesta->estado());
+        self::assertSame('pendiente', $this->estado($id));
+    }
+
+    /**
+     * @return iterable<string, array{list<string>|string}>
+     */
+    public static function checklistsIncompletos(): iterable
+    {
+        yield 'sin ninguno' => [[]];
+        yield 'uno de más en lugar de uno' => [['seguro_vigente', 'habilitacion', 'capacidad', 'otro']];
+        yield 'uno repetido' => [['seguro_vigente', 'habilitacion', 'capacidad', 'capacidad']];
+        yield 'un texto en lugar de la lista' => ['seguro_vigente'];
+    }
+
+    /**
+     * EF-07.9: el pedido de cambio de dirección lleva el mismo checklist, y una mudada sin
+     * documentos se aprueba tildando los cuatro a mano.
+     */
+    public function testElCambioYLaMudadaTambienPidenLosCuatro(): void
+    {
+        $cambio = $this->solicitar(self::ORGANIZADOR, 'El Galpón', cambio: true);
+        $mudada = $this->solicitar(self::ESPECTADORA, 'La Terraza', conFoto: false);
+
+        foreach ([$cambio, $mudada] as $id) {
+            self::assertSame(422, $this->resolver($id, ['resolucion' => 'aprobar', 'motivo' => 'Todo en orden.', 'requisitos' => ['capacidad']])->estado());
+            self::assertSame(303, $this->resolver($id, ['resolucion' => 'aprobar', 'motivo' => 'Todo en orden.'])->estado());
+            self::assertSame('aprobada', $this->estado($id));
+        }
     }
 
     /**
@@ -962,6 +1093,7 @@ final class AdministracionDeSolicitudesTest extends TestCase
         $pantalla = $this->pedir('GET', "/solicitudes?id={$id}", 'moderador')->cuerpo();
         self::assertStringNotContainsString("/solicitudes/{$id}/resolver", $pantalla);
         self::assertStringContainsString('La mandaste vos: la resuelve otro moderador.', $pantalla);
+        self::assertStringNotContainsString('name="requisitos[]"', $pantalla);
 
         foreach (['aprobar', 'rechazar', 'revision'] as $resolucion) {
             self::assertSame(403, $this->resolver($id, ['resolucion' => $resolucion, 'motivo' => 'Todo en orden.'], 'moderador')->estado());

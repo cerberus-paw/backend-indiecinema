@@ -66,6 +66,7 @@ trait ConBaseDePruebas
     {
         $base = BaseDeDatos::conectar($configuracion);
         $base->ejecutar('SET FOREIGN_KEY_CHECKS = 0');
+        $base->ejecutar('DROP TABLE IF EXISTS revision_requisitos');
         $base->ejecutar('DROP TABLE IF EXISTS denuncia');
         $base->ejecutar('DROP TABLE IF EXISTS revision_obra');
         $base->ejecutar('DROP TABLE IF EXISTS aviso');

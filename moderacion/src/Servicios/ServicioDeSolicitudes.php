@@ -13,6 +13,7 @@ use IndieCinema\Moderacion\Modelo\DocumentoSubido;
 use IndieCinema\Moderacion\Modelo\EstadoDocumento;
 use IndieCinema\Moderacion\Modelo\EstadoSolicitud;
 use IndieCinema\Moderacion\Modelo\ImagenSubida;
+use IndieCinema\Moderacion\Modelo\RequisitoDeSala;
 use IndieCinema\Moderacion\Modelo\SolicitudDeSala;
 use IndieCinema\Moderacion\Modelo\UsuarioDeCuentas;
 use IndieCinema\Moderacion\Repositorios\RepositorioDeDocumentos;
@@ -243,53 +244,65 @@ final class ServicioDeSolicitudes
      * aprobada sin sala, o una sala publicada cuyo dueño no puede entrar a «Mis salas». Se aprueba
      * igual una pendiente que una en revisión manual.
      *
+     * Aprobarla exige el checklist completo (EF-07.9), que queda registrado con la aprobación. El
+     * controlador ya lo validó: acá se vuelve a controlar porque es la regla, no el formulario.
+     *
+     * @param list<RequisitoDeSala> $tildados
+     *
      * @return bool false si ya estaba resuelta: no cambia nada
      *
      * @throws ExcepcionHttp 404 si no existe; 403 si es del moderador; 503 si cuentas o
      *                       programación no responden
      */
-    public function aprobar(string $id, Usuario $moderador, string $motivo): bool
+    public function aprobar(string $id, Usuario $moderador, string $motivo, array $tildados): bool
     {
         $solicitud = $this->buscar($id);
         $this->controlarQueLaPuedeResolver($solicitud, $moderador);
         if (!$solicitud->estaAbierta()) {
             return false;
         }
+        if (!RequisitoDeSala::completo($tildados)) {
+            throw new LogicException('Aprobar una solicitud exige los cuatro puntos del checklist: el controlador los pide.');
+        }
         $this->usuarios->darOrganizador($solicitud->usuarioId, $moderador->id);
         $this->salas->crearParaSolicitud($solicitud);
 
-        return $this->resolver($solicitud, EstadoSolicitud::Aprobada, $moderador, $motivo);
+        return $this->resolver($solicitud, EstadoSolicitud::Aprobada, $moderador, $motivo, $tildados);
     }
 
     /**
      * Quien la mandó ve el motivo para corregirla. Programación no se entera: la sala no existe
      * todavía, o, si se mudó con la solicitud, sigue sin publicar.
      *
+     * @param list<RequisitoDeSala> $tildados los puntos del checklist que cumplía (EF-07.9)
+     *
      * @return bool false si ya estaba resuelta: no cambia nada
      *
      * @throws ExcepcionHttp 404 si no existe; 403 si es del moderador
      */
-    public function rechazar(string $id, Usuario $moderador, string $motivo): bool
+    public function rechazar(string $id, Usuario $moderador, string $motivo, array $tildados): bool
     {
         $solicitud = $this->buscar($id);
         $this->controlarQueLaPuedeResolver($solicitud, $moderador);
 
-        return $this->resolver($solicitud, EstadoSolicitud::Rechazada, $moderador, $motivo);
+        return $this->resolver($solicitud, EstadoSolicitud::Rechazada, $moderador, $motivo, $tildados);
     }
 
     /**
      * La pasa a revisión manual (EF-07.6), por ejemplo para coordinar una visita al espacio: sigue
      * abierta, y quien la mandó ve el motivo. Después se aprueba o se rechaza como una pendiente.
      *
+     * @param list<RequisitoDeSala> $tildados los puntos del checklist que ya controló (EF-07.9)
+     *
      * @return bool false si no estaba pendiente: no cambia nada
      *
      * @throws ExcepcionHttp 404 si no existe; 403 si es del moderador
      */
-    public function pasarARevision(string $id, Usuario $moderador, string $motivo): bool
+    public function pasarARevision(string $id, Usuario $moderador, string $motivo, array $tildados): bool
     {
         $solicitud = $this->buscar($id);
         $this->controlarQueLaPuedeResolver($solicitud, $moderador);
-        if (!$this->solicitudes->pasarARevision($solicitud->id, $moderador->id, $motivo, self::ahora())) {
+        if (!$this->solicitudes->pasarARevision($solicitud->id, $moderador->id, $motivo, self::ahora(), $tildados)) {
             return false;
         }
         $this->registrar($solicitud, EstadoSolicitud::EnRevisionManual, $moderador);
@@ -434,9 +447,12 @@ final class ServicioDeSolicitudes
         return $solicitud->imagen;
     }
 
-    private function resolver(SolicitudDeSala $solicitud, EstadoSolicitud $estado, Usuario $moderador, string $motivo): bool
+    /**
+     * @param list<RequisitoDeSala> $tildados
+     */
+    private function resolver(SolicitudDeSala $solicitud, EstadoSolicitud $estado, Usuario $moderador, string $motivo, array $tildados): bool
     {
-        if (!$this->solicitudes->resolver($solicitud->id, $estado, $moderador->id, $motivo, self::ahora())) {
+        if (!$this->solicitudes->resolver($solicitud->id, $estado, $moderador->id, $motivo, self::ahora(), $tildados)) {
             return false;
         }
         $this->registrar($solicitud, $estado, $moderador);

@@ -145,6 +145,28 @@ final class MigracionesTest extends TestCase
     }
 
     /**
+     * EF-07.9: el checklist de una resolución es de una solicitud que existe, y una aprobación lleva
+     * los cuatro puntos tildados; rechazar o pasar a revisión, los que sean.
+     */
+    public function testUnaAprobacionLlevaLosCuatroPuntosDelChecklist(): void
+    {
+        $solicitud = $this->solicitar(Uuid::nuevo());
+        $revisar = fn (string $solicitudId, string $resolucion, int $condiciones) => $this->base->ejecutar(
+            "INSERT INTO revision_requisitos (id, solicitud_id, moderador_id, resolucion, revisado_en, seguro_vigente, habilitacion, capacidad, condiciones)
+             VALUES (?, ?, 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', ?, NOW(), TRUE, TRUE, TRUE, ?)",
+            [Uuid::nuevo(), $solicitudId, $resolucion, $condiciones],
+        );
+
+        $this->assertRechaza(self::RESTRICCION_CHECK, fn () => $revisar($solicitud, 'aprobada', 0));
+        $this->assertRechaza(self::CLAVE_FORANEA, fn () => $revisar(Uuid::nuevo(), 'rechazada', 0));
+
+        $revisar($solicitud, 'en_revision_manual', 0);
+        $revisar($solicitud, 'rechazada', 0);
+        $revisar($solicitud, 'aprobada', 1);
+        self::assertSame(3, $this->base->valor('SELECT COUNT(*) FROM revision_requisitos'));
+    }
+
+    /**
      * EF-07.4: una solicitud lleva un seguro y una habilitación, de una solicitud que existe; una
      * renovación (sin solicitud) puede haber varias por sala.
      */

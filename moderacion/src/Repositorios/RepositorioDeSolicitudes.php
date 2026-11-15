@@ -10,9 +10,11 @@ use IndieCinema\Moderacion\Modelo\DatosDeSala;
 use IndieCinema\Moderacion\Modelo\Documento;
 use IndieCinema\Moderacion\Modelo\EstadoDocumento;
 use IndieCinema\Moderacion\Modelo\EstadoSolicitud;
+use IndieCinema\Moderacion\Modelo\RequisitoDeSala;
 use IndieCinema\Moderacion\Modelo\SolicitudDeSala;
 use IndieCinema\Moderacion\Servicios\SolicitudPendiente;
 use IndieCinema\Nucleo\BaseDeDatos;
+use IndieCinema\Nucleo\Uuid;
 use PDOException;
 
 /**
@@ -141,42 +143,76 @@ final class RepositorioDeSolicitudes
 
     /**
      * La deja resuelta si estaba abierta, y con ella sus documentos (EF-07.4): aprobarla los
-     * acepta y rechazarla los rechaza (grilling de EF-07, Q6). Todo junto o nada.
+     * acepta y rechazarla los rechaza (grilling de EF-07, Q6), y con el checklist que tildó quien la
+     * resolvió (EF-07.9). Todo junto o nada.
+     *
+     * @param list<RequisitoDeSala> $tildados
      *
      * @return bool false si ya estaba resuelta: no cambia nada
      */
-    public function resolver(string $id, EstadoSolicitud $estado, string $resueltaPor, string $motivo, DateTimeImmutable $resueltaEn): bool
+    public function resolver(string $id, EstadoSolicitud $estado, string $resueltaPor, string $motivo, DateTimeImmutable $resueltaEn, array $tildados): bool
     {
-        return (bool) $this->base->enTransaccion(function (BaseDeDatos $base) use ($id, $estado, $resueltaPor, $motivo, $resueltaEn): bool {
+        return (bool) $this->base->enTransaccion(function (BaseDeDatos $base) use ($id, $estado, $resueltaPor, $motivo, $resueltaEn, $tildados): bool {
             $resuelta = $base->ejecutar(
                 'UPDATE solicitud_sala SET estado = ?, resuelta_por = ?, motivo = ?, resuelta_en = ? WHERE id = ? AND estado IN (?, ?)',
                 [$estado->value, $resueltaPor, $motivo, $resueltaEn, $id, ...self::abiertas()],
             ) === 1;
+            if (!$resuelta) {
+                return false;
+            }
             $documentos = match ($estado) {
                 EstadoSolicitud::Aprobada => EstadoDocumento::Aceptado,
                 EstadoSolicitud::Rechazada => EstadoDocumento::Rechazado,
                 default => null,
             };
-            if ($resuelta && $documentos !== null) {
+            if ($documentos !== null) {
                 $base->ejecutar('UPDATE documento SET estado = ? WHERE solicitud_id = ?', [$documentos->value, $id]);
             }
+            self::registrarChecklist($base, $id, $estado, $resueltaPor, $resueltaEn, $tildados);
 
-            return $resuelta;
+            return true;
         });
     }
 
     /**
      * La pasa a revisión manual (EF-07.6) si estaba pendiente: sigue abierta, con el motivo de la
-     * revisión aparte del de la resolución.
+     * revisión aparte del de la resolución, y con el checklist que tildó quien la pasó (EF-07.9).
+     *
+     * @param list<RequisitoDeSala> $tildados
      *
      * @return bool false si no estaba pendiente: no cambia nada
      */
-    public function pasarARevision(string $id, string $revisadaPor, string $motivo, DateTimeImmutable $revisadaEn): bool
+    public function pasarARevision(string $id, string $revisadaPor, string $motivo, DateTimeImmutable $revisadaEn, array $tildados): bool
     {
-        return $this->base->ejecutar(
-            'UPDATE solicitud_sala SET estado = ?, revision_por = ?, revision_motivo = ?, revision_en = ? WHERE id = ? AND estado = ?',
-            [EstadoSolicitud::EnRevisionManual->value, $revisadaPor, $motivo, $revisadaEn, $id, EstadoSolicitud::Pendiente->value],
-        ) === 1;
+        return (bool) $this->base->enTransaccion(function (BaseDeDatos $base) use ($id, $revisadaPor, $motivo, $revisadaEn, $tildados): bool {
+            $pasada = $base->ejecutar(
+                'UPDATE solicitud_sala SET estado = ?, revision_por = ?, revision_motivo = ?, revision_en = ? WHERE id = ? AND estado = ?',
+                [EstadoSolicitud::EnRevisionManual->value, $revisadaPor, $motivo, $revisadaEn, $id, EstadoSolicitud::Pendiente->value],
+            ) === 1;
+            if ($pasada) {
+                self::registrarChecklist($base, $id, EstadoSolicitud::EnRevisionManual, $revisadaPor, $revisadaEn, $tildados);
+            }
+
+            return $pasada;
+        });
+    }
+
+    /**
+     * Qué tildó el moderador al resolverla: una fila por resolución, con una columna por punto.
+     *
+     * @param list<RequisitoDeSala> $tildados
+     */
+    private static function registrarChecklist(BaseDeDatos $base, string $solicitudId, EstadoSolicitud $resolucion, string $moderadorId, DateTimeImmutable $revisadoEn, array $tildados): void
+    {
+        $columnas = array_map(static fn (RequisitoDeSala $requisito): string => $requisito->value, RequisitoDeSala::cases());
+        $base->ejecutar(
+            'INSERT INTO revision_requisitos (id, solicitud_id, moderador_id, resolucion, revisado_en, ' . implode(', ', $columnas) . ')
+             VALUES (?, ?, ?, ?, ?' . str_repeat(', ?', count($columnas)) . ')',
+            [
+                Uuid::nuevo(), $solicitudId, $moderadorId, $resolucion->value, $revisadoEn,
+                ...array_map(static fn (RequisitoDeSala $requisito): int => (int) in_array($requisito, $tildados, true), RequisitoDeSala::cases()),
+            ],
+        );
     }
 
     /**

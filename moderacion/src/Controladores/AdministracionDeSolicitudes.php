@@ -7,6 +7,7 @@ namespace IndieCinema\Moderacion\Controladores;
 use DateTimeImmutable;
 use IndieCinema\Moderacion\Modelo\Documento;
 use IndieCinema\Moderacion\Modelo\EstadoSolicitud;
+use IndieCinema\Moderacion\Modelo\RequisitoDeSala;
 use IndieCinema\Moderacion\Modelo\SolicitudDeSala;
 use IndieCinema\Moderacion\Servicios\ServicioDeSolicitudes;
 use IndieCinema\Nucleo\Controlador;
@@ -21,7 +22,8 @@ use LogicException;
  * wireframe de la E2 (moderacion-solicitudes): el buscador y la lista a la izquierda y la elegida
  * (?id=) a la derecha, con la sala, quién la mandó y la resolución, que lleva un motivo
  * obligatorio. Una pendiente también pasa a revisión manual (EF-07.6), con su motivo, y sigue en
- * la lista hasta que se aprueba o se rechaza. «Ver historial de decisiones» (?ver=historial) lista
+ * la lista hasta que se aprueba o se rechaza. Cada resolución lleva el checklist de requisitos
+ * (EF-07.9): aprobar exige los cuatro puntos, y queda registrado qué tildó cada moderador. «Ver historial de decisiones» (?ver=historial) lista
  * las resueltas; desde una
  * aprobada la sala se retira del sitio o se vuelve a publicar, con un motivo, por la API interna de
  * programación.
@@ -62,6 +64,7 @@ final class AdministracionDeSolicitudes extends Controlador
         $this->servicio->controlarQueLaPuedeResolver($solicitud, self::moderador($peticion));
         $resolucion = $peticion->campo('resolucion');
         $motivo = self::motivo($peticion->campo('motivo'));
+        $tildados = RequisitoDeSala::tildados($peticion->campo('requisitos'));
         $errores = [];
         if (!in_array($resolucion, self::RESOLUCIONES, true)) {
             $errores['resolucion'] = 'Elegí si la aprobás, la rechazás o la pasás a revisión manual.';
@@ -73,15 +76,22 @@ final class AdministracionDeSolicitudes extends Controlador
         } elseif (mb_strlen($motivo) > self::MAXIMO_MOTIVO) {
             $errores['motivo'] = 'El motivo puede tener hasta ' . self::MAXIMO_MOTIVO . ' caracteres.';
         }
+        if ($resolucion === 'aprobar' && !RequisitoDeSala::completo($tildados)) {
+            $errores['requisitos'] = 'Para aprobarla, tildá los cuatro puntos.';
+        }
         if ($errores !== []) {
-            return $this->bandeja($peticion, $solicitud, ['resolucion' => is_string($resolucion) ? $resolucion : '', 'motivo' => $motivo], $errores, estado: 422);
+            return $this->bandeja($peticion, $solicitud, [
+                'resolucion' => is_string($resolucion) ? $resolucion : '',
+                'motivo' => $motivo,
+                'requisitos' => array_map(static fn (RequisitoDeSala $requisito): string => $requisito->value, $tildados),
+            ], $errores, estado: 422);
         }
 
         $moderador = self::moderador($peticion);
         $resuelta = match ($resolucion) {
-            'aprobar' => $this->servicio->aprobar($solicitud->id, $moderador, $motivo),
-            'revision' => $this->servicio->pasarARevision($solicitud->id, $moderador, $motivo),
-            default => $this->servicio->rechazar($solicitud->id, $moderador, $motivo),
+            'aprobar' => $this->servicio->aprobar($solicitud->id, $moderador, $motivo, $tildados),
+            'revision' => $this->servicio->pasarARevision($solicitud->id, $moderador, $motivo, $tildados),
+            default => $this->servicio->rechazar($solicitud->id, $moderador, $motivo, $tildados),
         };
         $aviso = match (true) {
             !$resuelta => 'ya_resuelta',
@@ -137,7 +147,7 @@ final class AdministracionDeSolicitudes extends Controlador
     }
 
     /**
-     * @param array{resolucion?: string, motivo?: string, motivo_sala?: string} $valores lo que mandó, si hubo errores
+     * @param array{resolucion?: string, motivo?: string, requisitos?: list<string>, motivo_sala?: string} $valores lo que mandó, si hubo errores
      * @param array<string, string>                       $errores campo => qué está mal
      */
     private function bandeja(Peticion $peticion, ?SolicitudDeSala $elegida, array $valores = [], array $errores = [], ?string $mensaje = null, int $estado = 200): Respuesta
@@ -171,6 +181,12 @@ final class AdministracionDeSolicitudes extends Controlador
             'valores' => $valores,
             'errores' => $errores,
             'maximo_motivo' => self::MAXIMO_MOTIVO,
+            // EF-07.9: los puntos del checklist, para resolver una abierta.
+            'requisitos' => array_map(static fn (RequisitoDeSala $requisito): array => [
+                'clave' => $requisito->value,
+                'nombre' => $requisito->nombre(),
+                'aclaracion' => $requisito->aclaracion(),
+            ], RequisitoDeSala::cases()),
         ];
         // La plantilla muestra el mensaje si la variable existe: sólo se pasa cuando hay algo que
         // decir.

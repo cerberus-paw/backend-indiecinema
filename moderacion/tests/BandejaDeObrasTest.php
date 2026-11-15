@@ -11,6 +11,7 @@ use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Log;
 use IndieCinema\Nucleo\Pruebas\Dobles\PaginasParaValidar;
+use IndieCinema\Nucleo\Pruebas\Dobles\ServidorSmtpDePrueba;
 use IndieCinema\Nucleo\Uuid;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
@@ -19,7 +20,8 @@ use PHPUnit\Framework\TestCase;
  * La pestaña «Obras» de la bandeja de moderación (EF-07.7), de punta a punta: las obras que cargan
  * los organizadores quedan pendientes en programación hasta que un moderador las aprueba o las
  * rechaza con un motivo. Con la aplicación entera, un MySQL de verdad y una programación y una
- * cuentas de mentira, a las que se les piden las pendientes, la resolución y el dueño.
+ * cuentas de mentira, a las que se les piden las pendientes, la resolución y el dueño, y un SMTP
+ * de prueba, que recibe el correo al dueño.
  */
 final class BandejaDeObrasTest extends TestCase
 {
@@ -33,7 +35,12 @@ final class BandejaDeObrasTest extends TestCase
     // El organizador que conoce Dobles/cuentas.php.
     private const ORGANIZADOR = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 
+    private static ServidorSmtpDePrueba $correo;
+
     private BaseDeDatos $base;
+
+    /** Por dónde salen los correos: el SMTP de prueba, salvo que la prueba lo tire. */
+    private ?string $servidorDeCorreo = null;
 
     /** @var resource */
     private $salidaDelLog;
@@ -41,16 +48,19 @@ final class BandejaDeObrasTest extends TestCase
     public static function setUpBeforeClass(): void
     {
         self::iniciarServidores();
+        self::$correo = ServidorSmtpDePrueba::iniciar();
     }
 
     public static function tearDownAfterClass(): void
     {
         self::detenerServidores();
+        self::$correo->detener();
     }
 
     protected function setUp(): void
     {
         self::reiniciarServidores();
+        self::$correo->vaciar();
         $this->base = self::baseConTablasNuevas($this->configuracion());
         $this->salidaDelLog = fopen('php://memory', 'w+');
     }
@@ -64,8 +74,7 @@ final class BandejaDeObrasTest extends TestCase
             'nginx' => ['secreto' => self::SECRETO],
             'subsistemas' => ['cuentas' => self::$urls['cuentas'], 'programacion' => self::$urls['programacion']],
             'interno' => ['token' => 'token-de-moderacion'],
-            // Sin correos en esta pestaña hasta el aviso al dueño: en el puerto 1 no escucha nadie.
-            'correo' => ['servidor' => 'smtp://127.0.0.1:1', 'remitente' => 'no-responder@indiecinema.test'],
+            'correo' => ['servidor' => $this->servidorDeCorreo ?? self::$correo->url(), 'remitente' => 'no-responder@indiecinema.test'],
         ]);
     }
 
@@ -178,6 +187,78 @@ final class BandejaDeObrasTest extends TestCase
         $historial = $this->pedir('GET', '/obras?ver=historial');
         self::assertSame(['Mi obra'], self::titulos($historial));
         self::assertStringContainsString('Revisé el título y el afiche.', $historial->cuerpo());
+    }
+
+    /**
+     * @return iterable<string, array{string, string, string}>
+     */
+    public static function correos(): iterable
+    {
+        yield 'aprobar' => ['aprobar', 'Aprobamos tu obra «Mi obra»', 'ya está en el catálogo'];
+        yield 'rechazar' => ['rechazar', 'Rechazamos tu obra «Mi obra»', 'Corregila en «Mis obras» (/organizador/obras)'];
+    }
+
+    /**
+     * EF-07.7 (Q17): su dueño se entera por correo, con el motivo. La dirección la da cuentas.
+     */
+    #[DataProvider('correos')]
+    public function testResolverLeMandaUnCorreoAlDueno(string $resolucion, string $asunto, string $texto): void
+    {
+        $id = self::obra('Mi obra');
+
+        $this->resolver($id, ['resolucion' => $resolucion, 'motivo' => 'Revisé el título y el afiche.']);
+
+        $correos = self::correosEnviados();
+        self::assertCount(1, $correos);
+        self::assertSame('<omar@ejemplo.com>', $correos[0]['para']);
+        self::assertSame($asunto, $correos[0]['asunto']);
+        self::assertStringContainsString('Revisé el título y el afiche.', $correos[0]['texto']);
+        self::assertStringContainsString($texto, $correos[0]['texto']);
+    }
+
+    /**
+     * El correo es el aviso: lo que decidió el moderador no depende de él.
+     */
+    public function testSiCuentasNoRespondeLaResolucionQuedaYElLogLoDice(): void
+    {
+        $id = self::obra('Mi obra');
+        self::tirar('cuentas');
+
+        self::assertSame(303, $this->resolver($id, ['resolucion' => 'rechazar', 'motivo' => 'Falta el afiche.'])->estado());
+
+        self::assertSame('rechazada', self::obrasDeProgramacion()[$id]['estado']);
+        self::assertCount(1, $this->registro());
+        self::assertSame([], self::correosEnviados());
+        self::assertStringContainsString("La obra {$id} quedó rechazada, pero no se le avisó a su dueño", $this->log());
+    }
+
+    public function testSiFallaElCorreoLaResolucionQueda(): void
+    {
+        $id = self::obra('Mi obra');
+        // En el puerto 1 no escucha nadie.
+        $this->servidorDeCorreo = 'smtp://127.0.0.1:1';
+
+        self::assertSame(303, $this->resolver($id, ['resolucion' => 'aprobar', 'motivo' => 'Bien.'])->estado());
+
+        self::assertSame('aprobada', self::obrasDeProgramacion()[$id]['estado']);
+        self::assertStringContainsString("La obra {$id} quedó aprobada, pero no se le avisó a su dueño", $this->log());
+    }
+
+    /**
+     * @return list<array{para: string, asunto: string, texto: string}> los correos que salieron, ya decodificados
+     */
+    private static function correosEnviados(): array
+    {
+        return array_map(static function (array $correo): array {
+            [$cabeceras, $cuerpo] = explode("\r\n\r\n", $correo['mensaje'], 2);
+            $asunto = iconv_mime_decode_headers($cabeceras, 0, 'UTF-8')['Subject'] ?? '';
+
+            return [
+                'para' => implode(',', $correo['para']),
+                'asunto' => is_array($asunto) ? implode(' ', $asunto) : (string) $asunto,
+                'texto' => (string) base64_decode(str_replace("\r\n", '', $cuerpo), true),
+            ];
+        }, self::$correo->correos());
     }
 
     /**

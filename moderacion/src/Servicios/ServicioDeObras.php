@@ -12,7 +12,11 @@ use IndieCinema\Moderacion\Repositorios\RepositorioDeRevisionesDeObras;
 use IndieCinema\Nucleo\Http\ExcepcionHttp;
 use IndieCinema\Nucleo\Seguridad\Rol;
 use IndieCinema\Nucleo\Seguridad\Usuario;
+use IndieCinema\Nucleo\Correo\ClienteSmtp;
+use IndieCinema\Nucleo\Correo\Correo;
 use Psr\Log\LoggerInterface;
+use RuntimeException;
+use Throwable;
 
 /**
  * La revisión de las obras nuevas (EF-07.7): una obra que carga un organizador queda pendiente en
@@ -28,6 +32,7 @@ final class ServicioDeObras
         private readonly ObrasDeProgramacion $obras,
         private readonly RepositorioDeRevisionesDeObras $revisiones,
         private readonly UsuariosDeCuentas $usuarios,
+        private readonly ClienteSmtp $correo,
         private readonly LoggerInterface $log,
     ) {
     }
@@ -96,8 +101,42 @@ final class ServicioDeObras
             'obra' => $obra->id,
             'estado' => $revisada['estado'],
         ]);
+        $this->avisarAlDueno($obra->id, $revisada['dueno_id'], $revisada['titulo'], $aprobar, $motivo);
 
         return true;
+    }
+
+    /**
+     * El correo al dueño, con el motivo (grilling de EF-07, Q17). Su dirección la da cuentas. Es
+     * sólo el aviso: si cuentas no responde o el correo falla, la resolución queda igual y el log
+     * lo dice.
+     */
+    private function avisarAlDueno(string $obraId, string $duenoId, string $titulo, bool $aprobada, string $motivo): void
+    {
+        try {
+            $dueno = $this->usuarios->buscar($duenoId) ?? throw new RuntimeException('cuentas ya no tiene al usuario.');
+            $this->correo->enviar(new Correo(
+                $dueno->correo,
+                ($aprobada ? 'Aprobamos' : 'Rechazamos') . " tu obra «{$titulo}»",
+                implode("\n", $aprobada ? [
+                    "Aprobamos «{$titulo}»: ya está en el catálogo de IndieCinema y se puede proponer en las funciones.",
+                    '',
+                    'Lo que anotó la moderación:',
+                    $motivo,
+                ] : [
+                    "Rechazamos «{$titulo}», por este motivo:",
+                    $motivo,
+                    '',
+                    'Corregila en «Mis obras» (/organizador/obras): al guardarla, vuelve a revisión.',
+                ]),
+            ));
+        } catch (Throwable $error) {
+            $this->log->warning('La obra {obra} quedó {estado}, pero no se le avisó a su dueño: {mensaje}', [
+                'obra' => $obraId,
+                'estado' => $aprobada ? 'aprobada' : 'rechazada',
+                'mensaje' => $error->getMessage(),
+            ]);
+        }
     }
 
     /**

@@ -94,6 +94,10 @@ final readonly class Obra
         );
     }
 
+    /**
+     * Con los datos corregidos. Corregir una rechazada la vuelve a pendiente, para que la revise la
+     * moderación; una aprobada o una pendiente siguen como estaban (EF-07.7, grilling de EF-07, Q7).
+     */
     public function actualizar(DatosDeObra $datos, ?string $nuevoAfiche = null): self
     {
         self::validar($datos->titulo, $datos->duracionMinutos, $datos->anio, $datos->generosIds);
@@ -110,7 +114,7 @@ final readonly class Obra
             $datos->origenCopia,
             $datos->generosIds,
             $nuevoAfiche ?? $this->afiche,
-            $this->estado,
+            $this->estado === EstadoObra::Rechazada ? EstadoObra::Pendiente : $this->estado,
             $this->motivo,
         );
     }

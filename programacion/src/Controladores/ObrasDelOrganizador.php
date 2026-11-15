@@ -9,6 +9,7 @@ use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Seguridad\Usuario;
 use IndieCinema\Programacion\Modelo\Genero;
+use IndieCinema\Programacion\Modelo\EstadoObra;
 use IndieCinema\Programacion\Modelo\Obra;
 use IndieCinema\Programacion\Modelo\OrigenCopia;
 use IndieCinema\Programacion\Modelo\ReglaIncumplida;
@@ -48,6 +49,8 @@ final class ObrasDelOrganizador extends Controlador
                 'tiene_funciones_futuras' => $this->servicio->tieneFuncionesFuturas($obra->id),
                 // EF-07.7: pendiente, aprobada o rechazada; sólo la aprobada tiene ficha pública.
                 'estado' => $obra->estado->value,
+                // Por qué la rechazaron, para corregirla.
+                'motivo' => $obra->estado === EstadoObra::Rechazada ? $obra->motivo : null,
             ],
             $obras,
         );
@@ -100,7 +103,11 @@ final class ObrasDelOrganizador extends Controlador
 
         return $this->formulario([
             'formulario' => FormularioDeObra::desdeDatos($obra->datos()),
-            'mensaje_exito' => $peticion->consulta('guardada') === '1' ? 'Los cambios ya se ven en el catálogo.' : null,
+            'mensaje_exito' => $peticion->consulta('guardada') === '1' ? match ($obra->estado) {
+                EstadoObra::Aprobada => 'Los cambios ya se ven en el catálogo.',
+                // EF-07.7: la rechazada que se corrigió volvió a pendiente.
+                default => 'La mandaste de nuevo a revisión: entra en el catálogo cuando la apruebe la moderación.',
+            } : null,
         ], esEdicion: true, obra: $obra);
     }
 

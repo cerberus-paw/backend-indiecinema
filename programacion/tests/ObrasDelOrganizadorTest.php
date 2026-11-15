@@ -266,6 +266,57 @@ final class ObrasDelOrganizadorTest extends TestCase
         self::assertSame($obra->afiche, $actualizada->afiche);
     }
 
+    /**
+     * @return array<string, mixed> los campos del formulario de edición
+     */
+    private function camposDeEdicion(string $sinopsis): array
+    {
+        return [
+            'titulo' => 'Historias extraordinarias',
+            'director' => 'Mariano Llinás',
+            'sinopsis' => $sinopsis,
+            'anio' => '2008',
+            'duracion' => '245',
+            'tipo' => 'pelicula',
+            'origen_copia' => 'obra_propia',
+            'generos' => [$this->primerGeneroId()],
+        ];
+    }
+
+    /**
+     * EF-07.7: «Mis obras» muestra por qué la rechazaron, y corregirla la manda de nuevo a revisión.
+     */
+    public function testUnaRechazadaMuestraElMotivoYEditarlaLaVuelveAPendiente(): void
+    {
+        $obra = $this->testCrearObraConAficheExitoso();
+        $this->base->ejecutar("UPDATE obra SET estado = 'rechazada', motivo = 'El afiche es de <b>otra</b> película.' WHERE id = ?", [$obra->id]);
+
+        $listado = $this->pedir('GET', '/organizador/obras')->cuerpo();
+        self::assertStringContainsString('Rechazada', $listado);
+        self::assertStringContainsString('El afiche es de &lt;b&gt;otra&lt;/b&gt; película.', $listado);
+
+        $respuesta = $this->pedir('POST', "/organizador/obras/{$obra->id}/editar", $this->camposDeEdicion('Con el afiche correcto.'));
+
+        self::assertSame(303, $respuesta->estado());
+        self::assertSame('pendiente', $this->base->valor('SELECT estado FROM obra WHERE id = ?', [$obra->id]));
+        self::assertStringContainsString('La mandaste de nuevo a revisión', $this->pedir('GET', "/organizador/obras/{$obra->id}/editar?guardada=1")->cuerpo());
+    }
+
+    /**
+     * Q7: corregir un dato de una aprobada no la saca del catálogo; si abusa, se la denuncia.
+     */
+    public function testEditarUnaAprobadaOUnaPendienteNoCambiaSuEstado(): void
+    {
+        $obra = $this->testCrearObraConAficheExitoso();
+
+        $this->pedir('POST', "/organizador/obras/{$obra->id}/editar", $this->camposDeEdicion('Otra sinopsis.'));
+        self::assertSame('pendiente', $this->base->valor('SELECT estado FROM obra WHERE id = ?', [$obra->id]));
+
+        $this->base->ejecutar("UPDATE obra SET estado = 'aprobada', motivo = 'Bien.' WHERE id = ?", [$obra->id]);
+        $this->pedir('POST', "/organizador/obras/{$obra->id}/editar", $this->camposDeEdicion('Una sinopsis más.'));
+        self::assertSame('aprobada', $this->base->valor('SELECT estado FROM obra WHERE id = ?', [$obra->id]));
+    }
+
     public function testRechazaEditarObraDeOtroOrganizador(): void
     {
         $obra = $this->testCrearObraConAficheExitoso();

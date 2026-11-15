@@ -221,18 +221,19 @@ final class RepositorioDeObras
     }
 
     /**
-     * Actualiza los datos de la obra y sus géneros en una transacción.
+     * Actualiza los datos de la obra, su estado (EF-07.7: la rechazada que se corrige vuelve a
+     * pendiente) y sus géneros en una transacción.
      */
     public function actualizar(Obra $obra): void
     {
         $this->base->enTransaccion(function (BaseDeDatos $base) use ($obra): void {
             $base->ejecutar(
-                'UPDATE obra SET titulo = ?, sinopsis = ?, anio = ?, director = ?, duracion = ?, tipo = ?, origen_copia = ?, afiche = ?
+                'UPDATE obra SET titulo = ?, sinopsis = ?, anio = ?, director = ?, duracion = ?, tipo = ?, origen_copia = ?, afiche = ?, estado = ?
                  WHERE id = ? AND dada_de_baja_en IS NULL',
                 [
                     $obra->titulo, $obra->sinopsis, $obra->anio, $obra->director,
                     $obra->duracionMinutos, $obra->tipo->value, $obra->origenCopia->value, $obra->afiche,
-                    $obra->id,
+                    $obra->estado->value, $obra->id,
                 ],
             );
             $base->ejecutar('DELETE FROM obra_genero WHERE obra_id = ?', [$obra->id]);

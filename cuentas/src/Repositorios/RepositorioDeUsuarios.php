@@ -252,6 +252,25 @@ final class RepositorioDeUsuarios
     }
 
     /**
+     * Le da y le quita varios roles juntos, en la misma transacción que cierra sus sesiones: así
+     * pasar de moderador a organizador no deja un momento sin ninguno de los dos.
+     *
+     * @param list<Rol> $agregar
+     * @param list<Rol> $quitar
+     */
+    public function cambiarRoles(string $usuarioId, array $agregar, array $quitar): void
+    {
+        $this->cerrandoSesiones($usuarioId, function (BaseDeDatos $base) use ($usuarioId, $agregar, $quitar): void {
+            foreach ($quitar as $rol) {
+                $base->ejecutar('DELETE FROM rol WHERE usuario_id = ? AND tipo = ?', [$usuarioId, $rol->value]);
+            }
+            foreach ($agregar as $rol) {
+                $base->ejecutar('INSERT INTO rol (usuario_id, tipo) VALUES (?, ?)', [$usuarioId, $rol->value]);
+            }
+        });
+    }
+
+    /**
      * Suspender, reactivar o, con la verificación por correo, dejar pendiente.
      */
     public function cambiarEstado(string $usuarioId, EstadoCuenta $estado): void

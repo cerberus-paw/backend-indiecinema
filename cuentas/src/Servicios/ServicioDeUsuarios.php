@@ -113,41 +113,68 @@ final class ServicioDeUsuarios
     }
 
     /**
-     * «Guardar cambios» de la tabla: deja a cada usuario de espectador o de organizador. Al
-     * moderador y al administrador no se los cambia desde la web, y su desplegable está apagado.
+     * «Guardar cambios» de la tabla: deja a cada usuario de espectador, de organizador o de
+     * moderador (EF-07.3), el rol mayor que se ve en el desplegable. Al administrador no se lo
+     * cambia desde la web, y su desplegable está apagado.
+     *
+     * Como el moderador alcanza a organizador, quitarle el de moderador lo deja en el que se eligió:
+     * de organizador conserva «Mis salas» (si no tenía el rol guardado, se le da); de espectador
+     * pierde los dos. Cada usuario cambia en una sola transacción, que cierra sus sesiones, y cada
+     * rol que se da o se quita queda en el log: es el registro de auditoría.
      *
      * Primero se revisan todos: con uno que no se puede hacer, no se cambia ninguno. El que ya
      * tiene ese rol no cambia ni se registra.
      *
      * @param array<string, Rol> $cambios id del usuario => el rol que le eligieron
      *
-     * @return array<string, Rol> los que cambiaron
+     * @return array<string, array{antes: Rol, despues: Rol}> los que cambiaron
      *
-     * @throws ExcepcionHttp 404 si un usuario no existe; 400 si un rol no es espectador ni
-     *                       organizador, o si un usuario es moderador o administrador
+     * @throws ExcepcionHttp 404 si un usuario no existe; 400 si un rol no es espectador,
+     *                       organizador ni moderador, o si un usuario es administrador
      */
     public function cambiarRoles(array $cambios, Usuario $administrador): array
     {
-        $cambiables = [Rol::Espectador, Rol::Organizador];
+        $cambiables = [Rol::Espectador, Rol::Organizador, Rol::Moderador];
         $hechos = [];
+        $usuarios = [];
         foreach ($cambios as $id => $rol) {
-            $actual = $this->buscar($id)->mayorRol();
+            $usuario = $this->buscar($id);
+            $actual = $usuario->mayorRol();
             if (!in_array($rol, $cambiables, true) || !in_array($actual, $cambiables, true)) {
-                throw ExcepcionHttp::solicitudInvalida('Desde la web sólo se pasa de espectador a organizador, o al revés.');
+                throw ExcepcionHttp::solicitudInvalida('Desde la web sólo se elige espectador, organizador o moderador.');
             }
             if ($rol !== $actual) {
-                $hechos[$id] = $rol;
+                $hechos[$id] = ['antes' => $actual, 'despues' => $rol];
+                $usuarios[$id] = $usuario;
             }
         }
-        foreach ($hechos as $id => $rol) {
-            if ($rol === Rol::Organizador) {
-                $this->darOrganizador($id, $administrador->id);
-            } else {
-                $this->quitarOrganizador($id, $administrador);
-            }
+        foreach ($hechos as $id => $cambio) {
+            $this->dejarConRolMayor($usuarios[$id], $cambio['despues'], $administrador);
         }
 
         return $hechos;
+    }
+
+    /**
+     * Le da y le quita los roles que hacen falta para que $rol sea el mayor, en una transacción
+     * que cierra sus sesiones, y registra cada uno.
+     */
+    private function dejarConRolMayor(UsuarioEnListado $usuario, Rol $rol, Usuario $administrador): void
+    {
+        $tiene = static fn (Rol $buscado): bool => in_array($buscado, $usuario->roles, true);
+        [$agregar, $quitar] = match ($rol) {
+            Rol::Moderador => [[Rol::Moderador], []],
+            Rol::Organizador => [$tiene(Rol::Organizador) ? [] : [Rol::Organizador], [Rol::Moderador]],
+            default => [[], [Rol::Moderador, Rol::Organizador]],
+        };
+        $quitar = array_values(array_filter($quitar, $tiene));
+        $this->usuarios->cambiarRoles($usuario->id, $agregar, $quitar);
+        foreach ($quitar as $quitado) {
+            $this->log->notice("{administrador} le quitó el rol de {$quitado->value} a {usuario}.", ['administrador' => $administrador->id, 'usuario' => $usuario->id]);
+        }
+        foreach ($agregar as $agregado) {
+            $this->log->notice("{administrador} le dio el rol de {$agregado->value} a {usuario}.", ['administrador' => $administrador->id, 'usuario' => $usuario->id]);
+        }
     }
 
     /**
@@ -172,27 +199,6 @@ final class ServicioDeUsuarios
         $this->usuarios->agregarRol($usuario->id, Rol::Organizador);
         $this->log->notice('{administrador} le dio el rol de organizador a {usuario}.', [
             'administrador' => $administradorId,
-            'usuario' => $usuario->id,
-        ]);
-
-        return $usuario;
-    }
-
-    /**
-     * Le quita el rol de organizador; vuelve a ser espectador. Sus salas quedan como están, pero
-     * sin el rol no entra a «Mis salas». Si no lo tenía, no cambia nada ni se registra.
-     *
-     * @throws ExcepcionHttp 404 si el usuario no existe
-     */
-    public function quitarOrganizador(string $id, Usuario $administrador): UsuarioEnListado
-    {
-        $usuario = $this->buscar($id);
-        if (!in_array(Rol::Organizador, $usuario->roles, true)) {
-            return $usuario;
-        }
-        $this->usuarios->quitarRol($usuario->id, Rol::Organizador);
-        $this->log->notice('{administrador} le quitó el rol de organizador a {usuario}.', [
-            'administrador' => $administrador->id,
             'usuario' => $usuario->id,
         ]);
 

@@ -315,7 +315,7 @@ docker run --rm -u "$(id -u):$(id -g)" -v "$PWD/..:/app" -w /app/backend-indieci
 | http://localhost:8080/solicitar-sala | la solicitud de sala, con sesión: se guarda la sala propuesta y le llega al equipo por correo |
 | http://localhost:8080/moderacion/solicitudes | la bandeja de solicitudes de sala, para aprobarlas (publica la sala y da el rol de organizador) o rechazarlas con un motivo, el historial, y retirar o volver a publicar la sala con un motivo; para el moderador (y el administrador) |
 | http://localhost:8025 | el buzón de prueba (Mailpit): los correos que mandan los subsistemas, sin que salgan a nadie |
-| http://localhost:8080/cuenta/administracion/usuarios | usuarios y roles, con los números de las cuentas, buscador por nombre o correo, filtros de rol, estado y año de alta, y el rol de cada uno en un desplegable (espectador u organizador), con «Guardar cambios» para toda la tabla; sólo el administrador |
+| http://localhost:8080/cuenta/administracion/usuarios | usuarios y roles, con los números de las cuentas, buscador por nombre o correo, filtros de rol, estado y año de alta, y el rol de cada uno en un desplegable (espectador, organizador o moderador), con «Guardar cambios» para toda la tabla; sólo el administrador |
 | http://localhost:8080/funcion/reservas | «Mis reservas», con sesión: las del espectador, con su estado, el comprobante (que se imprime) y cancelar mientras se pueda |
 | http://localhost:8080/funcion/organizador/funciones/{id}/reservas | las reservas de una función para su organizador: lugares reservados y libres, asistencia con el código y descarga en CSV |
 | http://localhost:8080/funcion/administracion/reservas | todas las reservas, con filtro por estado y la anulación; sólo el administrador |

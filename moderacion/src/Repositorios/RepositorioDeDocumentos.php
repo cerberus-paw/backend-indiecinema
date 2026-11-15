@@ -41,6 +41,26 @@ final class RepositorioDeDocumentos
     }
 
     /**
+     * Las salas y tipos cuyo documento vigente (el aceptado con el vencimiento más lejano) venció:
+     * vence hoy o antes.
+     *
+     * @return list<array{sala_id: string, tipo: TipoDocumento}>
+     */
+    public function vencidosAl(DateTimeImmutable $hoy): array
+    {
+        $filas = $this->base->filas(
+            "SELECT sala_id, tipo FROM documento WHERE estado = 'aceptado'
+             GROUP BY sala_id, tipo HAVING MAX(vence_en) <= ? ORDER BY sala_id, tipo",
+            [$hoy->format('Y-m-d')],
+        );
+
+        return array_map(static fn (array $fila): array => [
+            'sala_id' => (string) $fila['sala_id'],
+            'tipo' => TipoDocumento::from((string) $fila['tipo']),
+        ], $filas);
+    }
+
+    /**
      * @param array<string, mixed> $fila
      */
     private static function documento(array $fila): Documento

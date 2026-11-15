@@ -101,11 +101,13 @@ final class SalasInternas extends Controlador
         if (!is_string($motivo) || trim($motivo) === '') {
             return $this->json(['error' => 'Falta el motivo.'], 400);
         }
-        if (!is_string($moderador) || !Uuid::esValido($moderador)) {
-            return $this->json(['error' => '«moderador_id» es el UUID del moderador.'], 400);
+        // Sin moderador, la apaga o la publica la tarea que suspende las salas con un documento
+        // vencido (EF-07.5).
+        if ($moderador !== null && (!is_string($moderador) || !Uuid::esValido($moderador))) {
+            return $this->json(['error' => '«moderador_id» es el UUID del moderador, o null si es la tarea de vencimientos.'], 400);
         }
 
-        $sala = $this->salas->cambiarHabilitacion($id, $habilitada, $moderador, trim($motivo));
+        $sala = $this->salas->cambiarHabilitacion($id, $habilitada, $moderador ?? 'La tarea de vencimientos de moderación', trim($motivo));
 
         return $this->json(['id' => $sala->id, 'habilitada' => $sala->habilitada]);
     }

@@ -586,7 +586,7 @@ final class AdministracionDeSolicitudesTest extends TestCase
         $sala = $this->salaId($id);
         self::assertSame(303, $this->cambiarLaSala($id, 'deshabilitar-sala')->estado());
         $this->base->ejecutar(
-            "INSERT INTO suspension (id, sala_id, causa, tipo_documento, motivo, desde) VALUES (?, ?, 'vencimiento', 'seguro', 'Venció el seguro.', UTC_TIMESTAMP())",
+            "INSERT INTO suspension (id, sala_id, causa, tipo_documento, motivo, desde) VALUES (?, ?, 'vencimiento', 'seguro', 'Venció el seguro.', UTC_TIMESTAMP() + INTERVAL 1 SECOND)",
             [Uuid::nuevo(), $sala],
         );
         file_put_contents(self::$registros['programacion'], '');

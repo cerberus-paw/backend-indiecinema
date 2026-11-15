@@ -3,3 +3,4 @@
 */15 * * * * cd @BACK@ && docker compose exec -T programacion php bin/cerrar-por-fecha.php
 */15 * * * * cd @BACK@ && docker compose exec -T programacion php bin/finalizar-funciones.php
 0 * * * * cd @BACK@ && docker compose exec -T funciones php bin/recordar-funciones.php
+30 3 * * * cd @BACK@ && docker compose exec -T moderacion php bin/suspender-vencidas.php

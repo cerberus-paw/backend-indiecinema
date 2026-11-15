@@ -204,6 +204,21 @@ final class SalasInternasTest extends TestCase
         self::assertStringContainsString(self::MODERADOR . " habilitó la sala {$sala->id}: Documentación al día.", $this->log());
     }
 
+    /**
+     * EF-07.5: la tarea de moderación que suspende las salas con un documento vencido no es un
+     * moderador: manda moderador_id en null, y el registro lo dice.
+     */
+    public function testLaTareaDeModeracionSuspendeSinModerador(): void
+    {
+        $sala = $this->sala();
+
+        $respuesta = $this->habilitacion($sala->id, ['habilitada' => false, 'motivo' => 'Venció el seguro.', 'moderador_id' => null]);
+
+        self::assertSame(200, $respuesta->estado(), $respuesta->cuerpo());
+        self::assertFalse(($this->salas->buscar($sala->id) ?? self::fail('No está la sala.'))->habilitada);
+        self::assertStringContainsString("La tarea de vencimientos de moderación deshabilitó la sala {$sala->id}: Venció el seguro.", $this->log());
+    }
+
     public function testPedirElEstadoQueYaTieneNoHaceNada(): void
     {
         $sala = $this->sala();

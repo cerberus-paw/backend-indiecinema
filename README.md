@@ -555,6 +555,8 @@ no duplica nada:
   las funciones de la sala) y deja «ausente» a quien no fue.
 - `recordar-funciones`: manda el recordatorio por correo a las reservas confirmadas de las
   funciones de las próximas 24 horas.
+- `suspender-vencidas` (moderación, una vez por día): suspende las salas con el seguro o la
+  habilitación aceptados vencidos y las apaga en programación, hasta que se acepte uno nuevo.
 
 En local no se instalan: se prueban a mano con el `docker compose exec` de cada línea, y los correos
 llegan a Mailpit.

@@ -515,6 +515,51 @@ final class AdministracionDeSolicitudesTest extends TestCase
     }
 
     /**
+     * EF-07.9: rechazar no exige puntos, pero registra los que se tildaron: justamente lo que
+     * cumplía, y por omisión lo que no.
+     */
+    public function testRechazarRegistraLosPuntosTildados(): void
+    {
+        $id = $this->solicitar(self::ESPECTADORA, 'El Galpón');
+
+        self::assertSame(303, $this->resolver($id, ['resolucion' => 'rechazar', 'motivo' => 'Falta la póliza.', 'requisitos' => ['capacidad', 'condiciones']], 'moderador')->estado());
+
+        self::assertSame([['resolucion' => 'rechazada', 'moderador' => self::MODERADORA, 'tildados' => ['capacidad', 'condiciones']]], $this->revisiones($id));
+    }
+
+    /**
+     * EF-07.9: pasarla a revisión manual registra lo que tildó quien la pasó; aprobarla después,
+     * lo de quien la aprobó. Cada uno firma lo suyo.
+     */
+    public function testLaRevisionManualYLaAprobacionDejanCadaUnaSuRegistro(): void
+    {
+        $id = $this->solicitar(self::ESPECTADORA, 'El Galpón');
+
+        self::assertSame(303, $this->resolver($id, ['resolucion' => 'revision', 'motivo' => 'Coordinamos una visita.', 'requisitos' => ['seguro_vigente', 'habilitacion']], 'moderador')->estado());
+        self::assertSame(303, $this->resolver($id, ['resolucion' => 'aprobar', 'motivo' => 'La visita salió bien.'])->estado());
+
+        self::assertSame([
+            ['resolucion' => 'en_revision_manual', 'moderador' => self::MODERADORA, 'tildados' => ['seguro_vigente', 'habilitacion']],
+            ['resolucion' => 'aprobada', 'moderador' => self::ADMINISTRADOR, 'tildados' => self::REQUISITOS],
+        ], $this->revisiones($id));
+    }
+
+    /**
+     * EF-07.9: una que ya estaba resuelta no cambia, y tampoco se registra otro checklist.
+     */
+    public function testUnaYaResueltaNoRegistraOtroChecklist(): void
+    {
+        $id = $this->solicitar(self::ESPECTADORA, 'El Galpón');
+        $this->resolver($id, ['resolucion' => 'rechazar', 'motivo' => 'Falta la póliza.']);
+
+        self::assertSame(303, $this->resolver($id, ['resolucion' => 'aprobar', 'motivo' => 'Todo en orden.'])->estado());
+        self::assertSame(303, $this->resolver($id, ['resolucion' => 'rechazar', 'motivo' => 'Otra vez.'])->estado());
+
+        self::assertSame('rechazada', $this->estado($id));
+        self::assertSame([['resolucion' => 'rechazada', 'moderador' => self::ADMINISTRADOR, 'tildados' => []]], $this->revisiones($id));
+    }
+
+    /**
      * EF-07.9: un papel vencido no cuenta, aunque su punto llegue tildado: no se aprueba. Vence
      * hoy ya es vencido, como lo muestra la documentación.
      */

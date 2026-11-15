@@ -13,6 +13,9 @@
 <body>
   <main>
     <h1>{{ mensaje }}</h1>
+    {% if estado == 401 %}
+      <p><a href="/cuenta/ingresar?volver={{ (prefijo ~ ruta_pedida)|url_encode }}">Ingresar</a></p>
+    {% endif %}
     <p><a href="/">Volver al inicio</a></p>
     {% if detalle %}
       <pre>{{ detalle }}</pre>

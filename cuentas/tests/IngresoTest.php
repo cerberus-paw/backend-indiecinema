@@ -17,6 +17,7 @@ use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Log;
 use IndieCinema\Nucleo\Pruebas\Dobles\Formularios;
 use IndieCinema\Nucleo\Pruebas\Dobles\PaginasParaValidar;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -52,12 +53,13 @@ final class IngresoTest extends TestCase
     /**
      * @param array<string, mixed>  $cuerpo
      * @param array<string, string> $cookies además de la del token CSRF
+     * @param array<string, string> $consulta
      */
-    private function pedir(string $metodo, string $ruta, array $cuerpo = [], array $cookies = []): Respuesta
+    private function pedir(string $metodo, string $ruta, array $cuerpo = [], array $cookies = [], array $consulta = []): Respuesta
     {
         $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion, new Log('cuentas', fopen('php://memory', 'w+')));
 
-        return $aplicacion->atender(new Peticion($metodo, $ruta, [], $cuerpo, [], $cookies + ['csrf' => self::CSRF]));
+        return $aplicacion->atender(new Peticion($metodo, $ruta, $consulta, $cuerpo, [], $cookies + ['csrf' => self::CSRF]));
     }
 
     /**
@@ -118,6 +120,48 @@ final class IngresoTest extends TestCase
         $sesion = $this->base->fila('SELECT usuario_id, vence_en FROM sesion WHERE huella = ?', [hash('sha256', $cookie['valor'])]);
         self::assertSame($this->mariana, $sesion['usuario_id'] ?? null);
         self::assertSame((new DateTimeImmutable((string) $sesion['vence_en'], new DateTimeZone('UTC')))->getTimestamp(), $cookie['opciones']['expires']);
+    }
+
+    /**
+     * EF-07.8: quien toca «Denunciar» sin sesión ingresa y vuelve al formulario. El formulario de
+     * ingreso lleva la ruta en un campo oculto, y también después de un error.
+     */
+    public function testDespuesDeIngresarVuelveALaPaginaPedida(): void
+    {
+        $volver = '/moderacion/denuncias/nueva?tipo=obra&id=abc';
+
+        $formulario = $this->pedir('GET', '/ingresar', consulta: ['volver' => $volver])->cuerpo();
+        self::assertStringContainsString('name="volver" value="' . htmlspecialchars($volver) . '"', $formulario);
+        $conError = $this->pedir('POST', '/ingresar', ['_csrf' => self::CSRF, 'email' => 'mariana@ejemplo.com', 'password' => 'otra', 'volver' => $volver])->cuerpo();
+        self::assertStringContainsString('name="volver" value="' . htmlspecialchars($volver) . '"', $conError);
+
+        $respuesta = $this->pedir('POST', '/ingresar', ['_csrf' => self::CSRF, 'email' => 'mariana@ejemplo.com', 'password' => self::CONTRASENA, 'volver' => $volver]);
+
+        self::assertSame(303, $respuesta->estado());
+        self::assertSame($volver, $respuesta->cabecera('Location'));
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function rutasDeAfuera(): iterable
+    {
+        yield 'otro sitio' => ['https://otro.example/'];
+        yield 'sin esquema' => ['//otro.example/'];
+        yield 'con barra invertida' => ['/\\otro.example/'];
+        yield 'relativa' => ['cartelera'];
+    }
+
+    /**
+     * Que el link de ingresar no sirva para mandar a alguien a otro sitio después de ingresar.
+     */
+    #[DataProvider('rutasDeAfuera')]
+    public function testUnaRutaDeAfueraVaALaPortada(string $volver): void
+    {
+        $respuesta = $this->pedir('POST', '/ingresar', ['_csrf' => self::CSRF, 'email' => 'mariana@ejemplo.com', 'password' => self::CONTRASENA, 'volver' => $volver]);
+
+        self::assertSame('/', $respuesta->cabecera('Location'));
+        self::assertStringNotContainsString('otro.example', $this->pedir('GET', '/ingresar', consulta: ['volver' => $volver])->cuerpo());
     }
 
     public function testElErrorNoDiceSiFallaElCorreoOLaContrasena(): void

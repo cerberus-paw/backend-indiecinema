@@ -585,6 +585,28 @@ final class SolicitudDeSalaTest extends TestCase
         self::assertCount(1, self::$correo->correos());
     }
 
+    /**
+     * EF-07.6: en revisión manual ve por qué, y sigue sin poder mandar otra.
+     */
+    public function testEnRevisionManualVeElMotivoYNoMandaOtra(): void
+    {
+        $this->enviar();
+        $this->base->ejecutar(
+            "UPDATE solicitud_sala SET estado = 'en_revision_manual', revision_motivo = 'Coordinamos una <b>visita</b>.',
+                revision_por = ?, revision_en = UTC_TIMESTAMP()",
+            [self::ADMINISTRADOR],
+        );
+
+        $pantalla = $this->pedir()->cuerpo();
+        self::assertStringContainsString('En revisión manual', $pantalla);
+        self::assertStringContainsString('Coordinamos una &lt;b&gt;visita&lt;/b&gt;.', $pantalla);
+        self::assertStringNotContainsString('name="nombre"', $pantalla);
+
+        $otra = $this->enviar(['nombre' => 'Otra sala']);
+        self::assertSame(409, $otra->estado());
+        self::assertSame(1, $this->base->valor('SELECT COUNT(*) FROM solicitud_sala'));
+    }
+
     public function testSiLaRechazaronMuestraElMotivoYSeCorrigeLaMismaSala(): void
     {
         $this->enviar();

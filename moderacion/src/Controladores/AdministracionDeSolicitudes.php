@@ -6,6 +6,7 @@ namespace IndieCinema\Moderacion\Controladores;
 
 use DateTimeImmutable;
 use IndieCinema\Moderacion\Modelo\Documento;
+use IndieCinema\Moderacion\Modelo\EstadoSolicitud;
 use IndieCinema\Moderacion\Modelo\SolicitudDeSala;
 use IndieCinema\Moderacion\Servicios\ServicioDeSolicitudes;
 use IndieCinema\Nucleo\Controlador;
@@ -19,7 +20,9 @@ use LogicException;
  * La bandeja de solicitudes de sala, en /moderacion/solicitudes desde EF-07.2, como el
  * wireframe de la E2 (moderacion-solicitudes): el buscador y la lista a la izquierda y la elegida
  * (?id=) a la derecha, con la sala, quién la mandó y la resolución, que lleva un motivo
- * obligatorio. «Ver historial de decisiones» (?ver=historial) lista las resueltas; desde una
+ * obligatorio. Una pendiente también pasa a revisión manual (EF-07.6), con su motivo, y sigue en
+ * la lista hasta que se aprueba o se rechaza. «Ver historial de decisiones» (?ver=historial) lista
+ * las resueltas; desde una
  * aprobada la sala se retira del sitio o se vuelve a publicar, con un motivo, por la API interna de
  * programación.
  *
@@ -31,7 +34,7 @@ final class AdministracionDeSolicitudes extends Controlador
 {
     /** Como la columna solicitud_sala.motivo. */
     private const MAXIMO_MOTIVO = 1000;
-    private const RESOLUCIONES = ['aprobar', 'rechazar'];
+    private const RESOLUCIONES = ['aprobar', 'rechazar', 'revision'];
 
     public function __construct(private readonly ServicioDeSolicitudes $servicio)
     {
@@ -61,7 +64,9 @@ final class AdministracionDeSolicitudes extends Controlador
         $motivo = self::motivo($peticion->campo('motivo'));
         $errores = [];
         if (!in_array($resolucion, self::RESOLUCIONES, true)) {
-            $errores['resolucion'] = 'Elegí si la aprobás o la rechazás.';
+            $errores['resolucion'] = 'Elegí si la aprobás, la rechazás o la pasás a revisión manual.';
+        } elseif ($resolucion === 'revision' && $solicitud->estado === EstadoSolicitud::EnRevisionManual) {
+            $errores['resolucion'] = 'Ya está en revisión manual: aprobala o rechazala.';
         }
         if ($motivo === '') {
             $errores['motivo'] = 'Escribí el motivo: se le muestra a quien la mandó.';
@@ -73,16 +78,19 @@ final class AdministracionDeSolicitudes extends Controlador
         }
 
         $moderador = self::moderador($peticion);
-        $resuelta = $resolucion === 'aprobar'
-            ? $this->servicio->aprobar($solicitud->id, $moderador, $motivo)
-            : $this->servicio->rechazar($solicitud->id, $moderador, $motivo);
+        $resuelta = match ($resolucion) {
+            'aprobar' => $this->servicio->aprobar($solicitud->id, $moderador, $motivo),
+            'revision' => $this->servicio->pasarARevision($solicitud->id, $moderador, $motivo),
+            default => $this->servicio->rechazar($solicitud->id, $moderador, $motivo),
+        };
         $aviso = match (true) {
             !$resuelta => 'ya_resuelta',
             $resolucion === 'aprobar' => 'aprobada',
+            $resolucion === 'revision' => 'en_revision',
             default => 'rechazada',
         };
 
-        // 303 a las pendientes con el aviso: recargar no vuelve a mandar la resolución, y sigue la
+        // 303 a las abiertas con el aviso: recargar no vuelve a mandar la resolución, y sigue la
         // próxima.
         return $this->redirigir('/solicitudes?' . http_build_query([$aviso => $solicitud->id]));
     }
@@ -135,7 +143,7 @@ final class AdministracionDeSolicitudes extends Controlador
     private function bandeja(Peticion $peticion, ?SolicitudDeSala $elegida, array $valores = [], array $errores = [], ?string $mensaje = null, int $estado = 200): Respuesta
     {
         // La vista de la elegida; sin elegida, la que pide la URL.
-        $historial = $elegida !== null ? !$elegida->estaPendiente() : $peticion->consulta('ver') === 'historial';
+        $historial = $elegida !== null ? !$elegida->estaAbierta() : $peticion->consulta('ver') === 'historial';
         $q = $peticion->consulta('q');
         $texto = is_string($q) ? trim($q) : '';
         $lista = $this->servicio->lista(!$historial, $texto);
@@ -193,6 +201,11 @@ final class AdministracionDeSolicitudes extends Controlador
             'enviada' => FechaParaMostrar::diaYHora($solicitud->enviadaEn),
             'resuelta' => $solicitud->resueltaEn === null ? null : FechaParaMostrar::diaYHora($solicitud->resueltaEn),
             'motivo' => $solicitud->motivo,
+            // EF-07.6: si pasó por la revisión manual, su motivo, aparte del de la resolución.
+            'revision' => $solicitud->revisionEn === null ? null : [
+                'motivo' => $solicitud->revisionMotivo,
+                'fecha' => FechaParaMostrar::diaYHora($solicitud->revisionEn),
+            ],
             'sala' => [
                 'id' => $solicitud->salaId,
                 'nombre' => $datos->nombre,
@@ -251,6 +264,7 @@ final class AdministracionDeSolicitudes extends Controlador
         $avisos = [
             'aprobada' => 'Aprobaste la solicitud de «%s»: la sala ya se ve en el sitio y quien la mandó es organizador.',
             'rechazada' => 'Rechazaste la solicitud de «%s». Quien la mandó ve el motivo y puede corregirla.',
+            'en_revision' => 'Pasaste «%s» a revisión manual. Quien la mandó ve el motivo; cuando termine la revisión, aprobala o rechazala.',
             'ya_resuelta' => 'La solicitud de «%s» ya estaba resuelta: no se cambió nada.',
             'deshabilitada' => 'Retiraste «%s» del sitio: ya no se ve, ni sus funciones en la cartelera.',
             'habilitada' => 'Volviste a publicar «%s» en el sitio.',

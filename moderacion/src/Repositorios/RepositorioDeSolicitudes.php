@@ -25,7 +25,7 @@ final class RepositorioDeSolicitudes
 
     private const SELECT = 'SELECT id, sala_id, usuario_id, solicitante_nombre, nombre, descripcion, direccion, localidad,
                                    capacidad, peliculas_por_funcion, duracion_funcion, tiempo_entre_funciones, imagen,
-                                   estado, enviada_en, resuelta_en, motivo
+                                   estado, enviada_en, resuelta_en, motivo, revision_motivo, revision_en
                             FROM solicitud_sala';
 
     public function __construct(private readonly BaseDeDatos $base)
@@ -37,7 +37,7 @@ final class RepositorioDeSolicitudes
      *
      * @param list<Documento> $documentos
      *
-     * @throws SolicitudPendiente si la sala ya tiene una pendiente
+     * @throws SolicitudPendiente si la sala ya tiene una abierta
      */
     public function agregar(SolicitudDeSala $solicitud, array $documentos = []): void
     {
@@ -100,8 +100,9 @@ final class RepositorioDeSolicitudes
     }
 
     /**
-     * Las que esperan una resolución, primero la que lleva más tiempo esperando; o las resueltas
-     * (el historial de decisiones), primero la última que se resolvió.
+     * Las que esperan una resolución (las pendientes y las que están en revisión manual), primero
+     * la que lleva más tiempo esperando; o las resueltas (el historial de decisiones), primero la
+     * última que se resolvió.
      *
      * @param ?string      $texto  si viene, sólo las que lo tienen en el nombre o la localidad de
      *                             la sala, o en el nombre de quien la mandó. Como en la cartelera,
@@ -111,10 +112,10 @@ final class RepositorioDeSolicitudes
      *
      * @return list<SolicitudDeSala>
      */
-    public function lista(bool $pendientes, ?string $texto, int $limite): array
+    public function lista(bool $abiertas, ?string $texto, int $limite): array
     {
-        [$filtro, $parametros] = self::filtro($pendientes, $texto);
-        $orden = $pendientes ? 'enviada_en, id' : 'resuelta_en DESC, id';
+        [$filtro, $parametros] = self::filtro($abiertas, $texto);
+        $orden = $abiertas ? 'enviada_en, id' : 'resuelta_en DESC, id';
         $parametros[] = $limite;
 
         return array_map(self::solicitud(...), $this->base->filas(self::SELECT . " WHERE {$filtro} ORDER BY {$orden} LIMIT ?", $parametros));
@@ -123,20 +124,15 @@ final class RepositorioDeSolicitudes
     /**
      * Cuántas hay en la lista, aunque muestre menos.
      */
-    public function cuantas(bool $pendientes, ?string $texto = null): int
+    public function cuantas(bool $abiertas, ?string $texto = null): int
     {
-        [$filtro, $parametros] = self::filtro($pendientes, $texto);
+        [$filtro, $parametros] = self::filtro($abiertas, $texto);
 
         return (int) $this->base->valor('SELECT COUNT(*) FROM solicitud_sala WHERE ' . $filtro, $parametros);
     }
 
     /**
-     * La aprueba o la rechaza, sólo si sigue pendiente.
-     *
-     * @return bool false si ya estaba resuelta (otro administrador, o el mismo POST dos veces)
-     */
-    /**
-     * La deja resuelta si estaba pendiente, y con ella sus documentos (EF-07.4): aprobarla los
+     * La deja resuelta si estaba abierta, y con ella sus documentos (EF-07.4): aprobarla los
      * acepta y rechazarla los rechaza (grilling de EF-07, Q6). Todo junto o nada.
      *
      * @return bool false si ya estaba resuelta: no cambia nada
@@ -145,8 +141,8 @@ final class RepositorioDeSolicitudes
     {
         return (bool) $this->base->enTransaccion(function (BaseDeDatos $base) use ($id, $estado, $resueltaPor, $motivo, $resueltaEn): bool {
             $resuelta = $base->ejecutar(
-                'UPDATE solicitud_sala SET estado = ?, resuelta_por = ?, motivo = ?, resuelta_en = ? WHERE id = ? AND estado = ?',
-                [$estado->value, $resueltaPor, $motivo, $resueltaEn, $id, EstadoSolicitud::Pendiente->value],
+                'UPDATE solicitud_sala SET estado = ?, resuelta_por = ?, motivo = ?, resuelta_en = ? WHERE id = ? AND estado IN (?, ?)',
+                [$estado->value, $resueltaPor, $motivo, $resueltaEn, $id, ...self::abiertas()],
             ) === 1;
             $documentos = match ($estado) {
                 EstadoSolicitud::Aprobada => EstadoDocumento::Aceptado,
@@ -162,12 +158,34 @@ final class RepositorioDeSolicitudes
     }
 
     /**
+     * La pasa a revisión manual (EF-07.6) si estaba pendiente: sigue abierta, con el motivo de la
+     * revisión aparte del de la resolución.
+     *
+     * @return bool false si no estaba pendiente: no cambia nada
+     */
+    public function pasarARevision(string $id, string $revisadaPor, string $motivo, DateTimeImmutable $revisadaEn): bool
+    {
+        return $this->base->ejecutar(
+            'UPDATE solicitud_sala SET estado = ?, revision_por = ?, revision_motivo = ?, revision_en = ? WHERE id = ? AND estado = ?',
+            [EstadoSolicitud::EnRevisionManual->value, $revisadaPor, $motivo, $revisadaEn, $id, EstadoSolicitud::Pendiente->value],
+        ) === 1;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private static function abiertas(): array
+    {
+        return array_map(static fn (EstadoSolicitud $estado): string => $estado->value, EstadoSolicitud::abiertas());
+    }
+
+    /**
      * @return array{string, list<string>}
      */
-    private static function filtro(bool $pendientes, ?string $texto): array
+    private static function filtro(bool $abiertas, ?string $texto): array
     {
-        $filtro = $pendientes ? 'estado = ?' : 'estado <> ?';
-        $parametros = [EstadoSolicitud::Pendiente->value];
+        $filtro = $abiertas ? 'estado IN (?, ?)' : 'estado NOT IN (?, ?)';
+        $parametros = self::abiertas();
         $texto = trim((string) $texto);
         if ($texto !== '') {
             $filtro .= " AND (nombre LIKE ? ESCAPE '!' OR localidad LIKE ? ESCAPE '!' OR solicitante_nombre LIKE ? ESCAPE '!')";
@@ -202,6 +220,8 @@ final class RepositorioDeSolicitudes
             self::fecha($fila['enviada_en']),
             $fila['resuelta_en'] === null ? null : self::fecha($fila['resuelta_en']),
             $fila['motivo'] === null ? null : (string) $fila['motivo'],
+            $fila['revision_motivo'] === null ? null : (string) $fila['revision_motivo'],
+            $fila['revision_en'] === null ? null : self::fecha($fila['revision_en']),
         );
     }
 

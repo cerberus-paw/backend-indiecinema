@@ -82,6 +82,50 @@ final class MigracionesTest extends TestCase
         $this->assertRechaza(self::RESTRICCION_CHECK, fn () => $this->base->ejecutar('UPDATE solicitud_sala SET resuelta_en = NOW() WHERE id = ?', [$solicitud]));
     }
 
+    /**
+     * EF-07.6: la revisión manual sigue abierta, así que cuenta como la pendiente.
+     */
+    public function testUnaSalaTieneUnaSolaAbiertaContandoLaRevisionManual(): void
+    {
+        $sala = Uuid::nuevo();
+        $primera = $this->solicitar($sala);
+        $this->pasarARevision($primera);
+
+        $this->assertRechaza(self::CLAVE_REPETIDA, fn () => $this->solicitar($sala));
+
+        $this->base->ejecutar("UPDATE solicitud_sala SET estado = 'rechazada', motivo = 'No pasó la visita.', resuelta_en = NOW() WHERE id = ?", [$primera]);
+        $this->solicitar($sala);
+        self::assertSame(2, $this->base->valor('SELECT COUNT(*) FROM solicitud_sala'));
+    }
+
+    /**
+     * El motivo, quién y cuándo de la revisión van juntos, y sólo en una que pasó por ella. En
+     * revisión no está resuelta; resuelta, conserva la revisión aparte de su motivo.
+     */
+    public function testLaRevisionManualTieneSusTresCamposYQuedaAparteDeLaResolucion(): void
+    {
+        $solicitud = $this->solicitar(Uuid::nuevo());
+
+        $this->assertRechaza(self::RESTRICCION_CHECK, fn () => $this->base->ejecutar("UPDATE solicitud_sala SET estado = 'en_revision_manual' WHERE id = ?", [$solicitud]));
+        $this->assertRechaza(self::RESTRICCION_CHECK, fn () => $this->base->ejecutar("UPDATE solicitud_sala SET estado = 'en_revision_manual', revision_motivo = 'Visita.', revision_en = NOW() WHERE id = ?", [$solicitud]));
+        $this->assertRechaza(self::RESTRICCION_CHECK, fn () => $this->pasarARevision($solicitud, 'pendiente'));
+        $this->assertRechaza(self::RESTRICCION_CHECK, fn () => $this->base->ejecutar("UPDATE solicitud_sala SET estado = 'aprobada', motivo = 'Bien.', resuelta_en = NOW(), revision_motivo = 'Visita.' WHERE id = ?", [$solicitud]));
+
+        $this->pasarARevision($solicitud);
+        $this->assertRechaza(self::RESTRICCION_CHECK, fn () => $this->base->ejecutar('UPDATE solicitud_sala SET resuelta_en = NOW() WHERE id = ?', [$solicitud]));
+        $this->base->ejecutar("UPDATE solicitud_sala SET estado = 'aprobada', motivo = 'Bien.', resuelta_en = NOW() WHERE id = ?", [$solicitud]);
+        self::assertSame('Coordinamos una visita.', $this->base->valor('SELECT revision_motivo FROM solicitud_sala WHERE id = ?', [$solicitud]));
+    }
+
+    private function pasarARevision(string $solicitud, string $estado = 'en_revision_manual'): void
+    {
+        $this->base->ejecutar(
+            "UPDATE solicitud_sala SET estado = ?, revision_motivo = 'Coordinamos una visita.',
+                revision_por = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', revision_en = NOW() WHERE id = ?",
+            [$estado, $solicitud],
+        );
+    }
+
     public function testLaSalaPropuestaTieneCapacidadPeliculasYDuracion(): void
     {
         $solicitud = $this->solicitar(Uuid::nuevo());

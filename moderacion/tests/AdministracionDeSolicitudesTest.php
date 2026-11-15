@@ -375,8 +375,9 @@ final class AdministracionDeSolicitudesTest extends TestCase
     {
         yield 'sin motivo' => [['resolucion' => 'aprobar', 'motivo' => '   '], 'Escribí el motivo'];
         yield 'motivo de más' => [['resolucion' => 'aprobar', 'motivo' => str_repeat('a', 1001)], 'hasta 1000 caracteres'];
-        yield 'sin resolución' => [['motivo' => 'Todo en orden.'], 'Elegí si la aprobás o la rechazás.'];
-        yield 'otra resolución' => [['resolucion' => 'aprobar como VIP', 'motivo' => 'Todo en orden.'], 'Elegí si la aprobás o la rechazás.'];
+        yield 'revisión sin motivo' => [['resolucion' => 'revision', 'motivo' => ''], 'Escribí el motivo'];
+        yield 'sin resolución' => [['motivo' => 'Todo en orden.'], 'Elegí si la aprobás, la rechazás o la pasás a revisión manual.'];
+        yield 'otra resolución' => [['resolucion' => 'aprobar como VIP', 'motivo' => 'Todo en orden.'], 'Elegí si la aprobás, la rechazás o la pasás a revisión manual.'];
     }
 
     /**
@@ -453,6 +454,91 @@ final class AdministracionDeSolicitudesTest extends TestCase
         self::assertSame(303, $respuesta->estado(), $respuesta->cuerpo());
         self::assertSame('aprobada', $this->estado($id));
         self::assertStringContainsString("La solicitud de sala {$id} quedó aprobada, pero no se le avisó a quien la mandó", $this->log());
+    }
+
+    /**
+     * EF-07.6: pasarla a revisión manual (para coordinar una visita, por ejemplo) guarda el motivo
+     * aparte de la resolución y la deja abierta, junto a las pendientes. Quien la mandó recibe el
+     * correo. Ni cuentas ni programación se enteran.
+     */
+    public function testPasarARevisionManualGuardaElMotivoAparteYLaDejaAbierta(): void
+    {
+        $id = $this->solicitar(self::ESPECTADORA, 'El Galpón');
+
+        $respuesta = $this->resolver($id, ['resolucion' => 'revision', 'motivo' => 'Coordinamos una visita al espacio.']);
+
+        self::assertSame(303, $respuesta->estado(), $respuesta->cuerpo());
+        self::assertSame("/moderacion/solicitudes?en_revision={$id}", $respuesta->cabecera('Location'));
+        self::assertSame(
+            ['estado' => 'en_revision_manual', 'revision_motivo' => 'Coordinamos una visita al espacio.', 'revision_por' => self::ADMINISTRADOR, 'motivo' => null, 'resuelta_en' => null],
+            $this->base->fila('SELECT estado, revision_motivo, revision_por, motivo, resuelta_en FROM solicitud_sala WHERE id = ?', [$id]),
+        );
+        self::assertSame([], self::pedidosA('cuentas'));
+        self::assertSame([], self::pedidosA('programacion'));
+        $correos = self::correos();
+        self::assertCount(1, $correos);
+        self::assertSame('<eva@ejemplo.com>', $correos[0]['para']);
+        self::assertSame('Tu solicitud de «El Galpón» pasó a revisión manual', $correos[0]['asunto']);
+        self::assertStringContainsString('Coordinamos una visita al espacio.', $correos[0]['texto']);
+        self::assertStringContainsString('/solicitar-sala', $correos[0]['texto']);
+        self::assertStringContainsString(self::ADMINISTRADOR . " resolvió la solicitud de sala {$id}: en_revision_manual.", $this->log());
+
+        $pantalla = $this->pedir('GET', "/solicitudes?en_revision={$id}")->cuerpo();
+        self::assertStringContainsString('Pasaste «El Galpón» a revisión manual', $pantalla);
+        self::assertSame(['El Galpón'], self::nombres($this->pedir('GET', '/solicitudes')));
+        self::assertStringContainsString('En revisión manual', $pantalla);
+        self::assertStringContainsString('Coordinamos una visita al espacio.', $pantalla);
+        // Sigue en las abiertas, y se cierra después con la misma resolución.
+        self::assertStringContainsString("/solicitudes/{$id}/resolver", $pantalla);
+        self::assertStringNotContainsString('value="revision"', $pantalla);
+        self::assertSame([], self::nombres($this->pedir('GET', '/solicitudes?ver=historial')));
+    }
+
+    public function testUnaEnRevisionManualSeApruebaOSeRechazaYConservaElMotivoDeLaRevision(): void
+    {
+        $aprobada = $this->solicitar(self::ESPECTADORA, 'El Galpón');
+        $rechazada = $this->solicitar(self::ORGANIZADOR, 'La Terraza');
+        foreach ([$aprobada, $rechazada] as $id) {
+            $this->resolver($id, ['resolucion' => 'revision', 'motivo' => 'Coordinamos una visita.']);
+        }
+
+        self::assertSame(303, $this->resolver($aprobada, ['resolucion' => 'aprobar', 'motivo' => 'La visita salió bien.'])->estado());
+        self::assertSame(303, $this->resolver($rechazada, ['resolucion' => 'rechazar', 'motivo' => 'No coincide con las fotos.'])->estado());
+
+        self::assertSame(
+            [
+                ['estado' => 'aprobada', 'revision_motivo' => 'Coordinamos una visita.', 'motivo' => 'La visita salió bien.'],
+                ['estado' => 'rechazada', 'revision_motivo' => 'Coordinamos una visita.', 'motivo' => 'No coincide con las fotos.'],
+            ],
+            $this->base->filas('SELECT estado, revision_motivo, motivo FROM solicitud_sala ORDER BY estado'),
+        );
+        self::assertSame([$this->salaId($aprobada)], array_keys(self::salasDeProgramacion()));
+        $pantalla = $this->pedir('GET', "/solicitudes?id={$aprobada}")->cuerpo();
+        self::assertStringContainsString('Coordinamos una visita.', $pantalla);
+        self::assertStringContainsString('La visita salió bien.', $pantalla);
+    }
+
+    /**
+     * Sólo una pendiente pasa a revisión manual: la resuelta ya se resolvió, y la que está en
+     * revisión se aprueba o se rechaza.
+     */
+    public function testNoPasaARevisionUnaResueltaNiUnaQueYaEsta(): void
+    {
+        $resuelta = $this->solicitar(self::ESPECTADORA, 'El Galpón');
+        $this->resolver($resuelta, ['resolucion' => 'rechazar', 'motivo' => 'Falta la póliza.']);
+        $enRevision = $this->solicitar(self::ORGANIZADOR, 'La Terraza');
+        $this->resolver($enRevision, ['resolucion' => 'revision', 'motivo' => 'Coordinamos una visita.']);
+        self::$correo->vaciar();
+
+        self::assertSame("/moderacion/solicitudes?ya_resuelta={$resuelta}", $this->resolver($resuelta, ['resolucion' => 'revision', 'motivo' => 'Otra visita.'])->cabecera('Location'));
+        $otraVez = $this->resolver($enRevision, ['resolucion' => 'revision', 'motivo' => 'Otra visita.']);
+        self::assertSame(422, $otraVez->estado());
+        self::assertStringContainsString('Ya está en revisión manual: aprobala o rechazala.', $otraVez->cuerpo());
+
+        self::assertSame('rechazada', $this->estado($resuelta));
+        self::assertNull($this->base->valor('SELECT revision_motivo FROM solicitud_sala WHERE id = ?', [$resuelta]));
+        self::assertSame('Coordinamos una visita.', $this->base->valor('SELECT revision_motivo FROM solicitud_sala WHERE id = ?', [$enRevision]));
+        self::assertSame([], self::correos());
     }
 
     public function testSiCuentasNoRespondeNoSeApruebaNiSeCreaLaSala(): void
@@ -831,7 +917,7 @@ final class AdministracionDeSolicitudesTest extends TestCase
         self::assertStringNotContainsString("/solicitudes/{$id}/resolver", $pantalla);
         self::assertStringContainsString('La mandaste vos: la resuelve otro moderador.', $pantalla);
 
-        foreach (['aprobar', 'rechazar'] as $resolucion) {
+        foreach (['aprobar', 'rechazar', 'revision'] as $resolucion) {
             self::assertSame(403, $this->resolver($id, ['resolucion' => $resolucion, 'motivo' => 'Todo en orden.'], 'moderador')->estado());
         }
         self::assertSame('pendiente', $this->estado($id));

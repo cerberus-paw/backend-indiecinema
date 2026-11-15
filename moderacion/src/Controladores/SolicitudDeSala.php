@@ -19,8 +19,8 @@ use LogicException;
 /**
  * GET y POST /solicitar-sala: la solicitud para abrir una sala, como el wireframe de la E2
  * (solicitud-de-sala). La manda el espectador que quiere ser organizador y el organizador que
- * suma otra sala: es el mismo trámite. Con una pendiente se ve su estado en lugar del
- * formulario; si la rechazaron, el motivo y el formulario con la sala, para corregirla y volver a
+ * suma otra sala: es el mismo trámite. Con una pendiente, o en revisión manual (EF-07.6), se ve
+ * su estado en lugar del formulario; si la rechazaron, el motivo y el formulario con la sala, para corregirla y volver a
  * mandarla.
  *
  * Es de moderación desde EF-07.2, pero la dirección es la de siempre: nginx la trae sin el prefijo
@@ -46,7 +46,7 @@ final class SolicitudDeSala extends Controlador
     {
         $usuario = self::usuario($peticion);
         $ultima = $this->servicio->ultimaDe($usuario);
-        if ($ultima?->estaPendiente()) {
+        if ($ultima?->estaAbierta()) {
             // Dos pestañas, o reenviar el POST: se ve la que ya está en revisión.
             return $this->pantalla($ultima, null, estado: 409);
         }
@@ -87,6 +87,8 @@ final class SolicitudDeSala extends Controlador
                 'enviada' => FechaParaMostrar::diaYHora($ultima->enviadaEn),
                 'resuelta' => $ultima->resueltaEn === null ? null : FechaParaMostrar::diaYHora($ultima->resueltaEn),
                 'motivo' => $ultima->motivo,
+                // EF-07.6: por qué la pasaron a revisión manual, si pasó.
+                'revision_motivo' => $ultima->revisionMotivo,
                 'documentos' => array_map(fn (Documento $documento): array => [
                     'nombre' => $documento->tipo->nombre(),
                     // El campo del formulario, para mostrarlo junto al suyo al corregir.

@@ -78,12 +78,12 @@ final class ServicioDeSolicitudes
      *                                           queda la que tenía
      * @param list<DocumentoSubido>  $documentos los que mandó, ya validados
      *
-     * @throws SolicitudPendiente si ya tiene una sin resolver
+     * @throws SolicitudPendiente si ya tiene una sin resolver (pendiente o en revisión manual)
      */
     public function solicitar(Usuario $usuario, DatosDeSala $datos, ?ImagenSubida $imagen, array $documentos = []): SolicitudDeSala
     {
         $ultima = $this->solicitudes->ultimaDe($usuario->id);
-        if ($ultima?->estaPendiente()) {
+        if ($ultima?->estaAbierta()) {
             throw new SolicitudPendiente('Ya tiene una solicitud de sala sin resolver.');
         }
         $corregida = $ultima?->estado === EstadoSolicitud::Rechazada ? $ultima : null;
@@ -149,19 +149,19 @@ final class ServicioDeSolicitudes
     }
 
     /**
-     * Las que esperan, primero la que lleva más tiempo; o el historial de decisiones, primero la
-     * última que se resolvió.
+     * Las abiertas (pendientes y en revisión manual), primero la que lleva más tiempo; o el
+     * historial de decisiones, primero la última que se resolvió.
      *
      * @return list<SolicitudDeSala>
      */
-    public function lista(bool $pendientes, ?string $texto = null): array
+    public function lista(bool $abiertas, ?string $texto = null): array
     {
-        return $this->solicitudes->lista($pendientes, $texto, self::EN_LA_BANDEJA);
+        return $this->solicitudes->lista($abiertas, $texto, self::EN_LA_BANDEJA);
     }
 
-    public function cuantas(bool $pendientes, ?string $texto = null): int
+    public function cuantas(bool $abiertas, ?string $texto = null): int
     {
-        return $this->solicitudes->cuantas($pendientes, $texto);
+        return $this->solicitudes->cuantas($abiertas, $texto);
     }
 
     /**
@@ -187,7 +187,8 @@ final class ServicioDeSolicitudes
      * ya existía) y recién ahí la deja aprobada. Si cuentas o programación no responden, la
      * solicitud sigue pendiente y se puede reintentar: el rol que ya estaba no cambia nada, y la
      * sala tiene el id que guardó la solicitud, así que no se crea otra. Al revés, quedaría una
-     * aprobada sin sala, o una sala publicada cuyo dueño no puede entrar a «Mis salas».
+     * aprobada sin sala, o una sala publicada cuyo dueño no puede entrar a «Mis salas». Se aprueba
+     * igual una pendiente que una en revisión manual.
      *
      * @return bool false si ya estaba resuelta: no cambia nada
      *
@@ -198,7 +199,7 @@ final class ServicioDeSolicitudes
     {
         $solicitud = $this->buscar($id);
         $this->controlarQueLaPuedeResolver($solicitud, $moderador);
-        if (!$solicitud->estaPendiente()) {
+        if (!$solicitud->estaAbierta()) {
             return false;
         }
         $this->usuarios->darOrganizador($solicitud->usuarioId, $moderador->id);
@@ -221,6 +222,27 @@ final class ServicioDeSolicitudes
         $this->controlarQueLaPuedeResolver($solicitud, $moderador);
 
         return $this->resolver($solicitud, EstadoSolicitud::Rechazada, $moderador, $motivo);
+    }
+
+    /**
+     * La pasa a revisión manual (EF-07.6), por ejemplo para coordinar una visita al espacio: sigue
+     * abierta, y quien la mandó ve el motivo. Después se aprueba o se rechaza como una pendiente.
+     *
+     * @return bool false si no estaba pendiente: no cambia nada
+     *
+     * @throws ExcepcionHttp 404 si no existe; 403 si es del moderador
+     */
+    public function pasarARevision(string $id, Usuario $moderador, string $motivo): bool
+    {
+        $solicitud = $this->buscar($id);
+        $this->controlarQueLaPuedeResolver($solicitud, $moderador);
+        if (!$this->solicitudes->pasarARevision($solicitud->id, $moderador->id, $motivo, self::ahora())) {
+            return false;
+        }
+        $this->registrar($solicitud, EstadoSolicitud::EnRevisionManual, $moderador);
+        $this->avisarAlSolicitante($solicitud, EstadoSolicitud::EnRevisionManual, $motivo);
+
+        return true;
     }
 
     /**
@@ -345,15 +367,22 @@ final class ServicioDeSolicitudes
         if (!$this->solicitudes->resolver($solicitud->id, $estado, $moderador->id, $motivo, self::ahora())) {
             return false;
         }
-        // Es el registro de auditoría: quién resolvió qué.
+        $this->registrar($solicitud, $estado, $moderador);
+        $this->avisarAlSolicitante($solicitud, $estado, $motivo);
+
+        return true;
+    }
+
+    /**
+     * Es el registro de auditoría: quién resolvió qué.
+     */
+    private function registrar(SolicitudDeSala $solicitud, EstadoSolicitud $estado, Usuario $moderador): void
+    {
         $this->log->notice('{moderador} resolvió la solicitud de sala {solicitud}: {estado}.', [
             'moderador' => $moderador->id,
             'solicitud' => $solicitud->id,
             'estado' => $estado->value,
         ]);
-        $this->avisarAlSolicitante($solicitud, $estado, $motivo);
-
-        return true;
     }
 
     /**
@@ -390,6 +419,12 @@ final class ServicioDeSolicitudes
                 $motivo,
                 '',
                 'La solicitud sigue a la vista en /solicitar-sala.',
+            ])],
+            EstadoSolicitud::EnRevisionManual => ["Tu solicitud de «{$sala}» pasó a revisión manual", implode("\n", [
+                "La moderación necesita revisar «{$sala}» más de cerca antes de resolverla:",
+                $motivo,
+                '',
+                'Te escribimos de nuevo cuando la apruebe o la rechace. Mientras tanto la ves en /solicitar-sala.',
             ])],
             EstadoSolicitud::Rechazada => ["Rechazamos la solicitud de «{$sala}»", implode("\n", [
                 "Rechazamos la solicitud de «{$sala}», por este motivo:",

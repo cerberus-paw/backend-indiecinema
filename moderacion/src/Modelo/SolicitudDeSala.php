@@ -18,6 +18,8 @@ final readonly class SolicitudDeSala
      *                                   la tabla en programación, de salas que ya esperaban
      * @param ?string $imagen            la foto en el volumen de moderación; null en las que se
      *                                   mudaron de programación, cuya foto quedó en su sala
+     * @param ?string $revisionMotivo    por qué pasó a revisión manual (EF-07.6), aparte del motivo
+     *                                   de la resolución; null si no pasó
      */
     public function __construct(
         public string $id,
@@ -30,11 +32,21 @@ final readonly class SolicitudDeSala
         public DateTimeImmutable $enviadaEn,
         public ?DateTimeImmutable $resueltaEn = null,
         public ?string $motivo = null,
+        public ?string $revisionMotivo = null,
+        public ?DateTimeImmutable $revisionEn = null,
     ) {
     }
 
     public function estaPendiente(): bool
     {
         return $this->estado === EstadoSolicitud::Pendiente;
+    }
+
+    /**
+     * Pendiente o en revisión manual: espera que la aprueben o la rechacen.
+     */
+    public function estaAbierta(): bool
+    {
+        return in_array($this->estado, EstadoSolicitud::abiertas(), true);
     }
 }

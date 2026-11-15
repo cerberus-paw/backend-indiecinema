@@ -77,8 +77,8 @@ final class CalificacionesDeFunciones
      *
      * @param 'sala'|'obra' $de
      *
-     * @return ?list<array{funcion_id: string, puntaje: int, comentario: ?string, espectador: ?string, fecha: string}>
-     *                null si funciones no responde
+     * @return ?list<array{id?: string, funcion_id: string, puntaje: int, comentario: ?string, espectador: ?string, fecha: string}>
+     *                null si funciones no responde. id (EF-07.8), para denunciar el comentario.
      */
     public function ultimas(string $de, string $id): ?array
     {
@@ -94,6 +94,7 @@ final class CalificacionesDeFunciones
                     || !is_string($calificacion['fecha'] ?? null)
                     || !(($calificacion['comentario'] ?? null) === null || is_string($calificacion['comentario']))
                     || !(($calificacion['espectador'] ?? null) === null || is_string($calificacion['espectador']))
+                    || !(!isset($calificacion['id']) || is_string($calificacion['id']))
                 ) {
                     throw new RuntimeException('funciones no respondió las últimas calificaciones.');
                 }

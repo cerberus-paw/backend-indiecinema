@@ -36,6 +36,7 @@ final class ServicioDeDenuncias
         private readonly ServicioDeSuspensiones $suspensiones,
         private readonly AvisosAlOrganizador $avisos,
         private readonly SalasDeProgramacion $salas,
+        private readonly CalificacionesDeFunciones $calificaciones,
     ) {
     }
 
@@ -138,6 +139,7 @@ final class ServicioDeDenuncias
                 // rechazada, no hace nada.
                 'rechazar' => $this->obras->resolver($obraId ?? $denunciado->id, false, $motivo, $moderador),
                 'suspender' => $this->suspender($salaId, $motivo, $moderador),
+                'ocultar' => $this->calificaciones->ocultar($denunciado->id, $moderador->id),
                 default => null,
             };
         }

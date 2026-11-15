@@ -66,6 +66,9 @@ return static function (Router $router): void {
     // Los promedios y las últimas calificaciones, para las fichas de programación (EF-04.3).
     $router->interna('GET', '/interno/calificaciones/resumen', [CalificacionesInternas::class, 'resumen'], ['programacion']);
     $router->interna('GET', '/interno/calificaciones', [CalificacionesInternas::class, 'ultimas'], ['programacion']);
+    // El comentario denunciado, para moderación, que lo oculta (EF-07.8).
+    $router->interna('GET', '/interno/calificaciones/{id}', [CalificacionesInternas::class, 'mostrar'], ['moderacion']);
+    $router->interna('POST', '/interno/calificaciones/{id}/ocultar', [CalificacionesInternas::class, 'ocultar'], ['moderacion']);
 
     // Lo cobrado de cada función, para el reparto de recaudación (EF-02.5).
     $router->interna('GET', '/interno/funciones/{id}/cobros', [CobrosInternos::class, 'deUna'], ['recaudacion']);

@@ -69,7 +69,7 @@ final class DenunciasTest extends TestCase
             'archivos' => ['carpeta' => sys_get_temp_dir() . '/sin-archivos'],
             'base' => self::baseDePruebas(),
             'nginx' => ['secreto' => self::SECRETO],
-            'subsistemas' => ['cuentas' => self::$urls['cuentas'], 'programacion' => self::$urls['programacion']],
+            'subsistemas' => ['cuentas' => self::$urls['cuentas'], 'programacion' => self::$urls['programacion'], 'funciones' => self::$urls['funciones']],
             'interno' => ['token' => 'token-de-moderacion'],
             'correo' => ['servidor' => self::$correo->url(), 'remitente' => 'no-responder@indiecinema.test'],
         ]);
@@ -210,6 +210,26 @@ final class DenunciasTest extends TestCase
     private static function funcionesDeProgramacion(): array
     {
         return (array) json_decode((string) file_get_contents(self::$funciones), true);
+    }
+
+    /**
+     * Una calificación con comentario en funciones, de una función de la sala.
+     */
+    private static function comentario(string $salaId, string $comentario, string $autor = self::ORGANIZADOR, bool $oculto = false): string
+    {
+        $id = Uuid::nuevo();
+        self::calificacionesEnFunciones(self::calificacionesDeFunciones() + [$id => [
+            'funcion_id' => Uuid::nuevo(),
+            'sala_id' => $salaId,
+            'usuario_id' => $autor,
+            'espectador' => 'Omar',
+            'puntaje' => 1,
+            'comentario' => $comentario,
+            'fecha' => '2026-11-01',
+            'oculto' => $oculto,
+        ]]);
+
+        return $id;
     }
 
     /**
@@ -780,5 +800,73 @@ final class DenunciasTest extends TestCase
         $this->denunciada('funcion', $funcion, self::ESPECTADORA, '2026-11-01 10:00:00');
 
         self::assertSame(403, $this->resolver('funcion', $funcion, ['accion' => 'desestimar', 'motivo' => 'Nada.'])->estado());
+    }
+
+    /**
+     * Un comentario de una calificación se denuncia de a uno (Q1); su autor no lo denuncia, y uno
+     * oculto ya no se ve.
+     */
+    public function testUnComentarioSeDenunciaSalvoSuAutor(): void
+    {
+        $sala = self::sala('El Galpón');
+        $id = self::comentario($sala, 'Un insulto.');
+
+        $formulario = $this->pedir('GET', "/denuncias/nueva?tipo=calificacion&id={$id}");
+        self::assertSame(200, $formulario->estado(), $formulario->cuerpo());
+        self::assertStringContainsString('Comentario de Omar', $formulario->cuerpo());
+        self::assertStringNotContainsString('Seguridad del lugar', $formulario->cuerpo());
+        self::assertSame(303, $this->denunciar('calificacion', $id, ['categoria' => 'ofensivo', 'detalle' => ''])->estado());
+        self::assertStringContainsString("href=\"/salas/{$sala}\"", $this->pedir('GET', "/denuncias/nueva?tipo=calificacion&id={$id}&enviada=1")->cuerpo());
+
+        self::assertSame(404, $this->pedir('GET', "/denuncias/nueva?tipo=calificacion&id={$id}", usuario: self::ORGANIZADOR)->estado());
+        self::assertSame(404, $this->pedir('GET', '/denuncias/nueva?tipo=calificacion&id=' . self::comentario($sala, 'Otro.', oculto: true))->estado());
+    }
+
+    /**
+     * Ocultar pide a funciones que lo saque de las fichas; el puntaje sigue (Q11).
+     */
+    public function testOcultarElComentarioDenunciadoLoPideAFunciones(): void
+    {
+        $id = self::comentario(self::sala('El Galpón'), 'Un insulto.');
+        $this->denunciada('calificacion', $id, self::ESPECTADORA, '2026-11-01 10:00:00');
+
+        $pantalla = $this->pedir('GET', '/denuncias', 'moderador')->cuerpo();
+        self::assertStringContainsString('Un insulto.', $pantalla);
+        self::assertStringContainsString('value="ocultar"', $pantalla);
+
+        self::assertSame(303, $this->resolver('calificacion', $id, ['accion' => 'ocultar', 'motivo' => 'Insulta a la sala.'])->estado());
+
+        self::assertSame([['ruta' => 'ocultar', 'calificacion' => $id, 'moderador_id' => self::MODERADORA]], self::pedidosA('funciones'));
+        self::assertTrue(self::calificacionesDeFunciones()[$id]['oculto']);
+        self::assertSame(['resuelta', 'ocultar'], [$this->cerradas()[0]['estado'], $this->cerradas()[0]['accion']]);
+    }
+
+    public function testSiFuncionesNoRespondeNoSeOcultaNiSeCierra(): void
+    {
+        $id = self::comentario(self::sala('El Galpón'), 'Un insulto.');
+        $this->denunciada('calificacion', $id, self::ESPECTADORA, '2026-11-01 10:00:00');
+        self::tirar('funciones');
+
+        self::assertSame(503, $this->resolver('calificacion', $id, ['accion' => 'ocultar', 'motivo' => 'No.'])->estado());
+
+        self::assertSame([], $this->cerradas());
+    }
+
+    /**
+     * Q14: si ya está oculto, se cierran sin pedirlo otra vez.
+     */
+    public function testUnComentarioYaOcultoCierraSinRepetir(): void
+    {
+        $id = self::comentario(self::sala('El Galpón'), 'Un insulto.');
+        $this->denunciada('calificacion', $id, self::ESPECTADORA, '2026-11-01 10:00:00');
+        $calificaciones = self::calificacionesDeFunciones();
+        $calificaciones[$id]['oculto'] = true;
+        self::calificacionesEnFunciones($calificaciones);
+
+        self::assertStringContainsString('Ya está oculto', $this->pedir('GET', '/denuncias', 'moderador')->cuerpo());
+        self::assertSame(303, $this->resolver('calificacion', $id, ['accion' => 'ocultar', 'motivo' => 'Ya estaba.'])->estado());
+
+        self::assertSame([], self::pedidosA('funciones'));
+        self::assertSame('resuelta', $this->cerradas()[0]['estado']);
     }
 }

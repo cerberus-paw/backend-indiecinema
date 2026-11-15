@@ -24,6 +24,7 @@ final class LoDenunciado
         private readonly SalasDeProgramacion $salas,
         private readonly ServicioDeSuspensiones $suspensiones,
         private readonly FuncionesDeProgramacion $funciones,
+        private readonly CalificacionesDeFunciones $calificaciones,
     ) {
     }
 
@@ -43,7 +44,7 @@ final class LoDenunciado
             TipoDenuncia::Obra => $this->obra($id),
             TipoDenuncia::Sala => $this->sala($id),
             TipoDenuncia::Funcion => $this->funcion($id),
-            default => null,
+            TipoDenuncia::Calificacion => $this->calificacion($id),
         };
     }
 
@@ -83,6 +84,29 @@ final class LoDenunciado
             $funcion['sala_habilitada'] && $enLaCartelera,
             "/cartelera/{$id}",
             ['sala' => $funcion['sala'], 'sala_id' => $funcion['sala_id'], 'obras' => $funcion['obras']],
+        );
+    }
+
+    /**
+     * El comentario de una calificación (Q1): está publicado si tiene texto y no lo ocultaron. Es
+     * de quien lo escribió, y se ve en la ficha de la sala.
+     */
+    private function calificacion(string $id): ?Denunciado
+    {
+        $calificacion = $this->calificaciones->una($id);
+        if ($calificacion === null) {
+            return null;
+        }
+
+        return new Denunciado(
+            TipoDenuncia::Calificacion,
+            $id,
+            'Comentario de ' . ($calificacion['espectador'] ?? 'un espectador'),
+            $calificacion['usuario_id'],
+            $calificacion['comentario'] !== null && !$calificacion['oculto'],
+            "/salas/{$calificacion['sala_id']}",
+            ['comentario' => $calificacion['comentario'], 'puntaje' => $calificacion['puntaje']],
+            $calificacion['oculto'],
         );
     }
 

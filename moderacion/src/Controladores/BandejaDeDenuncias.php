@@ -314,6 +314,9 @@ final class BandejaDeDenuncias extends Controlador
         if ($denunciado?->tipo === TipoDenuncia::Sala) {
             $acciones[] = ['valor' => 'suspender', 'etiqueta' => 'Suspender la sala: sale del sitio y lo programado sigue'];
         }
+        if ($denunciado?->tipo === TipoDenuncia::Calificacion) {
+            $acciones[] = ['valor' => 'ocultar', 'etiqueta' => 'Ocultar el comentario: deja de verse y el puntaje sigue contando'];
+        }
         // La función en sí no se cancela (IC-549 Q3): se actúa sobre su sala o sus obras.
         if ($denunciado?->tipo === TipoDenuncia::Funcion) {
             $acciones[] = ['valor' => 'suspender', 'etiqueta' => "Suspender su sala, «{$denunciado->datos['sala']}»: sale del sitio y lo programado sigue"];

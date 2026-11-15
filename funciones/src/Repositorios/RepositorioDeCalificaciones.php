@@ -131,6 +131,26 @@ final class RepositorioDeCalificaciones
         return array_map(self::calificacion(...), $this->base->filas($sql, [$id, $cuantas]));
     }
 
+    public function buscar(string $id): ?Calificacion
+    {
+        $fila = $this->base->fila('SELECT * FROM calificacion WHERE id = ?', [$id]);
+
+        return $fila === null ? null : self::calificacion($fila);
+    }
+
+    /**
+     * Oculta el comentario (EF-07.8), si no lo estaba.
+     *
+     * @return bool false si ya estaba oculto: no cambia nada
+     */
+    public function ocultarComentario(string $id, string $moderadorId, DateTimeImmutable $cuando): bool
+    {
+        return $this->base->ejecutar(
+            'UPDATE calificacion SET comentario_oculto_en = ?, comentario_oculto_por = ? WHERE id = ? AND comentario_oculto_en IS NULL',
+            [$cuando, $moderadorId, $id],
+        ) === 1;
+    }
+
     /**
      * Sin las obras: quien las necesita las pide aparte.
      *
@@ -149,6 +169,7 @@ final class RepositorioDeCalificaciones
             (string) $fila['organizador_id'],
             [],
             new DateTimeImmutable((string) $fila['creada_en'], new DateTimeZone('UTC')),
+            ($fila['comentario_oculto_en'] ?? null) !== null,
         );
     }
 }

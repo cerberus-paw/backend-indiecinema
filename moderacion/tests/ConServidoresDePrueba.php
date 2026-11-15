@@ -5,8 +5,9 @@ declare(strict_types=1);
 namespace IndieCinema\Moderacion\Pruebas;
 
 /**
- * Cuentas y programación de mentira (Dobles/cuentas.php y Dobles/programacion.php), cada una con
- * `php -S` en un puerto libre: moderación las llama por la red, como en el compose (EF-07.2).
+ * Cuentas, programación y funciones de mentira (Dobles/cuentas.php, Dobles/programacion.php y
+ * Dobles/funciones.php), cada una con `php -S` en un puerto libre: moderación las llama por la
+ * red, como en el compose (EF-07.2).
  * Anotan lo que se les pide en un archivo por servidor, y responden 500 a todo si la prueba crea
  * su archivo de caída.
  */
@@ -33,12 +34,16 @@ trait ConServidoresDePrueba
     /** El JSON con las funciones que conoce programación (EF-07.8). */
     private static string $funciones;
 
+    /** El JSON con las calificaciones que conoce funciones (EF-07.8). */
+    private static string $calificaciones;
+
     private static function iniciarServidores(): void
     {
         self::$salas = (string) tempnam(sys_get_temp_dir(), 'salas');
         self::$obras = (string) tempnam(sys_get_temp_dir(), 'obras');
         self::$funciones = (string) tempnam(sys_get_temp_dir(), 'funciones');
-        foreach (['cuentas', 'programacion'] as $servidor) {
+        self::$calificaciones = (string) tempnam(sys_get_temp_dir(), 'calificaciones');
+        foreach (['cuentas', 'programacion', 'funciones'] as $servidor) {
             self::$registros[$servidor] = (string) tempnam(sys_get_temp_dir(), "registro-{$servidor}");
             self::$caidas[$servidor] = sys_get_temp_dir() . "/caida-{$servidor}-" . bin2hex(random_bytes(4));
             // Un puerto libre: el sistema da uno al pedir el 0, y se suelta para que lo use php -S.
@@ -52,7 +57,7 @@ trait ConServidoresDePrueba
                 [['pipe', 'r'], ['file', '/dev/null', 'w'], ['file', '/dev/null', 'w']],
                 $tuberias,
                 null,
-                ['REGISTRO' => self::$registros[$servidor], 'CAIDA' => self::$caidas[$servidor], 'SALAS' => self::$salas, 'OBRAS' => self::$obras, 'FUNCIONES' => self::$funciones] + getenv(),
+                ['REGISTRO' => self::$registros[$servidor], 'CAIDA' => self::$caidas[$servidor], 'SALAS' => self::$salas, 'OBRAS' => self::$obras, 'FUNCIONES' => self::$funciones, 'CALIFICACIONES' => self::$calificaciones] + getenv(),
             );
             self::assertNotFalse($proceso);
             self::$procesos[$servidor] = $proceso;
@@ -67,7 +72,7 @@ trait ConServidoresDePrueba
             proc_close($proceso);
         }
         self::$procesos = [];
-        array_map(static fn (string $archivo) => @unlink($archivo), [...self::$registros, ...self::$caidas, self::$salas, self::$obras, self::$funciones]);
+        array_map(static fn (string $archivo) => @unlink($archivo), [...self::$registros, ...self::$caidas, self::$salas, self::$obras, self::$funciones, self::$calificaciones]);
     }
 
     /**
@@ -82,6 +87,30 @@ trait ConServidoresDePrueba
         file_put_contents(self::$salas, '{}');
         file_put_contents(self::$obras, '{}');
         file_put_contents(self::$funciones, '{}');
+        file_put_contents(self::$calificaciones, '{}');
+    }
+
+    /**
+     * Las calificaciones que funciones ya tiene, como las devuelve GET /interno/calificaciones/{id}
+     * (EF-07.8).
+     *
+     * @param array<string, array<string, mixed>> $calificaciones id => datos
+     */
+    private static function calificacionesEnFunciones(array $calificaciones): void
+    {
+        $completas = [];
+        foreach ($calificaciones as $id => $calificacion) {
+            $completas[$id] = ['id' => $id] + $calificacion;
+        }
+        file_put_contents(self::$calificaciones, json_encode((object) $completas));
+    }
+
+    /**
+     * @return array<string, array<string, mixed>>
+     */
+    private static function calificacionesDeFunciones(): array
+    {
+        return (array) json_decode((string) file_get_contents(self::$calificaciones), true);
     }
 
     /**

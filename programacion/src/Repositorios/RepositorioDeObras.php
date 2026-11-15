@@ -5,17 +5,19 @@ declare(strict_types=1);
 namespace IndieCinema\Programacion\Repositorios;
 
 use IndieCinema\Nucleo\BaseDeDatos;
+use IndieCinema\Programacion\Modelo\EstadoObra;
 use IndieCinema\Programacion\Modelo\Obra;
 use IndieCinema\Programacion\Modelo\OrigenCopia;
 use IndieCinema\Programacion\Modelo\TipoObra;
 
 /**
  * Las obras y sus géneros en el esquema de programación. Las dadas de baja no se ven desde acá:
- * para la aplicación ya no existen, aunque la fila siga en la tabla.
+ * para la aplicación ya no existen, aunque la fila siga en la tabla. El catálogo (el público y el
+ * de las funciones) tiene sólo las aprobadas (EF-07.7); buscar() y delDueno() traen cualquiera.
  */
 final class RepositorioDeObras
 {
-    private const COLUMNAS = 'id, dueno_id, titulo, sinopsis, anio, director, duracion, tipo, origen_copia, afiche';
+    private const COLUMNAS = 'id, dueno_id, titulo, sinopsis, anio, director, duracion, tipo, origen_copia, afiche, estado, motivo';
 
     public function __construct(private readonly BaseDeDatos $base)
     {
@@ -36,23 +38,23 @@ final class RepositorioDeObras
     }
 
     /**
-     * Todas las obras activas del catálogo, ordenadas por título.
+     * Todas las obras activas y aprobadas del catálogo, ordenadas por título.
      *
      * @return list<Obra>
      */
     public function todas(): array
     {
         $filas = $this->base->filas(
-            'SELECT ' . self::COLUMNAS . ' FROM obra
-             WHERE dada_de_baja_en IS NULL
-             ORDER BY titulo, anio, id',
+            "SELECT " . self::COLUMNAS . " FROM obra
+             WHERE dada_de_baja_en IS NULL AND estado = 'aprobada'
+             ORDER BY titulo, anio, id",
         );
         $generos = [];
         foreach ($this->base->filas(
-            'SELECT og.obra_id, og.genero_id FROM obra_genero og
+            "SELECT og.obra_id, og.genero_id FROM obra_genero og
              JOIN obra o ON o.id = og.obra_id
-             WHERE o.dada_de_baja_en IS NULL
-             ORDER BY og.genero_id',
+             WHERE o.dada_de_baja_en IS NULL AND o.estado = 'aprobada'
+             ORDER BY og.genero_id",
         ) as $genero) {
             $generos[$genero['obra_id']][] = $genero['genero_id'];
         }
@@ -95,7 +97,7 @@ final class RepositorioDeObras
      */
     public function buscarEnCatalogo(?string $texto = null, ?string $generoId = null): array
     {
-        $condiciones = ['dada_de_baja_en IS NULL'];
+        $condiciones = ['dada_de_baja_en IS NULL', "estado = 'aprobada'"];
         $parametros = [];
 
         if ($texto !== null && trim($texto) !== '') {
@@ -165,11 +167,12 @@ final class RepositorioDeObras
     {
         $this->base->enTransaccion(function (BaseDeDatos $base) use ($obra): void {
             $base->ejecutar(
-                'INSERT INTO obra (id, dueno_id, titulo, sinopsis, anio, director, duracion, tipo, origen_copia, afiche)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                'INSERT INTO obra (id, dueno_id, titulo, sinopsis, anio, director, duracion, tipo, origen_copia, afiche, estado, motivo)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
                 [
                     $obra->id, $obra->duenoId, $obra->titulo, $obra->sinopsis, $obra->anio, $obra->director,
                     $obra->duracionMinutos, $obra->tipo->value, $obra->origenCopia->value, $obra->afiche,
+                    $obra->estado->value, $obra->motivo,
                 ],
             );
             foreach ($obra->generosIds as $generoId) {
@@ -229,6 +232,8 @@ final class RepositorioDeObras
             OrigenCopia::from((string) $fila['origen_copia']),
             $generosIds,
             $fila['afiche'] === null ? null : (string) $fila['afiche'],
+            EstadoObra::from((string) $fila['estado']),
+            $fila['motivo'] === null ? null : (string) $fila['motivo'],
         );
     }
 }

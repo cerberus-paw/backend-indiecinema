@@ -212,6 +212,19 @@ final class MigracionesTest extends TestCase
         self::assertNull($guardada['dada_de_baja_en']);
     }
 
+    /**
+     * EF-07.7: las obras que ya estaban (o que se insertan sin estado) quedan aprobadas; la
+     * aplicación carga las nuevas como pendientes.
+     */
+    public function testUnaObraSinEstadoQuedaAprobadaYElEstadoEsDelEnum(): void
+    {
+        $datos = $this->obraValida();
+        $this->insertarObra($datos);
+
+        self::assertSame(['estado' => 'aprobada', 'motivo' => null], $this->base->fila('SELECT estado, motivo FROM obra WHERE id = ?', [$datos['id']]));
+        $this->assertRechaza(self::VALOR_INVALIDO, fn () => $this->base->ejecutar("UPDATE obra SET estado = 'en_revision' WHERE id = ?", [$datos['id']]));
+    }
+
     public function testSePuedeGuardarUnaObraSinAfiche(): void
     {
         $datos = $this->obraValida();

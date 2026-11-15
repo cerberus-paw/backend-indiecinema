@@ -7,7 +7,9 @@ namespace IndieCinema\Programacion\Servicios;
 use IndieCinema\Nucleo\Http\ExcepcionHttp;
 use IndieCinema\Nucleo\Seguridad\Usuario;
 use IndieCinema\Nucleo\Uuid;
+use IndieCinema\Nucleo\Seguridad\Rol;
 use IndieCinema\Programacion\Modelo\DatosDeObra;
+use IndieCinema\Programacion\Modelo\EstadoObra;
 use IndieCinema\Programacion\Modelo\FiltrosDeCartelera;
 use IndieCinema\Programacion\Modelo\FuncionEnCartelera;
 use IndieCinema\Programacion\Modelo\Genero;
@@ -70,6 +72,22 @@ final class ServicioDeObras
     }
 
     /**
+     * Una obra del catálogo público: sólo las aprobadas (EF-07.7). Las demás no existen para el
+     * sitio, tampoco para su dueño, que las ve en «Mis obras».
+     *
+     * @throws ExcepcionHttp 404
+     */
+    public function publicada(string $id): Obra
+    {
+        $obra = $this->buscar($id);
+        if (!$obra->estaAprobada()) {
+            throw ExcepcionHttp::noEncontrada();
+        }
+
+        return $obra;
+    }
+
+    /**
      * Obtiene una obra para su edición, verificando que quien la pide sea su dueño.
      *
      * @throws ExcepcionHttp 404 si no existe o no pertenece al organizador
@@ -90,7 +108,8 @@ final class ServicioDeObras
     public function crear(Usuario $organizador, DatosDeObra $datos, ?ImagenSubida $imagen = null): Obra
     {
         $afiche = $imagen !== null ? $this->afiches->guardar($imagen) : null;
-        $obra = Obra::crear($organizador->id, $datos, $afiche);
+        // EF-07.7: queda pendiente hasta que la aprueba la moderación.
+        $obra = Obra::crear($organizador->id, $datos, $afiche, EstadoObra::Pendiente);
         $this->obras->agregar($obra);
         $this->log->info('Obra creada: {id} - {titulo} por {organizador}', [
             'id' => $obra->id,
@@ -146,14 +165,18 @@ final class ServicioDeObras
     }
 
     /**
-     * El nombre de archivo del afiche para servirlo públicamente.
+     * El nombre de archivo del afiche, si lo puede ver. El de una aprobada o rechazada es público:
+     * las funciones que ya tenía lo siguen mostrando. El de una pendiente lo ven su dueño y la
+     * moderación, que la revisa (EF-07.7).
      *
-     * @throws ExcepcionHttp 404 si la obra no existe o no tiene afiche
+     * @throws ExcepcionHttp 404 si la obra no existe, no tiene afiche o no lo puede ver
      */
-    public function imagenParaMostrar(string $id): string
+    public function imagenParaMostrar(string $id, ?Usuario $usuario = null): string
     {
         $obra = $this->buscar($id);
-        if ($obra->afiche === null) {
+        $loVe = $obra->estado !== EstadoObra::Pendiente
+            || ($usuario !== null && (hash_equals($obra->duenoId, $usuario->id) || $usuario->alcanza(Rol::Moderador)));
+        if ($obra->afiche === null || !$loVe) {
             throw ExcepcionHttp::noEncontrada();
         }
 

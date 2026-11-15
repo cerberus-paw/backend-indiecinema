@@ -35,7 +35,16 @@ final readonly class Obra
         public array $generosIds,
         /** El nombre del archivo en el volumen, o null si no tiene. */
         public ?string $afiche = null,
+        /** EF-07.7: las que carga un organizador nacen pendientes (ServicioDeObras::crear()). */
+        public EstadoObra $estado = EstadoObra::Aprobada,
+        /** El motivo de la última resolución de la moderación, o null. */
+        public ?string $motivo = null,
     ) {
+    }
+
+    public function estaAprobada(): bool
+    {
+        return $this->estado === EstadoObra::Aprobada;
     }
 
     /**
@@ -65,6 +74,7 @@ final readonly class Obra
         string $duenoId,
         DatosDeObra $datos,
         ?string $afiche = null,
+        EstadoObra $estado = EstadoObra::Aprobada,
     ): self {
         self::validar($datos->titulo, $datos->duracionMinutos, $datos->anio, $datos->generosIds);
 
@@ -80,6 +90,7 @@ final readonly class Obra
             $datos->origenCopia,
             $datos->generosIds,
             $afiche,
+            $estado,
         );
     }
 
@@ -99,6 +110,8 @@ final readonly class Obra
             $datos->origenCopia,
             $datos->generosIds,
             $nuevoAfiche ?? $this->afiche,
+            $this->estado,
+            $this->motivo,
         );
     }
 

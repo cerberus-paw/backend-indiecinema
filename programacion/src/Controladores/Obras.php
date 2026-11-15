@@ -71,7 +71,7 @@ final class Obras extends Controlador
     public function mostrar(Peticion $peticion): Respuesta
     {
         $id = (string) $peticion->parametro('id');
-        $obra = $this->servicio->buscar($id);
+        $obra = $this->servicio->publicada($id);
         $mapaGeneros = $this->servicio->mapaGeneros();
 
         $usuario = $peticion->usuario();

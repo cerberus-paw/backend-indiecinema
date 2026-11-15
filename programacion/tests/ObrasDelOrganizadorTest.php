@@ -196,23 +196,43 @@ final class ObrasDelOrganizadorTest extends TestCase
     }
 
     /**
-     * Criterio de aceptación E4-08.1: «Listo cuando: Una obra nueva se puede elegir al crear una función.»
+     * E4-08.1 pedía que una obra nueva se pudiera elegir al crear una función; desde EF-07.7 queda
+     * pendiente hasta que la aprueba la moderación, y recién ahí se elige.
      */
-    public function testObraNuevaSePuedeElegirAlCrearUnaFuncion(): void
+    public function testUnaObraNuevaQuedaPendienteYSeEligeRecienAprobada(): void
     {
         $obra = $this->testCrearObraConAficheExitoso();
+        self::assertSame('pendiente', $this->base->valor('SELECT estado FROM obra WHERE id = ?', [$obra->id]));
+        self::assertStringContainsString('Pendiente de revisión', $this->pedir('GET', '/organizador/obras')->cuerpo());
 
-        // Creamos una sala para que el organizador pueda abrir el formulario de nueva función.
         $sala = Sala::nueva(self::ORGANIZADORA, new DatosDeSala('Cine Tita', 'Descripción', 'Calle 123', 'Luján', 50, 1, 120, 15), '00000000000000000000000000000001.jpg');
         (new RepositorioDeSalas($this->base))->agregar($sala);
         $this->base->ejecutar('UPDATE sala SET habilitada = TRUE WHERE id = ?', [$sala->id]);
+        self::assertStringNotContainsString($obra->id, $this->pedir('GET', '/organizador/funciones/nueva')->cuerpo());
 
+        $this->base->ejecutar("UPDATE obra SET estado = 'aprobada', motivo = 'Bien.' WHERE id = ?", [$obra->id]);
         $respuesta = $this->pedir('GET', '/organizador/funciones/nueva');
 
         self::assertSame(200, $respuesta->estado());
-        // La obra recién creada figura en el catálogo seleccionable para la función.
-        self::assertStringContainsString($obra->titulo, $respuesta->cuerpo());
         self::assertStringContainsString($obra->id, $respuesta->cuerpo());
+        self::assertStringNotContainsString('Pendiente de revisión', $this->pedir('GET', '/organizador/obras')->cuerpo());
+    }
+
+    /**
+     * El afiche de una pendiente lo ven su dueño y la moderación, que la revisa; el de una aprobada
+     * es público, como el catálogo.
+     */
+    public function testElAficheDeUnaPendienteLoVenSuDuenoYLaModeracion(): void
+    {
+        $obra = $this->testCrearObraConAficheExitoso();
+        $url = "/obras/{$obra->id}/afiche";
+
+        self::assertSame(200, $this->pedir('GET', $url)->estado());
+        self::assertSame(404, $this->pedir('GET', $url, usuarioId: self::OTRO_ORGANIZADOR)->estado());
+        self::assertSame(200, $this->pedir('GET', $url, usuarioId: self::OTRO_ORGANIZADOR, cabecerasAdicionales: ['X-Rol' => 'moderador'])->estado());
+
+        $this->base->ejecutar("UPDATE obra SET estado = 'aprobada', motivo = 'Bien.' WHERE id = ?", [$obra->id]);
+        self::assertSame(200, $this->pedir('GET', $url, usuarioId: self::OTRO_ORGANIZADOR)->estado());
     }
 
     public function testEditarObraPropia(): void

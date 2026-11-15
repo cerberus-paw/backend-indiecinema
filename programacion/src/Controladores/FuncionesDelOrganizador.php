@@ -131,7 +131,8 @@ final class FuncionesDelOrganizador extends Controlador
 
         $funcion = $this->servicio->paraEditar($organizador, $id);
         $salas = $this->servicio->salasHabilitadas($organizador);
-        $obras = $this->servicio->catalogoDeObras();
+        // Con las que ya tenía, aunque ya no estén aprobadas (EF-07.7).
+        $obras = $this->servicio->catalogoDeObras($funcion);
 
         $valores = [
             'sala_id' => $funcion->salaId,
@@ -161,10 +162,10 @@ final class FuncionesDelOrganizador extends Controlador
         }
 
         // Si la función no existe o no es del organizador, corta con 404
-        $this->servicio->paraEditar($organizador, $id);
+        $funcion = $this->servicio->paraEditar($organizador, $id);
 
         $salas = $this->servicio->salasHabilitadas($organizador);
-        $obras = $this->servicio->catalogoDeObras();
+        $obras = $this->servicio->catalogoDeObras($funcion);
 
         $formulario = FormularioDeFuncion::desdeCampos($peticion->cuerpo(), $salas, $obras);
         if (!$formulario->esValido() || $formulario->salaId === null || $formulario->fechaHora === null || $formulario->cupo === null || $formulario->precio === null) {

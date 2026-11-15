@@ -125,6 +125,31 @@ final class ObrasTest extends TestCase
         self::assertStringNotContainsString('Balnearios', $respuesta->cuerpo());
     }
 
+    /**
+     * EF-07.7: la que no aprobó la moderación no está en el sitio, ni para su dueño.
+     */
+    public function testLasPendientesYLasRechazadasNoSeVenEnElCatalogoNiTienenFicha(): void
+    {
+        $this->cargarObrasDeEjemplo();
+        [$generoId] = $this->genero('Drama');
+        $ids = [];
+        foreach (['pendiente' => 'Mi película pendiente', 'rechazada' => 'Mi película rechazada'] as $estado => $titulo) {
+            $obra = Obra::crear(self::ORGANIZADORA, new DatosDeObra($titulo, 'Sinopsis.', 2020, 'Alguien', 90, TipoObra::Pelicula, OrigenCopia::ObraPropia, [$generoId]));
+            $this->repositorio->agregar($obra);
+            $this->base->ejecutar('UPDATE obra SET estado = ? WHERE id = ?', [$estado, $obra->id]);
+            $ids[] = $obra->id;
+        }
+
+        $catalogo = $this->pedir('/obras')->cuerpo();
+        self::assertStringContainsString('La flor', $catalogo);
+        self::assertStringNotContainsString('Mi película', $catalogo);
+        self::assertStringNotContainsString('Mi película', $this->pedir('/obras', ['q' => 'película'])->cuerpo());
+        foreach ($ids as $id) {
+            self::assertSame(404, $this->pedir("/obras/{$id}")->estado());
+            self::assertSame(404, $this->pedir("/obras/{$id}", cabecerasAdicionales: ['X-Usuario-Id' => self::ORGANIZADORA, 'X-Rol' => 'organizador'])->estado());
+        }
+    }
+
     public function testBuscarObrasPorTituloYDirector(): void
     {
         $this->cargarObrasDeEjemplo();

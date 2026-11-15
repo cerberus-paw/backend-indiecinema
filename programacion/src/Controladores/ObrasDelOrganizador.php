@@ -46,6 +46,8 @@ final class ObrasDelOrganizador extends Controlador
                 'url_editar' => "/organizador/obras/{$obra->id}/editar",
                 'url_baja' => "/organizador/obras/{$obra->id}/baja",
                 'tiene_funciones_futuras' => $this->servicio->tieneFuncionesFuturas($obra->id),
+                // EF-07.7: pendiente, aprobada o rechazada; sólo la aprobada tiene ficha pública.
+                'estado' => $obra->estado->value,
             ],
             $obras,
         );

@@ -134,6 +134,23 @@ final class DenunciasTest extends TestCase
     }
 
     /**
+     * @return list<array{para: string, asunto: string, texto: string}> los correos que salieron, ya decodificados
+     */
+    private static function correosEnviados(): array
+    {
+        return array_map(static function (array $correo): array {
+            [$cabeceras, $cuerpo] = explode("\r\n\r\n", $correo['mensaje'], 2);
+            $asunto = iconv_mime_decode_headers($cabeceras, 0, 'UTF-8')['Subject'] ?? '';
+
+            return [
+                'para' => implode(',', $correo['para']),
+                'asunto' => is_array($asunto) ? implode(' ', $asunto) : (string) $asunto,
+                'texto' => (string) base64_decode(str_replace("\r\n", '', $cuerpo), true),
+            ];
+        }, self::$correo->correos());
+    }
+
+    /**
      * @return list<string> los títulos de la lista, en orden
      */
     private static function titulos(Respuesta $respuesta): array
@@ -411,5 +428,80 @@ final class DenunciasTest extends TestCase
     public function testSoloEntranElModeradorYElAdministrador(?string $rol, int $estado): void
     {
         self::assertSame($estado, $this->pedir('GET', '/denuncias', $rol)->estado());
+    }
+
+    /**
+     * Rechazar la obra denunciada es el rechazo de EF-07.7: programación la saca del catálogo, queda
+     * en el historial de obras y su dueño recibe el correo con el motivo.
+     */
+    public function testRechazarLaObraDenunciadaLaSacaDelCatalogoYCierraLasDenuncias(): void
+    {
+        $id = self::obra('La flor');
+        $this->denunciada('obra', $id, self::ESPECTADORA, '2026-11-01 10:00:00', 'derechos');
+        self::assertStringContainsString('value="rechazar"', $this->pedir('GET', '/denuncias', 'moderador')->cuerpo());
+
+        $respuesta = $this->resolver('obra', $id, ['accion' => 'rechazar', 'motivo' => 'No tiene los derechos de la copia.']);
+
+        self::assertSame("/moderacion/denuncias?resueltas={$id}", $respuesta->cabecera('Location'));
+        self::assertSame([['ruta' => 'revision', 'obra' => $id, 'resolucion' => 'rechazar', 'motivo' => 'No tiene los derechos de la copia.', 'moderador_id' => self::MODERADORA]], self::pedidosA('programacion'));
+        self::assertSame('rechazada', self::obrasDeProgramacion()[$id]['estado']);
+        self::assertSame('rechazada', $this->base->valor('SELECT resolucion FROM revision_obra WHERE obra_id = ?', [$id]));
+        $correos = self::correosEnviados();
+        self::assertCount(1, $correos);
+        self::assertSame('<omar@ejemplo.com>', $correos[0]['para']);
+        self::assertStringContainsString('No tiene los derechos de la copia.', $correos[0]['texto']);
+        self::assertSame([['objeto_id' => $id, 'estado' => 'resuelta', 'accion' => 'rechazar', 'motivo' => 'No tiene los derechos de la copia.', 'resuelta_por' => self::MODERADORA, 'con_fecha' => 1]], $this->cerradas());
+        self::assertStringContainsString('Obra rechazada', $this->pedir('GET', '/denuncias?ver=historial', 'moderador')->cuerpo());
+    }
+
+    public function testSiProgramacionNoRespondeNoSeCierraNada(): void
+    {
+        $id = self::obra('La flor');
+        $this->denunciada('obra', $id, self::ESPECTADORA, '2026-11-01 10:00:00');
+        self::tirar('programacion');
+
+        self::assertSame(503, $this->resolver('obra', $id, ['accion' => 'rechazar', 'motivo' => 'No.'])->estado());
+
+        self::assertSame([], $this->cerradas());
+    }
+
+    /**
+     * Q14: si ya la habían rechazado (por la pestaña «Obras» u otra denuncia), las denuncias se
+     * cierran sin repetir el rechazo ni el correo.
+     */
+    public function testUnaObraYaRechazadaCierraLasDenunciasSinRepetir(): void
+    {
+        $id = self::obra('La flor');
+        $this->denunciada('obra', $id, self::ESPECTADORA, '2026-11-01 10:00:00');
+        $obras = self::obrasDeProgramacion();
+        $obras[$id]['estado'] = 'rechazada';
+        self::obrasEnProgramacion($obras);
+
+        $pantalla = $this->pedir('GET', '/denuncias', 'moderador')->cuerpo();
+        self::assertStringContainsString('Ya está rechazada: resolverlas así no la vuelve a rechazar.', $pantalla);
+        self::assertStringContainsString('value="rechazar"', $pantalla);
+
+        self::assertSame(303, $this->resolver('obra', $id, ['accion' => 'rechazar', 'motivo' => 'Ya la rechazaron.'])->estado());
+        self::assertSame([], self::pedidosA('programacion'));
+        self::assertSame([], self::correosEnviados());
+        self::assertSame(['resuelta', 'rechazar'], [$this->cerradas()[0]['estado'], $this->cerradas()[0]['accion']]);
+    }
+
+    /**
+     * Q15: si ya no existe (su dueño la dio de baja), sólo se desestima.
+     */
+    public function testUnaObraQueYaNoEstaSoloSeDesestima(): void
+    {
+        $id = self::obra('La flor');
+        $this->denunciada('obra', $id, self::ESPECTADORA, '2026-11-01 10:00:00');
+        self::obrasEnProgramacion([]);
+
+        $pantalla = $this->pedir('GET', '/denuncias', 'moderador')->cuerpo();
+        self::assertStringContainsString('La flor', $pantalla);
+        self::assertStringContainsString('Ya no está publicada', $pantalla);
+
+        self::assertSame(422, $this->resolver('obra', $id, ['accion' => 'rechazar', 'motivo' => 'No.'])->estado());
+        self::assertSame(303, $this->resolver('obra', $id, ['accion' => 'desestimar', 'motivo' => 'Ya no está.'])->estado());
+        self::assertSame('desestimada', $this->cerradas()[0]['estado']);
     }
 }

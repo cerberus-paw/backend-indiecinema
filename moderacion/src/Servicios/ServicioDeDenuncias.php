@@ -30,6 +30,7 @@ final class ServicioDeDenuncias
         private readonly RepositorioDeDenuncias $denuncias,
         private readonly LoDenunciado $denunciados,
         private readonly UsuariosDeCuentas $usuarios,
+        private readonly ServicioDeObras $obras,
     ) {
     }
 
@@ -103,7 +104,10 @@ final class ServicioDeDenuncias
 
     /**
      * Cierra todas las abiertas de lo denunciado con el motivo: desestimadas, o resueltas después
-     * de actuar en el subsistema dueño (si no responde, no se cierra nada y se reintenta).
+     * de actuar en el subsistema dueño (si no responde, no se cierra nada y se reintenta). Si lo
+     * que resuelve ya estaba hecho, se cierran sin repetirlo (Q14).
+     *
+     * @param ?Denunciado $denunciado como lo da hoy su subsistema, si todavía se resuelve
      *
      * @return bool false si ya no había abiertas: no cambia nada
      *
@@ -117,6 +121,14 @@ final class ServicioDeDenuncias
         }
         if (!$this->lasPuedeResolver($denunciado, $denuncias, $moderador)) {
             throw ExcepcionHttp::prohibida();
+        }
+
+        if ($denunciado !== null && !$denunciado->sancionado) {
+            match ($accion) {
+                // El rechazo de EF-07.7: el historial de obras y el correo al dueño.
+                'rechazar' => $this->obras->resolver($denunciado->id, false, $motivo, $moderador),
+                default => null,
+            };
         }
 
         return $this->denuncias->cerrar($tipo, $objetoId, $accion === 'desestimar' ? null : $accion, null, $motivo, $moderador->id, new DateTimeImmutable('now', new DateTimeZone('UTC'))) > 0;

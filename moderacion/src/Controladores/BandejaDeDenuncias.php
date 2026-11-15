@@ -64,7 +64,7 @@ final class BandejaDeDenuncias extends Controlador
             return $this->redirigir('/denuncias?' . http_build_query(['ya_resueltas' => $id]));
         }
         $denunciado = $this->servicio->denunciado($tipo, $id);
-        $publicado = $denunciado !== null && $denunciado->publicado ? $denunciado : null;
+        $publicado = $denunciado !== null && $denunciado->seResuelve() ? $denunciado : null;
         // Antes que los errores del formulario: lo suyo no lo resuelve, ni con el motivo mal.
         if (!$this->servicio->lasPuedeResolver($denunciado, $denuncias, $moderador)) {
             throw ExcepcionHttp::prohibida();
@@ -224,8 +224,8 @@ final class BandejaDeDenuncias extends Controlador
             // false: su subsistema no respondió; null: ya no está publicado.
             'denunciado' => match (true) {
                 !$consultado => false,
-                $denunciado === null || !$denunciado->publicado => null,
-                default => ['url' => $denunciado->url] + $denunciado->datos,
+                $denunciado === null || !$denunciado->seResuelve() => null,
+                default => ['url' => $denunciado->url, 'sancionado' => $denunciado->sancionado] + $denunciado->datos,
             },
             // Lo que se puede hacer depende de que siga publicado (Q15).
             'denuncias' => array_map(fn (Denuncia $denuncia): array => [
@@ -235,7 +235,7 @@ final class BandejaDeDenuncias extends Controlador
                 'quien' => $this->quien($denuncia->usuarioId),
             ], $denuncias),
             'propia' => !$this->servicio->lasPuedeResolver($denunciado, $denuncias, $moderador),
-            'acciones' => self::acciones($denunciado !== null && $denunciado->publicado ? $denunciado : null),
+            'acciones' => self::acciones($denunciado !== null && $denunciado->seResuelve() ? $denunciado : null),
         ];
     }
 
@@ -246,7 +246,12 @@ final class BandejaDeDenuncias extends Controlador
      */
     private static function acciones(?Denunciado $denunciado): array
     {
-        return [['valor' => 'desestimar', 'etiqueta' => 'Desestimarlas: no hay nada que hacer']];
+        $acciones = [['valor' => 'desestimar', 'etiqueta' => 'Desestimarlas: no hay nada que hacer']];
+        if ($denunciado?->tipo === TipoDenuncia::Obra) {
+            $acciones[] = ['valor' => 'rechazar', 'etiqueta' => 'Rechazar la obra: sale del catálogo y de las votaciones abiertas'];
+        }
+
+        return $acciones;
     }
 
     /**

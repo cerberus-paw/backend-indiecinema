@@ -11,8 +11,11 @@ namespace IndieCinema\Moderacion\Modelo;
 final readonly class Denunciado
 {
     /**
-     * @param string               $url   la ficha del sitio donde se ve
-     * @param array<string, mixed> $datos lo que ve el moderador, según el tipo
+     * @param string               $url        la ficha del sitio donde se ve
+     * @param array<string, mixed> $datos      lo que ve el moderador, según el tipo
+     * @param bool                 $sancionado si ya se hizo lo que resuelve sus denuncias (la obra
+     *                                         rechazada, la sala suspendida por denuncia, el
+     *                                         comentario oculto): se cierran sin repetirlo (Q14)
      */
     public function __construct(
         public TipoDenuncia $tipo,
@@ -22,7 +25,17 @@ final readonly class Denunciado
         public bool $publicado,
         public string $url,
         public array $datos = [],
+        public bool $sancionado = false,
     ) {
+    }
+
+    /**
+     * Si todavía se puede hacer algo con él: está publicado, o ya se hizo lo que resuelve sus
+     * denuncias.
+     */
+    public function seResuelve(): bool
+    {
+        return $this->publicado || $this->sancionado;
     }
 
     public function esDe(string $usuarioId): bool

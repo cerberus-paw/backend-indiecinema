@@ -48,6 +48,6 @@ final class LoDenunciado
             'director' => $obra->director,
             'sinopsis' => $obra->sinopsis,
             'afiche' => $obra->afiche ? "/obras/{$obra->id}/afiche" : null,
-        ]);
+        ], $obra->estado === 'rechazada');
     }
 }

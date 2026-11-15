@@ -134,6 +134,35 @@ final class AdministracionDeSolicitudesTest extends TestCase
         return $id;
     }
 
+    /**
+     * El seguro y la habilitación de una solicitud, como los deja el formulario (EF-07.4). Los
+     * archivos no hacen falta: la bandeja muestra el enlace, no el PDF.
+     *
+     * @return array<string, string> tipo => id del documento
+     */
+    private function conDocumentos(string $solicitud, string $venceSeguro = '+1 year'): array
+    {
+        $ids = [];
+        foreach (['seguro' => $venceSeguro, 'habilitacion' => '+2 years'] as $tipo => $vence) {
+            $ids[$tipo] = Uuid::nuevo();
+            $this->base->ejecutar(
+                "INSERT INTO documento (id, sala_id, solicitud_id, tipo, archivo, vence_en, subido_en)
+                 VALUES (?, ?, ?, ?, '0123456789abcdef0123456789abcdef.pdf', ?, NOW())",
+                [$ids[$tipo], $this->salaId($solicitud), $solicitud, $tipo, new DateTimeImmutable('today')->modify($vence)->format('Y-m-d')],
+            );
+        }
+
+        return $ids;
+    }
+
+    /**
+     * @return array<string, string> tipo => estado
+     */
+    private function estadosDeLosDocumentos(string $solicitud): array
+    {
+        return array_column($this->base->filas('SELECT tipo, estado FROM documento WHERE solicitud_id = ?', [$solicitud]), 'estado', 'tipo');
+    }
+
     private function estado(string $id): string
     {
         return (string) $this->base->valor('SELECT estado FROM solicitud_sala WHERE id = ?', [$id]);
@@ -399,6 +428,76 @@ final class AdministracionDeSolicitudesTest extends TestCase
         // Elegir una resuelta abre el historial; una pendiente, la bandeja.
         self::assertSame(['Rechazada'], self::nombres($this->pedir('GET', "/solicitudes?id={$rechazada}")));
         self::assertSame(['Pendiente'], self::nombres($this->pedir('GET', "/solicitudes?id={$pendiente}")));
+    }
+
+    public function testLaElegidaMuestraLaDocumentacionConSusEnlaces(): void
+    {
+        $id = $this->solicitar(self::ESPECTADORA, 'El Galpón');
+        $documentos = $this->conDocumentos($id);
+
+        $cuerpo = $this->pedir('GET', "/solicitudes?id={$id}", 'moderador')->cuerpo();
+
+        self::assertStringContainsString('Documentación', $cuerpo);
+        self::assertStringContainsString("href=\"/moderacion/documentos/{$documentos['seguro']}\"", $cuerpo);
+        self::assertStringContainsString("href=\"/moderacion/documentos/{$documentos['habilitacion']}\"", $cuerpo);
+        self::assertStringContainsString('Vence el ' . new DateTimeImmutable('today')->modify('+1 year')->format('d/m/Y'), $cuerpo);
+        self::assertStringContainsString('Vence el ' . new DateTimeImmutable('today')->modify('+2 years')->format('d/m/Y'), $cuerpo);
+        self::assertStringNotContainsString('Sin documentación', $cuerpo);
+    }
+
+    /**
+     * Grilling de EF-07, Q6: no hay un paso aparte para los documentos. Aprobar la solicitud los
+     * acepta y rechazarla los rechaza.
+     */
+    public function testAprobarAceptaLosDocumentosYRechazarLosRechaza(): void
+    {
+        $aprobada = $this->solicitar(self::ESPECTADORA, 'El Galpón');
+        $rechazada = $this->solicitar(self::ORGANIZADOR, 'La Terraza');
+        $this->conDocumentos($aprobada);
+        $this->conDocumentos($rechazada);
+
+        self::assertSame(303, $this->resolver($aprobada, ['resolucion' => 'aprobar', 'motivo' => 'Todo en orden.'], 'moderador')->estado());
+        self::assertSame(303, $this->resolver($rechazada, ['resolucion' => 'rechazar', 'motivo' => 'La póliza no cubre el espacio.'], 'moderador')->estado());
+
+        self::assertSame(['seguro' => 'aceptado', 'habilitacion' => 'aceptado'], $this->estadosDeLosDocumentos($aprobada));
+        self::assertSame(['seguro' => 'rechazado', 'habilitacion' => 'rechazado'], $this->estadosDeLosDocumentos($rechazada));
+        self::assertStringContainsString('Aceptado', $this->pedir('GET', "/solicitudes?id={$aprobada}", 'moderador')->cuerpo());
+        self::assertStringContainsString('Rechazado', $this->pedir('GET', "/solicitudes?id={$rechazada}", 'moderador')->cuerpo());
+    }
+
+    /**
+     * Una que no se pudo aprobar (programación no respondió) sigue pendiente, y sus documentos
+     * también.
+     */
+    public function testSiNoSeApruebaLosDocumentosSiguenPendientes(): void
+    {
+        $id = $this->solicitar(self::ESPECTADORA, 'El Galpón');
+        $this->conDocumentos($id);
+        self::tirar('programacion');
+
+        $this->resolver($id, ['resolucion' => 'aprobar', 'motivo' => 'Todo en orden.']);
+
+        self::assertSame(['seguro' => 'pendiente', 'habilitacion' => 'pendiente'], $this->estadosDeLosDocumentos($id));
+    }
+
+    public function testUnaSinDocumentacionSeVeConElAvisoYSeResuelveIgual(): void
+    {
+        $id = $this->solicitar(self::ESPECTADORA, 'El Galpón');
+
+        self::assertStringContainsString('Sin documentación: se mandó antes de que se pidiera.', $this->pedir('GET', "/solicitudes?id={$id}")->cuerpo());
+        self::assertSame(303, $this->resolver($id, ['resolucion' => 'aprobar', 'motivo' => 'Todo en orden.'])->estado());
+        self::assertSame('aprobada', $this->estado($id));
+    }
+
+    public function testUnDocumentoVencidoSeVeComoVencido(): void
+    {
+        $id = $this->solicitar(self::ESPECTADORA, 'El Galpón');
+        $this->conDocumentos($id, '-1 day');
+
+        $cuerpo = $this->pedir('GET', "/solicitudes?id={$id}")->cuerpo();
+
+        self::assertStringContainsString('Venció el ' . new DateTimeImmutable('today')->modify('-1 day')->format('d/m/Y'), $cuerpo);
+        self::assertStringContainsString('Vence el ' . new DateTimeImmutable('today')->modify('+2 years')->format('d/m/Y'), $cuerpo);
     }
 
     /**

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace IndieCinema\Moderacion\Controladores;
 
+use DateTimeImmutable;
+use IndieCinema\Moderacion\Modelo\Documento;
 use IndieCinema\Moderacion\Modelo\SolicitudDeSala;
 use IndieCinema\Moderacion\Servicios\ServicioDeSolicitudes;
 use IndieCinema\Nucleo\Controlador;
@@ -216,6 +218,14 @@ final class AdministracionDeSolicitudes extends Controlador
                 ],
             },
             'solicitante_nombre' => $solicitud->solicitanteNombre,
+            // EF-07.4: vacía en las que se mandaron antes de que se pidiera.
+            'documentos' => array_map(fn (Documento $documento): array => [
+                'nombre' => $documento->tipo->nombre(),
+                'vence' => $documento->venceEn->format('d/m/Y'),
+                'vencido' => $documento->venceEn <= new DateTimeImmutable('today'),
+                'estado' => $documento->estado->value,
+                'url' => $this->ruta("/documentos/{$documento->id}"),
+            ], $this->servicio->documentosDe($solicitud)),
             'solicitudes_previas' => $this->servicio->cuantasDe($solicitud->usuarioId) - 1,
         ];
     }

@@ -8,6 +8,7 @@ use DateTimeImmutable;
 use DateTimeZone;
 use IndieCinema\Moderacion\Modelo\DatosDeSala;
 use IndieCinema\Moderacion\Modelo\Documento;
+use IndieCinema\Moderacion\Modelo\EstadoDocumento;
 use IndieCinema\Moderacion\Modelo\EstadoSolicitud;
 use IndieCinema\Moderacion\Modelo\SolicitudDeSala;
 use IndieCinema\Moderacion\Servicios\SolicitudPendiente;
@@ -134,12 +135,30 @@ final class RepositorioDeSolicitudes
      *
      * @return bool false si ya estaba resuelta (otro administrador, o el mismo POST dos veces)
      */
+    /**
+     * La deja resuelta si estaba pendiente, y con ella sus documentos (EF-07.4): aprobarla los
+     * acepta y rechazarla los rechaza (grilling de EF-07, Q6). Todo junto o nada.
+     *
+     * @return bool false si ya estaba resuelta: no cambia nada
+     */
     public function resolver(string $id, EstadoSolicitud $estado, string $resueltaPor, string $motivo, DateTimeImmutable $resueltaEn): bool
     {
-        return $this->base->ejecutar(
-            'UPDATE solicitud_sala SET estado = ?, resuelta_por = ?, motivo = ?, resuelta_en = ? WHERE id = ? AND estado = ?',
-            [$estado->value, $resueltaPor, $motivo, $resueltaEn, $id, EstadoSolicitud::Pendiente->value],
-        ) === 1;
+        return (bool) $this->base->enTransaccion(function (BaseDeDatos $base) use ($id, $estado, $resueltaPor, $motivo, $resueltaEn): bool {
+            $resuelta = $base->ejecutar(
+                'UPDATE solicitud_sala SET estado = ?, resuelta_por = ?, motivo = ?, resuelta_en = ? WHERE id = ? AND estado = ?',
+                [$estado->value, $resueltaPor, $motivo, $resueltaEn, $id, EstadoSolicitud::Pendiente->value],
+            ) === 1;
+            $documentos = match ($estado) {
+                EstadoSolicitud::Aprobada => EstadoDocumento::Aceptado,
+                EstadoSolicitud::Rechazada => EstadoDocumento::Rechazado,
+                default => null,
+            };
+            if ($resuelta && $documentos !== null) {
+                $base->ejecutar('UPDATE documento SET estado = ? WHERE solicitud_id = ?', [$documentos->value, $id]);
+            }
+
+            return $resuelta;
+        });
     }
 
     /**

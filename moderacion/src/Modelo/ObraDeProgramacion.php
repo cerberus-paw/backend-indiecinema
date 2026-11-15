@@ -74,4 +74,20 @@ final readonly class ObraDeProgramacion
     {
         return $this->estado === 'pendiente';
     }
+
+    /**
+     * Cómo se puede resolver: una pendiente se aprueba o se rechaza, y una aprobada sólo se
+     * rechaza (Q16, la denuncia de EF-07.8). Una rechazada la corrige su dueño y vuelve a
+     * pendiente.
+     *
+     * @return list<string> aprobar, rechazar
+     */
+    public function resoluciones(): array
+    {
+        return match ($this->estado) {
+            'pendiente' => ['aprobar', 'rechazar'],
+            'aprobada' => ['rechazar'],
+            default => [],
+        };
+    }
 }

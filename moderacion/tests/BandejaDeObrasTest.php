@@ -102,10 +102,10 @@ final class BandejaDeObrasTest extends TestCase
     /**
      * Una obra pendiente en programación.
      */
-    private static function obra(string $titulo, string $creada = '2026-10-01T10:00:00', string $dueno = self::ORGANIZADOR): string
+    private static function obra(string $titulo, string $creada = '2026-10-01T10:00:00', string $dueno = self::ORGANIZADOR, string $estado = 'pendiente'): string
     {
         $id = Uuid::nuevo();
-        self::obrasEnProgramacion(self::obrasDeProgramacion() + [$id => ['titulo' => $titulo, 'creada_en' => $creada, 'dueno_id' => $dueno]]);
+        self::obrasEnProgramacion(self::obrasDeProgramacion() + [$id => ['titulo' => $titulo, 'creada_en' => $creada, 'dueno_id' => $dueno, 'estado' => $estado]]);
 
         return $id;
     }
@@ -317,6 +317,55 @@ final class BandejaDeObrasTest extends TestCase
         self::assertSame('rechazada', self::obrasDeProgramacion()[$id]['estado']);
         self::assertCount(1, $this->registro());
         self::assertSame(404, $this->pedir('GET', '/obras?id=' . Uuid::nuevo())->estado());
+    }
+
+    /**
+     * Q16: una aprobada se rechaza desde la pestaña, por su id (lo usa la denuncia de EF-07.8).
+     * Aprobarla otra vez no tiene sentido: el formulario sólo la rechaza.
+     */
+    public function testUnaAprobadaSeAbrePorSuIdYSeRechaza(): void
+    {
+        $id = self::obra('La denunciada', estado: 'aprobada');
+
+        $pantalla = $this->pedir('GET', "/obras?id={$id}");
+
+        self::assertSame(200, $pantalla->estado(), $pantalla->cuerpo());
+        self::assertStringContainsString('La denunciada', $pantalla->cuerpo());
+        self::assertStringContainsString('Aprobada', $pantalla->cuerpo());
+        self::assertStringContainsString("/moderacion/obras/{$id}/resolver", $pantalla->cuerpo());
+        self::assertStringContainsString('value="rechazar"', $pantalla->cuerpo());
+        self::assertStringNotContainsString('value="aprobar"', $pantalla->cuerpo());
+
+        $respuesta = $this->resolver($id, ['resolucion' => 'rechazar', 'motivo' => 'La denunciaron: no tiene los derechos.']);
+
+        self::assertSame("/moderacion/obras?rechazada={$id}", $respuesta->cabecera('Location'));
+        self::assertSame('rechazada', self::obrasDeProgramacion()[$id]['estado']);
+        self::assertSame('rechazada', $this->registro()[0]['resolucion']);
+        self::assertSame('Rechazamos tu obra «La denunciada»', self::correosEnviados()[0]['asunto']);
+    }
+
+    /**
+     * Una rechazada vuelve a revisión cuando su dueño la corrige: hasta entonces no se resuelve.
+     */
+    public function testUnaRechazadaSeVeSinFormulario(): void
+    {
+        $id = self::obra('La rechazada', estado: 'rechazada');
+
+        $pantalla = $this->pedir('GET', "/obras?id={$id}")->cuerpo();
+
+        self::assertStringContainsString('La rechazada', $pantalla);
+        self::assertStringContainsString('Está rechazada: vuelve a revisión cuando su dueño la corrige.', $pantalla);
+        self::assertStringNotContainsString("/obras/{$id}/resolver", $pantalla);
+    }
+
+    public function testUnaAprobadaNoSeVuelveAAprobar(): void
+    {
+        $id = self::obra('La aprobada', estado: 'aprobada');
+
+        self::assertSame("/moderacion/obras?ya_resuelta={$id}", $this->resolver($id, ['resolucion' => 'aprobar', 'motivo' => 'Bien.'])->cabecera('Location'));
+
+        self::assertSame([], self::pedidosA('programacion'));
+        self::assertSame([], $this->registro());
     }
 
     /**

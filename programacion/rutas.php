@@ -101,6 +101,7 @@ return static function (Router $router): void {
     $router->interna('POST', '/interno/salas', [SalasInternas::class, 'crear'], ['moderacion']);
     // Las obras que revisa la moderación (EF-07.7).
     $router->interna('GET', '/interno/obras/pendientes', [ObrasInternas::class, 'pendientes'], ['moderacion']);
+    $router->interna('GET', '/interno/obras/{id}', [ObrasInternas::class, 'mostrar'], ['moderacion']);
     $router->interna('POST', '/interno/obras/{id}/revision', [ObrasInternas::class, 'revisar'], ['moderacion']);
     $router->interna('POST', '/interno/salas/{id}/habilitacion', [SalasInternas::class, 'habilitacion'], ['moderacion']);
 

@@ -164,16 +164,61 @@ final class RepositorioDeObras
     }
 
     /**
+     * Cuándo se cargó (en la hora del sitio, como la guarda la base), para mostrarla en la bandeja
+     * de moderación (EF-07.7).
+     */
+    public function creadaEn(string $id): ?string
+    {
+        $creada = $this->base->valor('SELECT creada_en FROM obra WHERE id = ? AND dada_de_baja_en IS NULL', [$id]);
+
+        return $creada === null ? null : (string) $creada;
+    }
+
+    /**
      * La deja en ese estado con el motivo, si no lo estaba.
      *
      * @return bool false si ya estaba en ese estado (o no existe): no cambia nada
      */
     public function revisar(string $id, EstadoObra $estado, string $motivo): bool
     {
-        return $this->base->ejecutar(
-            'UPDATE obra SET estado = ?, motivo = ? WHERE id = ? AND dada_de_baja_en IS NULL AND estado <> ?',
-            [$estado->value, $motivo, $id, $estado->value],
-        ) === 1;
+        return $this->base->enTransaccion(function (BaseDeDatos $base) use ($id, $estado, $motivo): bool {
+            $cambio = $base->ejecutar(
+                'UPDATE obra SET estado = ?, motivo = ? WHERE id = ? AND dada_de_baja_en IS NULL AND estado <> ?',
+                [$estado->value, $motivo, $id, $estado->value],
+            ) === 1;
+            if ($cambio && $estado === EstadoObra::Rechazada) {
+                self::sacarDeLasVotaciones($base, $id);
+            }
+
+            return $cambio;
+        });
+    }
+
+    /**
+     * Q16: la rechazada sale de las candidatas de las funciones en votación de títulos, con sus
+     * votos, para que quien la votó elija otra. Si era la única, la votación se cancela y la obra
+     * queda en ella, porque una función siempre tiene alguna; en votación no hay reservas que
+     * cancelar. Los acuerdos y lo programado no cambian (Q3).
+     */
+    private static function sacarDeLasVotaciones(BaseDeDatos $base, string $obraId): void
+    {
+        $base->ejecutar(
+            "DELETE v FROM voto v JOIN funcion f ON f.id = v.funcion_id
+             WHERE v.obra_id = ? AND f.estado = 'en_votacion_titulos'",
+            [$obraId],
+        );
+        $base->ejecutar(
+            "UPDATE funcion f JOIN funcion_obra fo ON fo.funcion_id = f.id AND fo.obra_id = ?
+             SET f.estado = 'cancelada'
+             WHERE f.estado = 'en_votacion_titulos'
+               AND NOT EXISTS (SELECT 1 FROM funcion_obra otra WHERE otra.funcion_id = f.id AND otra.obra_id <> fo.obra_id)",
+            [$obraId],
+        );
+        $base->ejecutar(
+            "DELETE fo FROM funcion_obra fo JOIN funcion f ON f.id = fo.funcion_id
+             WHERE fo.obra_id = ? AND f.estado = 'en_votacion_titulos'",
+            [$obraId],
+        );
     }
 
     /**

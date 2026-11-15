@@ -72,6 +72,20 @@ final class ServicioDeObras
     }
 
     /**
+     * Una obra en cualquier estado, para la bandeja de moderación (EF-07.7).
+     *
+     * @return array{Obra, string} la obra y cuándo se cargó
+     *
+     * @throws ExcepcionHttp 404 si no existe o se dio de baja
+     */
+    public function paraRevisar(string $id): array
+    {
+        $obra = $this->buscar($id);
+
+        return [$obra, (string) $this->obras->creadaEn($id)];
+    }
+
+    /**
      * Las pendientes de revisión, para la bandeja de moderación (EF-07.7).
      *
      * @return list<array{Obra, string}> la obra y cuándo se cargó

@@ -15,8 +15,8 @@ use IndieCinema\Programacion\Servicios\ServicioDeObras;
 
 /**
  * La API interna de obras para moderación (EF-07.7), que revisa las obras nuevas en su bandeja y
- * no tiene acceso al esquema de programación: lee las pendientes y las aprueba o las rechaza. Sólo
- * la llama moderación, con su token: lo controla la ruta.
+ * no tiene acceso al esquema de programación: lee las pendientes, o una por su id, y las aprueba o
+ * las rechaza. Sólo la llama moderación, con su token: lo controla la ruta.
  */
 final class ObrasInternas extends Controlador
 {
@@ -40,6 +40,19 @@ final class ObrasInternas extends Controlador
             static fn (array $pendiente): array => self::datos($pendiente[0], $generos) + ['creada_en' => str_replace(' ', 'T', $pendiente[1])],
             $this->obras->pendientes(),
         ));
+    }
+
+    /**
+     * GET /interno/obras/{id}: una obra en cualquier estado, con los mismos datos que una
+     * pendiente, para que el moderador rechace una aprobada (la denuncia de EF-07.8).
+     *
+     * @throws ExcepcionHttp 404 si no existe o se dio de baja
+     */
+    public function mostrar(Peticion $peticion): Respuesta
+    {
+        [$obra, $creada] = $this->obras->paraRevisar((string) $peticion->parametro('id'));
+
+        return $this->json(self::datos($obra, $this->obras->mapaGeneros()) + ['creada_en' => str_replace(' ', 'T', $creada)]);
     }
 
     /**

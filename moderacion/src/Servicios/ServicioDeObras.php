@@ -77,14 +77,15 @@ final class ServicioDeObras
      * La aprueba o la rechaza en programación y recién ahí guarda el registro: si programación no
      * responde, no queda nada y se reintenta.
      *
-     * @return bool false si ya no está pendiente: no cambia nada
+     * @return bool false si ya no se resuelve así (ya no está pendiente, o es aprobarla otra vez):
+     *              no cambia nada
      *
      * @throws ExcepcionHttp 403 si es del moderador; 503 si programación no responde
      */
     public function resolver(string $id, bool $aprobar, string $motivo, Usuario $moderador): bool
     {
-        $obra = $this->pendiente($id);
-        if ($obra === null) {
+        $obra = $this->obras->una($id);
+        if ($obra === null || !in_array($aprobar ? 'aprobar' : 'rechazar', $obra->resoluciones(), true)) {
             return false;
         }
         if (!$this->laPuedeResolver($obra, $moderador)) {
@@ -140,18 +141,12 @@ final class ServicioDeObras
     }
 
     /**
-     * Una pendiente, o null si no lo está (o no existe).
+     * Una obra en cualquier estado, o null si programación no la tiene.
      *
      * @throws ExcepcionHttp 503 si programación no responde
      */
-    public function pendiente(string $id): ?ObraDeProgramacion
+    public function obra(string $id): ?ObraDeProgramacion
     {
-        foreach ($this->obras->pendientes() as $obra) {
-            if ($obra->id === $id) {
-                return $obra;
-            }
-        }
-
-        return null;
+        return $this->obras->una($id);
     }
 }

@@ -13,14 +13,16 @@ use IndieCinema\Nucleo\Http\ExcepcionHttp;
 use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Seguridad\Usuario;
+use IndieCinema\Nucleo\Uuid;
 use LogicException;
 
 /**
  * La pestaña «Obras» de la bandeja de moderación, en /moderacion/obras (EF-07.7): las obras que
  * cargan los organizadores, pendientes en programación, de la más vieja a la más nueva. La elegida
  * (?id=) muestra sus datos, el afiche y quién la cargó, y se aprueba o se rechaza con un motivo
- * obligatorio. «Ver historial» (?ver=historial) lista las resueltas, de la tabla de moderación.
- * Las rutas piden el rol de moderador, que el administrador alcanza.
+ * obligatorio. Por su id se abre también una que no está pendiente: una aprobada se rechaza (Q16,
+ * la denuncia de EF-07.8). «Ver historial» (?ver=historial) lista las resueltas, de la tabla de
+ * moderación. Las rutas piden el rol de moderador, que el administrador alcanza.
  */
 final class BandejaDeObras extends Controlador
 {
@@ -35,7 +37,7 @@ final class BandejaDeObras extends Controlador
     }
 
     /**
-     * @throws ExcepcionHttp 404 si la obra de ?id= no está pendiente
+     * @throws ExcepcionHttp 404 si la obra de ?id= no existe
      */
     public function listar(Peticion $peticion): Respuesta
     {
@@ -49,8 +51,8 @@ final class BandejaDeObras extends Controlador
     {
         $id = (string) $peticion->parametro('id');
         $moderador = self::moderador($peticion);
-        $obra = $this->servicio->pendiente($id);
-        if ($obra === null) {
+        $obra = $this->servicio->obra($id);
+        if ($obra === null || $obra->resoluciones() === []) {
             return $this->redirigir('/obras?' . http_build_query(['ya_resuelta' => $id]));
         }
         // Antes que los errores del formulario: la suya no la resuelve, ni con el motivo mal.
@@ -121,7 +123,9 @@ final class BandejaDeObras extends Controlador
             } else {
                 $elegida = $pendientes[0] ?? null;
                 if ($elegidaId !== null) {
+                    // Una que no está pendiente se abre por su id, para rechazarla (Q16).
                     $elegida = array_values(array_filter($pendientes, static fn (ObraDeProgramacion $obra): bool => $obra->id === $elegidaId))[0]
+                        ?? (Uuid::esValido($elegidaId) ? $this->servicio->obra($elegidaId) : null)
                         ?? throw ExcepcionHttp::noEncontrada();
                 }
                 $datos['obras'] = array_map(static fn (ObraDeProgramacion $obra): array => [
@@ -174,6 +178,8 @@ final class BandejaDeObras extends Controlador
                 default => ['nombre' => $dueno->nombre, 'correo' => $dueno->correo],
             },
             'propia' => !$this->servicio->laPuedeResolver($obra, $moderador),
+            'estado' => $obra->estado,
+            'resoluciones' => $obra->resoluciones(),
         ];
     }
 

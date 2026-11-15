@@ -10,8 +10,8 @@ use IndieCinema\Nucleo\Http\ExcepcionHttp;
 use RuntimeException;
 
 /**
- * Las obras, que son de programación: moderación lee las pendientes y las aprueba o las rechaza
- * por su API interna (EF-07.7), sin tocar su esquema.
+ * Las obras, que son de programación: moderación lee las pendientes (o una, por su id) y las
+ * aprueba o las rechaza por su API interna (EF-07.7), sin tocar su esquema.
  */
 final class ObrasDeProgramacion
 {
@@ -35,6 +35,19 @@ final class ObrasDeProgramacion
         }
 
         return array_map(ObraDeProgramacion::desdeJson(...), $obras);
+    }
+
+    /**
+     * Una obra en cualquier estado, o null si programación no la tiene (o se dio de baja).
+     *
+     * @throws ExcepcionHttp    503 si programación no responde
+     * @throws RuntimeException si responde otra cosa
+     */
+    public function una(string $id): ?ObraDeProgramacion
+    {
+        $obra = $this->cliente->get('programacion', '/interno/obras/' . rawurlencode($id));
+
+        return $obra === null ? null : ObraDeProgramacion::desdeJson($obra);
     }
 
     /**

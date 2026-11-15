@@ -101,6 +101,53 @@ final class ObrasInternasTest extends TestCase
         return $this->base->fila('SELECT estado, motivo FROM obra WHERE id = ?', [$id]) ?? [];
     }
 
+    private function sala(): string
+    {
+        $id = Uuid::nuevo();
+        $this->base->ejecutar(
+            'INSERT INTO sala (id, organizador_id, nombre, descripcion, direccion, localidad, capacidad,'
+            . ' peliculas_por_funcion, duracion_funcion, tiempo_entre_funciones, habilitada)'
+            . ' VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [$id, self::DUENA, 'El Galpón', 'Un galpón con proyector.', 'Av. San Martín 450', 'Luján', 60, 2, 120, 15, 1],
+        );
+
+        return $id;
+    }
+
+    /**
+     * @param array<string, string> $obras id => candidata|elegida
+     */
+    private function funcion(string $estado, array $obras): string
+    {
+        $id = Uuid::nuevo();
+        $this->base->ejecutar(
+            'INSERT INTO funcion (id, sala_id, estado, fecha_hora, precio_base, cupo) VALUES (?, ?, ?, ?, 2000, 50)',
+            [$id, $this->sala(), $estado, $estado === 'programada' ? '2027-01-10 20:00:00' : null],
+        );
+        foreach ($obras as $obraId => $enLaFuncion) {
+            $this->base->ejecutar('INSERT INTO funcion_obra (funcion_id, obra_id, estado) VALUES (?, ?, ?)', [$id, $obraId, $enLaFuncion]);
+        }
+
+        return $id;
+    }
+
+    private function votar(string $funcionId, string $obraId): void
+    {
+        $this->base->ejecutar('INSERT INTO voto (funcion_id, usuario_id, obra_id) VALUES (?, ?, ?)', [$funcionId, Uuid::nuevo(), $obraId]);
+    }
+
+    /**
+     * @return array{estado: string, obras: list<string>, votos: list<string>}
+     */
+    private function laFuncion(string $id): array
+    {
+        return [
+            'estado' => (string) $this->base->valor('SELECT estado FROM funcion WHERE id = ?', [$id]),
+            'obras' => array_column($this->base->filas('SELECT obra_id FROM funcion_obra WHERE funcion_id = ? ORDER BY obra_id', [$id]), 'obra_id'),
+            'votos' => array_column($this->base->filas('SELECT obra_id FROM voto WHERE funcion_id = ? ORDER BY obra_id', [$id]), 'obra_id'),
+        ];
+    }
+
     private function log(): string
     {
         rewind($this->salidaDelLog);
@@ -138,6 +185,46 @@ final class ObrasInternasTest extends TestCase
             'motivo' => null,
             'creada_en' => '2026-10-01T10:00:00',
         ], $obras[0]);
+    }
+
+    /**
+     * Para que la pestaña muestre una obra que no está pendiente y el moderador la rechace (lo usa
+     * la denuncia de EF-07.8).
+     */
+    public function testUnaObraPorSuIdConSuEstadoYSuMotivo(): void
+    {
+        $id = $this->obra('La aprobada', EstadoObra::Aprobada, '2026-10-03 09:30:00');
+        $this->base->ejecutar('UPDATE obra SET motivo = ? WHERE id = ?', ['Está bien.', $id]);
+
+        $respuesta = $this->pedir('GET', "/interno/obras/{$id}");
+
+        self::assertSame(200, $respuesta->estado(), $respuesta->cuerpo());
+        self::assertSame([
+            'id' => $id,
+            'titulo' => 'La aprobada',
+            'tipo' => 'pelicula',
+            'anio' => 2020,
+            'director' => 'Rocío Paz',
+            'duracion' => 95,
+            'sinopsis' => 'Un pueblo y su río.',
+            'generos' => ['Drama'],
+            'origen_copia' => 'obra_propia',
+            'afiche' => true,
+            'dueno_id' => self::DUENA,
+            'estado' => 'aprobada',
+            'motivo' => 'Está bien.',
+            'creada_en' => '2026-10-03T09:30:00',
+        ], json_decode($respuesta->cuerpo(), true));
+    }
+
+    public function testUnaObraQueNoExisteODadaDeBajaEs404(): void
+    {
+        $baja = $this->obra('Dada de baja', EstadoObra::Aprobada);
+        (new RepositorioDeObras($this->base))->darDeBaja($baja);
+
+        foreach ([$baja, Uuid::nuevo(), 'no-es-un-id'] as $id) {
+            self::assertSame(404, $this->pedir('GET', "/interno/obras/{$id}")->estado(), $id);
+        }
     }
 
     public function testSinPendientesEsUnaListaVacia(): void
@@ -194,6 +281,56 @@ final class ObrasInternasTest extends TestCase
         self::assertSame(['estado' => 'aprobada', 'motivo' => 'Ahora sí.'], $this->enLaBase($id));
     }
 
+    /**
+     * Q16: una aprobada que se rechaza (por una denuncia) sale de las votaciones abiertas, y sus
+     * votos se borran para que quien la votó elija otra.
+     */
+    public function testRechazarUnaAprobadaLaSacaDeLaVotacionYBorraSusVotos(): void
+    {
+        $rechazada = $this->obra('La denunciada', EstadoObra::Aprobada);
+        $otra = $this->obra('La otra', EstadoObra::Aprobada);
+        $funcion = $this->funcion('en_votacion_titulos', [$rechazada => 'candidata', $otra => 'candidata']);
+        $this->votar($funcion, $rechazada);
+        $this->votar($funcion, $otra);
+
+        self::assertSame(200, $this->revisar($rechazada, ['resolucion' => 'rechazar', 'motivo' => 'Denunciada.'])->estado());
+
+        self::assertSame(['estado' => 'en_votacion_titulos', 'obras' => [$otra], 'votos' => [$otra]], $this->laFuncion($funcion));
+    }
+
+    /**
+     * Una votación sin candidatas no tiene sentido: se cancela. Queda con la obra, porque una
+     * función siempre tiene alguna.
+     */
+    public function testSiEraLaUnicaCandidataLaFuncionSeCancela(): void
+    {
+        $rechazada = $this->obra('La denunciada', EstadoObra::Aprobada);
+        $funcion = $this->funcion('en_votacion_titulos', [$rechazada => 'candidata']);
+        $this->votar($funcion, $rechazada);
+
+        self::assertSame(200, $this->revisar($rechazada, ['resolucion' => 'rechazar', 'motivo' => 'Denunciada.'])->estado());
+
+        self::assertSame(['estado' => 'cancelada', 'obras' => [$rechazada], 'votos' => []], $this->laFuncion($funcion));
+    }
+
+    /**
+     * Q3: la votación ya terminó en un acuerdo, y una programada tiene reservas.
+     */
+    public function testRechazarUnaAprobadaNoTocaUnAcuerdoNiUnaProgramada(): void
+    {
+        $rechazada = $this->obra('La denunciada', EstadoObra::Aprobada);
+        $otra = $this->obra('La otra', EstadoObra::Aprobada);
+        $acuerdo = $this->funcion('en_acuerdo_fecha', [$rechazada => 'elegida', $otra => 'candidata']);
+        $programada = $this->funcion('programada', [$rechazada => 'elegida']);
+        $antes = [$this->laFuncion($acuerdo), $this->laFuncion($programada)];
+
+        self::assertSame(200, $this->revisar($rechazada, ['resolucion' => 'rechazar', 'motivo' => 'Denunciada.'])->estado());
+
+        self::assertSame($antes, [$this->laFuncion($acuerdo), $this->laFuncion($programada)]);
+        self::assertSame('en_acuerdo_fecha', $antes[0]['estado']);
+        self::assertSame('programada', $antes[1]['estado']);
+    }
+
     public function testUnaQueNoExisteODadaDeBajaEs404(): void
     {
         $baja = $this->obra('Dada de baja');
@@ -233,6 +370,7 @@ final class ObrasInternasTest extends TestCase
         $id = $this->obra('Mi obra');
 
         self::assertSame(403, $this->pedir('GET', '/interno/obras/pendientes', llamador: 'funciones', token: self::TOKEN_DE_FUNCIONES)->estado());
+        self::assertSame(403, $this->pedir('GET', "/interno/obras/{$id}", llamador: 'funciones', token: self::TOKEN_DE_FUNCIONES)->estado());
         self::assertSame(403, $this->pedir('POST', "/interno/obras/{$id}/revision", ['resolucion' => 'aprobar', 'motivo' => 'Bien.', 'moderador_id' => self::MODERADOR], 'funciones', self::TOKEN_DE_FUNCIONES)->estado());
         self::assertSame('pendiente', $this->enLaBase($id)['estado']);
     }

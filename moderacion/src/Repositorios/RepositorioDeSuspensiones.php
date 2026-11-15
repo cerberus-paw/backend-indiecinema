@@ -60,6 +60,19 @@ final class RepositorioDeSuspensiones
     }
 
     /**
+     * Las activas que abrió la tarea (por un documento vencido o que falta): las que llevan su
+     * aviso al organizador.
+     *
+     * @return list<Suspension>
+     */
+    public function activasDeLaTarea(): array
+    {
+        return array_map(self::suspension(...), $this->base->filas(
+            self::SELECT . " WHERE causa = 'vencimiento' AND abierta_por IS NULL AND levantada_en IS NULL ORDER BY desde, id",
+        ));
+    }
+
+    /**
      * @return bool false si ya estaba levantada
      */
     public function levantar(string $id, ?string $quien, DateTimeImmutable $cuando): bool

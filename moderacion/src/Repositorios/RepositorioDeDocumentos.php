@@ -61,6 +61,25 @@ final class RepositorioDeDocumentos
     }
 
     /**
+     * Los documentos vigentes (el aceptado con el vencimiento más lejano de cada sala y tipo) que
+     * vencen entre las dos fechas, incluidas.
+     *
+     * @return list<Documento>
+     */
+    public function vigentesQueVencenEntre(DateTimeImmutable $desde, DateTimeImmutable $hasta): array
+    {
+        $filas = $this->base->filas(
+            "SELECT id, sala_id, solicitud_id, tipo, archivo, vence_en, subido_en, estado FROM documento d
+             WHERE estado = 'aceptado' AND vence_en BETWEEN ? AND ?
+               AND vence_en = (SELECT MAX(o.vence_en) FROM documento o WHERE o.sala_id = d.sala_id AND o.tipo = d.tipo AND o.estado = 'aceptado')
+             ORDER BY sala_id, tipo",
+            [$desde->format('Y-m-d'), $hasta->format('Y-m-d')],
+        );
+
+        return array_map(self::documento(...), $filas);
+    }
+
+    /**
      * @param array<string, mixed> $fila
      */
     private static function documento(array $fila): Documento

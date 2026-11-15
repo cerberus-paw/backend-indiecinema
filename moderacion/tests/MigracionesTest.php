@@ -152,6 +152,20 @@ final class MigracionesTest extends TestCase
     }
 
     /**
+     * EF-07.5: cada aviso a una sala sale una vez.
+     */
+    public function testUnAvisoPorSalaYClave(): void
+    {
+        $sala = Uuid::nuevo();
+        $this->base->ejecutar("INSERT INTO aviso (sala_id, clave, enviado_en) VALUES (?, 'plazo-inicio', NOW())", [$sala]);
+
+        $this->assertRechaza(self::CLAVE_REPETIDA, fn () => $this->base->ejecutar("INSERT INTO aviso (sala_id, clave, enviado_en) VALUES (?, 'plazo-inicio', NOW())", [$sala]));
+        $this->base->ejecutar("INSERT INTO aviso (sala_id, clave, enviado_en) VALUES (?, 'plazo-7', NOW())", [$sala]);
+        $this->base->ejecutar("INSERT INTO aviso (sala_id, clave, enviado_en) VALUES (?, 'plazo-inicio', NOW())", [Uuid::nuevo()]);
+        self::assertSame(3, $this->base->valor('SELECT COUNT(*) FROM aviso'));
+    }
+
+    /**
      * EF-07.2: las solicitudes que había en programación se mudan con los datos de su sala, sin
      * foto propia, y programación se queda sin la tabla. Las de salas dadas de baja no, como no se
      * veían en la bandeja.

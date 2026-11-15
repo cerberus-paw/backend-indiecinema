@@ -111,6 +111,14 @@ final class ServicioDeSuspensiones
     /**
      * @return list<Suspension>
      */
+    public function activasDeLaTarea(): array
+    {
+        return $this->suspensiones->activasDeLaTarea();
+    }
+
+    /**
+     * @return list<Suspension>
+     */
     public function activasDe(string $salaId): array
     {
         return $this->suspensiones->activasDe($salaId);

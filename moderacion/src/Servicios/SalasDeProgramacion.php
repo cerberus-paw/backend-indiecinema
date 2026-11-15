@@ -65,16 +65,38 @@ final class SalasDeProgramacion
      */
     public function enElSitio(string $salaId): string
     {
+        $sala = $this->datosDe($salaId);
+        if ($sala === null) {
+            return 'dada_de_baja';
+        }
+
+        return $sala['habilitada'] ? 'publicada' : 'retirada';
+    }
+
+    /**
+     * Lo que programación cuenta de la sala, o null si ya no la tiene (se dio de baja).
+     *
+     * @return ?array{nombre: string, organizador_id: string, habilitada: bool}
+     *
+     * @throws ExcepcionHttp    503 si programación no responde
+     * @throws RuntimeException si responde otra cosa
+     */
+    public function datosDe(string $salaId): ?array
+    {
         $salas = $this->cliente->get('programacion', '/interno/salas', ['ids' => $salaId]);
         if (!is_array($salas)) {
             throw new RuntimeException('programación no respondió las salas a GET /interno/salas.');
         }
         $sala = $salas[$salaId] ?? null;
         if (!is_array($sala)) {
-            return 'dada_de_baja';
+            return null;
         }
 
-        return ($sala['habilitada'] ?? null) === true ? 'publicada' : 'retirada';
+        return [
+            'nombre' => (string) ($sala['nombre'] ?? ''),
+            'organizador_id' => (string) ($sala['organizador_id'] ?? ''),
+            'habilitada' => ($sala['habilitada'] ?? null) === true,
+        ];
     }
 
     /**

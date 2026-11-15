@@ -105,6 +105,7 @@ final class OrdenDeEncabezadosTest extends TestCase
     {
         yield 'portada' => ['/', null, 'GET', [], 200];
         yield 'acerca de' => ['/acerca-de', null, 'GET', [], 200];
+        yield 'cómo funciona' => ['/como-funciona', null, 'GET', [], 200];
         yield 'cartelera' => ['/cartelera', null, 'GET', [], 200];
         yield 'cartelera sin resultados' => ['/cartelera?q=zzzz', null, 'GET', [], 200];
         yield 'ficha de una función' => ['/cartelera/' . self::FUNCION, null, 'GET', [], 200];

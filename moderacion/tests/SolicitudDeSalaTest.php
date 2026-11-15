@@ -319,6 +319,21 @@ final class SolicitudDeSalaTest extends TestCase
     }
 
     /**
+     * La foto y los dos PDF se pueden arrastrar a su zona (EF-07.4), cada una con su texto. Sin
+     * JavaScript, son campos de archivo comunes.
+     */
+    public function testLaFotoYLosPdfSeArrastranASuZona(): void
+    {
+        $documento = HTMLDocument::createFromString($this->pedir()->cuerpo(), LIBXML_NOERROR);
+
+        foreach (['imagen' => 'Arrastrá la imagen acá, o elegila:', 'seguro' => 'Arrastrá el PDF acá, o elegilo:', 'habilitacion_pdf' => 'Arrastrá el PDF acá, o elegilo:'] as $campo => $texto) {
+            $control = $documento->querySelector("input[type=\"file\"][name=\"{$campo}\"]");
+            self::assertNotNull($control, $campo);
+            self::assertSame($texto, $control->getAttribute('data-zona-de-archivo'), $campo);
+        }
+    }
+
+    /**
      * @return iterable<string, array{array<string, string>, string, string}>
      */
     public static function camposInvalidos(): iterable

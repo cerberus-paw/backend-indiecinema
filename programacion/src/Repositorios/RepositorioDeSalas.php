@@ -156,6 +156,24 @@ final class RepositorioDeSalas
     }
 
     /**
+     * La última solicitud de moderación que se le aplicó (EF-07.6), o null.
+     */
+    public function solicitudAplicada(string $id): ?string
+    {
+        $solicitud = $this->base->valor('SELECT solicitud_id FROM sala WHERE id = ?', [$id]);
+
+        return $solicitud === null ? null : (string) $solicitud;
+    }
+
+    /**
+     * Anota la solicitud que se le acaba de aplicar.
+     */
+    public function anotarSolicitud(string $id, string $solicitudId): void
+    {
+        $this->base->ejecutar('UPDATE sala SET solicitud_id = ? WHERE id = ?', [$solicitudId, $id]);
+    }
+
+    /**
      * Guarda sólo el flag de habilitada, que cambia el administrador: los datos de la sala son
      * del organizador y no se pisan con lo que se leyó antes.
      */

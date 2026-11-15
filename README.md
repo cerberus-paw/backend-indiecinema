@@ -204,7 +204,10 @@ todo el sitio se vea igual aunque lo sirvan subsistemas distintos.
   bandeja de solicitudes de sala.
   Programación tiene la API de salas para moderación (EF-07.1): `POST /interno/salas` crea la sala
   de una solicitud aprobada (o completa la que ya existía), `POST /interno/salas/{id}/habilitacion`
-  la publica o la retira con un motivo, y `GET /interno/salas?ids=…` la lee para la bandeja.
+  la publica o la retira con un motivo, y `GET /interno/salas?ids=…` la lee para la bandeja. Desde
+  EF-07.6 el alta lleva el `solicitud_id`: con otra solicitud que la última que se le aplicó, a una
+  sala habilitada le pone los datos de un cambio de dirección aprobado; con la misma, es un
+  reintento y no la toca.
   Moderación tiene `GET /interno/solicitudes/ultima/{usuario}` para cuentas (EF-07.6): el estado
   y el motivo de la última solicitud de sala, que «Mi cuenta» muestra si moderación responde.
   Funciones tiene `GET /interno/funciones/{id}/ocupacion` y `GET /interno/ocupacion?funciones=…`

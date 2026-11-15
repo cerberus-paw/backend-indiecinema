@@ -332,6 +332,8 @@ final class AdministracionDeSolicitudesTest extends TestCase
             'peliculas_por_funcion' => '2',
             'duracion_funcion' => '120',
             'tiempo_entre_funciones' => '15',
+            // EF-07.6: con la solicitud, programación reconoce el reintento.
+            'solicitud_id' => $id,
             'foto' => sha1_file("{$this->carpeta}/solicitudes/{$foto}"),
         ]], self::pedidosA('programacion'));
         self::assertStringContainsString(self::ADMINISTRADOR . " resolvió la solicitud de sala {$id}: aprobada.", $this->log());

@@ -25,7 +25,8 @@ final class SalasDeProgramacion
      * Crea la sala de una solicitud aprobada, habilitada, con el id que guardó la solicitud, o
      * completa y habilita la que ya existía (las que se mudaron de programación). Va con la foto
      * si la solicitud tiene una; una mudada no tiene, y su sala se queda con la suya. Repetirlo no
-     * crea otra.
+     * crea otra. Con la solicitud, programación le aplica a una sala habilitada un cambio de
+     * dirección aprobado (EF-07.6), y reconoce el reintento.
      *
      * Moderación validó los datos con las mismas reglas: si programación los rechaza igual, es un
      * error nuestro y corta como cualquier otro.
@@ -47,6 +48,8 @@ final class SalasDeProgramacion
             'peliculas_por_funcion' => (string) $datos->peliculasPorFuncion,
             'duracion_funcion' => (string) $datos->duracionFuncion,
             'tiempo_entre_funciones' => (string) $datos->tiempoEntreFunciones,
+            // EF-07.6: programación la recuerda, así un cambio aprobado se aplica una sola vez.
+            'solicitud_id' => $solicitud->id,
         ];
         $respuesta = $solicitud->imagen === null
             ? $this->cliente->post('programacion', '/interno/salas', $campos)

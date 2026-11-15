@@ -28,8 +28,8 @@ final class SalasInternas extends Controlador
     }
 
     /**
-     * GET /interno/salas?ids=…: nombre, localidad, organizador y si está habilitada de cada una,
-     * con su id como clave, como la lectura de varias funciones. Las que no existen o se dieron de
+     * GET /interno/salas?ids=…: nombre, localidad, organizador, si está habilitada y, desde EF-07.6,
+     * el resto de sus datos, de cada una, con su id como clave, como la lectura de varias funciones. Las que no existen o se dieron de
      * baja no vienen. Un id que no es UUID es un error de moderación, que los saca de sus
      * solicitudes: 400.
      */
@@ -54,9 +54,10 @@ final class SalasInternas extends Controlador
 
     /**
      * POST /interno/salas (multipart): la sala de una solicitud aprobada, con el id que eligió
-     * moderación, el organizador, los datos y la foto como archivo. Queda habilitada; con el id de
-     * una sin habilitar del mismo organizador, la completa (ServicioDeSalas::crearParaSolicitud()),
-     * y ahí la foto es opcional.
+     * moderación, el organizador, los datos, la foto como archivo y el id de la solicitud
+     * (solicitud_id, desde EF-07.6). Queda habilitada; con el id de una que ya existe del mismo
+     * organizador, la completa, o, si está habilitada y la solicitud es otra, le aplica el cambio
+     * (ServicioDeSalas::crearParaSolicitud()), y ahí la foto es opcional.
      * Los datos se validan como en el formulario de sala, y los errores vuelven por campo, con los
      * mismos mensajes, para que moderación se los muestre al moderador. Programación no le pregunta
      * a cuentas por el organizador: moderación lo sacó de la sesión del solicitante.
@@ -70,6 +71,10 @@ final class SalasInternas extends Controlador
         if (!is_string($id) || !Uuid::esValido($id) || !is_string($organizador) || !Uuid::esValido($organizador)) {
             return $this->json(['error' => '«id» y «organizador_id» son UUID.'], 400);
         }
+        $solicitud = $peticion->campo('solicitud_id');
+        if ($solicitud !== null && (!is_string($solicitud) || !Uuid::esValido($solicitud))) {
+            return $this->json(['error' => '«solicitud_id» es el UUID de la solicitud de moderación.'], 400);
+        }
         // Una sala que ya existe (la de una solicitud que se mudó a moderación, EF-07.2) se completa
         // sin foto: se queda con la suya.
         $formulario = FormularioDeSala::desdeCampos($peticion->cuerpo(), $peticion->archivo('imagen'), imagenObligatoria: !$this->salas->existe($id));
@@ -78,7 +83,7 @@ final class SalasInternas extends Controlador
             return $this->json(['errores' => $formulario->errores], 422);
         }
 
-        [$sala, $creada] = $this->salas->crearParaSolicitud($id, $organizador, $datos, $formulario->imagen);
+        [$sala, $creada] = $this->salas->crearParaSolicitud($id, $organizador, $datos, $formulario->imagen, $solicitud);
 
         return $this->json(['id' => $sala->id] + self::datos($sala), $creada ? 201 : 200);
     }
@@ -117,9 +122,10 @@ final class SalasInternas extends Controlador
     }
 
     /**
-     * Lo que moderación muestra de una sala en su bandeja.
+     * Lo que moderación muestra de una sala en su bandeja, y con lo que carga el pedido de cambio de
+     * dirección (EF-07.6).
      *
-     * @return array{nombre: string, localidad: string, organizador_id: string, habilitada: bool}
+     * @return array<string, string|int|bool>
      */
     private static function datos(Sala $sala): array
     {
@@ -128,6 +134,12 @@ final class SalasInternas extends Controlador
             'localidad' => $sala->datos->localidad,
             'organizador_id' => $sala->organizadorId,
             'habilitada' => $sala->habilitada,
+            'descripcion' => $sala->datos->descripcion,
+            'direccion' => $sala->datos->direccion,
+            'capacidad' => $sala->datos->capacidad,
+            'peliculas_por_funcion' => $sala->datos->peliculasPorFuncion,
+            'duracion_funcion' => $sala->datos->duracionFuncion,
+            'tiempo_entre_funciones' => $sala->datos->tiempoEntreFunciones,
         ];
     }
 }

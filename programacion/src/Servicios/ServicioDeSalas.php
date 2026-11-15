@@ -65,25 +65,33 @@ final class ServicioDeSalas
      * - Si hay una sin habilitar del mismo organizador (la de una solicitud que se mudó a
      *   moderación), le pone los datos y la foto corregidos allá y la habilita; la foto anterior se
      *   borra recién cuando la base apunta a la nueva.
-     * - Si hay una habilitada del mismo organizador, es el reintento de un pedido que ya se hizo: no
-     *   la toca, porque sus datos ya son de su organizador.
+     * - Si hay una habilitada del mismo organizador y el pedido no trae solicitud, o trae la última
+     *   que se le aplicó, es el reintento de un pedido que ya se hizo: no la toca, porque sus datos
+     *   ya son de su organizador.
+     * - Si trae otra solicitud (un cambio de dirección aprobado, EF-07.6), le pone los datos de esa
+     *   solicitud, y la foto si vino una.
      *
-     * @param ?ImagenSubida $imagen obligatoria para una sala nueva; al completar una, sin foto queda la
-     *                              que tenía
+     * La solicitud queda anotada en la sala, para reconocer el reintento.
+     *
+     * @param ?ImagenSubida $imagen      obligatoria para una sala nueva; al completar una, sin foto queda
+     *                                   la que tenía
+     * @param ?string       $solicitudId la solicitud de moderación que se aplica; null en las llamadas
+     *                                   de antes de EF-07.6
      *
      * @return array{Sala, bool} la sala y si se creó
      *
      * @throws ExcepcionHttp 409 si el id es de una sala de otro organizador o de una dada de baja
      */
-    public function crearParaSolicitud(string $id, string $organizadorId, DatosDeSala $datos, ?ImagenSubida $imagen): array
+    public function crearParaSolicitud(string $id, string $organizadorId, DatosDeSala $datos, ?ImagenSubida $imagen, ?string $solicitudId = null): array
     {
         $existente = $this->salas->buscar($id);
         if ($existente === null ? $this->salas->idUsado($id) : !$existente->esDe($organizadorId)) {
             throw new ExcepcionHttp(409, 'Ese id es de otra sala.');
         }
-        if ($existente?->habilitada) {
+        if ($existente?->habilitada && ($solicitudId === null || $solicitudId === $this->salas->solicitudAplicada($id))) {
             return [$existente, false];
         }
+        $cambio = $existente?->habilitada === true;
 
         if ($existente === null && $imagen === null) {
             throw new LogicException('Una sala nueva necesita su foto: la API la pide.');
@@ -115,14 +123,25 @@ final class ServicioDeSalas
         if ($anterior !== null) {
             $this->archivos->borrar($anterior);
         }
-        if ($existente !== null) {
+        if ($existente !== null && !$cambio) {
             $sala->cambiarHabilitacion(true);
             $this->salas->guardarHabilitacion($sala);
         }
-        $this->log->notice('Moderación habilitó la sala {sala} de {organizador}, de una solicitud aprobada.', [
-            'sala' => $sala->id,
-            'organizador' => $organizadorId,
-        ]);
+        if ($solicitudId !== null) {
+            $this->salas->anotarSolicitud($sala->id, $solicitudId);
+        }
+        if ($cambio) {
+            $this->log->notice('Moderación aplicó la solicitud {solicitud} a la sala {sala} de {organizador}.', [
+                'solicitud' => $solicitudId,
+                'sala' => $sala->id,
+                'organizador' => $organizadorId,
+            ]);
+        } else {
+            $this->log->notice('Moderación habilitó la sala {sala} de {organizador}, de una solicitud aprobada.', [
+                'sala' => $sala->id,
+                'organizador' => $organizadorId,
+            ]);
+        }
 
         return [$sala, $existente === null];
     }

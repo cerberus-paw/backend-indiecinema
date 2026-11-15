@@ -8,7 +8,8 @@
  *
  * Cada pedido lo anota en el archivo de la variable REGISTRO, con la foto como su SHA-1, para que
  * la prueba vea qué le llegó. Las salas que conoce son las del JSON de la variable SALAS (id =>
- * {nombre, localidad, organizador_id, habilitada}), y las va actualizando. Si existe el archivo de
+ * {nombre, localidad, organizador_id, habilitada} y, si la prueba los carga, los demás datos), y
+ * las va actualizando. Si existe el archivo de
  * la variable CAIDA, responde 500 a todo, como si estuviera caída.
  */
 
@@ -61,7 +62,8 @@ if ($metodo === 'POST' && $ruta === '/interno/salas') {
     $anotar(['ruta' => 'crear'] + $campos + ['foto' => is_string($foto) && is_uploaded_file($foto) ? sha1_file($foto) : null]);
     $id = (string) $campos['id'];
     $existia = isset($salas[$id]);
-    $salas[$id] = ['nombre' => $campos['nombre'], 'localidad' => $campos['localidad'], 'organizador_id' => $campos['organizador_id'], 'habilitada' => true];
+    $salas[$id] = ['nombre' => $campos['nombre'], 'localidad' => $campos['localidad'], 'organizador_id' => $campos['organizador_id'], 'habilitada' => true]
+        + array_intersect_key($campos, array_flip(['descripcion', 'direccion', 'capacidad', 'peliculas_por_funcion', 'duracion_funcion', 'tiempo_entre_funciones']));
     $guardar($salas);
     http_response_code($existia ? 200 : 201);
     echo json_encode(['id' => $id] + $salas[$id]);

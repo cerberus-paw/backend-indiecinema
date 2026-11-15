@@ -110,6 +110,28 @@ final class SalasInternasTest extends TestCase
         return ['name' => $nombre, 'type' => 'image/jpeg', 'tmp_name' => $temporal, 'error' => UPLOAD_ERR_OK, 'size' => strlen($contenido)];
     }
 
+    /**
+     * Lo que da el GET de una sala de sala(): con los datos de la sala, para el pedido de cambio de
+     * dirección (EF-07.6).
+     *
+     * @return array<string, mixed>
+     */
+    private static function datos(string $nombre, bool $habilitada): array
+    {
+        return [
+            'nombre' => $nombre,
+            'localidad' => 'Luján',
+            'organizador_id' => self::ORGANIZADORA,
+            'habilitada' => $habilitada,
+            'descripcion' => 'Un galpón.',
+            'direccion' => 'Av. San Martín 450',
+            'capacidad' => 60,
+            'peliculas_por_funcion' => 2,
+            'duracion_funcion' => 120,
+            'tiempo_entre_funciones' => 15,
+        ];
+    }
+
     private function cuantasSalas(): int
     {
         return (int) $this->base->valor('SELECT COUNT(*) FROM sala');
@@ -275,8 +297,8 @@ final class SalasInternasTest extends TestCase
 
         self::assertSame(200, $respuesta->estado(), $respuesta->cuerpo());
         self::assertEquals([
-            $galpon->id => ['nombre' => 'Cine Club El Galpón', 'localidad' => 'Luján', 'organizador_id' => self::ORGANIZADORA, 'habilitada' => true],
-            $sinHabilitar->id => ['nombre' => 'El Microcine', 'localidad' => 'Luján', 'organizador_id' => self::ORGANIZADORA, 'habilitada' => false],
+            $galpon->id => self::datos('Cine Club El Galpón', true),
+            $sinHabilitar->id => self::datos('El Microcine', false),
         ], json_decode($respuesta->cuerpo(), true));
     }
 
@@ -294,7 +316,7 @@ final class SalasInternasTest extends TestCase
 
         self::assertSame(200, $respuesta->estado(), $respuesta->cuerpo());
         self::assertEquals(
-            [$galpon->id => ['nombre' => 'Cine Club El Galpón', 'localidad' => 'Luján', 'organizador_id' => self::ORGANIZADORA, 'habilitada' => true]],
+            [$galpon->id => self::datos('Cine Club El Galpón', true)],
             json_decode($respuesta->cuerpo(), true),
         );
         self::assertSame(403, $this->pedir('GET', '/interno/salas', ['habilitadas' => '1'], llamador: 'funciones', token: self::TOKEN_DE_FUNCIONES)->estado());
@@ -338,7 +360,8 @@ final class SalasInternasTest extends TestCase
 
         self::assertSame(201, $respuesta->estado(), $respuesta->cuerpo());
         self::assertSame(
-            ['id' => $id, 'nombre' => 'Cine Club El Galpón', 'localidad' => 'Luján', 'organizador_id' => self::ORGANIZADORA, 'habilitada' => true],
+            ['id' => $id, 'nombre' => 'Cine Club El Galpón', 'localidad' => 'Luján', 'organizador_id' => self::ORGANIZADORA, 'habilitada' => true]
+                + ['descripcion' => "Un galpón con proyector.\nSesenta butacas.", 'direccion' => 'Av. San Martín 450', 'capacidad' => 60, 'peliculas_por_funcion' => 2, 'duracion_funcion' => 120, 'tiempo_entre_funciones' => 0],
             json_decode($respuesta->cuerpo(), true),
         );
         self::assertStringContainsString('Cine Club El Galpón', $this->enElListado());
@@ -411,6 +434,69 @@ final class SalasInternasTest extends TestCase
         $nueva = $this->pedir('POST', '/interno/salas', cuerpo: ['id' => Uuid::nuevo()] + $campos);
         self::assertSame(422, $nueva->estado());
         self::assertSame('Falta la foto de la sala.', json_decode($nueva->cuerpo(), true)['errores']['imagen'] ?? null);
+    }
+
+    /**
+     * EF-07.6: un cambio de dirección aprobado llega con su solicitud. Programación la recuerda: con
+     * otra, a una sala habilitada de su organizador le pone los datos nuevos; con la misma, es un
+     * reintento y no la toca.
+     */
+    public function testUnaSolicitudNuevaActualizaUnaHabilitadaYLaMismaNoLaToca(): void
+    {
+        $sala = $this->sala();
+        $cambio = Uuid::nuevo();
+        $campos = ['direccion' => 'Mitre 1200', 'localidad' => 'Mercedes', 'capacidad' => '80', 'solicitud_id' => $cambio];
+
+        $respuesta = $this->crear($sala->id, $campos, ['error' => UPLOAD_ERR_NO_FILE, 'name' => '', 'type' => '', 'tmp_name' => '', 'size' => 0]);
+
+        self::assertSame(200, $respuesta->estado(), $respuesta->cuerpo());
+        $actualizada = $this->salas->buscar($sala->id) ?? self::fail('No está la sala.');
+        self::assertSame(['Mitre 1200', 'Mercedes', 80], [$actualizada->datos->direccion, $actualizada->datos->localidad, $actualizada->datos->capacidad]);
+        self::assertTrue($actualizada->habilitada);
+        self::assertSame('sala.jpg', $actualizada->imagen);
+        self::assertSame($cambio, $this->base->valor('SELECT solicitud_id FROM sala WHERE id = ?', [$sala->id]));
+        self::assertStringContainsString("Moderación aplicó la solicitud {$cambio} a la sala {$sala->id}", $this->log());
+
+        // El reintento, aunque el organizador ya haya cambiado algo (bajó la capacidad), no la toca.
+        $this->base->ejecutar('UPDATE sala SET capacidad = 70 WHERE id = ?', [$sala->id]);
+        self::assertSame(200, $this->crear($sala->id, $campos)->estado());
+        self::assertSame(70, ($this->salas->buscar($sala->id) ?? self::fail('No está la sala.'))->datos->capacidad);
+        self::assertSame(1, $this->cuantasSalas());
+    }
+
+    public function testConUnaSolicitudNuevaYFotoLeCambiaLaFoto(): void
+    {
+        $id = Uuid::nuevo();
+        $this->crear($id, ['solicitud_id' => Uuid::nuevo()]);
+        $antes = ($this->salas->buscar($id) ?? self::fail('No está la sala.'))->imagen;
+
+        self::assertSame(200, $this->crear($id, ['direccion' => 'Mitre 1200', 'solicitud_id' => Uuid::nuevo()], Imagenes::subida('sala.jpg'))->estado());
+
+        $sala = $this->salas->buscar($id) ?? self::fail('No está la sala.');
+        self::assertSame('Mitre 1200', $sala->datos->direccion);
+        self::assertNotSame($antes, $sala->imagen);
+        self::assertSame([(string) $sala->imagen], $this->fotosGuardadas());
+    }
+
+    /**
+     * Las llamadas de antes, sin solicitud, se portan como siempre: a una habilitada no la tocan.
+     */
+    public function testSinSolicitudUnaHabilitadaNoSeToca(): void
+    {
+        $sala = $this->sala();
+
+        self::assertSame(200, $this->crear($sala->id, ['direccion' => 'Mitre 1200'])->estado());
+
+        self::assertSame('Av. San Martín 450', ($this->salas->buscar($sala->id) ?? self::fail('No está la sala.'))->datos->direccion);
+        self::assertNull($this->base->valor('SELECT solicitud_id FROM sala WHERE id = ?', [$sala->id]));
+    }
+
+    public function testLaSolicitudEsUuid(): void
+    {
+        $sala = $this->sala();
+
+        self::assertSame(400, $this->crear($sala->id, ['direccion' => 'Mitre 1200', 'solicitud_id' => 'no-es-un-id'])->estado());
+        self::assertSame('Av. San Martín 450', ($this->salas->buscar($sala->id) ?? self::fail('No está la sala.'))->datos->direccion);
     }
 
     public function testLaSalaDeOtroOrganizadorEs409(): void

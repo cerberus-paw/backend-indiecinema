@@ -23,4 +23,10 @@ final readonly class Documento
         public EstadoDocumento $estado,
     ) {
     }
+
+    /** Vencido si vence ese día o antes: el día que vence ya no vale. */
+    public function vencidoAl(DateTimeImmutable $hoy): bool
+    {
+        return $this->venceEn <= $hoy;
+    }
 }

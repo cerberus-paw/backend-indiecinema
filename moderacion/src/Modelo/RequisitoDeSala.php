@@ -39,6 +39,18 @@ enum RequisitoDeSala: string
     }
 
     /**
+     * El papel de la solicitud que respalda el punto: si está vencido, el punto no se puede tildar.
+     */
+    public function documento(): ?TipoDocumento
+    {
+        return match ($this) {
+            self::SeguroVigente => TipoDocumento::Seguro,
+            self::Habilitacion => TipoDocumento::Habilitacion,
+            default => null,
+        };
+    }
+
+    /**
      * Los que se tildaron, de lo que mandó el formulario: lo que no es un punto no cuenta, y uno
      * repetido cuenta una vez. Un campo que no es una lista cuenta como ninguno.
      *

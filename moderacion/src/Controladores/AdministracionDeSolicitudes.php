@@ -76,8 +76,14 @@ final class AdministracionDeSolicitudes extends Controlador
         } elseif (mb_strlen($motivo) > self::MAXIMO_MOTIVO) {
             $errores['motivo'] = 'El motivo puede tener hasta ' . self::MAXIMO_MOTIVO . ' caracteres.';
         }
-        if ($resolucion === 'aprobar' && !RequisitoDeSala::completo($tildados)) {
-            $errores['requisitos'] = 'Para aprobarla, tildá los cuatro puntos.';
+        if ($resolucion === 'aprobar') {
+            // Un papel vencido primero: su punto está deshabilitado, así que también falta.
+            $vencido = $this->servicio->requisitosVencidos($solicitud)[0] ?? null;
+            $errores += match (true) {
+                $vencido !== null => ['requisitos' => $vencido->documento()?->estaVencido() . ': no se puede aprobar.'],
+                !RequisitoDeSala::completo($tildados) => ['requisitos' => 'Para aprobarla, tildá los cuatro puntos.'],
+                default => [],
+            };
         }
         if ($errores !== []) {
             return $this->bandeja($peticion, $solicitud, [
@@ -158,6 +164,7 @@ final class AdministracionDeSolicitudes extends Controlador
         $texto = is_string($q) ? trim($q) : '';
         $lista = $this->servicio->lista(!$historial, $texto);
         $elegida ??= $lista[0] ?? null;
+        $vencidos = $elegida?->estaAbierta() ? $this->servicio->requisitosVencidos($elegida) : [];
 
         $datos = [
             'historial' => $historial,
@@ -181,11 +188,13 @@ final class AdministracionDeSolicitudes extends Controlador
             'valores' => $valores,
             'errores' => $errores,
             'maximo_motivo' => self::MAXIMO_MOTIVO,
-            // EF-07.9: los puntos del checklist, para resolver una abierta.
+            // EF-07.9: los puntos del checklist, para resolver una abierta. El de un papel vencido
+            // no se puede tildar.
             'requisitos' => array_map(static fn (RequisitoDeSala $requisito): array => [
                 'clave' => $requisito->value,
                 'nombre' => $requisito->nombre(),
                 'aclaracion' => $requisito->aclaracion(),
+                'vencido' => in_array($requisito, $vencidos, true),
             ], RequisitoDeSala::cases()),
         ];
         // La plantilla muestra el mensaje si la variable existe: sólo se pasa cuando hay algo que
@@ -255,7 +264,7 @@ final class AdministracionDeSolicitudes extends Controlador
             'documentos' => array_map(fn (Documento $documento): array => [
                 'nombre' => $documento->tipo->nombre(),
                 'vence' => $documento->venceEn->format('d/m/Y'),
-                'vencido' => $documento->venceEn <= new DateTimeImmutable('today'),
+                'vencido' => $documento->vencidoAl(new DateTimeImmutable('today')),
                 'estado' => $documento->estado->value,
                 'url' => $this->ruta("/documentos/{$documento->id}"),
             ], $this->servicio->documentosDe($solicitud)),

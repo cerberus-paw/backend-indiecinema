@@ -177,10 +177,10 @@ final class AdministracionDeSolicitudesTest extends TestCase
      *
      * @return array<string, string> tipo => id del documento
      */
-    private function conDocumentos(string $solicitud, string $venceSeguro = '+1 year'): array
+    private function conDocumentos(string $solicitud, string $venceSeguro = '+1 year', string $venceHabilitacion = '+2 years'): array
     {
         $ids = [];
-        foreach (['seguro' => $venceSeguro, 'habilitacion' => '+2 years'] as $tipo => $vence) {
+        foreach (['seguro' => $venceSeguro, 'habilitacion' => $venceHabilitacion] as $tipo => $vence) {
             $ids[$tipo] = Uuid::nuevo();
             $this->base->ejecutar(
                 "INSERT INTO documento (id, sala_id, solicitud_id, tipo, archivo, vence_en, subido_en)
@@ -512,6 +512,53 @@ final class AdministracionDeSolicitudesTest extends TestCase
         yield 'uno de más en lugar de uno' => [['seguro_vigente', 'habilitacion', 'capacidad', 'otro']];
         yield 'uno repetido' => [['seguro_vigente', 'habilitacion', 'capacidad', 'capacidad']];
         yield 'un texto en lugar de la lista' => ['seguro_vigente'];
+    }
+
+    /**
+     * EF-07.9: un papel vencido no cuenta, aunque su punto llegue tildado: no se aprueba. Vence
+     * hoy ya es vencido, como lo muestra la documentación.
+     */
+    #[DataProvider('papelesVencidos')]
+    public function testConUnPapelVencidoNoSeAprueba(string $venceSeguro, string $venceHabilitacion, string $error): void
+    {
+        $id = $this->solicitar(self::ESPECTADORA, 'El Galpón');
+        $this->conDocumentos($id, $venceSeguro, $venceHabilitacion);
+
+        $respuesta = $this->resolver($id, ['resolucion' => 'aprobar', 'motivo' => 'Todo en orden.']);
+
+        self::assertSame(422, $respuesta->estado());
+        self::assertStringContainsString($error, $respuesta->cuerpo());
+        self::assertSame('pendiente', $this->estado($id));
+        self::assertSame([], self::pedidosA('cuentas'));
+        self::assertSame([], $this->revisiones($id));
+    }
+
+    /**
+     * @return iterable<string, array{string, string, string}>
+     */
+    public static function papelesVencidos(): iterable
+    {
+        yield 'el seguro' => ['-1 day', '+2 years', 'El seguro está vencido: no se puede aprobar.'];
+        yield 'el seguro, que vence hoy' => ['today', '+2 years', 'El seguro está vencido: no se puede aprobar.'];
+        yield 'la habilitación' => ['+1 year', '-1 month', 'La habilitación está vencida: no se puede aprobar.'];
+    }
+
+    /**
+     * EF-07.9: el punto de un papel vencido se ve deshabilitado y marcado; los demás, no.
+     */
+    public function testElPuntoDeUnPapelVencidoSeVeDeshabilitado(): void
+    {
+        $id = $this->solicitar(self::ESPECTADORA, 'El Galpón');
+        $this->conDocumentos($id, venceSeguro: '-1 day');
+
+        $pantalla = $this->pedir('GET', "/solicitudes?id={$id}")->cuerpo();
+
+        self::assertMatchesRegularExpression('#value="seguro_vigente"[^>]* disabled#', $pantalla);
+        self::assertSame(1, preg_match_all('#name="requisitos\[\]"[^>]* disabled#', $pantalla));
+        self::assertMatchesRegularExpression('#Seguro vigente\s*<strong class="bandeja-vencido">vencido</strong>#', $pantalla);
+
+        // Al rechazarla, el punto deshabilitado no viaja: queda sin tildar.
+        self::assertSame(303, $this->resolver($id, ['resolucion' => 'rechazar', 'motivo' => 'El seguro venció.', 'requisitos' => ['habilitacion']])->estado());
     }
 
     /**

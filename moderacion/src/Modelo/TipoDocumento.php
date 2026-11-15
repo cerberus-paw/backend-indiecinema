@@ -31,6 +31,15 @@ enum TipoDocumento: string
         };
     }
 
+    /** Para el error de aprobar con el papel vencido: «El seguro está vencido». */
+    public function estaVencido(): string
+    {
+        return match ($this) {
+            self::Seguro => 'El seguro está vencido',
+            self::Habilitacion => 'La habilitación está vencida',
+        };
+    }
+
     /** «del seguro», «de la habilitación». */
     public function deQue(): string
     {

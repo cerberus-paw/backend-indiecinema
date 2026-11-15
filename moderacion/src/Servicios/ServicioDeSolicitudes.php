@@ -15,6 +15,7 @@ use IndieCinema\Moderacion\Modelo\EstadoSolicitud;
 use IndieCinema\Moderacion\Modelo\ImagenSubida;
 use IndieCinema\Moderacion\Modelo\RequisitoDeSala;
 use IndieCinema\Moderacion\Modelo\SolicitudDeSala;
+use IndieCinema\Moderacion\Modelo\TipoDocumento;
 use IndieCinema\Moderacion\Modelo\UsuarioDeCuentas;
 use IndieCinema\Moderacion\Repositorios\RepositorioDeDocumentos;
 use IndieCinema\Moderacion\Repositorios\RepositorioDeSolicitudes;
@@ -261,8 +262,8 @@ final class ServicioDeSolicitudes
         if (!$solicitud->estaAbierta()) {
             return false;
         }
-        if (!RequisitoDeSala::completo($tildados)) {
-            throw new LogicException('Aprobar una solicitud exige los cuatro puntos del checklist: el controlador los pide.');
+        if (!RequisitoDeSala::completo($tildados) || $this->requisitosVencidos($solicitud) !== []) {
+            throw new LogicException('Aprobar una solicitud exige los cuatro puntos del checklist, sin papeles vencidos: el controlador lo controla.');
         }
         $this->usuarios->darOrganizador($solicitud->usuarioId, $moderador->id);
         $this->salas->crearParaSolicitud($solicitud);
@@ -309,6 +310,23 @@ final class ServicioDeSolicitudes
         $this->avisarAlSolicitante($solicitud, EstadoSolicitud::EnRevisionManual, $motivo);
 
         return true;
+    }
+
+    /**
+     * Los puntos del checklist cuyo papel está vencido (EF-07.9): no cuentan aunque se tilden, así
+     * que no se puede aprobar. Una solicitud sin documentos (las mudadas) no tiene.
+     *
+     * @return list<RequisitoDeSala>
+     */
+    public function requisitosVencidos(SolicitudDeSala $solicitud): array
+    {
+        $hoy = new DateTimeImmutable('today');
+        $vencidos = array_map(
+            static fn (Documento $documento): TipoDocumento => $documento->tipo,
+            array_values(array_filter($this->documentosDe($solicitud), static fn (Documento $documento): bool => $documento->vencidoAl($hoy))),
+        );
+
+        return array_values(array_filter(RequisitoDeSala::cases(), static fn (RequisitoDeSala $requisito): bool => in_array($requisito->documento(), $vencidos, true)));
     }
 
     /**

@@ -35,6 +35,7 @@ final class ServicioDeDenuncias
         private readonly ServicioDeObras $obras,
         private readonly ServicioDeSuspensiones $suspensiones,
         private readonly AvisosAlOrganizador $avisos,
+        private readonly SalasDeProgramacion $salas,
     ) {
     }
 
@@ -169,5 +170,58 @@ final class ServicioDeDenuncias
                 'Si se resuelve, la moderación levanta la suspensión y la sala vuelve a publicarse.',
             ]),
         ]);
+    }
+
+    /**
+     * Las salas suspendidas por denuncia, con su nombre y su organizador según programación.
+     *
+     * @return list<array{suspension: Suspension, nombre: ?string, organizador_id: ?string}>
+     *
+     * @throws ExcepcionHttp 503 si programación no responde
+     */
+    public function suspendidas(): array
+    {
+        $suspensiones = $this->suspensiones->activasPorDenuncia();
+        $salas = $this->salas->datosDeVarias(array_values(array_unique(array_map(static fn (Suspension $suspension): string => $suspension->salaId, $suspensiones))));
+
+        return array_map(static fn (Suspension $suspension): array => [
+            'suspension' => $suspension,
+            'nombre' => $salas[$suspension->salaId]['nombre'] ?? null,
+            'organizador_id' => $salas[$suspension->salaId]['organizador_id'] ?? null,
+        ], $suspensiones);
+    }
+
+    /**
+     * El moderador no levanta la suspensión de su propia sala (Q1); el administrador sí.
+     */
+    public function laPuedeLevantar(?string $organizadorId, Usuario $moderador): bool
+    {
+        return $organizadorId === null || !hash_equals($organizadorId, $moderador->id) || $moderador->alcanza(Rol::Administrador);
+    }
+
+    /**
+     * Levanta la suspensión por denuncia: si era la última activa, programación vuelve a publicar
+     * la sala (EF-07.5).
+     *
+     * @return bool false si no tenía una activa por denuncia: no cambia nada
+     *
+     * @throws ExcepcionHttp 403 si la sala es del moderador; 503 si programación no responde
+     */
+    public function levantar(string $salaId, string $motivo, Usuario $moderador): bool
+    {
+        $sala = $this->salas->datosDe($salaId);
+        if (!$this->laPuedeLevantar($sala['organizador_id'] ?? null, $moderador)) {
+            throw ExcepcionHttp::prohibida();
+        }
+
+        return $this->suspensiones->levantar($salaId, CausaSuspension::Denuncia, null, $motivo, $moderador->id);
+    }
+
+    /**
+     * @throws ExcepcionHttp 503 si programación no responde
+     */
+    public function nombreDeLaSala(string $salaId): ?string
+    {
+        return $this->salas->datosDe($salaId)['nombre'] ?? null;
     }
 }

@@ -50,6 +50,8 @@ return static function (Router $router): void {
     // La pestaña «Denuncias» de la bandeja: el moderador las desestima o actúa sobre lo denunciado.
     $router->get('/denuncias', [BandejaDeDenuncias::class, 'listar'], Rol::Moderador);
     $router->post('/denuncias/{tipo}/{id}/resolver', [BandejaDeDenuncias::class, 'resolver'], Rol::Moderador);
+    // Las salas suspendidas por denuncia: la suspensión se levanta con un motivo.
+    $router->post('/denuncias/salas/{id}/levantar', [BandejaDeDenuncias::class, 'levantar'], Rol::Moderador);
     // La bandeja de solicitudes de sala: aprobar una crea la sala en programación y le da el rol
     // de organizador a quien la mandó. Es del moderador (EF-07.3); el administrador también entra,
     // porque lo alcanza.

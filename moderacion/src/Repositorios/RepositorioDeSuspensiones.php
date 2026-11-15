@@ -60,6 +60,17 @@ final class RepositorioDeSuspensiones
     }
 
     /**
+     * Las activas por denuncia (EF-07.8), primero la más vieja: las que la moderación levanta desde
+     * la pestaña «Denuncias».
+     *
+     * @return list<Suspension>
+     */
+    public function activasPorDenuncia(): array
+    {
+        return array_map(self::suspension(...), $this->base->filas(self::SELECT . " WHERE causa = 'denuncia' AND levantada_en IS NULL ORDER BY desde, id"));
+    }
+
+    /**
      * Las activas que abrió la tarea (por un documento vencido o que falta): las que llevan su
      * aviso al organizador.
      *

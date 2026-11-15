@@ -94,12 +94,40 @@ final class BandejaDeDenuncias extends Controlador
     }
 
     /**
+     * POST /moderacion/denuncias/salas/{id}/levantar con {motivo}: levanta la suspensión por
+     * denuncia de la sala.
+     *
+     * @throws ExcepcionHttp 403 si la sala es del moderador; 503 si programación no responde
+     */
+    public function levantar(Peticion $peticion): Respuesta
+    {
+        $salaId = (string) $peticion->parametro('id');
+        $moderador = self::moderador($peticion);
+        $motivo = self::motivo($peticion->campo('motivo'));
+        if ($motivo === '' || mb_strlen($motivo) > self::MAXIMO_MOTIVO) {
+            $sala = $this->servicio->suspendidas();
+            $organizador = array_values(array_filter($sala, static fn (array $una): bool => $una['suspension']->salaId === $salaId))[0]['organizador_id'] ?? null;
+            if (!$this->servicio->laPuedeLevantar($organizador, $moderador)) {
+                throw ExcepcionHttp::prohibida();
+            }
+            $error = $motivo === '' ? 'Escribí el motivo: queda en el registro de la sala.' : 'El motivo puede tener hasta ' . self::MAXIMO_MOTIVO . ' caracteres.';
+
+            return $this->bandeja($peticion, null, levantar: ['sala' => $salaId, 'motivo' => $motivo, 'error' => $error], estado: 422);
+        }
+        $aviso = $this->servicio->levantar($salaId, $motivo, $moderador) ? 'levantada' : 'ya_levantada';
+
+        return $this->redirigir('/denuncias?' . http_build_query([$aviso => $salaId]));
+    }
+
+    /**
      * «Ver historial»: las cerradas, primero la última.
      */
     private function historial(): Respuesta
     {
         return $this->vista('administracion_denuncias.html.twig', [
             'historial' => true,
+            'suspendidas' => [],
+            'levantar' => null,
             'grupos' => [],
             'elegida' => null,
             'valores' => [],
@@ -118,6 +146,28 @@ final class BandejaDeDenuncias extends Controlador
     }
 
     /**
+     * Las salas suspendidas por denuncia, o false si programación no respondió.
+     *
+     * @return list<array{sala_id: string, nombre: ?string, motivo: string, desde: string, propia: bool}>|false
+     */
+    private function suspendidas(Usuario $moderador): array|false
+    {
+        try {
+            $suspendidas = $this->servicio->suspendidas();
+        } catch (ExcepcionHttp) {
+            return false;
+        }
+
+        return array_map(fn (array $una): array => [
+            'sala_id' => $una['suspension']->salaId,
+            'nombre' => $una['nombre'],
+            'motivo' => $una['suspension']->motivo,
+            'desde' => FechaParaMostrar::diaYHora($una['suspension']->desde),
+            'propia' => !$this->servicio->laPuedeLevantar($una['organizador_id'], $moderador),
+        ], $suspendidas);
+    }
+
+    /**
      * El aviso de lo que se acaba de hacer, con el título que quedó en el historial.
      */
     private function mensaje(Peticion $peticion): ?string
@@ -126,14 +176,23 @@ final class BandejaDeDenuncias extends Controlador
             'desestimadas' => 'Desestimaste las denuncias de «%s».',
             'resueltas' => 'Resolviste las denuncias de «%s».',
             'ya_resueltas' => 'Ya no había denuncias abiertas: no se cambió nada.',
+            'levantada' => 'Levantaste la suspensión de «%s».',
+            'ya_levantada' => 'La sala ya no estaba suspendida por denuncia: no se cambió nada.',
         ];
         foreach ($avisos as $clave => $texto) {
             $id = $peticion->consulta($clave);
             if (!is_string($id)) {
                 continue;
             }
-            if ($clave === 'ya_resueltas') {
+            if ($clave === 'ya_resueltas' || $clave === 'ya_levantada') {
                 return $texto;
+            }
+            if ($clave === 'levantada') {
+                try {
+                    return sprintf($texto, $this->servicio->nombreDeLaSala($id) ?? 'la sala');
+                } catch (ExcepcionHttp) {
+                    return 'Levantaste la suspensión.';
+                }
             }
             foreach ($this->servicio->historial() as $cerrada) {
                 if ($cerrada['objeto_id'] === $id) {
@@ -164,10 +223,11 @@ final class BandejaDeDenuncias extends Controlador
      * @param array<string, string>        $valores       lo que mandó, si hubo errores
      * @param array<string, string>        $errores       campo => qué está mal
      * @param ?string                      $mensaje       el aviso de lo que se acaba de hacer
+     * @param ?array{sala: string, motivo: string, error: string} $levantar el levantamiento que volvió con error
      *
      * @throws ExcepcionHttp 404 si lo elegido no tiene denuncias abiertas
      */
-    private function bandeja(Peticion $peticion, ?array $elegidaPedida, array $valores = [], array $errores = [], ?string $mensaje = null, int $estado = 200): Respuesta
+    private function bandeja(Peticion $peticion, ?array $elegidaPedida, array $valores = [], array $errores = [], ?string $mensaje = null, ?array $levantar = null, int $estado = 200): Respuesta
     {
         $abiertas = $this->servicio->abiertas();
         $elegida = $abiertas[0] ?? null;
@@ -192,6 +252,8 @@ final class BandejaDeDenuncias extends Controlador
             'valores' => $valores,
             'errores' => $errores,
             'maximo_motivo' => self::MAXIMO_MOTIVO,
+            'suspendidas' => $this->suspendidas(self::moderador($peticion)),
+            'levantar' => $levantar,
         ];
         // La plantilla muestra el mensaje si la variable existe.
         if ($mensaje !== null) {

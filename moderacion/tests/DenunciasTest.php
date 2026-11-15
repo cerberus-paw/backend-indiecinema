@@ -609,4 +609,82 @@ final class DenunciasTest extends TestCase
 
         self::assertSame('denuncia', $this->suspensiones($id)[0]['causa']);
     }
+
+    /**
+     * Una sala suspendida por denuncia, como la deja resolver una.
+     */
+    private function suspendida(string $nombre, string $organizador = self::ORGANIZADOR): string
+    {
+        $id = self::sala($nombre, $organizador);
+        $this->denunciada('sala', $id, self::ESPECTADORA, '2026-11-01 10:00:00');
+        self::assertSame(303, $this->resolver('sala', $id, ['accion' => 'suspender', 'motivo' => 'Falta la salida de emergencia.'], 'administrador')->estado());
+        file_put_contents(self::$registros['programacion'], '');
+
+        return $id;
+    }
+
+    /**
+     * La pestaña lista las salas suspendidas por denuncia, y levantar la suspensión la vuelve a
+     * publicar si era la última activa (EF-07.5).
+     */
+    public function testLevantarLaSuspensionPorDenunciaVuelveAPublicarLaSala(): void
+    {
+        $id = $this->suspendida('El Galpón');
+
+        $pantalla = $this->pedir('GET', '/denuncias', 'moderador')->cuerpo();
+        self::assertStringContainsString('Salas suspendidas por denuncia', $pantalla);
+        self::assertStringContainsString('El Galpón', $pantalla);
+        self::assertStringContainsString('Falta la salida de emergencia.', $pantalla);
+        self::assertStringContainsString("/moderacion/denuncias/salas/{$id}/levantar", $pantalla);
+
+        $respuesta = $this->pedir('POST', "/denuncias/salas/{$id}/levantar", 'moderador', ['_csrf' => self::CSRF, 'motivo' => 'Ya instalaron la salida.']);
+
+        self::assertSame(303, $respuesta->estado(), $respuesta->cuerpo());
+        self::assertSame("/moderacion/denuncias?levantada={$id}", $respuesta->cabecera('Location'));
+        self::assertSame([['ruta' => 'habilitacion', 'sala' => $id, 'habilitada' => true, 'motivo' => 'Ya instalaron la salida.', 'moderador_id' => self::MODERADORA]], self::pedidosA('programacion'));
+        self::assertSame(0, $this->suspensiones($id)[0]['activa']);
+        $despues = $this->pedir('GET', "/denuncias?levantada={$id}", 'moderador')->cuerpo();
+        self::assertStringContainsString('Levantaste la suspensión de «El Galpón».', $despues);
+        self::assertStringNotContainsString("/denuncias/salas/{$id}/levantar", $despues);
+    }
+
+    /**
+     * Con otra suspensión activa (un documento vencido), la sala sigue apagada (EF-07.5, Q2).
+     */
+    public function testConOtraSuspensionActivaLaSalaSigueApagada(): void
+    {
+        $id = $this->suspendida('El Galpón');
+        $this->base->ejecutar(
+            "INSERT INTO suspension (id, sala_id, causa, tipo_documento, motivo, desde) VALUES (?, ?, 'vencimiento', 'seguro', 'Venció el seguro.', '2026-11-02 10:00:00')",
+            [Uuid::nuevo(), $id],
+        );
+
+        self::assertSame(303, $this->pedir('POST', "/denuncias/salas/{$id}/levantar", 'moderador', ['_csrf' => self::CSRF, 'motivo' => 'Resuelto.'])->estado());
+
+        self::assertSame([], self::pedidosA('programacion'));
+        self::assertSame(['vencimiento' => 1, 'denuncia' => 0], array_column($this->suspensiones($id), 'activa', 'causa'));
+    }
+
+    public function testLevantarPideElMotivo(): void
+    {
+        $id = $this->suspendida('El Galpón');
+
+        $respuesta = $this->pedir('POST', "/denuncias/salas/{$id}/levantar", 'moderador', ['_csrf' => self::CSRF, 'motivo' => ' ']);
+
+        self::assertSame(422, $respuesta->estado());
+        self::assertStringContainsString('Escribí el motivo', $respuesta->cuerpo());
+        self::assertSame(1, $this->suspensiones($id)[0]['activa']);
+    }
+
+    /**
+     * Q1 de EF-07: la de su propia sala la levanta otro moderador.
+     */
+    public function testElModeradorNoLevantaLaDeSuSala(): void
+    {
+        $id = $this->suspendida('La de Mora', self::MODERADORA);
+
+        self::assertStringNotContainsString("/denuncias/salas/{$id}/levantar", $this->pedir('GET', '/denuncias', 'moderador')->cuerpo());
+        self::assertSame(403, $this->pedir('POST', "/denuncias/salas/{$id}/levantar", 'moderador', ['_csrf' => self::CSRF, 'motivo' => 'Listo.'])->estado());
+        self::assertSame(303, $this->pedir('POST', "/denuncias/salas/{$id}/levantar", 'administrador', ['_csrf' => self::CSRF, 'motivo' => 'Listo.'])->estado());
+    }
 }

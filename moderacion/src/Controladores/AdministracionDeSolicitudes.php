@@ -47,12 +47,14 @@ final class AdministracionDeSolicitudes extends Controlador
     }
 
     /**
-     * @throws ExcepcionHttp 404 si la solicitud no existe; 503 si cuentas o programación no
-     *                       responden al aprobar
+     * @throws ExcepcionHttp 404 si la solicitud no existe; 403 si es del moderador; 503 si
+     *                       cuentas o programación no responden al aprobar
      */
     public function resolver(Peticion $peticion): Respuesta
     {
         $solicitud = $this->servicio->buscar((string) $peticion->parametro('id'));
+        // Antes que los errores del formulario: la suya no la resuelve, ni con el motivo mal.
+        $this->servicio->controlarQueLaPuedeResolver($solicitud, self::moderador($peticion));
         $resolucion = $peticion->campo('resolucion');
         $motivo = self::motivo($peticion->campo('motivo'));
         $errores = [];
@@ -106,6 +108,7 @@ final class AdministracionDeSolicitudes extends Controlador
     private function cambiarLaSala(Peticion $peticion, bool $habilitada): Respuesta
     {
         $solicitud = $this->servicio->buscar((string) $peticion->parametro('id'));
+        $this->servicio->controlarQueLaPuedeResolver($solicitud, self::moderador($peticion));
         $motivo = self::motivo($peticion->campo('motivo_sala'));
         $error = match (true) {
             $motivo === '' => 'Escribí por qué: queda en el registro.',
@@ -150,7 +153,10 @@ final class AdministracionDeSolicitudes extends Controlador
                 'enviada' => FechaParaMostrar::diaCorto($solicitud->enviadaEn),
                 'elegida' => $solicitud->id === $elegida?->id,
             ], $lista),
-            'elegida' => $elegida === null ? null : $this->detalle($elegida, $this->enElSitio($elegida)),
+            'elegida' => $elegida === null ? null : $this->detalle($elegida, $this->enElSitio($elegida)) + [
+                // La del moderador se muestra sin los formularios: la resuelve otro.
+                'propia' => !$this->servicio->laPuedeResolver($elegida, self::moderador($peticion)),
+            ],
             'valores' => $valores,
             'errores' => $errores,
             'maximo_motivo' => self::MAXIMO_MOTIVO,

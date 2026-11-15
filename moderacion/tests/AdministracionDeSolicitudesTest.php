@@ -571,6 +571,55 @@ final class AdministracionDeSolicitudesTest extends TestCase
     }
 
     /**
+     * EF-07.3 (grilling de IC-549, Q1): el moderador que pidió una sala no la resuelve: la ve sin
+     * los formularios, y pedirlo igual da 403 sin tocar nada. La resuelve otro moderador o el
+     * administrador.
+     */
+    public function testElModeradorNoResuelveSuPropiaSolicitud(): void
+    {
+        $id = $this->solicitar(self::MODERADORA, 'La Propia');
+
+        $pantalla = $this->pedir('GET', "/solicitudes?id={$id}", 'moderador')->cuerpo();
+        self::assertStringNotContainsString("/solicitudes/{$id}/resolver", $pantalla);
+        self::assertStringContainsString('La mandaste vos: la resuelve otro moderador.', $pantalla);
+
+        foreach (['aprobar', 'rechazar'] as $resolucion) {
+            self::assertSame(403, $this->resolver($id, ['resolucion' => $resolucion, 'motivo' => 'Todo en orden.'], 'moderador')->estado());
+        }
+        self::assertSame('pendiente', $this->estado($id));
+        self::assertSame([], self::pedidosA('cuentas'));
+        self::assertSame([], self::pedidosA('programacion'));
+
+        // Otro moderador sí.
+        self::assertSame(303, $this->pedir('POST', "/solicitudes/{$id}/resolver", 'moderador', ['resolucion' => 'rechazar', 'motivo' => 'Falta la póliza.', '_csrf' => self::CSRF], self::ESPECTADORA)->estado());
+        self::assertSame('rechazada', $this->estado($id));
+    }
+
+    public function testElModeradorNoRetiraNiVuelveAPublicarSuPropiaSala(): void
+    {
+        $id = $this->solicitar(self::MODERADORA, 'La Propia');
+        self::assertSame(303, $this->resolver($id, ['resolucion' => 'aprobar', 'motivo' => 'Todo en orden.'])->estado());
+        file_put_contents(self::$registros['programacion'], '');
+
+        $pantalla = $this->pedir('GET', "/solicitudes?id={$id}", 'moderador')->cuerpo();
+        self::assertDoesNotMatchRegularExpression('#/(des)?habilitar-sala"#', $pantalla);
+
+        self::assertSame(403, $this->cambiarLaSala($id, 'deshabilitar-sala', rol: 'moderador')->estado());
+        self::assertSame(403, $this->cambiarLaSala($id, 'habilitar-sala', rol: 'moderador')->estado());
+        self::assertSame([], self::pedidosA('programacion'));
+    }
+
+    public function testElAdministradorResuelveLaDeUnModerador(): void
+    {
+        $id = $this->solicitar(self::MODERADORA, 'La Propia');
+
+        self::assertStringContainsString("/solicitudes/{$id}/resolver", $this->pedir('GET', "/solicitudes?id={$id}")->cuerpo());
+        self::assertSame(303, $this->resolver($id, ['resolucion' => 'aprobar', 'motivo' => 'Todo en orden.'])->estado());
+        self::assertSame('aprobada', $this->estado($id));
+        self::assertSame(303, $this->cambiarLaSala($id, 'deshabilitar-sala')->estado());
+    }
+
+    /**
      * @return iterable<string, array{string, list<string>}>
      */
     public static function barras(): iterable

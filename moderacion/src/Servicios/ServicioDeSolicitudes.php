@@ -151,11 +151,13 @@ final class ServicioDeSolicitudes
      *
      * @return bool false si ya estaba resuelta: no cambia nada
      *
-     * @throws ExcepcionHttp 404 si no existe; 503 si cuentas o programación no responden
+     * @throws ExcepcionHttp 404 si no existe; 403 si es del moderador; 503 si cuentas o
+     *                       programación no responden
      */
     public function aprobar(string $id, Usuario $moderador, string $motivo): bool
     {
         $solicitud = $this->buscar($id);
+        $this->controlarQueLaPuedeResolver($solicitud, $moderador);
         if (!$solicitud->estaPendiente()) {
             return false;
         }
@@ -171,11 +173,33 @@ final class ServicioDeSolicitudes
      *
      * @return bool false si ya estaba resuelta: no cambia nada
      *
-     * @throws ExcepcionHttp 404 si no existe
+     * @throws ExcepcionHttp 404 si no existe; 403 si es del moderador
      */
     public function rechazar(string $id, Usuario $moderador, string $motivo): bool
     {
-        return $this->resolver($this->buscar($id), EstadoSolicitud::Rechazada, $moderador, $motivo);
+        $solicitud = $this->buscar($id);
+        $this->controlarQueLaPuedeResolver($solicitud, $moderador);
+
+        return $this->resolver($solicitud, EstadoSolicitud::Rechazada, $moderador, $motivo);
+    }
+
+    /**
+     * El moderador no resuelve lo suyo (EF-07.3): ni su solicitud ni la sala que salió de ella. La
+     * resuelve otro moderador o el administrador, que sí puede.
+     */
+    public function laPuedeResolver(SolicitudDeSala $solicitud, Usuario $moderador): bool
+    {
+        return !hash_equals($solicitud->usuarioId, $moderador->id) || $moderador->alcanza(Rol::Administrador);
+    }
+
+    /**
+     * @throws ExcepcionHttp 403 si es del moderador
+     */
+    public function controlarQueLaPuedeResolver(SolicitudDeSala $solicitud, Usuario $moderador): void
+    {
+        if (!$this->laPuedeResolver($solicitud, $moderador)) {
+            throw ExcepcionHttp::prohibida();
+        }
     }
 
     /**
@@ -193,12 +217,13 @@ final class ServicioDeSolicitudes
      * Retira del sitio, o vuelve a publicar, la sala de una solicitud aprobada: sus funciones dejan
      * de verse en la cartelera mientras está retirada.
      *
-     * @throws ExcepcionHttp 404 si la solicitud no existe o no está aprobada; 503 si programación
-     *                       no responde
+     * @throws ExcepcionHttp 404 si la solicitud no existe o no está aprobada; 403 si es del
+     *                       moderador; 503 si programación no responde
      */
     public function cambiarLaSala(string $id, bool $habilitada, Usuario $moderador, string $motivo): SolicitudDeSala
     {
         $solicitud = $this->buscar($id);
+        $this->controlarQueLaPuedeResolver($solicitud, $moderador);
         if ($solicitud->estado !== EstadoSolicitud::Aprobada) {
             throw ExcepcionHttp::noEncontrada();
         }

@@ -15,6 +15,7 @@ declare(strict_types=1);
 const ESPECTADORA = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const ORGANIZADOR = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const LENTO = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+const MODERADORA = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
 
 header('Content-Type: application/json');
 $cabeceras = getallheaders();
@@ -28,6 +29,8 @@ if (($cabeceras['X-Llamador'] ?? null) !== 'moderacion' || ($cabeceras['Authoriz
 $usuarios = [
     ESPECTADORA => ['nombre' => 'Eva Prueba', 'correo' => 'eva@ejemplo.com', 'roles' => ['espectador'], 'creado_en' => '2025-03-08T15:00:00'],
     ORGANIZADOR => ['nombre' => 'Omar Prueba', 'correo' => 'omar@ejemplo.com', 'roles' => ['espectador', 'organizador'], 'creado_en' => '2024-11-02T12:00:00'],
+    // Una moderadora que pidió una sala (EF-07.3).
+    MODERADORA => ['nombre' => 'Mora Prueba', 'correo' => 'mora@ejemplo.com', 'roles' => ['espectador', 'moderador'], 'creado_en' => '2024-06-01T09:00:00'],
 ];
 
 if (!preg_match('#^/interno/usuarios/([^/]+)(/roles)?$#', (string) parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH), $partes)) {

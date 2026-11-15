@@ -10,8 +10,9 @@
  * la prueba vea qué le llegó. Las salas que conoce son las del JSON de la variable SALAS (id =>
  * {nombre, localidad, organizador_id, habilitada} y, si la prueba los carga, los demás datos), y
  * las va actualizando; las obras (EF-07.7), las del JSON de la variable OBRAS, como las devuelve
- * ObrasInternas, en cualquier estado. Si existe el archivo de la variable CAIDA, responde 500 a
- * todo, como si estuviera caída.
+ * ObrasInternas, en cualquier estado; las funciones (EF-07.8), las del JSON de la variable
+ * FUNCIONES, como las devuelve FuncionesInternas. Si existe el archivo de la variable CAIDA,
+ * responde 500 a todo, como si estuviera caída.
  */
 
 declare(strict_types=1);
@@ -95,6 +96,21 @@ if ($metodo === 'GET' && $ruta === '/interno/obras/pendientes') {
     $pendientes = array_values(array_filter($obras, static fn (array $obra): bool => $obra['estado'] === 'pendiente'));
     usort($pendientes, static fn (array $una, array $otra): int => [$una['creada_en'], $una['id']] <=> [$otra['creada_en'], $otra['id']]);
     echo json_encode($pendientes);
+
+    return;
+}
+
+$archivoDeFunciones = (string) getenv('FUNCIONES');
+/** @var array<string, array<string, mixed>> $funciones */
+$funciones = is_file($archivoDeFunciones) ? (array) json_decode((string) file_get_contents($archivoDeFunciones), true) : [];
+
+if ($metodo === 'GET' && preg_match('#^/interno/funciones/([^/]+)$#', $ruta, $partes) === 1) {
+    if (!isset($funciones[$partes[1]])) {
+        http_response_code(404);
+
+        return;
+    }
+    echo json_encode($funciones[$partes[1]]);
 
     return;
 }

@@ -152,6 +152,11 @@ final class Cartelera extends Controlador
 
         $datosFuncion = [...self::datosDeDetalle($detalle, $editable, $cancelable, $cerrable), ...$lugares];
         $datosFuncion['es_organizador'] = $esPropia;
+        // EF-07.8: se denuncia la de la cartelera (en votación, en acuerdo o programada a futuro),
+        // y no la denuncia el organizador de su sala.
+        $datosFuncion['denunciable'] = $detalle->sala->organizadorId !== $usuario?->id
+            && (in_array($detalle->estado, [EstadoFuncion::EnVotacionTitulos, EstadoFuncion::EnAcuerdoFecha], true)
+                || ($detalle->estado === EstadoFuncion::Programada && $detalle->fechaHora !== null && $detalle->fechaHora > new DateTimeImmutable()));
         $franjasDelUsuario = [];
         $conteoVotosFranjas = [];
         $acuerdo = null;

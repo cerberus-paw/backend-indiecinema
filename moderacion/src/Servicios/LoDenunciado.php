@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace IndieCinema\Moderacion\Servicios;
 
+use DateTimeImmutable;
 use IndieCinema\Moderacion\Modelo\CausaSuspension;
 use IndieCinema\Moderacion\Modelo\Denunciado;
 use IndieCinema\Moderacion\Modelo\Suspension;
@@ -22,6 +23,7 @@ final class LoDenunciado
         private readonly ObrasDeProgramacion $obras,
         private readonly SalasDeProgramacion $salas,
         private readonly ServicioDeSuspensiones $suspensiones,
+        private readonly FuncionesDeProgramacion $funciones,
     ) {
     }
 
@@ -40,6 +42,7 @@ final class LoDenunciado
         return match ($tipo) {
             TipoDenuncia::Obra => $this->obra($id),
             TipoDenuncia::Sala => $this->sala($id),
+            TipoDenuncia::Funcion => $this->funcion($id),
             default => null,
         };
     }
@@ -57,6 +60,30 @@ final class LoDenunciado
         $porDenuncia = array_filter($this->suspensiones->activasDe($id), static fn (Suspension $suspension): bool => $suspension->causa === CausaSuspension::Denuncia);
 
         return new Denunciado(TipoDenuncia::Sala, $id, $sala['nombre'], $sala['organizador_id'], $sala['habilitada'], "/salas/{$id}", [], $porDenuncia !== []);
+    }
+
+    /**
+     * La función está publicada si está en la cartelera: en votación de títulos, en acuerdo de
+     * fecha o programada a futuro, en una sala publicada. Es del organizador de su sala.
+     */
+    private function funcion(string $id): ?Denunciado
+    {
+        $funcion = $this->funciones->una($id);
+        if ($funcion === null) {
+            return null;
+        }
+        $enLaCartelera = in_array($funcion['estado'], ['en_votacion_titulos', 'en_acuerdo_fecha'], true)
+            || ($funcion['estado'] === 'programada' && $funcion['fecha_hora'] !== null && new DateTimeImmutable($funcion['fecha_hora']) > new DateTimeImmutable());
+
+        return new Denunciado(
+            TipoDenuncia::Funcion,
+            $id,
+            implode(' + ', array_column($funcion['obras'], 'titulo')),
+            $funcion['organizador_id'],
+            $funcion['sala_habilitada'] && $enLaCartelera,
+            "/cartelera/{$id}",
+            ['sala' => $funcion['sala'], 'sala_id' => $funcion['sala_id'], 'obras' => $funcion['obras']],
+        );
     }
 
     private function obra(string $id): ?Denunciado

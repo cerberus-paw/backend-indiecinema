@@ -30,10 +30,14 @@ trait ConServidoresDePrueba
     /** El JSON con las obras que conoce programación (EF-07.7). */
     private static string $obras;
 
+    /** El JSON con las funciones que conoce programación (EF-07.8). */
+    private static string $funciones;
+
     private static function iniciarServidores(): void
     {
         self::$salas = (string) tempnam(sys_get_temp_dir(), 'salas');
         self::$obras = (string) tempnam(sys_get_temp_dir(), 'obras');
+        self::$funciones = (string) tempnam(sys_get_temp_dir(), 'funciones');
         foreach (['cuentas', 'programacion'] as $servidor) {
             self::$registros[$servidor] = (string) tempnam(sys_get_temp_dir(), "registro-{$servidor}");
             self::$caidas[$servidor] = sys_get_temp_dir() . "/caida-{$servidor}-" . bin2hex(random_bytes(4));
@@ -48,7 +52,7 @@ trait ConServidoresDePrueba
                 [['pipe', 'r'], ['file', '/dev/null', 'w'], ['file', '/dev/null', 'w']],
                 $tuberias,
                 null,
-                ['REGISTRO' => self::$registros[$servidor], 'CAIDA' => self::$caidas[$servidor], 'SALAS' => self::$salas, 'OBRAS' => self::$obras] + getenv(),
+                ['REGISTRO' => self::$registros[$servidor], 'CAIDA' => self::$caidas[$servidor], 'SALAS' => self::$salas, 'OBRAS' => self::$obras, 'FUNCIONES' => self::$funciones] + getenv(),
             );
             self::assertNotFalse($proceso);
             self::$procesos[$servidor] = $proceso;
@@ -63,7 +67,7 @@ trait ConServidoresDePrueba
             proc_close($proceso);
         }
         self::$procesos = [];
-        array_map(static fn (string $archivo) => @unlink($archivo), [...self::$registros, ...self::$caidas, self::$salas, self::$obras]);
+        array_map(static fn (string $archivo) => @unlink($archivo), [...self::$registros, ...self::$caidas, self::$salas, self::$obras, self::$funciones]);
     }
 
     /**
@@ -77,6 +81,22 @@ trait ConServidoresDePrueba
         }
         file_put_contents(self::$salas, '{}');
         file_put_contents(self::$obras, '{}');
+        file_put_contents(self::$funciones, '{}');
+    }
+
+    /**
+     * Las funciones que programación ya tiene, como las devuelve GET /interno/funciones/{id}
+     * (EF-07.8).
+     *
+     * @param array<string, array<string, mixed>> $funciones id => datos
+     */
+    private static function funcionesEnProgramacion(array $funciones): void
+    {
+        $completas = [];
+        foreach ($funciones as $id => $funcion) {
+            $completas[$id] = ['id' => $id] + $funcion;
+        }
+        file_put_contents(self::$funciones, json_encode((object) $completas));
     }
 
     /**

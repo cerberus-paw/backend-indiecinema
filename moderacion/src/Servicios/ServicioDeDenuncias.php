@@ -128,16 +128,21 @@ final class ServicioDeDenuncias
             throw ExcepcionHttp::prohibida();
         }
 
+        // En una función, la obra rechazada va en la acción: rechazar:{id}.
+        [$accion, $obraId] = str_contains($accion, ':') ? explode(':', $accion, 2) : [$accion, null];
         if ($denunciado !== null && !$denunciado->sancionado) {
+            // La sala de la función, o la sala denunciada; la obra elegida, o la denunciada.
+            $salaId = $tipo === TipoDenuncia::Funcion ? (string) $denunciado->datos['sala_id'] : $denunciado->id;
             match ($accion) {
-                // El rechazo de EF-07.7: el historial de obras y el correo al dueño.
-                'rechazar' => $this->obras->resolver($denunciado->id, false, $motivo, $moderador),
-                'suspender' => $this->suspender($denunciado->id, $motivo, $moderador),
+                // El rechazo de EF-07.7: el historial de obras y el correo al dueño. Si ya estaba
+                // rechazada, no hace nada.
+                'rechazar' => $this->obras->resolver($obraId ?? $denunciado->id, false, $motivo, $moderador),
+                'suspender' => $this->suspender($salaId, $motivo, $moderador),
                 default => null,
             };
         }
 
-        return $this->denuncias->cerrar($tipo, $objetoId, $accion === 'desestimar' ? null : $accion, null, $motivo, $moderador->id, new DateTimeImmutable('now', new DateTimeZone('UTC'))) > 0;
+        return $this->denuncias->cerrar($tipo, $objetoId, $accion === 'desestimar' ? null : $accion, $obraId, $motivo, $moderador->id, new DateTimeImmutable('now', new DateTimeZone('UTC'))) > 0;
     }
 
     /**

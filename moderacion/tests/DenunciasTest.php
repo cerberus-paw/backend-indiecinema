@@ -181,6 +181,38 @@ final class DenunciasTest extends TestCase
     }
 
     /**
+     * Una función de la sala en programación, con esas obras, como la devuelve su API interna.
+     *
+     * @param list<string> $obras ids de obras que ya están en programación
+     */
+    private static function funcion(string $salaId, array $obras, string $estado = 'en_votacion_titulos', ?string $fecha = null): string
+    {
+        $id = Uuid::nuevo();
+        $sala = self::salasDeProgramacion()[$salaId];
+        self::funcionesEnProgramacion(self::funcionesDeProgramacion() + [$id => [
+            'estado' => $estado,
+            'fecha_hora' => $fecha,
+            'precio_base' => 2000,
+            'cupo' => 50,
+            'titulos' => array_map(static fn (string $obra): string => (string) self::obrasDeProgramacion()[$obra]['titulo'], $obras),
+            'titulos_elegidos' => $estado !== 'en_votacion_titulos',
+            'sala' => ['id' => $salaId, 'nombre' => $sala['nombre'], 'localidad' => 'Luján', 'habilitada' => $sala['habilitada'], 'direccion' => 'Av. San Martín 450'],
+            'organizador_id' => $sala['organizador_id'],
+            'obras_ids' => $obras,
+        ]]);
+
+        return $id;
+    }
+
+    /**
+     * @return array<string, array<string, mixed>>
+     */
+    private static function funcionesDeProgramacion(): array
+    {
+        return (array) json_decode((string) file_get_contents(self::$funciones), true);
+    }
+
+    /**
      * Una obra aprobada en programación, del organizador salvo que se diga otro dueño.
      */
     private static function obra(string $titulo, string $dueno = self::ORGANIZADOR, string $estado = 'aprobada'): string
@@ -686,5 +718,67 @@ final class DenunciasTest extends TestCase
         self::assertStringNotContainsString("/denuncias/salas/{$id}/levantar", $this->pedir('GET', '/denuncias', 'moderador')->cuerpo());
         self::assertSame(403, $this->pedir('POST', "/denuncias/salas/{$id}/levantar", 'moderador', ['_csrf' => self::CSRF, 'motivo' => 'Listo.'])->estado());
         self::assertSame(303, $this->pedir('POST', "/denuncias/salas/{$id}/levantar", 'administrador', ['_csrf' => self::CSRF, 'motivo' => 'Listo.'])->estado());
+    }
+
+    /**
+     * Se denuncia la función de la cartelera: en votación, en acuerdo o programada a futuro, en una
+     * sala publicada.
+     */
+    public function testUnaFuncionDeLaCarteleraSeDenuncia(): void
+    {
+        $sala = self::sala('El Galpón');
+        $obras = [self::obra('Zama'), self::obra('La ciénaga')];
+        $enVotacion = self::funcion($sala, $obras);
+
+        $formulario = $this->pedir('GET', "/denuncias/nueva?tipo=funcion&id={$enVotacion}");
+        self::assertSame(200, $formulario->estado(), $formulario->cuerpo());
+        self::assertStringContainsString('Zama + La ciénaga', $formulario->cuerpo());
+        self::assertStringContainsString('Seguridad del lugar', $formulario->cuerpo());
+        self::assertSame(303, $this->denunciar('funcion', $enVotacion, ['categoria' => 'falsa', 'detalle' => ''])->estado());
+        self::assertStringContainsString("href=\"/cartelera/{$enVotacion}\"", $this->pedir('GET', "/denuncias/nueva?tipo=funcion&id={$enVotacion}&enviada=1")->cuerpo());
+
+        self::assertSame(200, $this->pedir('GET', '/denuncias/nueva?tipo=funcion&id=' . self::funcion($sala, $obras, 'programada', '2099-01-10T20:00:00'))->estado());
+        foreach ([self::funcion($sala, $obras, 'cancelada'), self::funcion($sala, $obras, 'finalizada', '2026-01-10T20:00:00'), self::funcion($sala, $obras, 'programada', '2020-01-10T20:00:00')] as $fuera) {
+            self::assertSame(404, $this->pedir('GET', "/denuncias/nueva?tipo=funcion&id={$fuera}")->estado());
+        }
+        self::assertSame(404, $this->pedir('GET', '/denuncias/nueva?tipo=funcion&id=' . self::funcion(self::sala('La mía', self::ESPECTADORA), $obras))->estado());
+    }
+
+    /**
+     * La función en sí no se cancela (IC-549 Q3): se suspende su sala o se rechaza una de sus
+     * obras, que se elige.
+     */
+    public function testLaFuncionDenunciadaSuspendeSuSalaORechazaUnaDeSusObras(): void
+    {
+        $sala = self::sala('El Galpón');
+        [$zama, $cienaga] = [self::obra('Zama'), self::obra('La ciénaga')];
+        $funcion = self::funcion($sala, [$zama, $cienaga]);
+        $this->denunciada('funcion', $funcion, self::ESPECTADORA, '2026-11-01 10:00:00');
+
+        $pantalla = $this->pedir('GET', '/denuncias', 'moderador')->cuerpo();
+        self::assertStringContainsString('value="suspender"', $pantalla);
+        self::assertStringContainsString("value=\"rechazar:{$zama}\"", $pantalla);
+        self::assertStringContainsString("value=\"rechazar:{$cienaga}\"", $pantalla);
+        self::assertSame(422, $this->resolver('funcion', $funcion, ['accion' => 'rechazar:' . self::obra('Otra'), 'motivo' => 'No.'])->estado());
+
+        self::assertSame(303, $this->resolver('funcion', $funcion, ['accion' => "rechazar:{$cienaga}", 'motivo' => 'No tiene los derechos.'])->estado());
+
+        self::assertSame('rechazada', self::obrasDeProgramacion()[$cienaga]['estado']);
+        self::assertSame('aprobada', self::obrasDeProgramacion()[$zama]['estado']);
+        self::assertSame([['ruta' => 'revision', 'obra' => $cienaga, 'resolucion' => 'rechazar', 'motivo' => 'No tiene los derechos.', 'moderador_id' => self::MODERADORA]], self::pedidosA('programacion'));
+        self::assertSame([[$cienaga, 'rechazar']], array_map(null, ...[array_column($this->base->filas('SELECT obra_rechazada_id FROM denuncia'), 'obra_rechazada_id'), array_column($this->cerradas(), 'accion')]));
+
+        $otra = self::funcion($sala, [$zama]);
+        $this->denunciada('funcion', $otra, self::ESPECTADORA, '2026-11-02 10:00:00');
+        self::assertSame(303, $this->resolver('funcion', $otra, ['accion' => 'suspender', 'motivo' => 'Falta la salida de emergencia.'])->estado());
+        self::assertSame('denuncia', $this->suspensiones($sala)[0]['causa']);
+    }
+
+    public function testElModeradorNoResuelveLaFuncionDeSuSala(): void
+    {
+        $funcion = self::funcion(self::sala('La de Mora', self::MODERADORA), [self::obra('Zama')]);
+        $this->denunciada('funcion', $funcion, self::ESPECTADORA, '2026-11-01 10:00:00');
+
+        self::assertSame(403, $this->resolver('funcion', $funcion, ['accion' => 'desestimar', 'motivo' => 'Nada.'])->estado());
     }
 }

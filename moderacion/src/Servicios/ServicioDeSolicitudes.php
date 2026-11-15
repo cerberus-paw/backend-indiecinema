@@ -234,17 +234,26 @@ final class ServicioDeSolicitudes
     }
 
     /**
-     * Un documento, si lo puede bajar: quien mandó su solicitud y la moderación. Para los demás no
-     * existe.
+     * Un documento, si lo puede bajar: quien mandó su solicitud (o, en una renovación, el
+     * organizador de la sala, según programación) y la moderación. Para los demás no existe.
      *
-     * @throws ExcepcionHttp 404
+     * @throws ExcepcionHttp 404; 503 si programación no responde
      */
     public function documentoParaBajar(string $id, Usuario $usuario): Documento
     {
         $documento = Uuid::esValido($id) ? $this->papeles->buscar($id) : null;
-        $solicitud = $documento?->solicitudId === null ? null : $this->solicitudes->buscar($documento->solicitudId);
-        $esSuyo = $solicitud !== null && hash_equals($solicitud->usuarioId, $usuario->id);
-        if ($documento === null || (!$esSuyo && !$usuario->alcanza(Rol::Moderador))) {
+        if ($documento === null) {
+            throw ExcepcionHttp::noEncontrada();
+        }
+        if ($usuario->alcanza(Rol::Moderador)) {
+            return $documento;
+        }
+        if ($documento->solicitudId === null) {
+            $duenio = $this->salas->datosDe($documento->salaId)['organizador_id'] ?? null;
+        } else {
+            $duenio = $this->solicitudes->buscar($documento->solicitudId)?->usuarioId;
+        }
+        if ($duenio === null || !hash_equals($duenio, $usuario->id)) {
             throw ExcepcionHttp::noEncontrada();
         }
 

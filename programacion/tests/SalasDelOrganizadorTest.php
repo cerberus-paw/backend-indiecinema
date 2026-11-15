@@ -256,6 +256,8 @@ final class SalasDelOrganizadorTest extends TestCase
         foreach ($propias as $id) {
             self::assertStringContainsString("/organizador/salas/{$id}/editar", $respuesta->cuerpo());
             self::assertStringContainsString("/salas/{$id}/imagen", $respuesta->cuerpo());
+            // EF-07.5: la documentación de la sala y sus suspensiones, en moderación.
+            self::assertStringContainsString("href=\"/moderacion/salas/{$id}/documentacion\"", $respuesta->cuerpo());
         }
         self::assertStringContainsString('La Terraza', $respuesta->cuerpo());
         self::assertStringContainsString('PUBLICADA', $respuesta->cuerpo());

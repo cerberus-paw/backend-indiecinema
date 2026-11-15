@@ -31,6 +31,38 @@ final class RepositorioDeDocumentos
     }
 
     /**
+     * Los de una sala, de la solicitud o renovaciones, primero el seguro y el que vence más lejos.
+     *
+     * @return list<Documento>
+     */
+    public function deLaSala(string $salaId): array
+    {
+        return array_map(self::documento(...), $this->base->filas(self::SELECT . ' WHERE sala_id = ? ORDER BY tipo, vence_en DESC, subido_en DESC', [$salaId]));
+    }
+
+    /**
+     * Una renovación que sube el organizador (EF-07.5), pendiente y sin solicitud. Si había otra
+     * pendiente del mismo tipo, la reemplaza: queda rechazada, en la misma transacción.
+     */
+    public function agregarRenovacion(Documento $documento): void
+    {
+        $this->base->enTransaccion(function (BaseDeDatos $base) use ($documento): void {
+            $base->ejecutar(
+                "UPDATE documento SET estado = 'rechazado', motivo = 'Lo reemplazó otro.', resuelto_en = ?
+                 WHERE sala_id = ? AND tipo = ? AND solicitud_id IS NULL AND estado = 'pendiente'",
+                [$documento->subidoEn, $documento->salaId, $documento->tipo->value],
+            );
+            $base->ejecutar(
+                'INSERT INTO documento (id, sala_id, solicitud_id, tipo, archivo, vence_en, subido_en, estado) VALUES (?, ?, NULL, ?, ?, ?, ?, ?)',
+                [
+                    $documento->id, $documento->salaId, $documento->tipo->value, $documento->archivo,
+                    $documento->venceEn->format('Y-m-d'), $documento->subidoEn, $documento->estado->value,
+                ],
+            );
+        });
+    }
+
+    /**
      * Los de una solicitud, primero el seguro.
      *
      * @return list<Documento>

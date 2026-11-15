@@ -30,6 +30,7 @@ final class FormularioDeDocumentos
     /** Lo que admite php.ini (upload_max_filesize) por archivo y dice la ayuda del formulario. */
     private const MAXIMO = 5 * 1024 * 1024;
     private const ANIOS_MAXIMOS = 10;
+    private const ELEGI_EL_TIPO = 'Elegí si es el seguro o la habilitación.';
 
     /** @var array<string, string> las fechas que mandó, para volver a mostrarlas */
     public private(set) array $valores = [];
@@ -60,14 +61,72 @@ final class FormularioDeDocumentos
             $yaMandado = in_array($tipo, $yaMandados, true);
             $archivo = $archivos[$campoArchivo] ?? null;
             $nuevo = ($archivo['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_NO_FILE;
-            $ruta = $formulario->validarArchivo($tipo, $archivo, obligatorio: !$yaMandado);
-            $vence = $formulario->validarFecha($tipo, $formulario->valores[$campoFecha]);
+            $ruta = $formulario->validarArchivo($tipo, $campoArchivo, $archivo, obligatorio: !$yaMandado);
+            $vence = $formulario->validarFecha($tipo, $campoFecha, $formulario->valores[$campoFecha]);
             if ($vence !== null && ($ruta !== null || ($yaMandado && !$nuevo))) {
                 $formulario->documentos[] = new DocumentoSubido($tipo, $ruta, $vence);
             }
         }
 
         return $formulario;
+    }
+
+    /**
+     * Una renovación que sube el organizador desde la documentación de su sala (EF-07.5): el tipo,
+     * el PDF (en «documento») y su vencimiento (en «vence»), con las mismas reglas que en la
+     * solicitud. Sin un tipo que exista no se mira lo demás: los mensajes dependen de él.
+     *
+     * @param array<string, mixed>                     $campos
+     * @param array<string, array<string, mixed>|null> $archivos
+     */
+    public static function desdeRenovacion(array $campos, array $archivos): self
+    {
+        $formulario = new self();
+        $texto = $campos['tipo'] ?? null;
+        $fecha = $campos['vence'] ?? null;
+        $formulario->valores = ['tipo' => is_string($texto) ? $texto : '', 'vence' => is_string($fecha) ? trim($fecha) : ''];
+        $tipo = is_string($texto) ? TipoDocumento::tryFrom($texto) : null;
+        if ($tipo === null) {
+            $formulario->errores['tipo'] = self::ELEGI_EL_TIPO;
+
+            return $formulario;
+        }
+        $ruta = $formulario->validarArchivo($tipo, 'documento', $archivos['documento'] ?? null, obligatorio: true);
+        $vence = $formulario->validarFecha($tipo, 'vence', $formulario->valores['vence']);
+        if ($ruta !== null && $vence !== null) {
+            $formulario->documentos[] = new DocumentoSubido($tipo, $ruta, $vence);
+        }
+
+        return $formulario;
+    }
+
+    /**
+     * Las de la renovación. Los mensajes del servidor nombran el tipo elegido; el navegador, que no
+     * sabe cuál se va a elegir, dice lo mismo sin nombrarlo.
+     *
+     * @return array<string, array<string, mixed>>
+     */
+    public static function reglasDeRenovacion(): array
+    {
+        return [
+            'tipo' => ['requerido' => true, 'mensajes' => ['requerido' => self::ELEGI_EL_TIPO]],
+            'documento' => [
+                'requerido' => true,
+                'aceptar' => 'application/pdf,.pdf',
+                'mensajes' => ['requerido' => 'Falta el PDF.', 'aceptar' => 'Tiene que ser un PDF.'],
+            ],
+            'vence' => [
+                'requerido' => true,
+                'valor_minimo' => self::hoy()->modify('+1 day')->format('Y-m-d'),
+                'valor_maximo' => self::limite()->format('Y-m-d'),
+                'mensajes' => [
+                    'requerido' => 'Falta la fecha de vencimiento.',
+                    'tipo' => 'Falta la fecha de vencimiento.',
+                    'valor_minimo' => 'Tiene que vencer después de hoy.',
+                    'valor_maximo' => 'El vencimiento no puede pasar de ' . self::ANIOS_MAXIMOS . ' años: revisá el año.',
+                ],
+            ],
+        ];
     }
 
     /**
@@ -123,9 +182,8 @@ final class FormularioDeDocumentos
      *
      * @return ?string el temporal, si es un PDF que va
      */
-    private function validarArchivo(TipoDocumento $tipo, ?array $archivo, bool $obligatorio): ?string
+    private function validarArchivo(TipoDocumento $tipo, string $campo, ?array $archivo, bool $obligatorio): ?string
     {
-        $campo = self::CAMPOS[$tipo->value][0];
         $error = $archivo['error'] ?? UPLOAD_ERR_NO_FILE;
         if ($error === UPLOAD_ERR_NO_FILE) {
             if ($obligatorio) {
@@ -170,9 +228,8 @@ final class FormularioDeDocumentos
         return (new finfo(FILEINFO_MIME_TYPE))->file($ruta) === 'application/pdf' && $inicio === '%PDF-';
     }
 
-    private function validarFecha(TipoDocumento $tipo, string $texto): ?DateTimeImmutable
+    private function validarFecha(TipoDocumento $tipo, string $campo, string $texto): ?DateTimeImmutable
     {
-        $campo = self::CAMPOS[$tipo->value][1];
         $fecha = DateTimeImmutable::createFromFormat('!Y-m-d', $texto);
         // Sin la comparación, un 30 de febrero pasaría como 2 de marzo.
         if ($fecha === false || $fecha->format('Y-m-d') !== $texto) {

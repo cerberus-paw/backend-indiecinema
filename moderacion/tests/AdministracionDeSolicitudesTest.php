@@ -19,6 +19,7 @@ use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Log;
 use IndieCinema\Nucleo\Pruebas\Dobles\PaginasParaValidar;
+use IndieCinema\Nucleo\Pruebas\Dobles\ServidorSmtpDePrueba;
 use IndieCinema\Nucleo\Uuid;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
@@ -45,8 +46,13 @@ final class AdministracionDeSolicitudesTest extends TestCase
     private const ORGANIZADOR = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
     private const LENTO = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
 
+    private static ServidorSmtpDePrueba $correo;
+
     private BaseDeDatos $base;
     private string $carpeta;
+
+    /** Por dónde salen los correos: el SMTP de prueba, salvo que la prueba lo tire. */
+    private ?string $servidorDeCorreo = null;
 
     /** @var resource */
     private $salidaDelLog;
@@ -54,17 +60,20 @@ final class AdministracionDeSolicitudesTest extends TestCase
     public static function setUpBeforeClass(): void
     {
         self::iniciarServidores();
+        self::$correo = ServidorSmtpDePrueba::iniciar();
     }
 
     public static function tearDownAfterClass(): void
     {
         self::detenerServidores();
+        self::$correo->detener();
     }
 
     protected function setUp(): void
     {
         $this->carpeta = sys_get_temp_dir() . '/archivos-' . bin2hex(random_bytes(4));
         self::reiniciarServidores();
+        self::$correo->vaciar();
         $this->base = self::baseConTablasNuevas($this->configuracion());
         $this->salidaDelLog = fopen('php://memory', 'w+');
     }
@@ -85,8 +94,7 @@ final class AdministracionDeSolicitudesTest extends TestCase
             'nginx' => ['secreto' => self::SECRETO],
             'subsistemas' => ['cuentas' => self::$urls['cuentas'], 'programacion' => self::$urls['programacion']],
             'interno' => ['token' => 'token-de-moderacion'],
-            // La bandeja no manda correos: en el puerto 1 no escucha nadie.
-            'correo' => ['servidor' => 'smtp://127.0.0.1:1', 'remitente' => 'no-responder@indiecinema.test'],
+            'correo' => ['servidor' => $this->servidorDeCorreo ?? self::$correo->url(), 'remitente' => 'no-responder@indiecinema.test'],
             'solicitudes' => ['destino' => 'equipo@indiecinema.test'],
         ]);
     }
@@ -182,6 +190,23 @@ final class AdministracionDeSolicitudesTest extends TestCase
         preg_match_all('#class="bandeja-item-sala">([^<]*)</span>#', $respuesta->cuerpo(), $nombres);
 
         return array_map(html_entity_decode(...), $nombres[1]);
+    }
+
+    /**
+     * @return list<array{para: string, asunto: string, texto: string}> los correos que salieron, ya decodificados
+     */
+    private static function correos(): array
+    {
+        return array_map(static function (array $correo): array {
+            [$cabeceras, $cuerpo] = explode("\r\n\r\n", $correo['mensaje'], 2);
+            $asunto = iconv_mime_decode_headers($cabeceras, 0, 'UTF-8')['Subject'] ?? '';
+
+            return [
+                'para' => implode(',', $correo['para']),
+                'asunto' => is_array($asunto) ? implode(' ', $asunto) : (string) $asunto,
+                'texto' => (string) base64_decode(str_replace("\r\n", '', $cuerpo), true),
+            ];
+        }, self::$correo->correos());
     }
 
     private function log(): string
@@ -368,6 +393,66 @@ final class AdministracionDeSolicitudesTest extends TestCase
         self::assertStringContainsString($error, $respuesta->cuerpo());
         self::assertSame('pendiente', $this->estado($id));
         self::assertSame([], self::pedidosA('cuentas'));
+    }
+
+    /**
+     * EF-07.6: quien la mandó se entera por correo, con el motivo. La dirección la da cuentas.
+     */
+    public function testAprobarLeMandaUnCorreoAQuienLaMando(): void
+    {
+        $id = $this->solicitar(self::ESPECTADORA, 'El Galpón');
+
+        $this->resolver($id, ['resolucion' => 'aprobar', 'motivo' => 'Todo en orden.']);
+
+        $correos = self::correos();
+        self::assertCount(1, $correos);
+        self::assertSame('<eva@ejemplo.com>', $correos[0]['para']);
+        self::assertSame('Aprobamos tu sala «El Galpón»', $correos[0]['asunto']);
+        self::assertStringContainsString('Todo en orden.', $correos[0]['texto']);
+        self::assertStringContainsString('/solicitar-sala', $correos[0]['texto']);
+    }
+
+    public function testRechazarLeMandaElMotivoYDondeCorregirla(): void
+    {
+        $id = $this->solicitar(self::ESPECTADORA, 'El Galpón');
+
+        $this->resolver($id, ['resolucion' => 'rechazar', 'motivo' => 'Falta la habilitación.']);
+
+        $correos = self::correos();
+        self::assertCount(1, $correos);
+        self::assertSame('<eva@ejemplo.com>', $correos[0]['para']);
+        self::assertSame('Rechazamos la solicitud de «El Galpón»', $correos[0]['asunto']);
+        self::assertStringContainsString('Falta la habilitación.', $correos[0]['texto']);
+        self::assertStringContainsString('corregirla y volver a mandarla en /solicitar-sala', $correos[0]['texto']);
+    }
+
+    /**
+     * El correo es el aviso: lo que decidió el moderador no depende de él.
+     */
+    public function testSiCuentasNoRespondeElRechazoQuedaYElLogLoDice(): void
+    {
+        $id = $this->solicitar(self::ESPECTADORA, 'El Galpón');
+        self::tirar('cuentas');
+
+        $respuesta = $this->resolver($id, ['resolucion' => 'rechazar', 'motivo' => 'Falta la habilitación.']);
+
+        self::assertSame(303, $respuesta->estado(), $respuesta->cuerpo());
+        self::assertSame('rechazada', $this->estado($id));
+        self::assertSame([], self::correos());
+        self::assertStringContainsString("La solicitud de sala {$id} quedó rechazada, pero no se le avisó a quien la mandó", $this->log());
+    }
+
+    public function testSiFallaElCorreoLaAprobacionQueda(): void
+    {
+        $id = $this->solicitar(self::ESPECTADORA, 'El Galpón');
+        // En el puerto 1 no escucha nadie.
+        $this->servidorDeCorreo = 'smtp://127.0.0.1:1';
+
+        $respuesta = $this->resolver($id, ['resolucion' => 'aprobar', 'motivo' => 'Todo en orden.']);
+
+        self::assertSame(303, $respuesta->estado(), $respuesta->cuerpo());
+        self::assertSame('aprobada', $this->estado($id));
+        self::assertStringContainsString("La solicitud de sala {$id} quedó aprobada, pero no se le avisó a quien la mandó", $this->log());
     }
 
     public function testSiCuentasNoRespondeNoSeApruebaNiSeCreaLaSala(): void

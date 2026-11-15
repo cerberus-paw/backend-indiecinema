@@ -27,6 +27,7 @@ use IndieCinema\Nucleo\Seguridad\Usuario;
 use IndieCinema\Nucleo\Uuid;
 use LogicException;
 use Psr\Log\LoggerInterface;
+use RuntimeException;
 use Throwable;
 
 /**
@@ -350,8 +351,54 @@ final class ServicioDeSolicitudes
             'solicitud' => $solicitud->id,
             'estado' => $estado->value,
         ]);
+        $this->avisarAlSolicitante($solicitud, $estado, $motivo);
 
         return true;
+    }
+
+    /**
+     * El correo a quien la mandó, con el motivo y dónde verla (EF-07.6). Su dirección la da
+     * cuentas. Es sólo el aviso: si cuentas no responde o el correo falla, lo que se resolvió queda
+     * igual, y el motivo lo ve en /solicitar-sala. Queda una advertencia en el log.
+     */
+    private function avisarAlSolicitante(SolicitudDeSala $solicitud, EstadoSolicitud $estado, string $motivo): void
+    {
+        try {
+            $usuario = $this->usuarios->buscar($solicitud->usuarioId) ?? throw new RuntimeException('cuentas ya no tiene al usuario.');
+            [$asunto, $texto] = self::textoParaElSolicitante($solicitud->datos->nombre, $estado, $motivo);
+            $this->correo->enviar(new Correo($usuario->correo, $asunto, $texto));
+        } catch (Throwable $error) {
+            $this->log->warning('La solicitud de sala {solicitud} quedó {estado}, pero no se le avisó a quien la mandó: {mensaje}', [
+                'solicitud' => $solicitud->id,
+                'estado' => $estado->value,
+                'mensaje' => $error->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * @return array{string, string} el asunto y el texto
+     */
+    private static function textoParaElSolicitante(string $sala, EstadoSolicitud $estado, string $motivo): array
+    {
+        return match ($estado) {
+            EstadoSolicitud::Aprobada => ["Aprobamos tu sala «{$sala}»", implode("\n", [
+                "Aprobamos la solicitud de «{$sala}»: la sala ya se ve en IndieCinema y sos organizador.",
+                'Desde «Mis salas» le cargás las películas y programás las funciones.',
+                '',
+                'Lo que anotó la moderación:',
+                $motivo,
+                '',
+                'La solicitud sigue a la vista en /solicitar-sala.',
+            ])],
+            EstadoSolicitud::Rechazada => ["Rechazamos la solicitud de «{$sala}»", implode("\n", [
+                "Rechazamos la solicitud de «{$sala}», por este motivo:",
+                $motivo,
+                '',
+                'Podés corregirla y volver a mandarla en /solicitar-sala.',
+            ])],
+            default => throw new LogicException("Una solicitud {$estado->value} no lleva correo."),
+        };
     }
 
     private function avisarAlEquipo(SolicitudDeSala $solicitud, Usuario $usuario, bool $corregida): void

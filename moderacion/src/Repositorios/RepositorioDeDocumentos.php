@@ -63,6 +63,32 @@ final class RepositorioDeDocumentos
     }
 
     /**
+     * Las renovaciones que esperan a la moderación, de la más vieja a la más nueva.
+     *
+     * @return list<Documento>
+     */
+    public function renovacionesPendientes(): array
+    {
+        return array_map(self::documento(...), $this->base->filas(
+            self::SELECT . " WHERE solicitud_id IS NULL AND estado = 'pendiente' ORDER BY subido_en, id",
+        ));
+    }
+
+    /**
+     * Acepta o rechaza una renovación pendiente, con el motivo y quién.
+     *
+     * @return bool false si ya no estaba pendiente
+     */
+    public function resolverRenovacion(string $id, EstadoDocumento $estado, string $motivo, string $quien, DateTimeImmutable $cuando): bool
+    {
+        return $this->base->ejecutar(
+            "UPDATE documento SET estado = ?, motivo = ?, resuelto_por = ?, resuelto_en = ?
+             WHERE id = ? AND solicitud_id IS NULL AND estado = 'pendiente'",
+            [$estado->value, $motivo, $quien, $cuando, $id],
+        ) === 1;
+    }
+
+    /**
      * Los de una solicitud, primero el seguro.
      *
      * @return list<Documento>

@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use IndieCinema\Moderacion\Controladores\AdministracionDeSolicitudes;
+use IndieCinema\Moderacion\Controladores\BandejaDeDocumentos;
 use IndieCinema\Moderacion\Controladores\DocumentacionDeSala;
 use IndieCinema\Moderacion\Controladores\DocumentoDeSala;
 use IndieCinema\Moderacion\Controladores\FotoDeSolicitud;
@@ -34,6 +35,10 @@ return static function (Router $router): void {
     // y la renovación que sube. Que la sala sea suya lo decide el servicio, con programación.
     $router->get('/salas/{id}/documentacion', [DocumentacionDeSala::class, 'mostrar'], Rol::Organizador);
     $router->post('/salas/{id}/documentacion', [DocumentacionDeSala::class, 'subir'], Rol::Organizador);
+    // La pestaña «Documentos» de la bandeja (EF-07.5): las renovaciones del seguro o de la
+    // habilitación, que el moderador acepta o rechaza con un motivo.
+    $router->get('/documentos', [BandejaDeDocumentos::class, 'listar'], Rol::Moderador);
+    $router->post('/documentos/{id}/resolver', [BandejaDeDocumentos::class, 'resolver'], Rol::Moderador);
     // La bandeja de solicitudes de sala: aprobar una crea la sala en programación y le da el rol
     // de organizador a quien la mandó. Es del moderador (EF-07.3); el administrador también entra,
     // porque lo alcanza.

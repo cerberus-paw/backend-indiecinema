@@ -107,20 +107,40 @@ final class SalasDeProgramacion
      */
     public function datosDe(string $salaId): ?array
     {
-        $salas = $this->cliente->get('programacion', '/interno/salas', ['ids' => $salaId]);
+        return $this->datosDeVarias([$salaId])[$salaId] ?? null;
+    }
+
+    /**
+     * Lo mismo de varias, con el id como clave; las que programación ya no tiene no están.
+     *
+     * @param list<string> $ids hasta 50, lo que admite programación por pedido
+     *
+     * @return array<string, array{nombre: string, organizador_id: string, habilitada: bool}>
+     *
+     * @throws ExcepcionHttp    503 si programación no responde
+     * @throws RuntimeException si responde otra cosa
+     */
+    public function datosDeVarias(array $ids): array
+    {
+        if ($ids === []) {
+            return [];
+        }
+        $salas = $this->cliente->get('programacion', '/interno/salas', ['ids' => implode(',', array_values(array_unique($ids)))]);
         if (!is_array($salas)) {
             throw new RuntimeException('programación no respondió las salas a GET /interno/salas.');
         }
-        $sala = $salas[$salaId] ?? null;
-        if (!is_array($sala)) {
-            return null;
+        $datos = [];
+        foreach ($salas as $id => $sala) {
+            if (is_array($sala)) {
+                $datos[(string) $id] = [
+                    'nombre' => (string) ($sala['nombre'] ?? ''),
+                    'organizador_id' => (string) ($sala['organizador_id'] ?? ''),
+                    'habilitada' => ($sala['habilitada'] ?? null) === true,
+                ];
+            }
         }
 
-        return [
-            'nombre' => (string) ($sala['nombre'] ?? ''),
-            'organizador_id' => (string) ($sala['organizador_id'] ?? ''),
-            'habilitada' => ($sala['habilitada'] ?? null) === true,
-        ];
+        return $datos;
     }
 
     /**

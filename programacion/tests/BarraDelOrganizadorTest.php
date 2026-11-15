@@ -41,8 +41,8 @@ final class BarraDelOrganizadorTest extends TestCase
     private const CSRF = 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc';
     private const ORGANIZADORA = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 
-    /** El logo, a la portada, y las secciones: Mis salas, Mis funciones, Programar función, Reportes y Publicar una sala. */
-    private const ENLACES = ['/', '/organizador/funciones', '/organizador/funciones/nueva', '/organizador/salas', '/recaudacion/reportes', '/solicitar-sala'];
+    /** El logo, a la portada, y las secciones: Mis salas, Mis funciones, Programar función, Reportes, Usuarios bloqueados y Publicar una sala. */
+    private const ENLACES = ['/', '/organizador/bloqueados', '/organizador/funciones', '/organizador/funciones/nueva', '/organizador/salas', '/recaudacion/reportes', '/solicitar-sala'];
 
     private Configuracion $configuracion;
     private BaseDeDatos $base;
@@ -173,6 +173,7 @@ final class BarraDelOrganizadorTest extends TestCase
         yield 'editar función' => ['/organizador/funciones/{programada}/editar', '/organizador/funciones'];
         yield 'proponer franjas' => ['/organizador/funciones/{en_acuerdo}/proponer-franjas', '/organizador/funciones'];
         yield 'cancelar función' => ['/organizador/funciones/{en_votacion}/cancelar', '/organizador/funciones'];
+        yield 'usuarios bloqueados' => ['/organizador/bloqueados', '/organizador/bloqueados'];
     }
 
     #[DataProvider('pantallas')]

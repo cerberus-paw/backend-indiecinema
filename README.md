@@ -167,7 +167,8 @@ todo el sitio se vea igual aunque lo sirvan subsistemas distintos.
 - **Límite de intentos en nginx.** Ingresar y registrarse admiten 5 POST por minuto por IP, con un
   margen de 3 seguidos; al pasarse, 429. Es el control contra la fuerza bruta en la capa de red:
   frena antes de llegar a PHP y a Argon2id, que es caro a propósito. Cuentan sólo los POST (abrir
-  el formulario no gasta intentos) y cada ruta tiene su cuenta.
+  el formulario no gasta intentos) y cada ruta tiene su cuenta. La solicitud de sala y la denuncia
+  (EF-07.8) admiten 2 por minuto, con un margen de 2.
 - **CSRF con doble envío:** el token está en la cookie `csrf` y en cada formulario (campo
   `_csrf`, o la cabecera `X-CSRF-Token` desde JavaScript), y un POST pasa sólo si coinciden. Los
   subsistemas no guardan sesión, así que no hay dónde tener el token del lado del servidor.
@@ -213,6 +214,15 @@ todo el sitio se vea igual aunque lo sirvan subsistemas distintos.
   `GET /interno/obras/{id}` lee una en cualquier estado, y `POST /interno/obras/{id}/revision` la
   aprueba o la rechaza con un motivo. Rechazar una aprobada la saca de las votaciones abiertas y
   borra sus votos; si era la única candidata, la función se cancela.
+  Las denuncias (EF-07.8) son de moderación, pero lo denunciado es de otro: moderación lee la sala
+  (`GET /interno/salas?ids=…`), la obra (`GET /interno/obras/{id}`) y la función
+  (`GET /interno/funciones/{id}`, que también le responde) de programación, y el comentario de una
+  calificación de funciones (`GET /interno/calificaciones/{id}`). Para resolverlas, suspende la
+  sala (`POST /interno/salas/{id}/habilitacion`, con la suspensión de causa `denuncia`), rechaza la
+  obra (`POST /interno/obras/{id}/revision`) u oculta el comentario
+  (`POST /interno/calificaciones/{id}/ocultar` de funciones: deja de verse y el puntaje sigue
+  contando). Las últimas calificaciones que da funciones llevan su id, para denunciar cada
+  comentario.
   Moderación tiene `GET /interno/solicitudes/ultima/{usuario}` para cuentas (EF-07.6): el estado
   y el motivo de la última solicitud de sala, que «Mi cuenta» muestra si moderación responde.
   Funciones tiene `GET /interno/funciones/{id}/ocupacion` y `GET /interno/ocupacion?funciones=…`

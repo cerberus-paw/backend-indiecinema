@@ -7,7 +7,8 @@ server_tokens off;
 # publicado por Docker (8080) o del HTTPS del VPS, nginx no sabe cuál vio el navegador.
 absolute_redirect off;
 
-# Lo que admite PHP (php/php.ini): una imagen de 5 MB más el resto del formulario.
+# Una imagen de 5 MB (el límite por archivo de php/php.ini) más el resto del formulario. La
+# solicitud de sala, que lleva tres archivos, tiene el suyo.
 client_max_body_size 6m;
 
 # Al pasarse del límite, 429 Too Many Requests (por defecto sería 503, que dice otra cosa), con
@@ -144,6 +145,9 @@ location /recaudacion/ {
 # pasan 3 seguidos y después uno cada 30 segundos.
 location ~ ^/solicitar-sala/?$ {
     limit_req zone=solicitud burst=2 nodelay;
+    # La foto y los PDF del seguro y de la habilitación, de hasta 5 MB cada uno (EF-07.4): lo
+    # mismo que admite PHP en un pedido (post_max_size).
+    client_max_body_size 16m;
     set $subsistema moderacion;
     set $secreto "${NGINX_SECRETO_MODERACION}";
     rewrite ^(.*)$ $1 break;

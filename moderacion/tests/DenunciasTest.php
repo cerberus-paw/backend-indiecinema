@@ -162,6 +162,25 @@ final class DenunciasTest extends TestCase
     }
 
     /**
+     * Una sala publicada en programación, del organizador salvo que se diga otro.
+     */
+    private static function sala(string $nombre, string $organizador = self::ORGANIZADOR, bool $habilitada = true): string
+    {
+        $id = Uuid::nuevo();
+        self::salasEnProgramacion(self::salasDeProgramacion() + [$id => ['nombre' => $nombre, 'localidad' => 'Luján', 'organizador_id' => $organizador, 'habilitada' => $habilitada]]);
+
+        return $id;
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function suspensiones(string $salaId): array
+    {
+        return $this->base->filas('SELECT causa, motivo, abierta_por, levantada_en IS NULL AS activa FROM suspension WHERE sala_id = ? ORDER BY desde', [$salaId]);
+    }
+
+    /**
      * Una obra aprobada en programación, del organizador salvo que se diga otro dueño.
      */
     private static function obra(string $titulo, string $dueno = self::ORGANIZADOR, string $estado = 'aprobada'): string
@@ -503,5 +522,91 @@ final class DenunciasTest extends TestCase
         self::assertSame(422, $this->resolver('obra', $id, ['accion' => 'rechazar', 'motivo' => 'No.'])->estado());
         self::assertSame(303, $this->resolver('obra', $id, ['accion' => 'desestimar', 'motivo' => 'Ya no está.'])->estado());
         self::assertSame('desestimada', $this->cerradas()[0]['estado']);
+    }
+
+    public function testUnaSalaSeDenunciaTambienPorLaSeguridadDelLugar(): void
+    {
+        $id = self::sala('El Galpón');
+
+        $formulario = $this->pedir('GET', "/denuncias/nueva?tipo=sala&id={$id}");
+
+        self::assertSame(200, $formulario->estado(), $formulario->cuerpo());
+        self::assertStringContainsString('El Galpón', $formulario->cuerpo());
+        self::assertStringContainsString('Seguridad del lugar', $formulario->cuerpo());
+        self::assertSame(303, $this->denunciar('sala', $id, ['categoria' => 'seguridad', 'detalle' => 'No hay salida de emergencia.'])->estado());
+        self::assertStringContainsString("href=\"/salas/{$id}\"", $this->pedir('GET', "/denuncias/nueva?tipo=sala&id={$id}&enviada=1")->cuerpo());
+
+        self::assertSame(404, $this->pedir('GET', '/denuncias/nueva?tipo=sala&id=' . self::sala('Sin publicar', habilitada: false))->estado());
+        self::assertSame(404, $this->pedir('GET', '/denuncias/nueva?tipo=sala&id=' . self::sala('La mía', self::ESPECTADORA))->estado());
+    }
+
+    /**
+     * Suspender abre la suspensión con causa denuncia (EF-07.5): programación la apaga y el
+     * organizador recibe el motivo, sin quién denunció ni qué escribió.
+     */
+    public function testSuspenderLaSalaDenunciadaLaApagaYLeAvisaAlOrganizador(): void
+    {
+        $id = self::sala('El Galpón');
+        $this->denunciada('sala', $id, self::ESPECTADORA, '2026-11-01 10:00:00', 'seguridad', 'No hay salida de emergencia.');
+        self::assertStringContainsString('value="suspender"', $this->pedir('GET', '/denuncias', 'moderador')->cuerpo());
+
+        $respuesta = $this->resolver('sala', $id, ['accion' => 'suspender', 'motivo' => 'Falta la salida de emergencia.']);
+
+        self::assertSame("/moderacion/denuncias?resueltas={$id}", $respuesta->cabecera('Location'));
+        self::assertSame([['ruta' => 'habilitacion', 'sala' => $id, 'habilitada' => false, 'motivo' => 'Falta la salida de emergencia.', 'moderador_id' => self::MODERADORA]], self::pedidosA('programacion'));
+        self::assertSame([['causa' => 'denuncia', 'motivo' => 'Falta la salida de emergencia.', 'abierta_por' => self::MODERADORA, 'activa' => 1]], $this->suspensiones($id));
+        self::assertSame(['resuelta', 'suspender'], [$this->cerradas()[0]['estado'], $this->cerradas()[0]['accion']]);
+        $correos = self::correosEnviados();
+        self::assertCount(1, $correos);
+        self::assertSame('<omar@ejemplo.com>', $correos[0]['para']);
+        self::assertSame('Suspendimos la sala «El Galpón»', $correos[0]['asunto']);
+        self::assertStringContainsString('Falta la salida de emergencia.', $correos[0]['texto']);
+        self::assertStringContainsString("/moderacion/salas/{$id}/documentacion", $correos[0]['texto']);
+        self::assertStringNotContainsString('No hay salida de emergencia.', $correos[0]['texto']);
+        self::assertStringNotContainsString('Eva', $correos[0]['texto']);
+    }
+
+    /**
+     * Q14: con una suspensión por denuncia activa, las que quedaban abiertas se cierran sin abrir
+     * otra ni mandar otro correo.
+     */
+    public function testUnaSalaYaSuspendidaPorDenunciaCierraSinRepetir(): void
+    {
+        $id = self::sala('El Galpón');
+        $this->denunciada('sala', $id, self::ESPECTADORA, '2026-11-01 10:00:00');
+        $this->resolver('sala', $id, ['accion' => 'suspender', 'motivo' => 'Primera.']);
+        self::$correo->vaciar();
+        file_put_contents(self::$registros['programacion'], '');
+        // Una que ya estaba abierta cuando la suspendieron por otro lado (desde una función): una
+        // suspendida no se puede denunciar.
+        $this->base->ejecutar(
+            "INSERT INTO denuncia (id, tipo, objeto_id, titulo, usuario_id, categoria, creada_en) VALUES (?, 'sala', ?, 'El Galpón', ?, 'ofensivo', '2026-11-02 10:00:00')",
+            [Uuid::nuevo(), $id, self::ADMINISTRADOR],
+        );
+
+        self::assertStringContainsString('Ya está suspendida por una denuncia', $this->pedir('GET', '/denuncias', 'moderador')->cuerpo());
+        self::assertSame(303, $this->resolver('sala', $id, ['accion' => 'suspender', 'motivo' => 'Segunda.'])->estado());
+
+        self::assertCount(1, $this->suspensiones($id));
+        self::assertSame([], self::pedidosA('programacion'));
+        self::assertSame([], self::correosEnviados());
+        self::assertSame(['resuelta', 'resuelta'], array_column($this->cerradas(), 'estado'));
+    }
+
+    /**
+     * Q15: una retirada o suspendida por otra causa sigue existiendo: se suspende igual (EF-07.5,
+     * Q2: cada causa con su suspensión).
+     */
+    public function testUnaSalaRetiradaIgualSeSuspendePorDenuncia(): void
+    {
+        $id = self::sala('El Galpón');
+        $this->denunciada('sala', $id, self::ESPECTADORA, '2026-11-01 10:00:00');
+        $salas = self::salasDeProgramacion();
+        $salas[$id]['habilitada'] = false;
+        self::salasEnProgramacion($salas);
+
+        self::assertSame(303, $this->resolver('sala', $id, ['accion' => 'suspender', 'motivo' => 'Igual.'])->estado());
+
+        self::assertSame('denuncia', $this->suspensiones($id)[0]['causa']);
     }
 }

@@ -64,7 +64,6 @@ final class BandejaDeDenuncias extends Controlador
             return $this->redirigir('/denuncias?' . http_build_query(['ya_resueltas' => $id]));
         }
         $denunciado = $this->servicio->denunciado($tipo, $id);
-        $publicado = $denunciado !== null && $denunciado->seResuelve() ? $denunciado : null;
         // Antes que los errores del formulario: lo suyo no lo resuelve, ni con el motivo mal.
         if (!$this->servicio->lasPuedeResolver($denunciado, $denuncias, $moderador)) {
             throw ExcepcionHttp::prohibida();
@@ -72,7 +71,7 @@ final class BandejaDeDenuncias extends Controlador
         $accion = $peticion->campo('accion');
         $motivo = self::motivo($peticion->campo('motivo'));
         $errores = [];
-        if (!is_string($accion) || !in_array($accion, array_column(self::acciones($publicado), 'valor'), true)) {
+        if (!is_string($accion) || !in_array($accion, array_column(self::acciones($denunciado), 'valor'), true)) {
             $errores['accion'] = 'Elegí qué hacer con las denuncias.';
         }
         if ($motivo === '') {
@@ -85,7 +84,7 @@ final class BandejaDeDenuncias extends Controlador
         }
 
         $aviso = match (true) {
-            !$this->servicio->resolver($tipo, $id, $publicado, $accion, $motivo, $moderador) => 'ya_resueltas',
+            !$this->servicio->resolver($tipo, $id, $denunciado, $accion, $motivo, $moderador) => 'ya_resueltas',
             $accion === 'desestimar' => 'desestimadas',
             default => 'resueltas',
         };
@@ -221,13 +220,13 @@ final class BandejaDeDenuncias extends Controlador
             'tipo_etiqueta' => $tipo->etiqueta(),
             'id' => $objetoId,
             'titulo' => $denunciado->titulo ?? $titulo,
-            // false: su subsistema no respondió; null: ya no está publicado.
+            // false: su subsistema no respondió; null: ya no existe.
             'denunciado' => match (true) {
                 !$consultado => false,
-                $denunciado === null || !$denunciado->seResuelve() => null,
+                $denunciado === null => null,
                 default => ['url' => $denunciado->url, 'sancionado' => $denunciado->sancionado] + $denunciado->datos,
             },
-            // Lo que se puede hacer depende de que siga publicado (Q15).
+            // Lo que se puede hacer depende de que siga existiendo (Q15).
             'denuncias' => array_map(fn (Denuncia $denuncia): array => [
                 'categoria' => $denuncia->categoria->etiqueta(),
                 'detalle' => $denuncia->detalle,
@@ -235,12 +234,12 @@ final class BandejaDeDenuncias extends Controlador
                 'quien' => $this->quien($denuncia->usuarioId),
             ], $denuncias),
             'propia' => !$this->servicio->lasPuedeResolver($denunciado, $denuncias, $moderador),
-            'acciones' => self::acciones($denunciado !== null && $denunciado->seResuelve() ? $denunciado : null),
+            'acciones' => self::acciones($denunciado),
         ];
     }
 
     /**
-     * Lo que se puede hacer con lo denunciado, si sigue publicado. Desestimar, siempre.
+     * Lo que se puede hacer con lo denunciado, si todavía existe. Desestimar, siempre.
      *
      * @return list<array{valor: string, etiqueta: string}>
      */
@@ -249,6 +248,9 @@ final class BandejaDeDenuncias extends Controlador
         $acciones = [['valor' => 'desestimar', 'etiqueta' => 'Desestimarlas: no hay nada que hacer']];
         if ($denunciado?->tipo === TipoDenuncia::Obra) {
             $acciones[] = ['valor' => 'rechazar', 'etiqueta' => 'Rechazar la obra: sale del catálogo y de las votaciones abiertas'];
+        }
+        if ($denunciado?->tipo === TipoDenuncia::Sala) {
+            $acciones[] = ['valor' => 'suspender', 'etiqueta' => 'Suspender la sala: sale del sitio y lo programado sigue'];
         }
 
         return $acciones;

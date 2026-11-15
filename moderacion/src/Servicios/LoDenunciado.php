@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace IndieCinema\Moderacion\Servicios;
 
+use IndieCinema\Moderacion\Modelo\CausaSuspension;
 use IndieCinema\Moderacion\Modelo\Denunciado;
+use IndieCinema\Moderacion\Modelo\Suspension;
 use IndieCinema\Moderacion\Modelo\TipoDenuncia;
 use IndieCinema\Nucleo\Http\ExcepcionHttp;
 use IndieCinema\Nucleo\Uuid;
@@ -16,8 +18,11 @@ use RuntimeException;
  */
 final class LoDenunciado
 {
-    public function __construct(private readonly ObrasDeProgramacion $obras)
-    {
+    public function __construct(
+        private readonly ObrasDeProgramacion $obras,
+        private readonly SalasDeProgramacion $salas,
+        private readonly ServicioDeSuspensiones $suspensiones,
+    ) {
     }
 
     /**
@@ -34,8 +39,24 @@ final class LoDenunciado
 
         return match ($tipo) {
             TipoDenuncia::Obra => $this->obra($id),
+            TipoDenuncia::Sala => $this->sala($id),
             default => null,
         };
+    }
+
+    /**
+     * La sala está publicada si está habilitada. Ya está sancionada si tiene una suspensión activa
+     * por denuncia (EF-07.5).
+     */
+    private function sala(string $id): ?Denunciado
+    {
+        $sala = $this->salas->datosDe($id);
+        if ($sala === null) {
+            return null;
+        }
+        $porDenuncia = array_filter($this->suspensiones->activasDe($id), static fn (Suspension $suspension): bool => $suspension->causa === CausaSuspension::Denuncia);
+
+        return new Denunciado(TipoDenuncia::Sala, $id, $sala['nombre'], $sala['organizador_id'], $sala['habilitada'], "/salas/{$id}", [], $porDenuncia !== []);
     }
 
     private function obra(string $id): ?Denunciado

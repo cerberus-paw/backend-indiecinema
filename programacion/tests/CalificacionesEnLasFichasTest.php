@@ -116,13 +116,16 @@ final class CalificacionesEnLasFichasTest extends TestCase
         ]);
     }
 
-    private function pedir(string $ruta, ?string $funciones = null): Respuesta
+    /**
+     * @param array<string, string> $cabeceras las de nginx, para pedir con sesión
+     */
+    private function pedir(string $ruta, ?string $funciones = null, array $cabeceras = []): Respuesta
     {
         $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion($funciones), new Log('programacion', fopen('php://memory', 'w')));
 
         parse_str((string) parse_url($ruta, PHP_URL_QUERY), $consulta);
 
-        return PaginasParaValidar::anotar('GET', $ruta, $aplicacion->atender(new Peticion('GET', (string) parse_url($ruta, PHP_URL_PATH), $consulta, [], [], [], [])));
+        return PaginasParaValidar::anotar('GET', $ruta, $aplicacion->atender(new Peticion('GET', (string) parse_url($ruta, PHP_URL_PATH), $consulta, [], $cabeceras, [], [])));
     }
 
     /**
@@ -280,5 +283,17 @@ final class CalificacionesEnLasFichasTest extends TestCase
         [$mejor, $media, $sinCalificar] = $this->tresSalas();
 
         self::assertEnOrden([$mejor, $media, $sinCalificar], $this->pedir("/obras/{$this->obraId}")->cuerpo());
+    }
+
+    /**
+     * EF-07.8: la ficha lleva a denunciar la sala, salvo a su organizadora.
+     */
+    public function testLaFichaLlevaADenunciarLaSalaSalvoASuOrganizadora(): void
+    {
+        $link = "href=\"/moderacion/denuncias/nueva?tipo=sala&amp;id={$this->sala->id}\"";
+
+        self::assertStringContainsString($link, $this->pedir("/salas/{$this->sala->id}")->cuerpo());
+        self::assertStringContainsString($link, $this->pedir("/salas/{$this->sala->id}", cabeceras: ['X-Nginx-Secreto' => 'secreto-de-nginx', 'X-Usuario-Id' => Uuid::nuevo(), 'X-Rol' => 'espectador'])->cuerpo());
+        self::assertStringNotContainsString($link, $this->pedir("/salas/{$this->sala->id}", cabeceras: ['X-Nginx-Secreto' => 'secreto-de-nginx', 'X-Usuario-Id' => self::ORGANIZADORA, 'X-Rol' => 'organizador'])->cuerpo());
     }
 }

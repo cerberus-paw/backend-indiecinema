@@ -7,8 +7,10 @@ namespace IndieCinema\Moderacion\Servicios;
 use DateTimeImmutable;
 use DateTimeZone;
 use IndieCinema\Moderacion\Modelo\CategoriaDenuncia;
+use IndieCinema\Moderacion\Modelo\CausaSuspension;
 use IndieCinema\Moderacion\Modelo\Denuncia;
 use IndieCinema\Moderacion\Modelo\Denunciado;
+use IndieCinema\Moderacion\Modelo\Suspension;
 use IndieCinema\Moderacion\Modelo\TipoDenuncia;
 use IndieCinema\Moderacion\Modelo\UsuarioDeCuentas;
 use IndieCinema\Moderacion\Repositorios\RepositorioDeDenuncias;
@@ -31,6 +33,8 @@ final class ServicioDeDenuncias
         private readonly LoDenunciado $denunciados,
         private readonly UsuariosDeCuentas $usuarios,
         private readonly ServicioDeObras $obras,
+        private readonly ServicioDeSuspensiones $suspensiones,
+        private readonly AvisosAlOrganizador $avisos,
     ) {
     }
 
@@ -107,7 +111,7 @@ final class ServicioDeDenuncias
      * de actuar en el subsistema dueño (si no responde, no se cierra nada y se reintenta). Si lo
      * que resuelve ya estaba hecho, se cierran sin repetirlo (Q14).
      *
-     * @param ?Denunciado $denunciado como lo da hoy su subsistema, si todavía se resuelve
+     * @param ?Denunciado $denunciado como lo da hoy su subsistema, o null si ya no existe
      *
      * @return bool false si ya no había abiertas: no cambia nada
      *
@@ -127,10 +131,43 @@ final class ServicioDeDenuncias
             match ($accion) {
                 // El rechazo de EF-07.7: el historial de obras y el correo al dueño.
                 'rechazar' => $this->obras->resolver($denunciado->id, false, $motivo, $moderador),
+                'suspender' => $this->suspender($denunciado->id, $motivo, $moderador),
                 default => null,
             };
         }
 
         return $this->denuncias->cerrar($tipo, $objetoId, $accion === 'desestimar' ? null : $accion, null, $motivo, $moderador->id, new DateTimeImmutable('now', new DateTimeZone('UTC'))) > 0;
+    }
+
+    /**
+     * Abre la suspensión por denuncia (EF-07.5: programación la apaga si era la primera activa y
+     * lo programado sigue) y le avisa al organizador con el motivo, sin quién denunció ni el
+     * detalle. Si el correo no sale, la suspensión queda igual.
+     */
+    private function suspender(string $salaId, string $motivo, Usuario $moderador): void
+    {
+        if (!$this->suspensiones->abrir($salaId, CausaSuspension::Denuncia, null, $motivo, $moderador->id)) {
+            return;
+        }
+        foreach ($this->suspensiones->activasDe($salaId) as $suspension) {
+            if ($suspension->causa === CausaSuspension::Denuncia) {
+                $this->avisarLaSuspension($suspension);
+            }
+        }
+    }
+
+    private function avisarLaSuspension(Suspension $suspension): void
+    {
+        $this->avisos->avisar($suspension->salaId, "suspendida:{$suspension->id}", static fn (string $sala): array => [
+            "Suspendimos la sala «{$sala}»",
+            implode("\n", [
+                "Tu sala «{$sala}» queda suspendida por una denuncia, por este motivo:",
+                $suspension->motivo,
+                '',
+                'Mientras tanto no se ve en el sitio ni programa funciones nuevas; las que ya tenía siguen en pie.',
+                'Los detalles están en la documentación de la sala (' . AvisosAlOrganizador::documentacion($suspension->salaId) . ').',
+                'Si se resuelve, la moderación levanta la suspensión y la sala vuelve a publicarse.',
+            ]),
+        ]);
     }
 }

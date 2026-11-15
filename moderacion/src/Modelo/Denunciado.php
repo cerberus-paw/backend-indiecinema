@@ -6,7 +6,9 @@ namespace IndieCinema\Moderacion\Modelo;
 
 /**
  * Lo denunciado, como lo da el subsistema dueño (EF-07.8): con qué se lo nombra, de quién es (que
- * no lo denuncia ni resuelve sus denuncias) y si está publicado (sólo eso se denuncia).
+ * no lo denuncia ni resuelve sus denuncias) y si está publicado (sólo eso se denuncia). Mientras
+ * exista, sus denuncias se resuelven aunque ya no esté publicado (retirado, suspendido por otra
+ * causa): Q15.
  */
 final readonly class Denunciado
 {
@@ -27,15 +29,6 @@ final readonly class Denunciado
         public array $datos = [],
         public bool $sancionado = false,
     ) {
-    }
-
-    /**
-     * Si todavía se puede hacer algo con él: está publicado, o ya se hizo lo que resuelve sus
-     * denuncias.
-     */
-    public function seResuelve(): bool
-    {
-        return $this->publicado || $this->sancionado;
     }
 
     public function esDe(string $usuarioId): bool

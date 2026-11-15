@@ -71,6 +71,8 @@ final class Salas extends Controlador
                 'peliculas_por_funcion' => $ficha->sala->datos->peliculasPorFuncion,
                 'duracion_funcion' => $ficha->sala->datos->duracionFuncion,
                 'tiempo_entre_funciones' => $ficha->sala->datos->tiempoEntreFunciones,
+                // EF-07.8: se denuncia publicada, y no la denuncia su organizador.
+                'denunciable' => $ficha->sala->habilitada && $ficha->sala->organizadorId !== $peticion->usuario()?->id,
             ],
             'funciones' => FilaDeFuncion::todas(
                 $ficha->funciones,

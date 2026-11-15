@@ -79,12 +79,12 @@ final class SalasDeProgramacion
 
     /**
      * La publica o la retira del sitio. El motivo y quién lo hizo quedan en el registro de
-     * programación.
+     * programación; sin quién, lo hizo la tarea de vencimientos (EF-07.5).
      *
      * @throws ExcepcionHttp    404 si programación ya no la tiene; 503 si no responde
      * @throws RuntimeException si responde otra cosa
      */
-    public function cambiarHabilitacion(string $salaId, bool $habilitada, string $motivo, string $quien): void
+    public function cambiarHabilitacion(string $salaId, bool $habilitada, string $motivo, ?string $quien): void
     {
         $respuesta = $this->cliente->post('programacion', "/interno/salas/{$salaId}/habilitacion", [
             'habilitada' => $habilitada,

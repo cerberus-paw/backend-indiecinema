@@ -6,6 +6,7 @@ namespace IndieCinema\Moderacion\Servicios;
 
 use DateTimeImmutable;
 use DateTimeZone;
+use IndieCinema\Moderacion\Modelo\CausaSuspension;
 use IndieCinema\Moderacion\Modelo\DatosDeSala;
 use IndieCinema\Moderacion\Modelo\Documento;
 use IndieCinema\Moderacion\Modelo\DocumentoSubido;
@@ -46,6 +47,7 @@ final class ServicioDeSolicitudes
         private readonly RepositorioDeDocumentos $papeles,
         private readonly UsuariosDeCuentas $usuarios,
         private readonly SalasDeProgramacion $salas,
+        private readonly ServicioDeSuspensiones $suspensiones,
         private readonly ClienteSmtp $correo,
         private readonly Configuracion $configuracion,
         private readonly LoggerInterface $log,
@@ -281,7 +283,9 @@ final class ServicioDeSolicitudes
 
     /**
      * Retira del sitio, o vuelve a publicar, la sala de una solicitud aprobada: sus funciones dejan
-     * de verse en la cartelera mientras está retirada.
+     * de verse en la cartelera mientras está retirada. Retirarla es una suspensión con causa
+     * «retiro» (EF-07.5), y volver a publicarla la levanta: si la sala tiene otra suspensión
+     * activa, sigue apagada.
      *
      * @throws ExcepcionHttp 404 si la solicitud no existe o no está aprobada; 403 si es del
      *                       moderador; 503 si programación no responde
@@ -293,7 +297,11 @@ final class ServicioDeSolicitudes
         if ($solicitud->estado !== EstadoSolicitud::Aprobada) {
             throw ExcepcionHttp::noEncontrada();
         }
-        $this->salas->cambiarHabilitacion($solicitud->salaId, $habilitada, $motivo, $moderador->id);
+        if ($habilitada) {
+            $this->suspensiones->levantar($solicitud->salaId, CausaSuspension::Retiro, null, $motivo, $moderador->id);
+        } else {
+            $this->suspensiones->abrir($solicitud->salaId, CausaSuspension::Retiro, null, $motivo, $moderador->id);
+        }
 
         return $solicitud;
     }

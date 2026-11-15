@@ -544,6 +544,70 @@ final class AdministracionDeSolicitudesTest extends TestCase
         self::assertTrue(self::salasDeProgramacion()[$sala]['habilitada']);
     }
 
+    /**
+     * @return list<array<string, mixed>> las suspensiones de la sala, de la primera a la última
+     */
+    private function suspensiones(string $sala): array
+    {
+        return $this->base->filas(
+            'SELECT causa, tipo_documento, motivo, abierta_por, levantada_en IS NOT NULL AS levantada, levantada_por FROM suspension WHERE sala_id = ? ORDER BY desde, id',
+            [$sala],
+        );
+    }
+
+    /**
+     * EF-07.5 (grilling de EF-07, Q2 y Q13): retirar la sala es una suspensión con causa «retiro»,
+     * que volver a publicarla levanta.
+     */
+    public function testRetirarAbreUnaSuspensionYVolverAPublicarLaLevanta(): void
+    {
+        $id = $this->aprobada();
+        $sala = $this->salaId($id);
+
+        self::assertSame(303, $this->cambiarLaSala($id, 'deshabilitar-sala', rol: 'moderador')->estado());
+        self::assertSame(
+            [['causa' => 'retiro', 'tipo_documento' => null, 'motivo' => 'Venció la póliza del seguro.', 'abierta_por' => self::MODERADORA, 'levantada' => 0, 'levantada_por' => null]],
+            $this->suspensiones($sala),
+        );
+
+        self::assertSame(303, $this->cambiarLaSala($id, 'habilitar-sala', ['motivo_sala' => 'Mandó la póliza nueva.'])->estado());
+        self::assertSame(1, $this->suspensiones($sala)[0]['levantada']);
+        self::assertSame(self::ADMINISTRADOR, $this->suspensiones($sala)[0]['levantada_por']);
+        self::assertTrue(self::salasDeProgramacion()[$sala]['habilitada']);
+    }
+
+    /**
+     * Una sala con otra suspensión activa (acá, el seguro vencido) sigue apagada aunque se levante
+     * el retiro: volver a publicarla no deshace la otra causa.
+     */
+    public function testConOtraSuspensionVolverAPublicarNoLaPublica(): void
+    {
+        $id = $this->aprobada();
+        $sala = $this->salaId($id);
+        self::assertSame(303, $this->cambiarLaSala($id, 'deshabilitar-sala')->estado());
+        $this->base->ejecutar(
+            "INSERT INTO suspension (id, sala_id, causa, tipo_documento, motivo, desde) VALUES (?, ?, 'vencimiento', 'seguro', 'Venció el seguro.', UTC_TIMESTAMP())",
+            [Uuid::nuevo(), $sala],
+        );
+        file_put_contents(self::$registros['programacion'], '');
+
+        self::assertSame(303, $this->cambiarLaSala($id, 'habilitar-sala', ['motivo_sala' => 'Se resolvió el reclamo.'])->estado());
+
+        self::assertSame([], self::pedidosA('programacion'));
+        self::assertFalse(self::salasDeProgramacion()[$sala]['habilitada']);
+        self::assertSame([1, 0], array_column($this->suspensiones($sala), 'levantada'));
+    }
+
+    public function testSiProgramacionNoRespondeNoSeAbreLaSuspension(): void
+    {
+        $id = $this->aprobada();
+        self::tirar('programacion');
+
+        self::assertSame(503, $this->cambiarLaSala($id, 'deshabilitar-sala')->estado());
+
+        self::assertSame([], $this->suspensiones($this->salaId($id)));
+    }
+
     public function testSinMotivoNoSeRetira(): void
     {
         $id = $this->aprobada();

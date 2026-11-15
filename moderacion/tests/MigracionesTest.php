@@ -119,6 +119,38 @@ final class MigracionesTest extends TestCase
         self::assertSame('pendiente', $this->base->valor('SELECT DISTINCT estado FROM documento'));
     }
 
+    private function suspender(string $sala, string $causa = 'retiro', ?string $tipo = null): string
+    {
+        $id = Uuid::nuevo();
+        $this->base->ejecutar(
+            "INSERT INTO suspension (id, sala_id, causa, tipo_documento, motivo, desde) VALUES (?, ?, ?, ?, 'Un motivo.', NOW())",
+            [$id, $sala, $causa, $tipo],
+        );
+
+        return $id;
+    }
+
+    /**
+     * EF-07.5: una sala tiene a lo sumo una suspensión activa por causa (y por tipo de documento en
+     * las de vencimiento); las levantadas no cuentan. Sólo las de vencimiento dicen qué papel.
+     */
+    public function testUnaSuspensionActivaPorSalaCausaYTipo(): void
+    {
+        $sala = Uuid::nuevo();
+        $retiro = $this->suspender($sala);
+        $this->suspender($sala, 'vencimiento', 'seguro');
+        $this->suspender($sala, 'vencimiento', 'habilitacion');
+
+        $this->assertRechaza(self::CLAVE_REPETIDA, fn () => $this->suspender($sala));
+        $this->assertRechaza(self::CLAVE_REPETIDA, fn () => $this->suspender($sala, 'vencimiento', 'seguro'));
+        $this->assertRechaza(self::RESTRICCION_CHECK, fn () => $this->suspender($sala, 'vencimiento'));
+        $this->assertRechaza(self::RESTRICCION_CHECK, fn () => $this->suspender($sala, 'denuncia', 'seguro'));
+
+        $this->base->ejecutar('UPDATE suspension SET levantada_en = NOW() WHERE id = ?', [$retiro]);
+        $this->suspender($sala);
+        self::assertSame(4, $this->base->valor('SELECT COUNT(*) FROM suspension WHERE sala_id = ?', [$sala]));
+    }
+
     /**
      * EF-07.2: las solicitudes que había en programación se mudan con los datos de su sala, sin
      * foto propia, y programación se queda sin la tabla. Las de salas dadas de baja no, como no se

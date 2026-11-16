@@ -48,7 +48,7 @@ backend-indiecinema/
 ├── programacion/          /          obras, salas, funciones, cartelera, votación de títulos y solicitudes de sala
 ├── funciones/             /funcion/  las reservas con el cupo de cada función, sus paneles y el acuerdo de fecha
 ├── moderacion/            /moderacion/  armado (EF-01): las solicitudes de sala, las denuncias y los términos llegan con EF-07 y EF-16
-└── recaudacion/           /recaudacion/: los reportes (EF-09); el reparto y las liquidaciones llegan con EF-08
+└── recaudacion/           /recaudacion/: los reportes (EF-09) y el reparto de lo cobrado (EF-08.1); las liquidaciones llegan con EF-08.3
 ```
 
 Lo que todavía no está (los beneficios, dentro de recaudación) se suma con la misma forma.
@@ -243,6 +243,15 @@ todo el sitio se vea igual aunque lo sirvan subsistemas distintos.
   un título para repetir o lo que el público pidió está en `[reportes]` de su `config.ini`. Los
   totales van de a un mes por página, y el CSV trae todas las funciones del período. El dueño de
   una obra ve cómo le fue en cualquier sala, también en las votaciones que perdió.
+- **El reparto de lo cobrado es un parámetro con fecha de vigencia**, no una constante
+  (`/recaudacion/administracion/reparto`, EF-08.1): el administrador carga con cuánto se reparte
+  entre la sala, el dueño de la obra y la plataforma —70/15/15 es lo que deja la migración— y
+  desde cuándo rige. Un parámetro no se corrige ni se borra: cada cambio es una fila nueva, el
+  anterior queda en el historial y cada función se reparte con el vigente en su `fecha_hora`, así
+  un cambio no mueve lo de las funciones que ya pasaron. La vigencia puede ser futura, para
+  anunciarlo antes, pero no anterior a ahora. Los porcentajes van en `DECIMAL(5,2)` y la base
+  controla que sumen 100 exacto; la aplicación los maneja en centésimas de punto (70 % es 7000),
+  porque con `float` un reparto como 33,33 / 33,33 / 33,34 no suma 100 y quedaría plata sin dueño.
 - **Las rutas dentro del contenedor copian las del disco** (`/src/backend-indiecinema/<subsistema>`
   y `/src/frontend-indiecinema`), así los repositorios `path` de Composer funcionan igual si se
   instala desde afuera o desde adentro del contenedor.
@@ -756,7 +765,7 @@ En cada PR y en cada push a `main` o a `dev`, GitHub Actions (`.github/workflows
 - **El análisis estático** de cada paquete con PHPStan (`composer analisis`, nivel 5): lo que ya
   estaba antes de sumarlo queda en su `phpstan-baseline.neon`, y marca sólo lo nuevo. Al arreglar
   algo de la lista, se regenera con `composer analisis -- --generate-baseline`.
-- **Las pruebas** del núcleo, cuentas, programación y funciones contra un MySQL 8.4, con el front al lado: el
+- **Las pruebas** del núcleo, cuentas, programación, funciones y recaudación contra un MySQL 8.4, con el front al lado: el
   de la rama del mismo nombre si existe en el front, y si no el de la base del PR (`dev` o `main`). Un cambio que toca los
   dos repositorios va en ramas que se llaman igual, y sus dos PR pasan sin esperar al otro.
 - **`composer audit`** sobre el `composer.lock` de cada subsistema y del núcleo.

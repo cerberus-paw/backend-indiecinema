@@ -83,6 +83,7 @@ final class Reservas extends Controlador
         $calificadas = $this->calificaciones->deLasReservas($espectador, $reservas);
 
         return $this->vista('mis_reservas.html.twig', [
+            'resumen_conducta' => $this->conducta?->actividadYConducta($espectador->id),
             'reservas' => array_map(static function (Reserva $reserva) use ($funciones, $sinProgramacion, $calificadas): array {
                 $funcion = $funciones[$reserva->funcionId] ?? null;
 

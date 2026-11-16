@@ -137,6 +137,7 @@ final class LugaresLibresTest extends TestCase
             'X-Nginx-Secreto' => 'secreto-de-nginx',
             'X-Usuario-Id' => 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
             'X-Rol' => 'espectador',
+            'X-Correo-Verificado' => '1',
         ])->cuerpo();
     }
 
@@ -445,6 +446,7 @@ final class LugaresLibresTest extends TestCase
             'X-Nginx-Secreto' => 'secreto-de-nginx',
             'X-Usuario-Id' => $usuario,
             'X-Rol' => 'espectador',
+            'X-Correo-Verificado' => '1',
         ];
         $conAviso = $this->pedir("/cartelera/{$conLugar['id']}", null, $cabeceras)->cuerpo();
         self::assertStringContainsString('Por tu historial de conducta podés tener hasta 2 reservas a la vez.', $conAviso);

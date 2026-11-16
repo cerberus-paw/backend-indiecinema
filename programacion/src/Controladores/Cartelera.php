@@ -364,6 +364,14 @@ final class Cartelera extends Controlador
         if ($usuario === null) {
             throw ExcepcionHttp::prohibida();
         }
+        if (!$usuario->correoVerificado) {
+            $mensaje = 'Verificá tu correo para votar.';
+            if ($peticion->aceptaJson() || $peticion->cabecera('Content-Type') === 'application/json') {
+                return $this->json(['error' => $mensaje], 403);
+            }
+
+            throw new ExcepcionHttp(403, $mensaje);
+        }
 
         $cuerpo = $peticion->cuerpo();
         $franjaId = (string) ($cuerpo['franja_id'] ?? '');

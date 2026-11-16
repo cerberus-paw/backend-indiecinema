@@ -89,7 +89,7 @@ final class PanelDeReservasTest extends TestCase
      */
     private function pedir(string $metodo, string $ruta, ?string $usuario = self::ORGANIZADORA, string $rol = 'organizador', array $cuerpo = [], array $extra = []): Respuesta
     {
-        $cabeceras = $usuario === null ? [] : ['X-Nginx-Secreto' => self::SECRETO, 'X-Usuario-Id' => $usuario, 'X-Rol' => $rol];
+        $cabeceras = $usuario === null ? [] : ['X-Nginx-Secreto' => self::SECRETO, 'X-Usuario-Id' => $usuario, 'X-Rol' => $rol, 'X-Correo-Verificado' => '1'];
         $cabeceras = [...$cabeceras, ...$extra];
         $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion, new Log('funciones', fopen('php://memory', 'w')));
         parse_str((string) parse_url($ruta, PHP_URL_QUERY), $consulta);

@@ -93,9 +93,20 @@ final class ReservasTest extends TestCase
      * @param array<string, string> $cuerpo
      * @param ?string               $acepta el Accept del pedido; null, el de un navegador
      */
-    private function pedir(string $metodo, string $ruta, ?string $usuario = self::EVA, array $cuerpo = [], ?string $acepta = null): Respuesta
-    {
-        $cabeceras = $usuario === null ? [] : ['X-Nginx-Secreto' => self::SECRETO, 'X-Usuario-Id' => $usuario, 'X-Rol' => 'espectador'];
+    private function pedir(
+        string $metodo,
+        string $ruta,
+        ?string $usuario = self::EVA,
+        array $cuerpo = [],
+        ?string $acepta = null,
+        bool $correoVerificado = true,
+    ): Respuesta {
+        $cabeceras = $usuario === null ? [] : [
+            'X-Nginx-Secreto' => self::SECRETO,
+            'X-Usuario-Id' => $usuario,
+            'X-Rol' => 'espectador',
+            'X-Correo-Verificado' => $correoVerificado ? '1' : '0',
+        ];
         if ($acepta !== null) {
             $cabeceras['Accept'] = $acepta;
         }
@@ -961,5 +972,24 @@ final class ReservasTest extends TestCase
         self::assertMatchesRegularExpression('#<dt>Asistencias</dt>\s*<dd class="panel-dato-valor">3</dd>#', $cuerpo);
         self::assertMatchesRegularExpression('#<dt>Ausencias</dt>\s*<dd class="panel-dato-valor">4</dd>#', $cuerpo);
         self::assertMatchesRegularExpression('#<dt>Calificaciones</dt>\s*<dd class="panel-dato-valor">3</dd>\s*<dd class="panel-dato-nota">1 pos · 2 neg \(2 vig\.\) · 1 función calificada</dd>#', $cuerpo);
+    }
+
+    public function testSinCorreoVerificadoNoPuedeReservarPorPaginaNiPorJson(): void
+    {
+        $sinVerificar = Uuid::nuevo();
+
+        $pantalla = $this->pedir('GET', '/reservar/' . self::PROXIMA, $sinVerificar, correoVerificado: false);
+        self::assertSame(200, $pantalla->estado());
+        self::assertStringContainsString('Verificá tu correo para reservar.', $pantalla->cuerpo());
+        self::assertStringNotContainsString('name="cantidad"', $pantalla->cuerpo());
+
+        $html = $this->pedir('POST', '/reservar/' . self::PROXIMA, $sinVerificar, ['_csrf' => self::CSRF, 'cantidad' => '1'], correoVerificado: false);
+        self::assertSame(403, $html->estado());
+        self::assertStringContainsString('Verificá tu correo para reservar.', $html->cuerpo());
+
+        $json = $this->pedir('POST', '/reservar/' . self::PROXIMA, $sinVerificar, ['_csrf' => self::CSRF, 'cantidad' => '1'], self::ACEPTA_JSON, correoVerificado: false);
+        self::assertSame(403, $json->estado());
+        self::assertSame('Verificá tu correo para reservar.', self::json($json)['error'] ?? null);
+        self::assertSame(0, $this->reservas());
     }
 }

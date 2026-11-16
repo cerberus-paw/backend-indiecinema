@@ -144,7 +144,7 @@ final class ParametrosDeRepartoTest extends TestCase
     {
         $respuesta = $this->pedir('POST', self::RUTA, cuerpo: self::formulario());
 
-        self::assertSame(302, $respuesta->estado(), $respuesta->cuerpo());
+        self::assertSame(303, $respuesta->estado(), $respuesta->cuerpo());
         self::assertSame('/recaudacion/administracion/reparto?guardado=1', $respuesta->cabecera('Location'));
         // Lo que ya pasó, y lo de hoy, siguen con el 70/15/15 de la migración…
         self::assertSame([7000, 1500, 1500], $this->repartoDe('-1 month'));

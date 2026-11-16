@@ -444,4 +444,47 @@ final class AvisosDePagoTest extends TestCase
 
         self::assertSame(404, $this->avisar()->estado());
     }
+
+    public function testUnAvisoConTsDeMasDeCincoMinutosSeRechazaAunqueTengaFirmaValida(): void
+    {
+        $reserva = $this->pendiente();
+        self::pagoEnMercadoPago(self::PAGO, $reserva['id'], $reserva['total']);
+
+        $respuesta = $this->avisar(cabeceras: self::cabecerasFirmadas(self::PAGO, self::CLAVE_WEBHOOK, time() - 301));
+
+        self::assertSame(401, $respuesta->estado());
+        self::assertSame('pendiente_pago', $this->reserva()['estado']);
+        self::assertSame([], self::pedidosAMercadoPago());
+        self::assertSame([], self::$correo->correos());
+    }
+
+    public function testLaFirmaDeOtroXRequestIdNoSirve(): void
+    {
+        $reserva = $this->pendiente();
+        self::pagoEnMercadoPago(self::PAGO, $reserva['id'], $reserva['total']);
+        $cabeceras = self::cabecerasFirmadas(self::PAGO);
+        $cabeceras['x-request-id'] = 'otro-request-id';
+
+        self::assertSame(401, $this->avisar(cabeceras: $cabeceras)->estado());
+        self::assertSame('pendiente_pago', $this->reserva()['estado']);
+        self::assertSame([], self::pedidosAMercadoPago());
+    }
+
+    public function testUnAvisoFueraDeOrdenDePagoYaConfirmadoYLuegoCanceladoOReembolsadoNoRevierte(): void
+    {
+        $reserva = $this->pendiente();
+        self::pagoEnMercadoPago(self::PAGO, $reserva['id'], $reserva['total']);
+
+        self::assertSame(200, $this->avisar()->estado());
+        self::assertSame('confirmada', $this->reserva()['estado']);
+
+        // Llega fuera de orden un aviso de rechazo/cancelación de otro intento o del mismo pago devuelto.
+        self::pagoEnMercadoPago(self::OTRO_PAGO, $reserva['id'], $reserva['total'], ['status' => 'cancelled']);
+        self::assertSame(200, $this->avisar(self::OTRO_PAGO)->estado());
+
+        self::assertSame('confirmada', $this->reserva()['estado']);
+        self::assertSame(self::PAGO, $this->reserva()['pago_id']);
+        self::assertCount(1, $this->historial($reserva['id']));
+        self::assertCount(1, self::$correo->correos());
+    }
 }

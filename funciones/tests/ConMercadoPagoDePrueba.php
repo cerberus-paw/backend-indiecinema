@@ -147,14 +147,14 @@ trait ConMercadoPagoDePrueba
      *
      * @return array<string, string>
      */
-    private static function cabecerasFirmadas(string $pagoId, string $clave = self::CLAVE_WEBHOOK): array
+    private static function cabecerasFirmadas(string $pagoId, string $clave = self::CLAVE_WEBHOOK, ?int $ts = null): array
     {
         $pedido = bin2hex(random_bytes(8));
-        $ts = (string) time();
+        $marca = (string) ($ts ?? time());
 
         return [
             'x-request-id' => $pedido,
-            'x-signature' => "ts={$ts},v1=" . hash_hmac('sha256', "id:{$pagoId};request-id:{$pedido};ts:{$ts};", $clave),
+            'x-signature' => "ts={$marca},v1=" . hash_hmac('sha256', "id:{$pagoId};request-id:{$pedido};ts:{$marca};", $clave),
             'Content-Type' => 'application/json',
         ];
     }

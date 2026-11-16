@@ -19,6 +19,8 @@ final class ServicioDeConducta
     private readonly int $descuentoNegativa;
     private readonly int $descuentoAusencia;
     private readonly int $mesesVigencia;
+    private readonly int $umbral;
+    private readonly int $topeBajoUmbral;
 
     public function __construct(
         private readonly RepositorioDeConducta $conductas,
@@ -28,6 +30,9 @@ final class ServicioDeConducta
         $this->descuentoNegativa = self::entero($configuracion, 'conducta.descuento_negativa', Conducta::DESCUENTO_NEGATIVA);
         $this->descuentoAusencia = self::entero($configuracion, 'conducta.descuento_ausencia', Conducta::DESCUENTO_AUSENCIA);
         $this->mesesVigencia = self::entero($configuracion, 'conducta.meses_vigencia', Conducta::MESES_VIGENCIA_NEGATIVA);
+        $this->umbral = self::entero($configuracion, 'conducta.umbral', Conducta::UMBRAL);
+        $tope = self::entero($configuracion, 'conducta.tope_bajo_umbral', Conducta::TOPE_BAJO_UMBRAL);
+        $this->topeBajoUmbral = $tope >= 1 ? $tope : Conducta::TOPE_BAJO_UMBRAL;
     }
 
     public function puntaje(string $usuarioId, DateTimeImmutable $ahora = new DateTimeImmutable()): int
@@ -38,6 +43,25 @@ final class ServicioDeConducta
         $puntaje = $this->puntajeInicial - ($negativas * $this->descuentoNegativa) - ($ausencias * $this->descuentoAusencia);
 
         return max(0, $puntaje);
+    }
+
+    public function umbral(): int
+    {
+        return $this->umbral;
+    }
+
+    public function bajoElUmbral(string $usuarioId, DateTimeImmutable $ahora = new DateTimeImmutable()): bool
+    {
+        return $this->puntaje($usuarioId, $ahora) <= $this->umbral;
+    }
+
+    /**
+     * Tope de reservas simultáneas para el usuario si está en el umbral o por debajo (EF-13.2);
+     * null cuando su historial no tiene restricciones.
+     */
+    public function topeSimultaneoPara(string $usuarioId, DateTimeImmutable $ahora = new DateTimeImmutable()): ?int
+    {
+        return $this->bajoElUmbral($usuarioId, $ahora) ? $this->topeBajoUmbral : null;
     }
 
     private static function entero(Configuracion $configuracion, string $clave, int $porDefecto): int

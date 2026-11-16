@@ -874,4 +874,49 @@ final class ReservasTest extends TestCase
         self::assertSame(303, $enOtra->estado());
         self::assertSame(1, $this->reservas());
     }
+
+    public function testBajoElUmbralDeConductaLimitaADosReservasYMuestraAviso(): void
+    {
+        $reciente = gmdate('Y-m-d H:i:s', strtotime('-5 days'));
+        $funcionPasada = '13131313-1313-4313-8313-131313131313';
+        for ($i = 0; $i < 2; ++$i) {
+            $id = Uuid::nuevo();
+            $this->base->ejecutar(
+                "INSERT INTO reserva (id, funcion_id, usuario_id, codigo, cantidad, total, estado, creada_en) VALUES (?, ?, ?, ?, 1, '0.00', 'asistio', ?)",
+                [$id, $funcionPasada, self::EVA, strtoupper(substr(bin2hex(random_bytes(4)), 0, 8)), $reciente],
+            );
+            $this->base->ejecutar(
+                'INSERT INTO conducta (reserva_id, usuario_id, organizador_id, positiva, motivo, creada_en) VALUES (?, ?, ?, 0, ?, ?)',
+                [$id, self::EVA, Uuid::nuevo(), 'Llegó tarde', $reciente],
+            );
+        }
+        for ($i = 0; $i < 4; ++$i) {
+            $this->hecha($funcionPasada, $reciente, 'ausente');
+        }
+
+        // Con 0 reservas activas todavía puede reservar, pero ya ve la advertencia.
+        $pantallaInicial = $this->pedir('GET', '/reservar/' . self::PROXIMA);
+        self::assertSame(200, $pantallaInicial->estado());
+        self::assertStringContainsString('Por tu historial de conducta podés tener hasta 2 reservas a la vez.', $pantallaInicial->cuerpo());
+        self::assertStringContainsString('name="cantidad"', $pantallaInicial->cuerpo());
+
+        self::assertSame(303, $this->reservar('1', self::PROXIMA)->estado());
+        self::assertSame(303, $this->reservar('1', '78787878-7878-4878-8878-787878787878')->estado());
+
+        // Con 2 reservas activas la pantalla deshabilita el formulario y el servidor rechaza la tercera.
+        $pantallaBloqueada = $this->pedir('GET', '/reservar/' . self::PROXIMA);
+        self::assertSame(200, $pantallaBloqueada->estado());
+        self::assertStringContainsString('Por tu historial de conducta podés tener hasta 2 reservas a la vez.', $pantallaBloqueada->cuerpo());
+        self::assertStringNotContainsString('name="cantidad"', $pantallaBloqueada->cuerpo());
+
+        $terceraHtml = $this->reservar('1', self::PROXIMA);
+        self::assertSame(422, $terceraHtml->estado());
+        self::assertStringContainsString('Por tu historial de conducta podés tener hasta 2 reservas a la vez.', $terceraHtml->cuerpo());
+
+        $terceraJson = $this->reservarEnJson('1', self::PROXIMA);
+        $json = self::json($terceraJson);
+        self::assertSame(422, $terceraJson->estado());
+        self::assertSame('Por tu historial de conducta podés tener hasta 2 reservas a la vez.', $json['error']);
+        self::assertTrue($json['limite_conducta_alcanzado'] ?? false);
+    }
 }

@@ -12,8 +12,10 @@ use IndieCinema\Funciones\Modelo\ReglaIncumplida;
 use IndieCinema\Funciones\Modelo\Reserva;
 use IndieCinema\Funciones\Servicios\AvisosDeReservas;
 use IndieCinema\Funciones\Modelo\Calificacion;
+use IndieCinema\Funciones\Modelo\Conducta;
 use IndieCinema\Funciones\Servicios\PagosDeReservas;
 use IndieCinema\Funciones\Servicios\ServicioDeCalificaciones;
+use IndieCinema\Funciones\Servicios\ServicioDeConducta;
 use IndieCinema\Funciones\Servicios\ServicioDeReservas;
 use IndieCinema\Nucleo\Controlador;
 use IndieCinema\Nucleo\Http\ExcepcionHttp;
@@ -43,6 +45,7 @@ final class Reservas extends Controlador
         private readonly PagosDeReservas $pagos,
         private readonly LoggerInterface $log,
         private readonly ServicioDeCalificaciones $calificaciones,
+        private readonly ?ServicioDeConducta $conducta = null,
     ) {
     }
 
@@ -289,7 +292,7 @@ final class Reservas extends Controlador
      * Los lugares que quedan después de reservar, para que la ficha actualice el número sin
      * volver a preguntar (E4-05.1), y lo que le queda al espectador según el tope por persona.
      *
-     * @return array{lugares_libres: int, lugares_restantes_usuario?: int, maximo_reserva?: int, maximo_por_persona?: int}
+     * @return array{lugares_libres: int, lugares_restantes_usuario?: int, maximo_reserva?: int, maximo_por_persona?: int, aviso_conducta?: string, limite_conducta_alcanzado?: bool}
      */
     private function lugaresDe(FuncionDeProgramacion $funcion, ?Usuario $usuario = null): array
     {
@@ -300,6 +303,11 @@ final class Reservas extends Controlador
             $datos['lugares_restantes_usuario'] = $restantes;
             $datos['maximo_reserva'] = min($libres, $restantes);
             $datos['maximo_por_persona'] = ServicioDeReservas::maximoPorPersona($funcion);
+            $topeConducta = $this->conducta?->topeSimultaneoPara($usuario->id);
+            if ($topeConducta !== null) {
+                $datos['aviso_conducta'] = Conducta::mensajeDeTopeBajoUmbral($topeConducta);
+                $datos['limite_conducta_alcanzado'] = $this->servicio->activasDelUsuario($usuario->id) >= $topeConducta;
+            }
         }
 
         return $datos;
@@ -366,9 +374,14 @@ final class Reservas extends Controlador
         $restantesUsuario = $usuario !== null ? $this->servicio->lugaresRestantesPara($funcion, $usuario->id) : $maximoPorPersona;
         $libres = $this->servicio->lugaresLibres($funcion);
         $maximoCampo = min($libres, $restantesUsuario);
+        $topeConducta = $usuario !== null ? $this->conducta?->topeSimultaneoPara($usuario->id) : null;
+        $avisoConducta = $topeConducta !== null ? Conducta::mensajeDeTopeBajoUmbral($topeConducta) : null;
 
         if ($error === null && $motivo === null && $usuario !== null && $restantesUsuario === 0) {
             $motivo = "Ya tenés reservados los {$maximoPorPersona} lugares máximos por persona para esta función.";
+        }
+        if ($error === null && $motivo === null && $usuario !== null && $topeConducta !== null && $avisoConducta !== null && $this->servicio->activasDelUsuario($usuario->id) >= $topeConducta) {
+            $motivo = $avisoConducta;
         }
 
         $datos = [
@@ -377,6 +390,7 @@ final class Reservas extends Controlador
             'con_pago' => $this->pagos->activos() && $funcion->precioBase > 0,
             // Si ya no se puede, la página lo dice en lugar del formulario.
             'motivo' => $motivo,
+            'aviso_conducta' => $error !== $avisoConducta ? $avisoConducta : null,
             'reglas' => [
                 'cantidad' => [
                     'minimo' => 1,

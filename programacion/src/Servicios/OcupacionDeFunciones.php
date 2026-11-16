@@ -70,7 +70,7 @@ final class OcupacionDeFunciones
      * los que ya tiene reservados ese espectador en ella (IC-463). El tope viene de funciones, que
      * es quien lo hace cumplir: programación no tiene su propia copia del número.
      *
-     * @return ?array{ocupados: int, maximo_por_persona: int, del_usuario: int} null si funciones no responde
+     * @return ?array{ocupados: int, maximo_por_persona: int, del_usuario: int, tope_reservas_conducta: ?int, reservas_activas_usuario: int} null si funciones no responde
      */
     public function deUnaParaUsuario(string $funcionId, ?string $usuarioId = null): ?array
     {
@@ -91,11 +91,15 @@ final class OcupacionDeFunciones
                 throw new RuntimeException('funciones no respondió los lugares ocupados a GET /interno/funciones/{id}/ocupacion.');
             }
             $delUsuario = $datos['lugares_del_usuario'] ?? 0;
+            $topeConducta = $datos['tope_reservas_conducta'] ?? null;
+            $activasUsuario = $datos['reservas_activas_usuario'] ?? 0;
 
             return [
                 'ocupados' => $ocupados,
                 'maximo_por_persona' => $maximo,
                 'del_usuario' => is_int($delUsuario) ? $delUsuario : 0,
+                'tope_reservas_conducta' => is_int($topeConducta) && $topeConducta >= 1 ? $topeConducta : null,
+                'reservas_activas_usuario' => is_int($activasUsuario) && $activasUsuario >= 0 ? $activasUsuario : 0,
             ];
         });
     }

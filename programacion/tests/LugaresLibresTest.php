@@ -432,4 +432,28 @@ final class LugaresLibresTest extends TestCase
         self::assertStringContainsString('ficha-funcion-contenido', $respuesta->cuerpo());
         self::assertSame('Accept', $respuesta->cabecera('Vary'));
     }
+
+    public function testLaFichaMuestraElAvisoDeConductaYDeshabilitaAlAlcanzarElTope(): void
+    {
+        [, $conLugar] = $this->ocuparDosFunciones();
+        $usuario = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+        $ocupacion = json_decode((string) file_get_contents(self::$ocupacion), true);
+        $ocupacion["conducta:{$usuario}"] = ['tope' => 2, 'activas' => 1];
+        file_put_contents(self::$ocupacion, json_encode($ocupacion));
+
+        $cabeceras = [
+            'X-Nginx-Secreto' => 'secreto-de-nginx',
+            'X-Usuario-Id' => $usuario,
+            'X-Rol' => 'espectador',
+        ];
+        $conAviso = $this->pedir("/cartelera/{$conLugar['id']}", null, $cabeceras)->cuerpo();
+        self::assertStringContainsString('Por tu historial de conducta podés tener hasta 2 reservas a la vez.', $conAviso);
+        self::assertStringNotContainsString('data-bloqueado-conducta="1"', $conAviso);
+
+        $ocupacion["conducta:{$usuario}"] = ['tope' => 2, 'activas' => 2];
+        file_put_contents(self::$ocupacion, json_encode($ocupacion));
+        $bloqueada = $this->pedir("/cartelera/{$conLugar['id']}", null, $cabeceras)->cuerpo();
+        self::assertStringContainsString('Por tu historial de conducta podés tener hasta 2 reservas a la vez.', $bloqueada);
+        self::assertStringContainsString('data-bloqueado-conducta="1"', $bloqueada);
+    }
 }

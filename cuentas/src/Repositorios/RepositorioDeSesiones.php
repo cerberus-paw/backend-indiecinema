@@ -39,7 +39,7 @@ final class RepositorioDeSesiones
     {
         $fila = $this->base->fila(
             "SELECT sesion.huella, sesion.usuario_id, sesion.creada_en, sesion.usada_en, sesion.vence_en,
-                usuario.nombre, usuario.estado, GROUP_CONCAT(rol.tipo SEPARATOR ',') AS roles
+                usuario.nombre, usuario.estado, usuario.correo_verificado_en, GROUP_CONCAT(rol.tipo SEPARATOR ',') AS roles
              FROM sesion
              JOIN usuario ON usuario.id = sesion.usuario_id
              LEFT JOIN rol ON rol.usuario_id = sesion.usuario_id
@@ -62,6 +62,7 @@ final class RepositorioDeSesiones
             (string) $fila['nombre'],
             EstadoCuenta::from((string) $fila['estado']),
             array_map(Rol::from(...), array_values(array_filter(explode(',', (string) $fila['roles'])))),
+            $fila['correo_verificado_en'] !== null,
         );
     }
 

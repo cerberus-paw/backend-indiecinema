@@ -142,6 +142,14 @@ final class Reservas extends Controlador
         $valor = $peticion->campo('cantidad');
         $valor = is_string($valor) ? trim($valor) : '';
 
+        if (!$usuario->correoVerificado) {
+            $mensaje = 'Verificá tu correo para reservar.';
+
+            return $enJson
+                ? $this->json(['error' => $mensaje, ...$this->lugaresDe($funcion, $usuario)], 403)
+                : $this->pantalla($funcion, ['cantidad' => $valor], error: $mensaje, usuario: $usuario, estado: 403);
+        }
+
         if ($funcion->usuarioBloqueado) {
             $mensaje = FuncionDeProgramacion::MENSAJE_USUARIO_BLOQUEADO;
 
@@ -378,6 +386,9 @@ final class Reservas extends Controlador
         $topeConducta = $usuario !== null ? $this->conducta?->topeSimultaneoPara($usuario->id) : null;
         $avisoConducta = $topeConducta !== null ? Conducta::mensajeDeTopeBajoUmbral($topeConducta) : null;
 
+        if ($error === null && $motivo === null && $usuario !== null && !$usuario->correoVerificado) {
+            $motivo = 'Verificá tu correo para reservar.';
+        }
         if ($error === null && $motivo === null && $usuario !== null && $restantesUsuario === 0) {
             $motivo = "Ya tenés reservados los {$maximoPorPersona} lugares máximos por persona para esta función.";
         }

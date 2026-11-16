@@ -97,7 +97,7 @@ final class AvisosDePagoTest extends TestCase
         // nginx siempre manda su secreto; sin sesión, sin usuario.
         $cabeceras['X-Nginx-Secreto'] = self::SECRETO;
         if ($usuario !== null) {
-            $cabeceras += ['X-Usuario-Id' => $usuario, 'X-Rol' => 'espectador'];
+            $cabeceras += ['X-Usuario-Id' => $usuario, 'X-Rol' => 'espectador', 'X-Correo-Verificado' => '1'];
         }
         $this->log = fopen('php://memory', 'w+');
         $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion, new Log('funciones', $this->log));

@@ -27,6 +27,7 @@ final class Identificacion
      * una cabecera no garantiza UTF-8 y porque así un nombre no puede meter un salto de línea.
      */
     public const CABECERA_NOMBRE = 'X-Usuario-Nombre';
+    public const CABECERA_CORREO_VERIFICADO = 'X-Correo-Verificado';
 
     public function __construct(private readonly string $secreto, private readonly LoggerInterface $log)
     {
@@ -61,7 +62,13 @@ final class Identificacion
         }
 
         $nombre = $peticion->cabecera(self::CABECERA_NOMBRE) ?? '';
+        $correoVerificado = $peticion->cabecera(self::CABECERA_CORREO_VERIFICADO) === '1';
 
-        return new Usuario($id, $rol, $nombre === '' ? null : rawurldecode($nombre));
+        return new Usuario(
+            $id,
+            $rol,
+            $nombre === '' ? null : rawurldecode($nombre),
+            $correoVerificado,
+        );
     }
 }

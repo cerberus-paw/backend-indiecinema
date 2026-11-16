@@ -9,6 +9,7 @@ auth_request /_sesion;
 auth_request_set $sesion_usuario_id $upstream_http_x_usuario_id;
 auth_request_set $sesion_rol $upstream_http_x_rol;
 auth_request_set $sesion_nombre $upstream_http_x_usuario_nombre;
+auth_request_set $sesion_correo_verificado $upstream_http_x_correo_verificado;
 
 # Con el nombre en una variable, se resuelve en cada pedido (ver «resolver»). Apache escucha en
 # el 8080 porque corre sin privilegios (php/Dockerfile).
@@ -23,6 +24,7 @@ proxy_set_header X-Forwarded-Proto $scheme;
 proxy_set_header X-Usuario-Id $sesion_usuario_id;
 proxy_set_header X-Rol $sesion_rol;
 proxy_set_header X-Usuario-Nombre $sesion_nombre;
+proxy_set_header X-Correo-Verificado $sesion_correo_verificado;
 proxy_set_header X-Nginx-Secreto $secreto;
 # Sólo los usa el auth_request: que no lleguen desde el navegador a ningún subsistema.
 proxy_set_header X-Llamador "";

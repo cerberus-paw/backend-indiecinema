@@ -65,6 +65,7 @@ location = /_sesion {
     proxy_set_header X-Usuario-Id "";
     proxy_set_header X-Rol "";
     proxy_set_header X-Usuario-Nombre "";
+    proxy_set_header X-Correo-Verificado "";
     proxy_set_header X-Nginx-Secreto "";
 }
 

@@ -17,7 +17,7 @@ readonly VALIDADOR=ghcr.io/validator/validator@sha256:0af71abb9e40083cc0e8b3fcbe
 # Las pruebas que dibujan cada página, por subsistema.
 readonly -A PRUEBAS=(
 	[programacion]='CalificacionesEnLasFichasTest|InicioTest|CarteleraTest|FichaDeLaFuncionTest|ObrasTest|SalasDelOrganizadorTest|ObrasDelOrganizadorTest|FuncionesDelOrganizadorTest|SolicitudDeSalaTest|AdministracionDeSolicitudesTest|AcercaDeTest'
-	[cuentas]='IngresoTest|RegistroTest|MiCuentaTest|AdministracionDeUsuariosTest|VerificacionDeCorreoTest'
+	[cuentas]='IngresoTest|RegistroTest|MiCuentaTest|AdministracionDeUsuariosTest|VerificacionDeCorreoTest|RecuperacionDeContrasenaTest'
 	[funciones]='ReservasTest|PanelDeReservasTest|CalificacionesTest'
 	[moderacion]='ArranqueTest'
 	[recaudacion]='ArranqueTest|ReportesTest'

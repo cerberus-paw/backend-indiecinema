@@ -13,6 +13,7 @@ use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Log;
 use IndieCinema\Nucleo\Pruebas\Dobles\Formularios;
 use IndieCinema\Nucleo\Pruebas\Dobles\PaginasParaValidar;
+use IndieCinema\Nucleo\Uuid;
 use IndieCinema\Programacion\Controladores\FormularioDePedido;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
@@ -43,13 +44,13 @@ final class PedidosDeTitulosTest extends TestCase
         $this->base = self::baseConTablasNuevas($this->configuracion());
     }
 
-    private function configuracion(int $umbral = 5): Configuracion
+    private function configuracion(int $umbral = 5, int $porPagina = 12): Configuracion
     {
         return new Configuracion([
             'app' => ['subsistema' => 'programacion', 'entorno' => 'desarrollo'],
             'base' => self::baseDePruebas(),
             'nginx' => ['secreto' => self::SECRETO],
-            'pedidos' => ['umbral' => $umbral],
+            'pedidos' => ['umbral' => $umbral, 'por_pagina' => $porPagina],
         ]);
     }
 
@@ -65,6 +66,7 @@ final class PedidosDeTitulosTest extends TestCase
         bool $conCsrf = true,
         bool $json = false,
         int $umbral = 5,
+        int $porPagina = 12,
     ): Respuesta {
         parse_str((string) parse_url($url, PHP_URL_QUERY), $consulta);
         $cabeceras = $rol === null ? [] : [
@@ -79,7 +81,7 @@ final class PedidosDeTitulosTest extends TestCase
         $campos = $metodo === 'POST' && $conCsrf ? ['_csrf' => self::CSRF, ...$cuerpo] : $cuerpo;
         $aplicacion = new Aplicacion(
             dirname(__DIR__),
-            $this->configuracion($umbral),
+            $this->configuracion($umbral, $porPagina),
             new Log('programacion', $this->salidaDelLog),
         );
 
@@ -265,5 +267,101 @@ final class PedidosDeTitulosTest extends TestCase
 
         self::assertStringContainsString(self::ESPECTADORA, $this->log());
         self::assertStringNotContainsString('Eva Prueba', $this->log());
+    }
+
+    public function testRankingOrdenaPorAdhesionesFiltraPaginaYPasaAActivoConElUmbral(): void
+    {
+        $tercerUsuario = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+
+        // Tres pedidos; «Pizza, birra, faso» recibirá 3 adhesiones y alcanzará el umbral=3.
+        $this->pedir('POST', '/pedidos/nuevo', ['titulo' => 'Mundo grúa', 'anio' => '1999', 'director' => 'Pablo Trapero'], umbral: 3);
+        $mundoGruaId = (string) $this->base->valor("SELECT id FROM pedido_titulo WHERE titulo = 'Mundo grúa'");
+
+        $this->pedir('POST', '/pedidos/nuevo', ['titulo' => 'Pizza, birra, faso', 'anio' => '1998', 'director' => 'Adrián Caetano'], umbral: 3);
+        $pizzaId = (string) $this->base->valor("SELECT id FROM pedido_titulo WHERE titulo = 'Pizza, birra, faso'");
+
+        $this->pedir('POST', '/pedidos/nuevo', ['titulo' => 'Nueve reinas', 'anio' => '2000', 'director' => 'Fabián Bielinsky'], umbral: 3);
+        $nueveReinasId = (string) $this->base->valor("SELECT id FROM pedido_titulo WHERE titulo = 'Nueve reinas'");
+
+        // «Nueve reinas» queda con 2 adhesiones (sigue abierto con umbral=3).
+        $this->pedir('POST', "/pedidos/{$nueveReinasId}/sumarme", ['origen' => 'ranking'], usuario: self::OTRO_ESPECTADOR, umbral: 3);
+        self::assertSame('abierto', (string) $this->base->valor('SELECT estado FROM pedido_titulo WHERE id = ?', [$nueveReinasId]));
+
+        // «Pizza, birra, faso» suma 2da adhesión (sigue abierto) y con la 3ra pasa a «activo» en la misma transacción.
+        $this->pedir('POST', "/pedidos/{$pizzaId}/sumarme", ['origen' => 'ranking'], usuario: self::OTRO_ESPECTADOR, umbral: 3);
+        self::assertSame('abierto', (string) $this->base->valor('SELECT estado FROM pedido_titulo WHERE id = ?', [$pizzaId]));
+        self::assertNull($this->base->valor('SELECT activado_en FROM pedido_titulo WHERE id = ?', [$pizzaId]));
+
+        $tercera = $this->pedir('POST', "/pedidos/{$pizzaId}/sumarme", ['origen' => 'ranking'], usuario: $tercerUsuario, umbral: 3);
+        self::assertSame(303, $tercera->estado());
+        self::assertSame('/pedidos?sumado=1', $tercera->cabecera('Location'));
+        self::assertSame('activo', (string) $this->base->valor('SELECT estado FROM pedido_titulo WHERE id = ?', [$pizzaId]));
+        self::assertNotNull($this->base->valor('SELECT activado_en FROM pedido_titulo WHERE id = ?', [$pizzaId]));
+
+        // Ranking público sin sesión: ordenado 3 -> 2 -> 1 y con la marca «Activo».
+        $rankingJson = $this->pedir('GET', '/pedidos', rol: null, json: true, umbral: 3, porPagina: 2);
+        self::assertSame(200, $rankingJson->estado());
+        self::assertStringContainsString('Accept', (string) $rankingJson->cabecera('Vary'));
+        $datos = json_decode($rankingJson->cuerpo(), true);
+        self::assertSame([$pizzaId, $nueveReinasId], array_column($datos['pedidos'], 'id'));
+        self::assertTrue($datos['pedidos'][0]['es_activo']);
+        self::assertFalse($datos['pedidos'][1]['es_activo']);
+        self::assertSame(2, $datos['paginado']['total_paginas']);
+
+        // Segunda página trae el tercero.
+        $pagina2 = $this->pedir('GET', '/pedidos?pagina=2', rol: null, json: true, umbral: 3, porPagina: 2);
+        self::assertSame(200, $pagina2->estado());
+        $datos2 = json_decode($pagina2->cuerpo(), true);
+        self::assertSame([$mundoGruaId], array_column($datos2['pedidos'], 'id'));
+
+        // Ranking HTML muestra los resultados, el paginado, el buscador y la marca «Activo».
+        $html = $this->pedir('GET', '/pedidos?sumado=1', rol: 'espectador', umbral: 3, porPagina: 2);
+        self::assertSame(200, $html->estado());
+        self::assertSaltaAlContenido($html->cuerpo());
+        self::assertStringContainsString('Te sumaste al pedido.', $html->cuerpo());
+        self::assertStringContainsString('Pizza, birra, faso', $html->cuerpo());
+        self::assertStringContainsString('Activo', $html->cuerpo());
+        self::assertStringContainsString('Dejar de pedirlo', $html->cuerpo());
+        self::assertStringContainsString('?pagina=2', $html->cuerpo());
+
+        // Buscador ?q= filtra por título o director.
+        $busqueda = $this->pedir('GET', '/pedidos?q=Trapero', rol: null, json: true, umbral: 3);
+        $datosBusqueda = json_decode($busqueda->cuerpo(), true);
+        self::assertSame([$mundoGruaId], array_column($datosBusqueda['pedidos'], 'id'));
+
+        // Páginas inválidas o fuera de rango devuelven 404 tanto en HTML como en JSON.
+        self::assertSame(404, $this->pedir('GET', '/pedidos?pagina=0', rol: null)->estado());
+        self::assertSame(404, $this->pedir('GET', '/pedidos?pagina=abc', rol: null, json: true)->estado());
+        self::assertSame(404, $this->pedir('GET', '/pedidos?pagina=9', rol: null, json: true, porPagina: 2)->estado());
+    }
+
+    public function testPedidoTomadoSaleDelRankingYEnlazaALaObraEnElCatalogo(): void
+    {
+        $this->pedir('POST', '/pedidos/nuevo', ['titulo' => 'La ciénaga', 'anio' => '2001', 'director' => 'Lucrecia Martel']);
+        $this->pedir('POST', '/pedidos/nuevo', ['titulo' => 'Zama', 'anio' => '2017', 'director' => 'Lucrecia Martel']);
+        $tomadoId = (string) $this->base->valor("SELECT id FROM pedido_titulo WHERE titulo = 'La ciénaga'");
+        $activoId = (string) $this->base->valor("SELECT id FROM pedido_titulo WHERE titulo = 'Zama'");
+
+        $obraId = Uuid::nuevo();
+        $this->base->ejecutar(
+            "INSERT INTO obra (id, dueno_id, titulo, tipo, sinopsis, anio, director, duracion, origen_copia)
+             VALUES (?, ?, 'La ciénaga', 'pelicula', 'Sinopsis de prueba.', 2001, 'Lucrecia Martel', 103, 'licencia_adquirida')",
+            [$obraId, self::OTRO_ESPECTADOR],
+        );
+        $this->base->ejecutar(
+            "UPDATE pedido_titulo SET estado = 'tomado', obra_id = ?, tomado_por = ?, tomado_en = UTC_TIMESTAMP() WHERE id = ?",
+            [$obraId, self::OTRO_ESPECTADOR, $tomadoId],
+        );
+
+        $json = $this->pedir('GET', '/pedidos', rol: null, json: true);
+        $datos = json_decode($json->cuerpo(), true);
+        self::assertSame([$activoId], array_column($datos['pedidos'], 'id'));
+        self::assertSame([$tomadoId], array_column($datos['tomados'], 'id'));
+        self::assertSame("/obras/{$obraId}", $datos['tomados'][0]['url_obra']);
+
+        $html = $this->pedir('GET', '/pedidos', rol: null);
+        self::assertSame(200, $html->estado());
+        self::assertStringContainsString("href=\"/obras/{$obraId}\"", $html->cuerpo());
+        self::assertStringContainsString('Títulos pedidos que ya están en el catálogo', $html->cuerpo());
     }
 }

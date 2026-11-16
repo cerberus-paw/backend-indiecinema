@@ -119,6 +119,8 @@ final class OrdenDeEncabezadosTest extends TestCase
         yield 'solicitar sala con errores' => ['/solicitar-sala', 'espectador', 'POST', [], 422];
         yield 'pedir un título' => ['/pedidos/nuevo', 'espectador', 'GET', [], 200];
         yield 'pedir un título con errores' => ['/pedidos/nuevo', 'espectador', 'POST', [], 422];
+        yield 'pedidos de títulos' => ['/pedidos', null, 'GET', [], 200];
+        yield 'pedidos de títulos sin resultados' => ['/pedidos?q=zzzz', null, 'GET', [], 200];
         yield 'mis salas' => ['/organizador/salas', 'organizador', 'GET', [], 200];
         yield 'editar una sala' => ['/organizador/salas/' . self::SALA . '/editar', 'organizador', 'GET', [], 200];
         yield 'editar una sala con errores' => ['/organizador/salas/' . self::SALA . '/editar', 'organizador', 'POST', [], 422];

@@ -49,7 +49,8 @@ return static function (Router $router): void {
     $router->get('/solicitar-sala', [SolicitudDeSala::class, 'mostrar'], Rol::Espectador);
     $router->post('/solicitar-sala', [SolicitudDeSala::class, 'enviar'], Rol::Espectador);
 
-    // Pedidos de títulos ausentes en el catálogo y adhesiones de espectadores (EF-11.1 / IC-576).
+    // Pedidos de títulos ausentes en el catálogo y adhesiones de espectadores (EF-11.1 / IC-576, EF-11.2 / IC-577).
+    $router->get('/pedidos', [Pedidos::class, 'listar']);
     $router->get('/pedidos/nuevo', [Pedidos::class, 'nuevo'], Rol::Espectador);
     $router->post('/pedidos/nuevo', [Pedidos::class, 'crear'], Rol::Espectador);
     $router->post('/pedidos/{id}/sumarme', [Pedidos::class, 'sumarme'], Rol::Espectador);

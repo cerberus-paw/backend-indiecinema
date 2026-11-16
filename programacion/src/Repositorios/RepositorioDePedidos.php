@@ -164,6 +164,69 @@ final class RepositorioDePedidos
     }
 
     /**
+     * Ranking de pedidos abiertos o activos ordenados por cantidad de adhesiones (EF-11.2).
+     * Los pedidos ya tomados salen del ranking principal.
+     *
+     * @return array{pedidos: list<PedidoDeTitulo>, total: int}
+     */
+    public function ranking(?string $texto, int $pagina, int $porPagina, ?string $usuarioId = null): array
+    {
+        $condiciones = ["p.estado IN ('abierto', 'activo')"];
+        $parametrosFiltro = [];
+
+        if ($texto !== null && trim($texto) !== '') {
+            $patron = Like::contiene(trim($texto));
+            $condiciones[] = "(p.titulo LIKE ? ESCAPE '!' OR p.director LIKE ? ESCAPE '!')";
+            $parametrosFiltro[] = $patron;
+            $parametrosFiltro[] = $patron;
+        }
+
+        $where = implode(' AND ', $condiciones);
+        $total = (int) $this->base->valor(
+            "SELECT COUNT(*) FROM pedido_titulo p WHERE {$where}",
+            $parametrosFiltro,
+        );
+        if ($total === 0) {
+            return ['pedidos' => [], 'total' => 0];
+        }
+
+        $offset = max(0, ($pagina - 1) * $porPagina);
+        [$selectAdherido, $parametrosAdherido] = self::expresionAdherido($usuarioId);
+        $filas = $this->base->filas(
+            'SELECT ' . self::COLUMNAS . ", {$selectAdherido}
+             FROM pedido_titulo p
+             LEFT JOIN obra o ON o.id = p.obra_id
+             WHERE {$where}
+             ORDER BY adhesiones DESC, p.creado_en ASC, p.id ASC
+             LIMIT ? OFFSET ?",
+            [...$parametrosAdherido, ...$parametrosFiltro, $porPagina, $offset],
+        );
+
+        return ['pedidos' => array_map(self::pedido(...), $filas), 'total' => $total];
+    }
+
+    /**
+     * Últimos pedidos ya tomados por una sala cuya obra sigue activa en el catálogo (EF-11).
+     *
+     * @return list<PedidoDeTitulo>
+     */
+    public function tomadosRecientes(int $limite = 6, ?string $usuarioId = null): array
+    {
+        [$selectAdherido, $parametrosAdherido] = self::expresionAdherido($usuarioId);
+        $filas = $this->base->filas(
+            'SELECT ' . self::COLUMNAS . ", {$selectAdherido}
+             FROM pedido_titulo p
+             INNER JOIN obra o ON o.id = p.obra_id
+             WHERE p.estado = 'tomado' AND o.dada_de_baja_en IS NULL
+             ORDER BY p.tomado_en DESC, p.creado_en DESC, p.id ASC
+             LIMIT ?",
+            [...$parametrosAdherido, max(1, $limite)],
+        );
+
+        return array_map(self::pedido(...), $filas);
+    }
+
+    /**
      * @return array{0: string, 1: list<string>}
      */
     private static function expresionAdherido(?string $usuarioId): array

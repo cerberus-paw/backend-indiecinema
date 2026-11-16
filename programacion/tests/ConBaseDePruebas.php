@@ -66,6 +66,8 @@ trait ConBaseDePruebas
         $base = BaseDeDatos::conectar($configuracion);
         // Al revés de como se crean, para que ninguna quede apuntada por una clave foránea.
         $base->ejecutar('SET FOREIGN_KEY_CHECKS = 0');
+        $base->ejecutar('DROP TABLE IF EXISTS adhesion_pedido');
+        $base->ejecutar('DROP TABLE IF EXISTS pedido_titulo');
         $base->ejecutar('DROP TABLE IF EXISTS bloqueo');
         $base->ejecutar('DROP TABLE IF EXISTS voto');
         $base->ejecutar('DROP TABLE IF EXISTS solicitud_sala');

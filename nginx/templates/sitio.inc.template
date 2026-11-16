@@ -93,6 +93,13 @@ location ~ ^/cuenta/registro/?$ {
     rewrite ^/cuenta(/.*)$ $1 break;
     include conf.d/subsistema.inc;
 }
+location ~ ^/cuenta/recuperar(/nueva)?/?$ {
+    limit_req zone=recuperar burst=3 nodelay;
+    set $subsistema cuentas;
+    set $secreto "${NGINX_SECRETO_CUENTAS}";
+    rewrite ^/cuenta(/.*)$ $1 break;
+    include conf.d/subsistema.inc;
+}
 location /cuenta/ {
     set $subsistema cuentas;
     set $secreto "${NGINX_SECRETO_CUENTAS}";

@@ -5,6 +5,7 @@ declare(strict_types=1);
 use IndieCinema\Cuentas\Controladores\AdministracionDeUsuarios;
 use IndieCinema\Cuentas\Controladores\Ingreso;
 use IndieCinema\Cuentas\Controladores\Inicio;
+use IndieCinema\Cuentas\Controladores\RecuperacionDeContrasena;
 use IndieCinema\Cuentas\Controladores\Registro;
 use IndieCinema\Cuentas\Controladores\SesionInterna;
 use IndieCinema\Cuentas\Controladores\UsuariosInternos;
@@ -27,6 +28,10 @@ return static function (Router $router): void {
     $router->get('/verificar', [VerificacionDeCorreo::class, 'verificar']);
     $router->get('/ingresar', [Ingreso::class, 'mostrar']);
     $router->post('/ingresar', [Ingreso::class, 'ingresar']);
+    $router->get('/recuperar', [RecuperacionDeContrasena::class, 'mostrarSolicitud']);
+    $router->post('/recuperar', [RecuperacionDeContrasena::class, 'solicitar']);
+    $router->get('/recuperar/nueva', [RecuperacionDeContrasena::class, 'mostrarNueva']);
+    $router->post('/recuperar/nueva', [RecuperacionDeContrasena::class, 'restablecer']);
     // Sin rol mínimo: trabaja con la cookie, y sin sesión válida igual la borra.
     $router->post('/salir', [Ingreso::class, 'salir']);
 

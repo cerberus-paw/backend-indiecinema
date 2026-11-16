@@ -50,6 +50,25 @@ final class ServicioDeTokens
     }
 
     /**
+     * Valida que el token exista, corresponda a $proposito y no esté usado ni vencido, sin consumirlo.
+     *
+     * @throws TokenInvalido
+     */
+    public function verificarDisponible(
+        string $valor,
+        PropositoDeToken $proposito,
+        ?DateTimeImmutable $ahora = null,
+    ): TokenDeCuenta {
+        $huella = TokenDeCuenta::huellaDe($valor);
+        if ($huella === null) {
+            throw TokenInvalido::inexistente();
+        }
+        $token = $this->tokens->buscar($huella);
+
+        return self::asegurarValido($token, $proposito, self::instante($ahora));
+    }
+
+    /**
      * Valida y marca como usado un token del propósito pedido; devuelve el id de la cuenta.
      *
      * @throws TokenInvalido
@@ -66,22 +85,31 @@ final class ServicioDeTokens
         $instante = self::instante($ahora);
 
         return $this->tokens->enTransaccion(function () use ($huella, $proposito, $instante): string {
-            $token = $this->tokens->buscar($huella, bloquear: true);
-            if ($token === null || $token->proposito !== $proposito) {
-                throw TokenInvalido::inexistente();
-            }
-            if ($token->estaUsado()) {
-                throw TokenInvalido::yaUsado();
-            }
-            if ($token->estaVencido($instante)) {
-                throw TokenInvalido::vencido();
-            }
+            $token = self::asegurarValido($this->tokens->buscar($huella, bloquear: true), $proposito, $instante);
             if (!$this->tokens->marcarUsado($huella, $instante)) {
                 throw TokenInvalido::yaUsado();
             }
 
             return $token->usuarioId;
         });
+    }
+
+    private static function asegurarValido(
+        ?TokenDeCuenta $token,
+        PropositoDeToken $proposito,
+        DateTimeImmutable $ahora,
+    ): TokenDeCuenta {
+        if ($token === null || $token->proposito !== $proposito) {
+            throw TokenInvalido::inexistente();
+        }
+        if ($token->estaUsado()) {
+            throw TokenInvalido::yaUsado();
+        }
+        if ($token->estaVencido($ahora)) {
+            throw TokenInvalido::vencido();
+        }
+
+        return $token;
     }
 
     /**
@@ -100,6 +128,18 @@ final class ServicioDeTokens
 
             return $usuarioId;
         });
+    }
+
+    /**
+     * @template T
+     *
+     * @param callable(): T $trabajo
+     *
+     * @return T
+     */
+    public function enTransaccion(callable $trabajo): mixed
+    {
+        return $this->tokens->enTransaccion($trabajo);
     }
 
     private static function instante(?DateTimeImmutable $ahora): DateTimeImmutable

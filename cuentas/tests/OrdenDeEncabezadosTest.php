@@ -54,6 +54,9 @@ final class OrdenDeEncabezadosTest extends TestCase
     {
         yield 'ingresar' => ['/ingresar', null, 'GET', [], 200];
         yield 'ingresar con errores' => ['/ingresar', null, 'POST', ['email' => 'nadie@indiecinema.test', 'password' => 'otra'], 422];
+        yield 'recuperar' => ['/recuperar', null, 'GET', [], 200];
+        yield 'recuperar con errores' => ['/recuperar', null, 'POST', [], 422];
+        yield 'recuperar nueva sin token' => ['/recuperar/nueva', null, 'GET', [], 400];
         yield 'registro' => ['/registro', null, 'GET', [], 200];
         yield 'registro con errores' => ['/registro', null, 'POST', [], 422];
         yield 'verificar correo' => ['/verificar', null, 'GET', [], 400];

@@ -24,6 +24,7 @@ map $request_method $ip_si_es_post {
 }
 limit_req_zone $ip_si_es_post zone=ingresar:10m rate=5r/m;
 limit_req_zone $ip_si_es_post zone=registro:10m rate=5r/m;
+limit_req_zone $ip_si_es_post zone=recuperar:10m rate=5r/m;
 # La solicitud de sala le manda un correo al equipo: pasan menos, para que no sirva para
 # llenarle el buzón.
 limit_req_zone $ip_si_es_post zone=solicitud:10m rate=2r/m;

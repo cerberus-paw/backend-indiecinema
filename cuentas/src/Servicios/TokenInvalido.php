@@ -29,6 +29,6 @@ final class TokenInvalido extends DomainException
 
     public static function vencido(): self
     {
-        return new self('El enlace venció. Podés pedir otro desde «Mi cuenta».', 410);
+        return new self('El enlace ya venció.', 410);
     }
 }

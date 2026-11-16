@@ -75,6 +75,22 @@ final class RepositorioDeSesiones
         $this->base->ejecutar('DELETE FROM sesion WHERE huella = ?', [$huella]);
     }
 
+    /**
+     * Cierra todas las sesiones de la cuenta, opcionalmente dejando abierta la actual.
+     */
+    public function borrarDeUsuario(string $usuarioId, ?string $exceptoHuella = null): void
+    {
+        if ($exceptoHuella === null) {
+            $this->base->ejecutar('DELETE FROM sesion WHERE usuario_id = ?', [$usuarioId]);
+
+            return;
+        }
+        $this->base->ejecutar(
+            'DELETE FROM sesion WHERE usuario_id = ? AND huella <> ?',
+            [$usuarioId, $exceptoHuella],
+        );
+    }
+
     private static function fecha(mixed $valor): DateTimeImmutable
     {
         return new DateTimeImmutable((string) $valor, new DateTimeZone('UTC'));

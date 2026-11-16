@@ -274,6 +274,14 @@ final class RepositorioDeUsuarios
         ));
     }
 
+    public function cambiarContrasena(string $usuarioId, string $contrasenaHash): void
+    {
+        $this->cerrandoSesiones($usuarioId, fn (BaseDeDatos $base) => $base->ejecutar(
+            'UPDATE usuario SET contrasena_hash = ? WHERE id = ?',
+            [$contrasenaHash, $usuarioId],
+        ));
+    }
+
     /**
      * El patrón de «contiene» para un texto del administrador, tal cual: sin esto, un «%» o un «_»
      * serían comodines. Es el mismo escape que usa programación (Like): «!» y no la barra, que

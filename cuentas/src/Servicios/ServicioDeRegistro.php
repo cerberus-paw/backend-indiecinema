@@ -8,11 +8,6 @@ use IndieCinema\Cuentas\Modelo\DatosDeRegistro;
 use IndieCinema\Cuentas\Modelo\PropositoDeToken;
 use IndieCinema\Cuentas\Modelo\Usuario;
 use IndieCinema\Cuentas\Repositorios\RepositorioDeUsuarios;
-use IndieCinema\Nucleo\Configuracion;
-use IndieCinema\Nucleo\Correo\ClienteSmtp;
-use IndieCinema\Nucleo\Correo\Correo;
-use Psr\Log\LoggerInterface;
-use Throwable;
 
 /**
  * El alta de una cuenta. La contraseña se guarda sólo como hash Argon2id (E2, seguridad), con los
@@ -29,9 +24,7 @@ final class ServicioDeRegistro
     public function __construct(
         private readonly RepositorioDeUsuarios $usuarios,
         private readonly ServicioDeTokens $tokens,
-        private readonly Configuracion $configuracion,
-        private readonly LoggerInterface $log,
-        private readonly ?ClienteSmtp $correo = null,
+        private readonly CorreoDeCuenta $correos,
     ) {
     }
 
@@ -44,38 +37,22 @@ final class ServicioDeRegistro
         $this->usuarios->agregar($usuario);
 
         $token = $this->tokens->emitir($usuario->id, PropositoDeToken::Verificar, self::DURACION_VERIFICACION);
-        $this->enviarVerificacion($usuario, $token);
+        $this->correos->enviarEnlace(
+            $usuario,
+            '/verificar',
+            $token,
+            'Verificá tu correo en IndieCinema',
+            implode("\n", [
+                "Hola {$usuario->nombre}:",
+                '',
+                'Creaste tu cuenta en IndieCinema. Confirmá tu correo abriendo este enlace (vence en 24 horas):',
+                CorreoDeCuenta::MARCADOR_ENLACE,
+                '',
+                'Si no creaste esta cuenta, podés ignorar este mensaje.',
+            ]),
+            'verificar el correo',
+        );
 
         return $usuario;
-    }
-
-    private function enviarVerificacion(Usuario $usuario, string $token): void
-    {
-        if ($this->correo === null) {
-            return;
-        }
-
-        $baseUrl = rtrim((string) $this->configuracion->obtener('sitio.url', ''), '/');
-        $prefijo = trim((string) $this->configuracion->obtener('app.prefijo', '/cuenta'), '/');
-        $ruta = ($prefijo === '' ? '' : "/{$prefijo}") . '/verificar?token=' . urlencode($token);
-        $enlace = $baseUrl . $ruta;
-
-        $cuerpo = implode("\n", [
-            "Hola {$usuario->nombre}:",
-            '',
-            'Creaste tu cuenta en IndieCinema. Confirmá tu correo abriendo este enlace (vence en 24 horas):',
-            $enlace,
-            '',
-            'Si no creaste esta cuenta, podés ignorar este mensaje.',
-        ]);
-
-        try {
-            $this->correo->enviar(new Correo($usuario->correo, 'Verificá tu correo en IndieCinema', $cuerpo));
-        } catch (Throwable $error) {
-            $this->log->warning(
-                'La cuenta {usuario} se creó, pero no se pudo enviar el correo de verificación: {motivo}',
-                ['usuario' => $usuario->id, 'motivo' => $error->getMessage()],
-            );
-        }
     }
 }

@@ -254,7 +254,7 @@ final class VerificacionDeCorreoTest extends TestCase
 
         $log = $this->log();
         self::assertStringContainsString($usuarioId, $log);
-        self::assertStringContainsString('no se pudo enviar el correo de verificación', $log);
+        self::assertStringContainsString('No se pudo enviar el correo para verificar el correo', $log);
         self::assertStringNotContainsString('Mariana@Ejemplo.com', $log);
     }
 

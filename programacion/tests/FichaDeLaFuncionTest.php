@@ -196,6 +196,8 @@ final class FichaDeLaFuncionTest extends TestCase
 
         self::assertSame(0, $ficha->query('//main//form[@data-formulario-reserva]')->length);
         self::assertSame(1, $ficha->query("//main//aside//p[normalize-space() = 'Verificá tu correo para reservar.']")->length);
+        self::assertSame(1, $ficha->query("//main//aside//strong[normalize-space() = 'Todavía no verificaste tu correo']")->length);
+        self::assertSame(1, $ficha->query("//main//aside//form[@action = '/cuenta/verificar/reenviar']//button[contains(normalize-space(), 'Mandarme el enlace otra vez')]")->length);
     }
 
     /**

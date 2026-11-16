@@ -1908,8 +1908,13 @@ final class CarteleraTest extends TestCase
 
         $fichaVotacion = $this->pedir("/cartelera/{$votacionId}", cabeceras: $sinVerificar);
         self::assertSame(200, $fichaVotacion->estado());
+        self::assertStringContainsString('Todavía no verificaste tu correo', $fichaVotacion->cuerpo());
         self::assertStringContainsString('Verificá tu correo para votar.', $fichaVotacion->cuerpo());
+        self::assertStringContainsString('Mandarme el enlace otra vez', $fichaVotacion->cuerpo());
         self::assertStringNotContainsString('data-formulario-voto', $fichaVotacion->cuerpo());
+
+        $fichaConReenvio = $this->pedir("/cartelera/{$votacionId}?reenviado=1", cabeceras: $sinVerificar);
+        self::assertStringContainsString('Te mandamos un enlace nuevo a tu correo.', $fichaConReenvio->cuerpo());
 
         $votoHtml = $this->post("/cartelera/{$votacionId}/votar", ['obra_id' => $obras[0]['id']], $espectador, correoVerificado: false);
         self::assertSame(403, $votoHtml->estado());

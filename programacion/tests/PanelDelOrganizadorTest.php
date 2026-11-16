@@ -36,6 +36,7 @@ final class PanelDelOrganizadorTest extends TestCase
     private const PUBLICAS = [
         'GET /',
         'GET /acerca-de',
+        'GET /como-funciona',
         'GET /cartelera',
         'GET /cartelera.csv',
         'GET /cartelera/{id}',

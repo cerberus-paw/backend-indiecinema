@@ -850,4 +850,28 @@ final class ReservasTest extends TestCase
             }
         }
     }
+
+    public function testUnUsuarioBloqueadoNoReservaEnEsaSalaPeroSiEnOtra(): void
+    {
+        $bloqueado = '66666666-6666-4666-8666-666666666666';
+        $otraSala = '67676767-6767-4767-8767-676767676767';
+
+        $pagina = $this->pedir('GET', '/reservar/' . self::PROXIMA, $bloqueado);
+        self::assertSame(200, $pagina->estado());
+        self::assertStringContainsString('No podés reservar en esta sala.', $pagina->cuerpo());
+        self::assertStringNotContainsString('name="cantidad"', $pagina->cuerpo());
+
+        $html = $this->reservar('1', self::PROXIMA, $bloqueado);
+        self::assertSame(403, $html->estado());
+        self::assertStringContainsString('No podés reservar en esta sala.', $html->cuerpo());
+
+        $json = $this->reservarEnJson('1', self::PROXIMA, $bloqueado);
+        self::assertSame(403, $json->estado());
+        self::assertSame('No podés reservar en esta sala.', self::json($json)['error']);
+        self::assertSame(0, $this->reservas());
+
+        $enOtra = $this->reservar('1', $otraSala, $bloqueado);
+        self::assertSame(303, $enOtra->estado());
+        self::assertSame(1, $this->reservas());
+    }
 }

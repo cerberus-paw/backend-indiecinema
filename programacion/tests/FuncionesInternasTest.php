@@ -95,11 +95,14 @@ final class FuncionesInternasTest extends TestCase
         return $funcion;
     }
 
-    private function pedir(string $id, string $llamador = 'funciones', string $token = self::TOKEN_DE_FUNCIONES): Respuesta
+    /**
+     * @param array<string, string> $consulta
+     */
+    private function pedir(string $id, string $llamador = 'funciones', string $token = self::TOKEN_DE_FUNCIONES, array $consulta = []): Respuesta
     {
         $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion, new Log('programacion', fopen('php://memory', 'w')));
 
-        return $aplicacion->atender(new Peticion('GET', "/interno/funciones/{$id}", [], [], [
+        return $aplicacion->atender(new Peticion('GET', "/interno/funciones/{$id}", $consulta, [], [
             'X-Llamador' => $llamador,
             'Authorization' => "Bearer {$token}",
         ], [], []));
@@ -385,5 +388,21 @@ final class FuncionesInternasTest extends TestCase
         self::assertSame(400, $this->pedirFinalizadas(['desde' => '2025-01-01', 'hasta' => '2026-11-30'])->estado());
         self::assertSame(400, $this->pedirFinalizadas(['desde' => '2026-11-01', 'hasta' => '2026-11-30', 'organizador' => 'yo'])->estado());
         self::assertSame(403, $this->pedirFinalizadas(['desde' => '2026-11-01', 'hasta' => '2026-11-30'], 'funciones', self::TOKEN_DE_FUNCIONES)->estado());
+    }
+
+    public function testInformaSiElUsuarioEstaBloqueadoEnLaSalaDeLaFuncion(): void
+    {
+        $funcion = $this->funcion();
+        $bloqueado = Uuid::nuevo();
+        $libre = Uuid::nuevo();
+        $this->base->ejecutar(
+            'INSERT INTO bloqueo (sala_id, usuario_id, motivo, bloqueado_por) VALUES (?, ?, ?, ?)',
+            [$this->sala->id, $bloqueado, 'Bloqueo de prueba', self::ORGANIZADORA],
+        );
+
+        self::assertTrue($this->json($this->pedir($funcion->id, consulta: ['usuario' => $bloqueado]))['usuario_bloqueado']);
+        self::assertFalse($this->json($this->pedir($funcion->id, consulta: ['usuario' => $libre]))['usuario_bloqueado']);
+        self::assertArrayNotHasKey('usuario_bloqueado', $this->json($this->pedir($funcion->id)));
+        self::assertSame(400, $this->pedir($funcion->id, consulta: ['usuario' => 'no-es-uuid'])->estado());
     }
 }

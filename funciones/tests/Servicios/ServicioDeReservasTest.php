@@ -299,4 +299,21 @@ final class ServicioDeReservasTest extends TestCase
 
         return $salida;
     }
+
+    public function testUnUsuarioBloqueadoEnLaSalaNoPuedeReservarPeroSiEnOtra(): void
+    {
+        $bloqueado = new Usuario('66666666-6666-4666-8666-666666666666', Rol::Espectador);
+        $ahora = new DateTimeImmutable('2026-10-20 12:00:00');
+
+        try {
+            $this->servicio()->reservar($bloqueado, self::PROGRAMADA, 1, $ahora);
+            self::fail('Tenía que rechazar la reserva de un usuario bloqueado en la sala.');
+        } catch (ReglaIncumplida $error) {
+            self::assertSame('No podés reservar en esta sala.', $error->getMessage());
+        }
+        self::assertSame(0, $this->confirmadas());
+
+        $enOtra = $this->servicio()->reservar($bloqueado, '67676767-6767-4767-8767-676767676767', 2, $ahora);
+        self::assertSame(2, $enOtra->cantidad);
+    }
 }

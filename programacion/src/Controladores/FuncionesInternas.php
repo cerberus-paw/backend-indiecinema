@@ -52,11 +52,25 @@ final class FuncionesInternas extends Controlador
      * El JSON lleva los nombres de las columnas, en castellano como el resto del código. La fecha
      * va en ISO 8601 sin zona: es la hora de la sala, como la guarda programación.
      *
+     * Con ?usuario=<uuid> agrega usuario_bloqueado (EF-12.2): funciones lo pide al mostrar el
+     * formulario o intentar una reserva para controlar bloqueos en la sala.
+     *
      * @throws ExcepcionHttp 404 si no existe
      */
     public function mostrar(Peticion $peticion): Respuesta
     {
-        return $this->json(self::datos($this->servicio->resumen((string) $peticion->parametro('id'))));
+        $usuario = $peticion->consulta('usuario');
+        if ($usuario !== null && (!is_string($usuario) || !Uuid::esValido($usuario))) {
+            return $this->json(['error' => 'El usuario va por su id, que es un UUID.'], 400);
+        }
+
+        $funcion = $this->servicio->resumen((string) $peticion->parametro('id'));
+        $datos = self::datos($funcion);
+        if (is_string($usuario)) {
+            $datos['usuario_bloqueado'] = $this->servicio->usuarioBloqueadoEnSala($funcion->salaId, $usuario);
+        }
+
+        return $this->json($datos);
     }
 
     /**

@@ -358,8 +358,9 @@ final class Cartelera extends Controlador
                 $this->servicio->votar($id, $usuario->id, $obraId);
             }
         } catch (ReglaIncumplida $regla) {
-            if ($peticion->cabecera('Accept') === 'application/json' || $peticion->cabecera('Content-Type') === 'application/json') {
-                return $this->json(['error' => $regla->getMessage()], 422);
+            $estado = $regla->getMessage() === ServicioDeCartelera::MENSAJE_USUARIO_BLOQUEADO ? 403 : 422;
+            if ($peticion->aceptaJson() || $peticion->cabecera('Accept') === 'application/json' || $peticion->cabecera('Content-Type') === 'application/json') {
+                return $this->json(['error' => $regla->getMessage()], $estado);
             }
 
             return $this->redirigir($this->avisos->direccion($id, AvisosDeLaFicha::VOTO, $regla->getMessage()));

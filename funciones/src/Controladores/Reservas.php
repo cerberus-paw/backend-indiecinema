@@ -124,18 +124,27 @@ final class Reservas extends Controlador
 
     public function formulario(Peticion $peticion): Respuesta
     {
-        $funcion = $this->servicio->funcion((string) $peticion->parametro('id'));
+        $usuario = self::usuario($peticion);
+        $funcion = $this->servicio->funcion((string) $peticion->parametro('id'), $usuario->id);
 
-        return $this->pantalla($funcion, ['cantidad' => '1'], usuario: self::usuario($peticion));
+        return $this->pantalla($funcion, ['cantidad' => '1'], usuario: $usuario);
     }
 
     public function reservar(Peticion $peticion): Respuesta
     {
-        $funcion = $this->servicio->funcion((string) $peticion->parametro('id'));
         $usuario = self::usuario($peticion);
+        $funcion = $this->servicio->funcion((string) $peticion->parametro('id'), $usuario->id);
         $enJson = $peticion->aceptaJson();
         $valor = $peticion->campo('cantidad');
         $valor = is_string($valor) ? trim($valor) : '';
+
+        if ($funcion->usuarioBloqueado) {
+            $mensaje = FuncionDeProgramacion::MENSAJE_USUARIO_BLOQUEADO;
+
+            return $enJson
+                ? $this->json(['error' => $mensaje, ...$this->lugaresDe($funcion, $usuario)], 403)
+                : $this->pantalla($funcion, ['cantidad' => $valor], error: $mensaje, usuario: $usuario, estado: 403);
+        }
 
         // Entero y dentro del cupo, como el min y el max del campo: el navegador controla lo mismo.
         // El mensaje nombra el tope por persona y no el cupo: es lo más que se puede pedir, y si
@@ -155,10 +164,12 @@ final class Reservas extends Controlador
         try {
             $reserva = $this->servicio->reservar($usuario, $funcion->id, $cantidad);
         } catch (ReglaIncumplida $error) {
+            $estado = $error->getMessage() === FuncionDeProgramacion::MENSAJE_USUARIO_BLOQUEADO ? 403 : 422;
+
             // El mensaje de la regla es para el espectador («Quedan 2 lugares.»), no interno.
             return $enJson
-                ? $this->json(['error' => $error->getMessage(), ...$this->lugaresDe($funcion, $usuario)], 422)
-                : $this->pantalla($funcion, ['cantidad' => $valor], error: $error->getMessage(), usuario: $usuario, estado: 422);
+                ? $this->json(['error' => $error->getMessage(), ...$this->lugaresDe($funcion, $usuario)], $estado)
+                : $this->pantalla($funcion, ['cantidad' => $valor], error: $error->getMessage(), usuario: $usuario, estado: $estado);
         }
 
         // Pendiente de pago: al paso «Pago», en el comprobante. El correo sale recién cuando llega

@@ -17,6 +17,7 @@ use IndieCinema\Programacion\Controladores\ImagenDeSala;
 use IndieCinema\Programacion\Controladores\Inicio;
 use IndieCinema\Programacion\Controladores\Obras;
 use IndieCinema\Programacion\Controladores\ObrasDelOrganizador;
+use IndieCinema\Programacion\Controladores\Pedidos;
 use IndieCinema\Programacion\Controladores\Salas;
 use IndieCinema\Programacion\Controladores\SalasDelOrganizador;
 use IndieCinema\Programacion\Controladores\SolicitudDeSala;
@@ -47,6 +48,12 @@ return static function (Router $router): void {
     // el organizador que suma otra sala. Aprobarla habilita la sala y da el rol.
     $router->get('/solicitar-sala', [SolicitudDeSala::class, 'mostrar'], Rol::Espectador);
     $router->post('/solicitar-sala', [SolicitudDeSala::class, 'enviar'], Rol::Espectador);
+
+    // Pedidos de títulos ausentes en el catálogo y adhesiones de espectadores (EF-11.1 / IC-576).
+    $router->get('/pedidos/nuevo', [Pedidos::class, 'nuevo'], Rol::Espectador);
+    $router->post('/pedidos/nuevo', [Pedidos::class, 'crear'], Rol::Espectador);
+    $router->post('/pedidos/{id}/sumarme', [Pedidos::class, 'sumarme'], Rol::Espectador);
+    $router->post('/pedidos/{id}/quitar', [Pedidos::class, 'quitar'], Rol::Espectador);
 
     // «Mis salas» y la edición de la sala propia; las nuevas entran por la solicitud. Que la sala
     // sea del que la edita lo controla el servicio.

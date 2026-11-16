@@ -9,12 +9,25 @@ namespace IndieCinema\Cuentas\Controladores;
  */
 final class ValidacionDeCuenta
 {
+    public const MAXIMO_NOMBRE = 100;
     public const MAXIMO_CORREO = 254;
     public const MINIMO_CONTRASENA = 8;
     public const MAXIMO_CONTRASENA = 128;
 
     private function __construct()
     {
+    }
+
+    public static function errorDeNombre(string $nombre): ?string
+    {
+        if ($nombre === '') {
+            return 'Falta el nombre.';
+        }
+        if (mb_strlen($nombre) > self::MAXIMO_NOMBRE) {
+            return 'El nombre puede tener hasta ' . self::MAXIMO_NOMBRE . ' caracteres.';
+        }
+
+        return null;
     }
 
     public static function errorDeCorreo(string $correo): ?string

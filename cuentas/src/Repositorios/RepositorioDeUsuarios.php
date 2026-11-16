@@ -311,6 +311,43 @@ final class RepositorioDeUsuarios
     }
 
     /**
+     * Actualiza la contraseña dejando abierta sólo la sesión indicada en $exceptoHuella, o
+     * ninguna si no se informa.
+     */
+    public function actualizarContrasena(string $usuarioId, string $contrasenaHash): void
+    {
+        $this->base->ejecutar(
+            'UPDATE usuario SET contrasena_hash = ? WHERE id = ?',
+            [$contrasenaHash, $usuarioId],
+        );
+    }
+
+    /**
+     * @throws CorreoYaRegistrado si otro usuario ya usa ese correo
+     */
+    public function actualizarPerfil(string $usuarioId, string $nombre, string $correo, bool $reiniciarVerificacion): void
+    {
+        try {
+            if ($reiniciarVerificacion) {
+                $this->base->ejecutar(
+                    'UPDATE usuario SET nombre = ?, correo = ?, correo_verificado_en = NULL, verificacion_reenviada_en = NULL WHERE id = ?',
+                    [$nombre, $correo, $usuarioId],
+                );
+            } else {
+                $this->base->ejecutar(
+                    'UPDATE usuario SET nombre = ?, correo = ? WHERE id = ?',
+                    [$nombre, $correo, $usuarioId],
+                );
+            }
+        } catch (PDOException $error) {
+            if (($error->errorInfo[1] ?? null) === self::CLAVE_DUPLICADA) {
+                throw new CorreoYaRegistrado('Ya hay una cuenta con este correo.', previous: $error);
+            }
+            throw $error;
+        }
+    }
+
+    /**
      * El patrón de «contiene» para un texto del administrador, tal cual: sin esto, un «%» o un «_»
      * serían comodines. Es el mismo escape que usa programación (Like): «!» y no la barra, que
      * cambia de significado con el modo NO_BACKSLASH_ESCAPES de MySQL.

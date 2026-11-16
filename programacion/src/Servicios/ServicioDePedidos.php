@@ -20,6 +20,8 @@ use Psr\Log\LoggerInterface;
 final class ServicioDePedidos
 {
     public const UMBRAL_POR_OMISION = 5;
+    public const POR_PAGINA_POR_OMISION = 12;
+    private const MAXIMO_POR_PAGINA = 100;
 
     public function __construct(
         private readonly RepositorioDePedidos $pedidos,
@@ -31,6 +33,41 @@ final class ServicioDePedidos
     public function umbral(): int
     {
         return max(1, (int) $this->configuracion->obtener('pedidos.umbral', self::UMBRAL_POR_OMISION));
+    }
+
+    public function porPagina(): int
+    {
+        return max(1, min(self::MAXIMO_POR_PAGINA, (int) $this->configuracion->obtener('pedidos.por_pagina', self::POR_PAGINA_POR_OMISION)));
+    }
+
+    /**
+     * Ranking paginado de pedidos abiertos y activos, junto con los últimos pedidos tomados.
+     *
+     * @return array{pedidos: list<PedidoDeTitulo>, total: int, pagina: int, total_paginas: int, por_pagina: int, tomados: list<PedidoDeTitulo>}
+     *
+     * @throws ExcepcionHttp 404 si la página es menor a 1 o supera la última
+     */
+    public function ranking(?string $texto, int $pagina, ?Usuario $usuario = null): array
+    {
+        if ($pagina < 1) {
+            throw ExcepcionHttp::noEncontrada();
+        }
+
+        $porPagina = $this->porPagina();
+        $resultado = $this->pedidos->ranking($texto, $pagina, $porPagina, $usuario?->id);
+        $totalPaginas = max(1, (int) ceil($resultado['total'] / $porPagina));
+        if ($pagina > 1 && $pagina > $totalPaginas) {
+            throw ExcepcionHttp::noEncontrada();
+        }
+
+        return [
+            'pedidos' => $resultado['pedidos'],
+            'total' => $resultado['total'],
+            'pagina' => $pagina,
+            'total_paginas' => $totalPaginas,
+            'por_pagina' => $porPagina,
+            'tomados' => $this->pedidos->tomadosRecientes(usuarioId: $usuario?->id),
+        ];
     }
 
     /**

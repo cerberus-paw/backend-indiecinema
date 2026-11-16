@@ -8,6 +8,7 @@ use DateTimeImmutable;
 use IndieCinema\Funciones\Modelo\Conducta;
 use IndieCinema\Funciones\Repositorios\RepositorioDeConducta;
 use IndieCinema\Nucleo\Configuracion;
+use IndieCinema\Nucleo\Uuid;
 
 /**
  * Cálculo de puntaje e historial de conducta de los espectadores (EF-13).
@@ -62,6 +63,80 @@ final class ServicioDeConducta
     public function topeSimultaneoPara(string $usuarioId, DateTimeImmutable $ahora = new DateTimeImmutable()): ?int
     {
         return $this->bajoElUmbral($usuarioId, $ahora) ? $this->topeBajoUmbral : null;
+    }
+
+    /**
+     * Puntaje de conducta y resumen de actividad para «Mis reservas» (EF-13.3).
+     *
+     * @return array{
+     *     puntaje: int,
+     *     puntaje_inicial: int,
+     *     umbral: int,
+     *     bajo_umbral: bool,
+     *     tope_bajo_umbral: int,
+     *     asistencias: int,
+     *     ausencias: int,
+     *     conducta_positivas: int,
+     *     conducta_negativas: int,
+     *     negativas_vigentes: int,
+     *     calificaciones_funciones: int,
+     * }
+     */
+    public function actividadYConducta(string $usuarioId, DateTimeImmutable $ahora = new DateTimeImmutable()): array
+    {
+        $desde = $ahora->modify("-{$this->mesesVigencia} months");
+        $resumen = $this->conductas->resumenDeActividad($usuarioId, $desde);
+        $puntaje = $this->calcularPuntaje($resumen['negativas_vigentes'], $resumen['ausencias']);
+
+        return [
+            'puntaje' => $puntaje,
+            'puntaje_inicial' => $this->puntajeInicial,
+            'umbral' => $this->umbral,
+            'bajo_umbral' => $puntaje <= $this->umbral,
+            'tope_bajo_umbral' => $this->topeBajoUmbral,
+            ...$resumen,
+        ];
+    }
+
+    /**
+     * Conducta en lote por usuario, para «Usuarios y roles» del administrador en cuentas (EF-13.3).
+     *
+     * @param list<string> $usuariosIds
+     *
+     * @return array<string, array{puntaje: int, bajo_umbral: bool, negativas: int, ausencias: int}>
+     */
+    public function resumenDeVarios(array $usuariosIds, DateTimeImmutable $ahora = new DateTimeImmutable()): array
+    {
+        $validos = array_values(array_unique(array_filter($usuariosIds, Uuid::esValido(...))));
+        if ($validos === []) {
+            return [];
+        }
+
+        $desde = $ahora->modify("-{$this->mesesVigencia} months");
+        $negativas = $this->conductas->negativasVigentesDeVarios($validos, $desde);
+        $ausencias = $this->conductas->ausenciasDeVarios($validos);
+
+        $porUsuario = [];
+        foreach ($validos as $id) {
+            $neg = $negativas[$id] ?? 0;
+            $aus = $ausencias[$id] ?? 0;
+            $puntaje = $this->calcularPuntaje($neg, $aus);
+            $porUsuario[$id] = [
+                'puntaje' => $puntaje,
+                'bajo_umbral' => $puntaje <= $this->umbral,
+                'negativas' => $neg,
+                'ausencias' => $aus,
+            ];
+        }
+
+        return $porUsuario;
+    }
+
+    private function calcularPuntaje(int $negativasVigentes, int $ausencias): int
+    {
+        $puntaje = $this->puntajeInicial - ($negativasVigentes * $this->descuentoNegativa) - ($ausencias * $this->descuentoAusencia);
+
+        return max(0, $puntaje);
     }
 
     private static function entero(Configuracion $configuracion, string $clave, int $porDefecto): int

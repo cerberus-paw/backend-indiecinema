@@ -164,7 +164,10 @@ final class PanelDeReservasTest extends TestCase
         self::assertMatchesRegularExpression('#Lugares libres</dt>\s*<dd class="panel-dato-valor"[^>]*>35</dd>#', $cuerpo);
         self::assertMatchesRegularExpression('#Asistentes registrados</dt>\s*<dd class="panel-dato-valor"[^>]*>3</dd>#', $cuerpo);
         self::assertStringContainsString('$ 17.500', $cuerpo);
-        self::assertStringContainsString('<td>Eva</td>', $cuerpo);
+        self::assertStringContainsString('<span class="tabla-admin-principal">Eva</span>', $cuerpo);
+        self::assertStringContainsString('/organizador/bloqueados?sala=', $cuerpo);
+        self::assertStringContainsString('&amp;usuario=' . self::EVA, $cuerpo);
+        self::assertStringContainsString('Bloquear en la sala', $cuerpo);
     }
 
     /**
@@ -184,7 +187,7 @@ final class PanelDeReservasTest extends TestCase
         preg_match_all('#<a href="([^"]*)"[^>]*aria-current="page"#', $barra, $actuales);
 
         // Los enlaces van sin el prefijo de funciones: las pantallas del panel son de programación.
-        self::assertSame(['/', '/organizador/funciones', '/organizador/funciones/nueva', '/organizador/salas', '/recaudacion/reportes', '/solicitar-sala'], $enlaces);
+        self::assertSame(['/', '/organizador/bloqueados', '/organizador/funciones', '/organizador/funciones/nueva', '/organizador/salas', '/recaudacion/reportes', '/solicitar-sala'], $enlaces);
         self::assertSame(['/organizador/funciones'], $actuales[1]);
         self::assertStringContainsString('Ana Prueba', $barra);
         self::assertStringContainsString('action="/cuenta/salir"', $barra);

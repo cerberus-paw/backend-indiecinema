@@ -189,6 +189,7 @@ final class MigracionesTest extends TestCase
         self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM funcion_obra'));
         self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM solicitud_sala'));
         self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM voto'));
+        self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM bloqueo'));
     }
 
     public function testLaObraQuedaGuardadaConSusValoresYTimestamps(): void
@@ -699,5 +700,37 @@ final class MigracionesTest extends TestCase
 
         $this->assertRechaza(self::REFERENCIADO, fn () => $this->base->ejecutar('DELETE FROM obra WHERE id = ?', [$obra]));
         self::assertSame(1, (int) $this->base->valor('SELECT COUNT(*) FROM voto'));
+    }
+
+    public function testUnUsuarioSoloTieneUnBloqueoPorSalaYConMotivoNoVacio(): void
+    {
+        $sala1 = $this->insertarSala();
+        $sala2 = $this->insertarSala();
+        $usuario = Uuid::nuevo();
+        $organizador = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+
+        $this->base->ejecutar(
+            'INSERT INTO bloqueo (sala_id, usuario_id, motivo, bloqueado_por) VALUES (?, ?, ?, ?)',
+            [$sala1, $usuario, 'Incumplió las normas de la sala.', $organizador],
+        );
+        $this->base->ejecutar(
+            'INSERT INTO bloqueo (sala_id, usuario_id, motivo, bloqueado_por) VALUES (?, ?, ?, ?)',
+            [$sala2, $usuario, 'Otro motivo en otra sala.', $organizador],
+        );
+
+        self::assertSame(2, (int) $this->base->valor('SELECT COUNT(*) FROM bloqueo WHERE usuario_id = ?', [$usuario]));
+
+        $this->assertRechaza(self::REPETIDO, fn () => $this->base->ejecutar(
+            'INSERT INTO bloqueo (sala_id, usuario_id, motivo, bloqueado_por) VALUES (?, ?, ?, ?)',
+            [$sala1, $usuario, 'Duplicado', $organizador],
+        ));
+        $this->assertRechaza(self::RESTRICCION_CHECK, fn () => $this->base->ejecutar(
+            'INSERT INTO bloqueo (sala_id, usuario_id, motivo, bloqueado_por) VALUES (?, ?, ?, ?)',
+            [$sala1, Uuid::nuevo(), '   ', $organizador],
+        ));
+        $this->assertRechaza(self::REFERENCIA_INEXISTENTE, fn () => $this->base->ejecutar(
+            'INSERT INTO bloqueo (sala_id, usuario_id, motivo, bloqueado_por) VALUES (?, ?, ?, ?)',
+            [Uuid::nuevo(), $usuario, 'Sala que no existe', $organizador],
+        ));
     }
 }

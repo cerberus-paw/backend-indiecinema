@@ -26,6 +26,7 @@ return static function (Router $router): void {
     $router->get('/registro', [Registro::class, 'mostrar']);
     $router->post('/registro', [Registro::class, 'registrar']);
     $router->get('/verificar', [VerificacionDeCorreo::class, 'verificar']);
+    $router->post('/verificar/reenviar', [VerificacionDeCorreo::class, 'reenviar'], Rol::Espectador);
     $router->get('/ingresar', [Ingreso::class, 'mostrar']);
     $router->post('/ingresar', [Ingreso::class, 'ingresar']);
     $router->get('/recuperar', [RecuperacionDeContrasena::class, 'mostrarSolicitud']);

@@ -258,6 +258,7 @@ final class Cartelera extends Controlador
             // El aviso de que se acaba de guardar: sólo para el organizador que la editó. La ficha
             // es pública, y si no, lo vería cualquiera que abra el enlace con el parámetro puesto.
             'guardada' => $esPropia && $peticion->consulta('guardada') === '1',
+            'verificacion_reenviada' => $usuario !== null && !$usuario->correoVerificado && $peticion->consulta('reenviado') === '1',
             'accion_votar_franja' => "/cartelera/{$id}/votar",
         ])->conCabecera('Vary', 'Accept');
     }

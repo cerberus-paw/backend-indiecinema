@@ -275,4 +275,96 @@ final class VerificacionDeCorreoTest extends TestCase
         self::assertStringContainsString('href="/cuenta/"', $respuesta->cuerpo());
         self::assertStringContainsString('Ir a Mi cuenta', $respuesta->cuerpo());
     }
+
+    public function testReenvioDesdeMiCuentaEnviaEnlaceNuevoInvalidaElAnteriorYLimitaACincoMinutos(): void
+    {
+        $this->registrar();
+        $usuarioId = (string) $this->base->valor('SELECT id FROM usuario');
+        $primerToken = self::extraerTokenDelCorreo();
+        self::$correo->vaciar();
+
+        $sesion = [
+            'X-Nginx-Secreto' => self::SECRETO,
+            'X-Usuario-Id' => $usuarioId,
+            'X-Rol' => 'espectador',
+            'X-Usuario-Nombre' => rawurlencode('Mariana'),
+            'X-Correo-Verificado' => '0',
+        ];
+
+        $reenvio = $this->pedir('POST', '/verificar/reenviar', cuerpo: ['_csrf' => self::CSRF], cabeceras: $sesion);
+        self::assertSame(303, $reenvio->estado());
+        self::assertSame('/cuenta/?reenviado=1', $reenvio->cabecera('Location'));
+
+        $segundoToken = self::extraerTokenDelCorreo();
+        self::assertNotSame($primerToken, $segundoToken);
+
+        // El enlace anterior dejó de servir.
+        $viejo = $this->pedir('GET', '/verificar', ['token' => $primerToken]);
+        self::assertSame(410, $viejo->estado());
+        self::assertNull($this->base->valor('SELECT correo_verificado_en FROM usuario WHERE id = ?', [$usuarioId]));
+
+        // Un segundo reenvío antes de los 5 minutos recibe 429 y no manda otro correo.
+        self::$correo->vaciar();
+        $repetido = $this->pedir('POST', '/verificar/reenviar', cuerpo: ['_csrf' => self::CSRF], cabeceras: $sesion);
+        self::assertSame(429, $repetido->estado());
+        self::assertStringContainsString('cada 5 minutos', $repetido->cuerpo());
+        self::assertCount(0, self::$correo->correos());
+
+        $repetidoJson = $this->pedir('POST', '/verificar/reenviar', cuerpo: ['_csrf' => self::CSRF], cabeceras: $sesion + ['Accept' => 'application/json']);
+        self::assertSame(429, $repetidoJson->estado());
+
+        // Pasados 5 minutos vuelve a emitir un enlace nuevo e invalida el segundo.
+        $this->base->ejecutar('UPDATE usuario SET verificacion_reenviada_en = UTC_TIMESTAMP() - INTERVAL 5 MINUTE WHERE id = ?', [$usuarioId]);
+        $nuevo = $this->pedir('POST', '/verificar/reenviar', cuerpo: ['_csrf' => self::CSRF], cabeceras: $sesion);
+        self::assertSame(303, $nuevo->estado());
+        $tercerToken = self::extraerTokenDelCorreo();
+        self::assertSame(410, $this->pedir('GET', '/verificar', ['token' => $segundoToken])->estado());
+
+        $ok = $this->pedir('GET', '/verificar', ['token' => $tercerToken]);
+        self::assertSame(200, $ok->estado());
+        self::assertNotNull($this->base->valor('SELECT correo_verificado_en FROM usuario WHERE id = ?', [$usuarioId]));
+
+        // Ya verificado no vuelve a mandar enlaces.
+        self::$correo->vaciar();
+        $verificada = $this->pedir('POST', '/verificar/reenviar', cuerpo: ['_csrf' => self::CSRF], cabeceras: $sesion);
+        self::assertSame(303, $verificada->estado());
+        self::assertSame('/cuenta/', $verificada->cabecera('Location'));
+        self::assertCount(0, self::$correo->correos());
+    }
+
+    public function testReenvioDesdeFichaVuelveALaFichaEIgnoraRutasExternasYSinSesionDa401(): void
+    {
+        self::assertSame(401, $this->pedir('POST', '/verificar/reenviar', cuerpo: ['_csrf' => self::CSRF])->estado());
+
+        $this->registrar();
+        $usuarioId = (string) $this->base->valor('SELECT id FROM usuario');
+        $funcionId = '11111111-1111-4111-8111-111111111111';
+        $sesion = [
+            'X-Nginx-Secreto' => self::SECRETO,
+            'X-Usuario-Id' => $usuarioId,
+            'X-Rol' => 'espectador',
+            'X-Usuario-Nombre' => rawurlencode('Mariana'),
+            'X-Correo-Verificado' => '0',
+        ];
+
+        $desdeFicha = $this->pedir(
+            'POST',
+            '/verificar/reenviar',
+            cuerpo: ['_csrf' => self::CSRF, 'volver' => "/cartelera/{$funcionId}"],
+            cabeceras: $sesion,
+        );
+        self::assertSame(303, $desdeFicha->estado());
+        self::assertSame("/cartelera/{$funcionId}?reenviado=1", $desdeFicha->cabecera('Location'));
+
+        // Un destino externo no genera open redirect.
+        $this->base->ejecutar('UPDATE usuario SET verificacion_reenviada_en = NULL WHERE id = ?', [$usuarioId]);
+        $externo = $this->pedir(
+            'POST',
+            '/verificar/reenviar',
+            cuerpo: ['_csrf' => self::CSRF, 'volver' => 'https://atacante.ejemplo/phishing'],
+            cabeceras: $sesion,
+        );
+        self::assertSame(303, $externo->estado());
+        self::assertSame('/cuenta/?reenviado=1', $externo->cabecera('Location'));
+    }
 }

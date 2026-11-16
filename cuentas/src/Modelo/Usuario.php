@@ -27,6 +27,7 @@ final class Usuario
         public readonly EstadoCuenta $estado,
         public readonly array $roles,
         public readonly ?DateTimeImmutable $correoVerificadoEn = null,
+        public readonly ?DateTimeImmutable $verificacionReenviadaEn = null,
     ) {
     }
 

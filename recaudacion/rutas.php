@@ -5,16 +5,22 @@ declare(strict_types=1);
 use IndieCinema\Nucleo\Http\EstadoInterno;
 use IndieCinema\Nucleo\Ruteo\Router;
 use IndieCinema\Nucleo\Seguridad\Rol;
+use IndieCinema\Recaudacion\Controladores\ParametrosDeReparto;
 use IndieCinema\Recaudacion\Controladores\Reportes;
 
 /*
  * Las rutas de recaudación, sin el prefijo que saca nginx. Cada una declara su rol mínimo; el
  * middleware del núcleo lo controla antes de llegar al controlador.
  *
- * El reparto y las liquidaciones (EF-08) y los beneficios (EF-17) se escriben acá. /recaudacion/
- * sola responde la página de error del sitio con un 404.
+ * Las liquidaciones (EF-08.3) y los beneficios (EF-17) se escriben acá. /recaudacion/ sola
+ * responde la página de error del sitio con un 404.
  */
 return static function (Router $router): void {
+    // Con cuánto se reparte lo cobrado entre la sala, el dueño y la plataforma, y desde cuándo
+    // (EF-08.1). Sólo el administrador: es el parámetro con el que se le paga a todos.
+    $router->get('/administracion/reparto', [ParametrosDeReparto::class, 'mostrar'], Rol::Administrador);
+    $router->post('/administracion/reparto', [ParametrosDeReparto::class, 'guardar'], Rol::Administrador);
+
     // Lo que pasó en las salas en un período y qué conviene hacer (EF-09): el organizador ve las
     // suyas y el administrador, todas.
     $router->get('/reportes', [Reportes::class, 'mostrar'], Rol::Organizador);

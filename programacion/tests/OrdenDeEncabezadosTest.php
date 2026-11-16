@@ -138,6 +138,7 @@ final class OrdenDeEncabezadosTest extends TestCase
         yield 'proponer franjas con errores' => ['/organizador/funciones/' . self::EN_ACUERDO . '/proponer-franjas', 'organizador', 'POST', [], 422];
         yield 'cancelar una función' => ['/organizador/funciones/' . self::FUNCION . '/cancelar', 'organizador', 'GET', [], 200];
         yield 'usuarios bloqueados' => ['/organizador/bloqueados', 'organizador', 'GET', [], 200];
+        yield 'pedidos para programar' => ['/organizador/pedidos', 'organizador', 'GET', [], 200];
         yield 'bloquear en sala con errores' => ['/organizador/salas/' . self::SALA . '/bloqueos', 'organizador', 'POST', [], 422];
         yield 'solicitudes del administrador' => ['/administracion/solicitudes', 'administrador', 'GET', [], 200];
         yield 'página que no existe' => ['/no-existe', null, 'GET', [], 404];

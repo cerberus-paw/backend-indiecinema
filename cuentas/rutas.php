@@ -8,6 +8,7 @@ use IndieCinema\Cuentas\Controladores\Inicio;
 use IndieCinema\Cuentas\Controladores\Registro;
 use IndieCinema\Cuentas\Controladores\SesionInterna;
 use IndieCinema\Cuentas\Controladores\UsuariosInternos;
+use IndieCinema\Cuentas\Controladores\VerificacionDeCorreo;
 use IndieCinema\Nucleo\Http\EstadoInterno;
 use IndieCinema\Nucleo\Ruteo\Router;
 use IndieCinema\Nucleo\Seguridad\Rol;
@@ -23,6 +24,7 @@ return static function (Router $router): void {
     // Sin sesión: es para el visitante que todavía no tiene cuenta.
     $router->get('/registro', [Registro::class, 'mostrar']);
     $router->post('/registro', [Registro::class, 'registrar']);
+    $router->get('/verificar', [VerificacionDeCorreo::class, 'verificar']);
     $router->get('/ingresar', [Ingreso::class, 'mostrar']);
     $router->post('/ingresar', [Ingreso::class, 'ingresar']);
     // Sin rol mínimo: trabaja con la cookie, y sin sesión válida igual la borra.

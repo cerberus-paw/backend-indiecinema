@@ -49,6 +49,7 @@ return static function (Router $router): void {
     // sea suya lo controla el servicio, con el id del que pide.
     $router->get('/organizador/funciones/{id}/reservas', [ReservasDeLaFuncion::class, 'listar'], Rol::Organizador);
     $router->post('/organizador/funciones/{id}/asistencia', [ReservasDeLaFuncion::class, 'registrarAsistencia'], Rol::Organizador);
+    $router->post('/organizador/funciones/{id}/conducta', [ReservasDeLaFuncion::class, 'calificarConducta'], Rol::Organizador);
     $router->get('/organizador/funciones/{id}/reservas.csv', [ReservasDeLaFuncion::class, 'descargar'], Rol::Organizador);
     // El administrador, todas, y anula la que haga falta.
     $router->get('/administracion/reservas', [ReservasDelAdministrador::class, 'listar'], Rol::Administrador);

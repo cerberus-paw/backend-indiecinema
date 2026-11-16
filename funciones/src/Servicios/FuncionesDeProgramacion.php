@@ -29,13 +29,14 @@ final class FuncionesDeProgramacion
      * @throws ExcepcionHttp    503 si programación no responde a tiempo
      * @throws RuntimeException si responde algo que no es una función: el contrato se rompió
      */
-    public function buscar(string $id): ?FuncionDeProgramacion
+    public function buscar(string $id, ?string $usuarioId = null): ?FuncionDeProgramacion
     {
         // Sin pedir nada si no tiene forma de id: tampoco podría colar otra ruta.
         if (!Uuid::esValido($id)) {
             return null;
         }
-        $datos = $this->cliente->get('programacion', "/interno/funciones/{$id}");
+        $consulta = $usuarioId !== null && Uuid::esValido($usuarioId) ? ['usuario' => $usuarioId] : [];
+        $datos = $this->cliente->get('programacion', "/interno/funciones/{$id}", $consulta);
 
         return $datos === null ? null : self::funcion($datos);
     }
@@ -113,6 +114,7 @@ final class FuncionesDeProgramacion
             || !is_string($sala['id'] ?? null) || !is_string($sala['nombre'] ?? null)
             || !is_string($sala['localidad'] ?? null) || !is_bool($sala['habilitada'] ?? null)
             || !is_array($datos['obras_ids'] ?? null) || !array_is_list($datos['obras_ids'])
+            || (array_key_exists('usuario_bloqueado', $datos) && !is_bool($datos['usuario_bloqueado']))
         ) {
             throw new RuntimeException('programacion no respondió una función a GET /interno/funciones/{id}.');
         }
@@ -133,6 +135,7 @@ final class FuncionesDeProgramacion
             array_map(strval(...), $datos['obras_ids']),
             // Llegó con el recordatorio (EF-03.3): un programación anterior no la manda.
             is_string($sala['direccion'] ?? null) ? $sala['direccion'] : '',
+            $datos['usuario_bloqueado'] ?? false,
         );
     }
 }

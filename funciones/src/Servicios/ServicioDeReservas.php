@@ -48,9 +48,9 @@ final class ServicioDeReservas
      * @throws ExcepcionHttp 404 si no existe o su sala no está publicada; 503 si programación no
      *                       responde
      */
-    public function funcion(string $funcionId): FuncionDeProgramacion
+    public function funcion(string $funcionId, ?string $usuarioId = null): FuncionDeProgramacion
     {
-        $funcion = $this->funciones->buscar($funcionId);
+        $funcion = $this->funciones->buscar($funcionId, $usuarioId);
         // Una sala sin publicar no muestra sus funciones: es lo mismo que si no existiera.
         if ($funcion === null || !$funcion->salaHabilitada) {
             throw ExcepcionHttp::noEncontrada();
@@ -220,7 +220,7 @@ final class ServicioDeReservas
         int $cantidad,
         DateTimeImmutable $ahora = new DateTimeImmutable(),
     ): Reserva {
-        $funcion = $this->funcion($funcionId);
+        $funcion = $this->funcion($funcionId, $espectador->id);
         $reserva = Reserva::nueva($funcion, $espectador->id, $cantidad, $ahora, $this->pagos?->minutosParaPagar());
         $reserva = $this->agregar($funcion, $reserva, $ahora);
         if ($reserva->estado !== EstadoReserva::PendientePago || $this->pagos === null) {
@@ -252,6 +252,9 @@ final class ServicioDeReservas
     private function agregar(FuncionDeProgramacion $funcion, Reserva $reserva, DateTimeImmutable $ahora): Reserva
     {
         return $this->reservas->conLaFuncionBloqueada($funcion->id, function () use ($funcion, $reserva, $ahora): Reserva {
+            if ($funcion->usuarioBloqueado) {
+                throw new ReglaIncumplida(FuncionDeProgramacion::MENSAJE_USUARIO_BLOQUEADO);
+            }
             $libres = $this->lugaresLibres($funcion, $ahora);
             if ($reserva->cantidad > $libres) {
                 throw new ReglaIncumplida(match ($libres) {

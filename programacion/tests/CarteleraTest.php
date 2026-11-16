@@ -1814,5 +1814,64 @@ final class CarteleraTest extends TestCase
         self::assertSame('franja-mock-1', $datos['funcion']['franjas'][1]['id']);
         self::assertSame(0, $datos['funcion']['franjas'][1]['votos']);
     }
+
+    public function testUnUsuarioBloqueadoNoVotaEnTitulosNiEnAcuerdoPeroSiEnOtraSala(): void
+    {
+        $this->cargarDatosDePrueba();
+        $salaBloqueada = (string) $this->base->valor("SELECT id FROM sala WHERE habilitada = TRUE AND dada_de_baja_en IS NULL LIMIT 1");
+        $otraSala = Uuid::nuevo();
+        $this->base->ejecutar(
+            'INSERT INTO sala (id, organizador_id, nombre, descripcion, direccion, localidad, capacidad, peliculas_por_funcion, duracion_funcion, tiempo_entre_funciones, habilitada) VALUES (?, ?, ?, ?, ?, ?, 40, 2, 120, 15, TRUE)',
+            [$otraSala, Uuid::nuevo(), 'Sala Paralela', 'Otra sala independiente.', 'Rivadavia 100', 'Morón'],
+        );
+        $obras = $this->base->filas('SELECT id FROM obra ORDER BY id LIMIT 2');
+
+        $votacionBloqueada = Uuid::nuevo();
+        $acuerdoBloqueada = Uuid::nuevo();
+        $votacionOtraSala = Uuid::nuevo();
+        foreach ([[$votacionBloqueada, $salaBloqueada, 'en_votacion_titulos'], [$acuerdoBloqueada, $salaBloqueada, 'en_acuerdo_fecha'], [$votacionOtraSala, $otraSala, 'en_votacion_titulos']] as [$fid, $sid, $estado]) {
+            $this->base->ejecutar("INSERT INTO funcion (id, sala_id, estado, precio_base, cupo) VALUES (?, ?, ?, 2000, 50)", [$fid, $sid, $estado]);
+            $this->base->ejecutar("INSERT INTO funcion_obra (funcion_id, obra_id, estado) VALUES (?, ?, ?)", [$fid, $obras[0]['id'], $estado === 'en_acuerdo_fecha' ? 'elegida' : 'candidata']);
+            if ($estado !== 'en_acuerdo_fecha') {
+                $this->base->ejecutar("INSERT INTO funcion_obra (funcion_id, obra_id, estado) VALUES (?, ?, 'candidata')", [$fid, $obras[1]['id']]);
+            }
+        }
+
+        $bloqueado = Uuid::nuevo();
+        $motivoPrivado = 'Motivo privado que el espectador no debe ver';
+        $this->base->ejecutar(
+            'INSERT INTO bloqueo (sala_id, usuario_id, motivo, bloqueado_por) VALUES (?, ?, ?, ?)',
+            [$salaBloqueada, $bloqueado, $motivoPrivado, Uuid::nuevo()],
+        );
+
+        // 1. Votación de títulos (HTML + JSON): rechaza sin revelar el motivo.
+        $votoHtml = $this->post("/cartelera/{$votacionBloqueada}/votar", ['obra_id' => $obras[0]['id']], $bloqueado);
+        self::assertSame(303, $votoHtml->estado());
+        $fichaVoto = $this->pedir($votoHtml->cabecera('Location') ?? self::fail());
+        self::assertStringContainsString('No podés votar en esta sala.', $fichaVoto->cuerpo());
+        self::assertStringNotContainsString($motivoPrivado, $fichaVoto->cuerpo());
+
+        $votoJson = $this->post("/cartelera/{$votacionBloqueada}/votar", ['obra_id' => $obras[0]['id']], $bloqueado, cabecerasExtra: ['Accept' => 'application/json']);
+        self::assertSame(403, $votoJson->estado());
+        self::assertSame(['error' => 'No podés votar en esta sala.'], self::json($votoJson));
+        self::assertSame(0, (int) $this->base->valor('SELECT COUNT(*) FROM voto WHERE funcion_id = ?', [$votacionBloqueada]));
+
+        // 2. Acuerdo de fecha (HTML + JSON): rechaza sin revelar el motivo.
+        $acuerdoHtml = $this->post("/cartelera/{$acuerdoBloqueada}/votar", ['franja_id' => 'franja-mock-0'], $bloqueado);
+        self::assertSame(303, $acuerdoHtml->estado());
+        $fichaAcuerdo = $this->pedir($acuerdoHtml->cabecera('Location') ?? self::fail());
+        self::assertStringContainsString('No podés votar en esta sala.', $fichaAcuerdo->cuerpo());
+        self::assertStringNotContainsString($motivoPrivado, $fichaAcuerdo->cuerpo());
+
+        $acuerdoJson = $this->post("/cartelera/{$acuerdoBloqueada}/acuerdo/votar", ['franja_id' => 'franja-mock-0'], $bloqueado, cabecerasExtra: ['Accept' => 'application/json']);
+        self::assertSame(403, $acuerdoJson->estado());
+        self::assertSame(['error' => 'No podés votar en esta sala.'], self::json($acuerdoJson));
+
+        // 3. En otra sala vota normalmente.
+        $enOtra = $this->post("/cartelera/{$votacionOtraSala}/votar", ['obra_id' => $obras[0]['id']], $bloqueado);
+        self::assertSame(303, $enOtra->estado());
+        self::assertSame("/cartelera/{$votacionOtraSala}?votado=1", $enOtra->cabecera('Location'));
+        self::assertSame(1, (int) $this->base->valor('SELECT COUNT(*) FROM voto WHERE funcion_id = ? AND usuario_id = ?', [$votacionOtraSala, $bloqueado]));
+    }
 }
 

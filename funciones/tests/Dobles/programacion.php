@@ -28,6 +28,9 @@ const EN_CINCO_HORAS = '45454545-4545-4545-8545-454545454545';
 const HISTORIAL_MIERCOLES = '00000005-0000-4000-8000-000000000001';
 const HISTORIAL_SABADO = '00000005-0000-4000-8000-000000000002';
 const HISTORIAL_PROGRAMADA = '00000005-0000-4000-8000-000000000003';
+// Espectador bloqueado en la sala de arriba, y función en otra sala donde sí puede operar (EF-12.2).
+const BLOQUEADO = '66666666-6666-4666-8666-666666666666';
+const OTRA_SALA = '67676767-6767-4767-8767-676767676767';
 
 header('Content-Type: application/json');
 $cabeceras = getallheaders();
@@ -38,7 +41,7 @@ if (($cabeceras['X-Llamador'] ?? null) !== 'funciones' || ($cabeceras['Authoriza
     return;
 }
 
-$funcion = static fn (string $id, string $estado, ?string $fecha, array $titulos, bool $elegidos, bool $publicada = true, int $precio = 3500): array => [
+$funcion = static fn (string $id, string $estado, ?string $fecha, array $titulos, bool $elegidos, bool $publicada = true, int $precio = 3500, string $salaId = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'): array => [
     'id' => $id,
     'estado' => $estado,
     'fecha_hora' => $fecha,
@@ -46,7 +49,7 @@ $funcion = static fn (string $id, string $estado, ?string $fecha, array $titulos
     'cupo' => 40,
     'titulos' => $titulos,
     'titulos_elegidos' => $elegidos,
-    'sala' => ['id' => 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', 'nombre' => 'Cine Club El Galpón', 'localidad' => 'Luján', 'habilitada' => $publicada, 'direccion' => 'Av. San Martín 450'],
+    'sala' => ['id' => $salaId, 'nombre' => 'Cine Club El Galpón', 'localidad' => 'Luján', 'habilitada' => $publicada, 'direccion' => 'Av. San Martín 450'],
     'organizador_id' => 'ffffffff-ffff-4fff-8fff-ffffffffffff',
     'obras_ids' => array_map(static fn (string $titulo): string => $titulo === 'Zama' ? '0b0b0b0b-0b0b-40b0-80b0-0b0b0b0b0b0b' : '0c0c0c0c-0c0c-40c0-80c0-0c0c0c0c0c0c', $titulos),
 ];
@@ -79,6 +82,7 @@ $responder = static function (string $id) use ($funcion): ?array {
         SIN_PUBLICAR => $funcion($id, 'programada', '2026-10-24T20:30:00', ['Zama'], true, false),
         // Un cambio en programación que rompe lo que funciones espera.
         ROTA => ['id' => $id, 'estado' => 'programada'],
+        OTRA_SALA => $funcion($id, 'programada', date('Y-m-d\\TH:i:s', strtotime('+30 days')), ['Zama'], true, salaId: '11111111-1111-4111-8111-111111111111'),
         LENTA => (static function (): ?array {
             sleep(2);
 
@@ -124,5 +128,8 @@ if ($datos === null) {
     http_response_code(404);
 
     return;
+}
+if (isset($_GET['usuario']) && isset($datos['sala']['id'])) {
+    $datos['usuario_bloqueado'] = $_GET['usuario'] === BLOQUEADO && $datos['sala']['id'] === 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
 }
 echo json_encode($datos);

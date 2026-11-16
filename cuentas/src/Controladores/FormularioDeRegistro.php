@@ -15,13 +15,7 @@ use IndieCinema\Cuentas\Modelo\DatosDeRegistro;
  */
 final class FormularioDeRegistro
 {
-    /** Como la columna usuario.nombre. */
-    private const MAXIMO_NOMBRE = 100;
-
-    /**
-     * @var array<string, string|bool> lo que mandó, para volver a mostrarlo si hay errores. Las
-     *                                 contraseñas no: no vuelven al navegador.
-     */
+    /** @var array<string, string|bool> */
     public private(set) array $valores = [];
 
     /** @var array<string, string> campo => qué está mal */
@@ -64,10 +58,9 @@ final class FormularioDeRegistro
     {
         $nombre = ValidacionDeCuenta::texto($campos['nombre'] ?? null);
         $this->valores['nombre'] = $nombre;
-        if ($nombre === '') {
-            $this->errores['nombre'] = 'Falta el nombre.';
-        } elseif (mb_strlen($nombre) > self::MAXIMO_NOMBRE) {
-            $this->errores['nombre'] = 'El nombre puede tener hasta ' . self::MAXIMO_NOMBRE . ' caracteres.';
+        $errorNombre = ValidacionDeCuenta::errorDeNombre($nombre);
+        if ($errorNombre !== null) {
+            $this->errores['nombre'] = $errorNombre;
         }
 
         $correo = ValidacionDeCuenta::texto($campos['email'] ?? null);

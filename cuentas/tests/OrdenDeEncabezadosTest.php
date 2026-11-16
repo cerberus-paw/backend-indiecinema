@@ -61,6 +61,10 @@ final class OrdenDeEncabezadosTest extends TestCase
         yield 'registro con errores' => ['/registro', null, 'POST', [], 422];
         yield 'verificar correo' => ['/verificar', null, 'GET', [], 400];
         yield 'mi cuenta' => ['/', 'espectador', 'GET', [], 200];
+        yield 'editar datos' => ['/datos', 'espectador', 'GET', [], 200];
+        yield 'editar datos con errores' => ['/datos', 'espectador', 'POST', ['nombre' => '', 'email' => ''], 422];
+        yield 'cambiar contraseña' => ['/contrasena', 'espectador', 'GET', [], 200];
+        yield 'cambiar contraseña con errores' => ['/contrasena', 'espectador', 'POST', [], 422];
         yield 'usuarios del administrador' => ['/administracion/usuarios', 'administrador', 'GET', [], 200];
         yield 'página que no existe' => ['/no-existe', null, 'GET', [], 404];
         yield 'sin permiso' => ['/administracion/usuarios', 'espectador', 'GET', [], 403];

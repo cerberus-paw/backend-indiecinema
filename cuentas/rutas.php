@@ -5,6 +5,7 @@ declare(strict_types=1);
 use IndieCinema\Cuentas\Controladores\AdministracionDeUsuarios;
 use IndieCinema\Cuentas\Controladores\Ingreso;
 use IndieCinema\Cuentas\Controladores\Inicio;
+use IndieCinema\Cuentas\Controladores\Perfil;
 use IndieCinema\Cuentas\Controladores\RecuperacionDeContrasena;
 use IndieCinema\Cuentas\Controladores\Registro;
 use IndieCinema\Cuentas\Controladores\SesionInterna;
@@ -19,8 +20,12 @@ use IndieCinema\Nucleo\Seguridad\Rol;
  * middleware del núcleo lo controla antes de llegar al controlador.
  */
 return static function (Router $router): void {
-    // «Mi cuenta»: los datos de quien está en sesión.
+    // «Mi cuenta»: los datos de quien está en sesión y su edición (EF-15.1).
     $router->get('/', [Inicio::class, 'mostrar'], Rol::Espectador);
+    $router->get('/datos', [Perfil::class, 'mostrarDatos'], Rol::Espectador);
+    $router->post('/datos', [Perfil::class, 'guardarDatos'], Rol::Espectador);
+    $router->get('/contrasena', [Perfil::class, 'mostrarContrasena'], Rol::Espectador);
+    $router->post('/contrasena', [Perfil::class, 'guardarContrasena'], Rol::Espectador);
 
     // Sin sesión: es para el visitante que todavía no tiene cuenta.
     $router->get('/registro', [Registro::class, 'mostrar']);

@@ -919,4 +919,47 @@ final class ReservasTest extends TestCase
         self::assertSame('Por tu historial de conducta podés tener hasta 2 reservas a la vez.', $json['error']);
         self::assertTrue($json['limite_conducta_alcanzado'] ?? false);
     }
+
+    public function testMisReservasMuestraElPuntajeDeConductaYLaActividad(): void
+    {
+        $reciente = gmdate('Y-m-d H:i:s', strtotime('-4 days'));
+        $asistidaId = Uuid::nuevo();
+        $this->base->ejecutar(
+            "INSERT INTO reserva (id, funcion_id, usuario_id, codigo, cantidad, total, estado, creada_en) VALUES (?, ?, ?, 'ASIS0001', 1, '0.00', 'asistio', ?)",
+            [$asistidaId, self::EMPEZADA, self::EVA, $reciente],
+        );
+        $this->base->ejecutar(
+            'INSERT INTO conducta (reserva_id, usuario_id, organizador_id, positiva, motivo, creada_en) VALUES (?, ?, ?, 1, NULL, ?)',
+            [$asistidaId, self::EVA, Uuid::nuevo(), $reciente],
+        );
+        for ($i = 0; $i < 2; ++$i) {
+            $id = Uuid::nuevo();
+            $this->base->ejecutar(
+                "INSERT INTO reserva (id, funcion_id, usuario_id, codigo, cantidad, total, estado, creada_en) VALUES (?, ?, ?, ?, 1, '0.00', 'asistio', ?)",
+                [$id, '13131313-1313-4313-8313-131313131313', self::EVA, strtoupper(substr(bin2hex(random_bytes(4)), 0, 8)), $reciente],
+            );
+            $this->base->ejecutar(
+                'INSERT INTO conducta (reserva_id, usuario_id, organizador_id, positiva, motivo, creada_en) VALUES (?, ?, ?, 0, ?, ?)',
+                [$id, self::EVA, Uuid::nuevo(), 'Interrumpió', $reciente],
+            );
+        }
+        for ($i = 0; $i < 4; ++$i) {
+            $this->hecha('24242424-2424-4424-8424-242424242424', $reciente, 'ausente');
+        }
+        $this->base->ejecutar(
+            'INSERT INTO calificacion (id, funcion_id, usuario_id, reserva_id, puntaje, comentario, sala_id, organizador_id, creada_en) VALUES (?, ?, ?, ?, 4, NULL, ?, ?, ?)',
+            [Uuid::nuevo(), self::EMPEZADA, self::EVA, $asistidaId, Uuid::nuevo(), Uuid::nuevo(), $reciente],
+        );
+
+        $respuesta = $this->pedir('GET', '/reservas');
+
+        self::assertSame(200, $respuesta->estado());
+        $cuerpo = $respuesta->cuerpo();
+        self::assertStringContainsString('Puntaje de conducta', $cuerpo);
+        self::assertStringContainsString('bajo umbral (hasta 2 reservas a la vez)', $cuerpo);
+        self::assertMatchesRegularExpression('#<dt>Puntaje de conducta</dt>\s*<dd class="panel-dato-valor">60</dd>#', $cuerpo);
+        self::assertMatchesRegularExpression('#<dt>Asistencias</dt>\s*<dd class="panel-dato-valor">3</dd>#', $cuerpo);
+        self::assertMatchesRegularExpression('#<dt>Ausencias</dt>\s*<dd class="panel-dato-valor">4</dd>#', $cuerpo);
+        self::assertMatchesRegularExpression('#<dt>Calificaciones</dt>\s*<dd class="panel-dato-valor">3</dd>\s*<dd class="panel-dato-nota">1 pos · 2 neg \(2 vig\.\) · 1 función calificada</dd>#', $cuerpo);
+    }
 }

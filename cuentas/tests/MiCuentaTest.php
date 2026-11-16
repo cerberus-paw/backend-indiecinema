@@ -48,11 +48,19 @@ final class MiCuentaTest extends TestCase
      *
      * @param list<Rol> $roles además de espectador
      */
-    private function agregar(array $roles = []): string
+    private function agregar(array $roles = [], bool $verificado = true): string
     {
         $id = Uuid::nuevo();
         (new RepositorioDeUsuarios($this->base))->agregar(
-            new Usuario($id, 'Eva Ramos', 'eva@ejemplo.com', 'hash', EstadoCuenta::Activa, [Rol::Espectador, ...$roles]),
+            new Usuario(
+                $id,
+                'Eva Ramos',
+                'eva@ejemplo.com',
+                'hash',
+                EstadoCuenta::Activa,
+                [Rol::Espectador, ...$roles],
+                $verificado ? new \DateTimeImmutable('2025-03-10 18:30:00', new \DateTimeZone('UTC')) : null,
+            ),
         );
         $this->base->ejecutar("UPDATE usuario SET creado_en = '2025-03-10 18:30:00' WHERE id = ?", [$id]);
 
@@ -156,5 +164,14 @@ final class MiCuentaTest extends TestCase
     public function testSinSesionPideIngresar(): void
     {
         self::assertSame(401, $this->pedir(null)->estado());
+    }
+
+    public function testSinCorreoVerificadoMuestraAvisoYReenvio(): void
+    {
+        $contenido = self::contenido($this->pedir($this->agregar(verificado: false)));
+
+        self::assertStringContainsString('Todavía no verificaste tu correo', $contenido);
+        self::assertStringContainsString('action="/cuenta/verificar/reenviar"', $contenido);
+        self::assertStringContainsString('Mandarme el enlace otra vez', $contenido);
     }
 }

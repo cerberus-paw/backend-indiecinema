@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace IndieCinema\Cuentas\Servicios;
 
 use IndieCinema\Cuentas\Modelo\DatosDeRegistro;
-use IndieCinema\Cuentas\Modelo\PropositoDeToken;
 use IndieCinema\Cuentas\Modelo\Usuario;
 use IndieCinema\Cuentas\Repositorios\RepositorioDeUsuarios;
 
@@ -19,12 +18,11 @@ use IndieCinema\Cuentas\Repositorios\RepositorioDeUsuarios;
  */
 final class ServicioDeRegistro
 {
-    public const DURACION_VERIFICACION = 'PT24H';
+    public const DURACION_VERIFICACION = ServicioDeVerificacion::DURACION_VERIFICACION;
 
     public function __construct(
         private readonly RepositorioDeUsuarios $usuarios,
-        private readonly ServicioDeTokens $tokens,
-        private readonly CorreoDeCuenta $correos,
+        private readonly ServicioDeVerificacion $verificacion,
     ) {
     }
 
@@ -35,23 +33,7 @@ final class ServicioDeRegistro
     {
         $usuario = Usuario::nuevo($datos->nombre, $datos->correo, password_hash($datos->contrasena, PASSWORD_ARGON2ID));
         $this->usuarios->agregar($usuario);
-
-        $token = $this->tokens->emitir($usuario->id, PropositoDeToken::Verificar, self::DURACION_VERIFICACION);
-        $this->correos->enviarEnlace(
-            $usuario,
-            '/verificar',
-            $token,
-            'Verificá tu correo en IndieCinema',
-            implode("\n", [
-                "Hola {$usuario->nombre}:",
-                '',
-                'Creaste tu cuenta en IndieCinema. Confirmá tu correo abriendo este enlace (vence en 24 horas):',
-                CorreoDeCuenta::MARCADOR_ENLACE,
-                '',
-                'Si no creaste esta cuenta, podés ignorar este mensaje.',
-            ]),
-            'verificar el correo',
-        );
+        $this->verificacion->enviarInicial($usuario);
 
         return $usuario;
     }

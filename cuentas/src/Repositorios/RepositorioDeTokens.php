@@ -59,6 +59,14 @@ final class RepositorioDeTokens
         ) === 1;
     }
 
+    public function invalidarPendientes(string $usuarioId, PropositoDeToken $proposito, DateTimeImmutable $cuando): int
+    {
+        return $this->base->ejecutar(
+            'UPDATE token_de_cuenta SET usado_en = ? WHERE usuario_id = ? AND proposito = ? AND usado_en IS NULL',
+            [$cuando, $usuarioId, $proposito->value],
+        );
+    }
+
     /**
      * @template T
      *

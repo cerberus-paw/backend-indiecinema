@@ -142,6 +142,14 @@ final class ServicioDeTokens
         return $this->tokens->enTransaccion($trabajo);
     }
 
+    public function invalidarPendientes(
+        string $usuarioId,
+        PropositoDeToken $proposito,
+        ?DateTimeImmutable $ahora = null,
+    ): int {
+        return $this->tokens->invalidarPendientes($usuarioId, $proposito, self::instante($ahora));
+    }
+
     private static function instante(?DateTimeImmutable $ahora): DateTimeImmutable
     {
         return ($ahora ?? new DateTimeImmutable('now', new DateTimeZone('UTC')))->setTimezone(new DateTimeZone('UTC'));

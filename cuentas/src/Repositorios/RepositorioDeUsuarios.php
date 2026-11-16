@@ -40,12 +40,29 @@ final class RepositorioDeUsuarios
     public function buscarPorCorreo(string $correo): ?Usuario
     {
         $fila = $this->base->fila(
-            'SELECT id, nombre, correo, contrasena_hash, estado, correo_verificado_en FROM usuario WHERE correo = ?',
+            'SELECT id, nombre, correo, contrasena_hash, estado, correo_verificado_en, verificacion_reenviada_en FROM usuario WHERE correo = ?',
             [$correo],
         );
-        if ($fila === null) {
-            return null;
-        }
+
+        return $fila === null ? null : $this->usuarioDesdeFila($fila);
+    }
+
+    public function buscarPorId(string $id, bool $bloquear = false): ?Usuario
+    {
+        $bloqueo = $bloquear ? ' FOR UPDATE' : '';
+        $fila = $this->base->fila(
+            "SELECT id, nombre, correo, contrasena_hash, estado, correo_verificado_en, verificacion_reenviada_en FROM usuario WHERE id = ?{$bloqueo}",
+            [$id],
+        );
+
+        return $fila === null ? null : $this->usuarioDesdeFila($fila);
+    }
+
+    /**
+     * @param array<string, mixed> $fila
+     */
+    private function usuarioDesdeFila(array $fila): Usuario
+    {
         $roles = $this->base->filas('SELECT tipo FROM rol WHERE usuario_id = ?', [$fila['id']]);
 
         return new Usuario(
@@ -58,6 +75,9 @@ final class RepositorioDeUsuarios
             $fila['correo_verificado_en'] === null
                 ? null
                 : new DateTimeImmutable((string) $fila['correo_verificado_en'], new DateTimeZone('UTC')),
+            $fila['verificacion_reenviada_en'] === null
+                ? null
+                : new DateTimeImmutable((string) $fila['verificacion_reenviada_en'], new DateTimeZone('UTC')),
         );
     }
 
@@ -243,6 +263,14 @@ final class RepositorioDeUsuarios
     {
         $this->base->ejecutar(
             'UPDATE usuario SET correo_verificado_en = COALESCE(correo_verificado_en, ?) WHERE id = ?',
+            [$cuando, $usuarioId],
+        );
+    }
+
+    public function marcarVerificacionReenviada(string $usuarioId, DateTimeImmutable $cuando): void
+    {
+        $this->base->ejecutar(
+            'UPDATE usuario SET verificacion_reenviada_en = ? WHERE id = ?',
             [$cuando, $usuarioId],
         );
     }

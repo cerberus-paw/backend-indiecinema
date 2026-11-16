@@ -56,6 +56,7 @@ final class OrdenDeEncabezadosTest extends TestCase
         yield 'ingresar con errores' => ['/ingresar', null, 'POST', ['email' => 'nadie@indiecinema.test', 'password' => 'otra'], 422];
         yield 'registro' => ['/registro', null, 'GET', [], 200];
         yield 'registro con errores' => ['/registro', null, 'POST', [], 422];
+        yield 'verificar correo' => ['/verificar', null, 'GET', [], 400];
         yield 'mi cuenta' => ['/', 'espectador', 'GET', [], 200];
         yield 'usuarios del administrador' => ['/administracion/usuarios', 'administrador', 'GET', [], 200];
         yield 'página que no existe' => ['/no-existe', null, 'GET', [], 404];

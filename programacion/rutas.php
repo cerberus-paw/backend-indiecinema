@@ -18,6 +18,7 @@ use IndieCinema\Programacion\Controladores\Inicio;
 use IndieCinema\Programacion\Controladores\Obras;
 use IndieCinema\Programacion\Controladores\ObrasDelOrganizador;
 use IndieCinema\Programacion\Controladores\Pedidos;
+use IndieCinema\Programacion\Controladores\PedidosDelOrganizador;
 use IndieCinema\Programacion\Controladores\Salas;
 use IndieCinema\Programacion\Controladores\SalasDelOrganizador;
 use IndieCinema\Programacion\Controladores\SolicitudDeSala;
@@ -69,6 +70,9 @@ return static function (Router $router): void {
 
     // «Mis obras», alta y edición de obras del catálogo.
     $router->get('/organizador/obras', [ObrasDelOrganizador::class, 'listar'], Rol::Organizador);
+    // Pedidos activos de títulos ausentes para tomar y programar (EF-11.3 / IC-578).
+    $router->get('/organizador/pedidos', [PedidosDelOrganizador::class, 'listar'], Rol::Organizador);
+    $router->post('/organizador/pedidos/{id}/tomar', [PedidosDelOrganizador::class, 'tomar'], Rol::Organizador);
     $router->get('/organizador/obras/nueva', [ObrasDelOrganizador::class, 'nueva'], Rol::Organizador);
     $router->post('/organizador/obras/nueva', [ObrasDelOrganizador::class, 'crear'], Rol::Organizador);
     $router->get('/organizador/obras/{id}/editar', [ObrasDelOrganizador::class, 'editar'], Rol::Organizador);

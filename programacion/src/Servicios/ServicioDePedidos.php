@@ -4,29 +4,43 @@ declare(strict_types=1);
 
 namespace IndieCinema\Programacion\Servicios;
 
+use DateTimeImmutable;
+use DateTimeZone;
 use IndieCinema\Nucleo\Configuracion;
+use IndieCinema\Nucleo\Correo\ClienteSmtp;
+use IndieCinema\Nucleo\Correo\Correo;
 use IndieCinema\Nucleo\Http\ExcepcionHttp;
 use IndieCinema\Nucleo\Seguridad\Usuario;
 use IndieCinema\Nucleo\Uuid;
 use IndieCinema\Programacion\Modelo\DatosDePedido;
+use IndieCinema\Programacion\Modelo\EstadoPedido;
+use IndieCinema\Programacion\Modelo\Obra;
 use IndieCinema\Programacion\Modelo\PedidoDeTitulo;
 use IndieCinema\Programacion\Modelo\ReglaIncumplida;
+use IndieCinema\Programacion\Modelo\Sala;
 use IndieCinema\Programacion\Repositorios\RepositorioDePedidos;
 use Psr\Log\LoggerInterface;
+use Throwable;
 
 /**
- * Alta de pedidos de títulos ausentes en el catálogo y adhesiones de los espectadores (EF-11.1).
+ * Alta, ranking y programación de pedidos de títulos ausentes y adhesiones (EF-11).
  */
 final class ServicioDePedidos
 {
     public const UMBRAL_POR_OMISION = 5;
     public const POR_PAGINA_POR_OMISION = 12;
+    public const PROMEDIO_PRIORIDAD = 4.0;
+    public const HORAS_PRIORIDAD = RepositorioDePedidos::HORAS_PRIORIDAD;
     private const MAXIMO_POR_PAGINA = 100;
 
     public function __construct(
         private readonly RepositorioDePedidos $pedidos,
         private readonly Configuracion $configuracion,
         private readonly LoggerInterface $log,
+        private readonly ?ServicioDeSalas $salas = null,
+        private readonly ?CalificacionesDeFunciones $calificaciones = null,
+        private readonly ?UsuariosDeCuentas $usuarios = null,
+        private readonly ?ClienteSmtp $correo = null,
     ) {
     }
 
@@ -129,5 +143,149 @@ final class ServicioDePedidos
         }
 
         return $this->pedidos->quitarAdhesion($pedidoId, $usuario->id);
+    }
+
+    /**
+     * Si el organizador tiene alguna sala con promedio >= 4.0 en las calificaciones, accede 48
+     * horas antes a los pedidos recién activados (EF-11.3 / EF-04.3).
+     */
+    public function tienePrioridad(Usuario $organizador): bool
+    {
+        if ($this->salas === null || $this->calificaciones === null) {
+            return false;
+        }
+        $salas = $this->salas->delOrganizador($organizador);
+        if ($salas === []) {
+            return false;
+        }
+
+        $ids = array_map(static fn (Sala $sala): string => $sala->id, $salas);
+        $resumen = $this->calificaciones->resumen([
+            'salas' => array_slice($ids, 0, CalificacionesDeFunciones::MAXIMO_POR_PEDIDO),
+        ]);
+        if ($resumen === null) {
+            return false;
+        }
+
+        foreach ($ids as $salaId) {
+            if (($resumen['salas'][$salaId]['promedio'] ?? 0.0) >= self::PROMEDIO_PRIORIDAD) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @return array{pedidos: list<PedidoDeTitulo>, tiene_prioridad: bool}
+     */
+    public function paraProgramar(Usuario $organizador, ?DateTimeImmutable $ahora = null): array
+    {
+        $tienePrioridad = $this->tienePrioridad($organizador);
+        $limite = self::limiteDePrioridad($ahora);
+
+        return [
+            'pedidos' => $this->pedidos->activosParaProgramar($tienePrioridad, $limite),
+            'tiene_prioridad' => $tienePrioridad,
+        ];
+    }
+
+    /**
+     * Comprueba que el pedido exista, siga activo y sea visible/tomable para el organizador antes
+     * de abrir el formulario de alta de obra precargada o de procesar el alta.
+     *
+     * @throws ExcepcionHttp   404 si no es UUID o el pedido no existe
+     * @throws ReglaIncumplida si ya fue tomado, sigue abierto o está en ventana de prioridad
+     */
+    public function paraTomar(Usuario $organizador, string $pedidoId, ?DateTimeImmutable $ahora = null): PedidoDeTitulo
+    {
+        $pedido = $this->buscar($pedidoId, $organizador);
+        if ($pedido->estado === EstadoPedido::Tomado) {
+            throw new ReglaIncumplida(RepositorioDePedidos::MENSAJE_PEDIDO_TOMADO);
+        }
+        if ($pedido->estado !== EstadoPedido::Activo) {
+            throw new ReglaIncumplida(RepositorioDePedidos::MENSAJE_NO_ACTIVO);
+        }
+        if (!$this->tienePrioridad($organizador) && $pedido->activadoEn !== null && $pedido->activadoEn > self::limiteDePrioridad($ahora)) {
+            throw new ReglaIncumplida(RepositorioDePedidos::MENSAJE_EN_PRIORIDAD);
+        }
+
+        return $pedido;
+    }
+
+    /**
+     * Vincula una obra del organizador al pedido activo, lo pasa a «tomado» y avisa por correo a
+     * quienes se sumaron (EF-11.3).
+     *
+     * @throws ExcepcionHttp   404 si el pedido no existe o la obra no es del organizador
+     * @throws ReglaIncumplida si no cumple estado activo o prioridad de 48 horas
+     */
+    public function tomarConObra(Usuario $organizador, string $pedidoId, Obra $obra, ?DateTimeImmutable $ahora = null): PedidoDeTitulo
+    {
+        if (!Uuid::esValido($pedidoId) || $obra->duenoId !== $organizador->id) {
+            throw ExcepcionHttp::noEncontrada();
+        }
+
+        $tienePrioridad = $this->tienePrioridad($organizador);
+        $tomado = $this->pedidos->tomar($pedidoId, $obra->id, $organizador->id, $tienePrioridad, self::limiteDePrioridad($ahora));
+
+        $this->log->info('El organizador {organizador} tomó el pedido {pedido} con la obra {obra}.', [
+            'organizador' => $organizador->id,
+            'pedido' => $tomado->id,
+            'obra' => $obra->id,
+        ]);
+
+        $this->avisarAdherentes($tomado, $obra);
+
+        return $tomado;
+    }
+
+    private function avisarAdherentes(PedidoDeTitulo $pedido, Obra $obra): void
+    {
+        if ($this->usuarios === null || $this->correo === null) {
+            return;
+        }
+
+        $baseUrl = rtrim((string) $this->configuracion->obtener('sitio.url', ''), '/');
+        $enlace = "{$baseUrl}/obras/{$obra->id}";
+        $asunto = "Ya está en IndieCinema: {$obra->titulo}";
+        $cuerpo = implode("\n", [
+            "El título «{$pedido->titulo}» ({$pedido->anio}) que pediste en IndieCinema fue tomado por una sala para programar.",
+            '',
+            "Obra en el catálogo: {$obra->titulo} ({$obra->director})",
+            "Podés ver su ficha y sus próximas funciones acá: {$enlace}",
+        ]);
+
+        foreach ($this->pedidos->usuariosAdheridos($pedido->id) as $usuarioId) {
+            try {
+                $destinatario = $this->usuarios->buscar($usuarioId);
+            } catch (Throwable $error) {
+                $this->log->warning('No se pudo consultar a cuentas para avisar del pedido {pedido} al usuario {usuario}: {error}', [
+                    'pedido' => $pedido->id,
+                    'usuario' => $usuarioId,
+                    'error' => $error->getMessage(),
+                ]);
+                continue;
+            }
+            if ($destinatario === null || $destinatario->correo === '') {
+                continue;
+            }
+            try {
+                $this->correo->enviar(new Correo($destinatario->correo, $asunto, $cuerpo));
+            } catch (Throwable $error) {
+                $this->log->warning('No se pudo enviar el aviso del pedido {pedido} al usuario {usuario}: {error}', [
+                    'pedido' => $pedido->id,
+                    'usuario' => $usuarioId,
+                    'error' => $error->getMessage(),
+                ]);
+            }
+        }
+    }
+
+    private static function limiteDePrioridad(?DateTimeImmutable $ahora): DateTimeImmutable
+    {
+        $instante = ($ahora ?? new DateTimeImmutable('now', new DateTimeZone('UTC')))->setTimezone(new DateTimeZone('UTC'));
+
+        return $instante->modify('-' . self::HORAS_PRIORIDAD . ' hours');
     }
 }

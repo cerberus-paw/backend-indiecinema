@@ -23,8 +23,11 @@ use PDOException;
 final class RepositorioDePedidos
 {
     private const CLAVE_DUPLICADA = 1062;
+    public const HORAS_PRIORIDAD = 48;
     public const MENSAJE_YA_SUMADO = 'Ya te sumaste a este pedido.';
     public const MENSAJE_PEDIDO_TOMADO = 'Este pedido ya fue tomado por una sala.';
+    public const MENSAJE_NO_ACTIVO = 'Este pedido todavía no alcanzó el umbral de activación.';
+    public const MENSAJE_EN_PRIORIDAD = 'Durante las primeras 48 horas este pedido tiene prioridad para las salas mejor calificadas.';
 
     private const COLUMNAS = 'p.id, p.titulo, p.anio, p.director, p.creado_por, p.estado, p.activado_en,
                               p.obra_id, o.titulo AS obra_titulo, p.tomado_por, p.tomado_en, p.creado_en,
@@ -224,6 +227,94 @@ final class RepositorioDePedidos
         );
 
         return array_map(self::pedido(...), $filas);
+    }
+
+    /**
+     * Pedidos activos disponibles para el organizador: durante las primeras 48 horas desde la
+     * activación los ven sólo quienes tienen prioridad; luego, todas las salas (EF-11.3).
+     *
+     * @return list<PedidoDeTitulo>
+     */
+    public function activosParaProgramar(bool $conPrioridad, DateTimeImmutable $limitePrioridad): array
+    {
+        $condicion = "p.estado = 'activo'";
+        $parametros = [];
+        if (!$conPrioridad) {
+            $condicion .= ' AND (p.activado_en IS NULL OR p.activado_en <= ?)';
+            $parametros[] = $limitePrioridad->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s');
+        }
+
+        $filas = $this->base->filas(
+            'SELECT ' . self::COLUMNAS . ", 0 AS adherido
+             FROM pedido_titulo p
+             LEFT JOIN obra o ON o.id = p.obra_id
+             WHERE {$condicion}
+             ORDER BY adhesiones DESC, p.activado_en ASC, p.creado_en ASC, p.id ASC",
+            $parametros,
+        );
+
+        return array_map(self::pedido(...), $filas);
+    }
+
+    /**
+     * Identificadores de los espectadores adheridos a un pedido (EF-11.3).
+     *
+     * @return list<string>
+     */
+    public function usuariosAdheridos(string $pedidoId): array
+    {
+        $filas = $this->base->filas(
+            'SELECT usuario_id FROM adhesion_pedido WHERE pedido_id = ? ORDER BY creada_en ASC, usuario_id ASC',
+            [$pedidoId],
+        );
+
+        return array_map(static fn (array $fila): string => (string) $fila['usuario_id'], $filas);
+    }
+
+    /**
+     * Asocia la obra al pedido y lo marca como «tomado» si está activo y disponible para el
+     * organizador según la ventana de 48 horas de prioridad (EF-11.3).
+     *
+     * @throws ExcepcionHttp   404 si el pedido no existe
+     * @throws ReglaIncumplida si ya fue tomado, sigue abierto o sigue en prioridad de 48 horas
+     */
+    public function tomar(
+        string $pedidoId,
+        string $obraId,
+        string $organizadorId,
+        bool $conPrioridad,
+        DateTimeImmutable $limitePrioridad,
+    ): PedidoDeTitulo {
+        $limiteUtc = $limitePrioridad->setTimezone(new DateTimeZone('UTC'));
+
+        $this->base->enTransaccion(static function (BaseDeDatos $base) use ($pedidoId, $obraId, $organizadorId, $conPrioridad, $limiteUtc): void {
+            $fila = $base->fila('SELECT id, estado, activado_en FROM pedido_titulo WHERE id = ? FOR UPDATE', [$pedidoId]);
+            if ($fila === null) {
+                throw ExcepcionHttp::noEncontrada();
+            }
+            $estado = (string) $fila['estado'];
+            if ($estado === EstadoPedido::Tomado->value) {
+                throw new ReglaIncumplida(self::MENSAJE_PEDIDO_TOMADO);
+            }
+            if ($estado !== EstadoPedido::Activo->value) {
+                throw new ReglaIncumplida(self::MENSAJE_NO_ACTIVO);
+            }
+            if (!$conPrioridad && $fila['activado_en'] !== null) {
+                $activadoEn = new DateTimeImmutable((string) $fila['activado_en'], new DateTimeZone('UTC'));
+                if ($activadoEn > $limiteUtc) {
+                    throw new ReglaIncumplida(self::MENSAJE_EN_PRIORIDAD);
+                }
+            }
+
+            $base->ejecutar(
+                "UPDATE pedido_titulo
+                 SET estado = 'tomado', obra_id = ?, tomado_por = ?, tomado_en = UTC_TIMESTAMP()
+                 WHERE id = ?",
+                [$obraId, $organizadorId, $pedidoId],
+            );
+        });
+
+        return $this->buscar($pedidoId, $organizadorId) ?? throw ExcepcionHttp::noEncontrada();
     }
 
     /**

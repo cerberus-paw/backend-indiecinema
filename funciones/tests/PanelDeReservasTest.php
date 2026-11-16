@@ -188,7 +188,7 @@ final class PanelDeReservasTest extends TestCase
         preg_match_all('#<a href="([^"]*)"[^>]*aria-current="page"#', $barra, $actuales);
 
         // Los enlaces van sin el prefijo de funciones: las pantallas del panel son de programación.
-        self::assertSame(['/', '/organizador/bloqueados', '/organizador/funciones', '/organizador/funciones/nueva', '/organizador/salas', '/recaudacion/reportes', '/solicitar-sala'], $enlaces);
+        self::assertSame(['/', '/organizador/bloqueados', '/organizador/funciones', '/organizador/funciones/nueva', '/organizador/pedidos', '/organizador/salas', '/recaudacion/reportes', '/solicitar-sala'], $enlaces);
         self::assertSame(['/organizador/funciones'], $actuales[1]);
         self::assertStringContainsString('Ana Prueba', $barra);
         self::assertStringContainsString('action="/cuenta/salir"', $barra);

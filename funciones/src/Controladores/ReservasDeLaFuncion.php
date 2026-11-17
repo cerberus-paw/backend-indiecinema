@@ -84,7 +84,7 @@ final class ReservasDeLaFuncion extends Controlador
 
             return $this->json([
                 'reserva' => self::fila($reserva, $nombres[$reserva->usuarioId] ?? null, $conductas[$reserva->id] ?? null, $funcion),
-                'resumen' => [...$resumen, 'recaudado' => TextoParaMostrar::monto($resumen['recaudado'])],
+                'resumen' => [...$resumen, 'recaudado' => self::recaudado($funcion, $resumen['recaudado'])],
             ]);
         }
 
@@ -166,7 +166,7 @@ final class ReservasDeLaFuncion extends Controlador
         $codigos = array_column($reservas, 'codigo');
         $datos = [
             'funcion' => self::datosDeFuncion($funcion),
-            'resumen' => [...$resumen, 'recaudado' => TextoParaMostrar::monto($resumen['recaudado'])],
+            'resumen' => [...$resumen, 'recaudado' => self::recaudado($funcion, $resumen['recaudado'])],
             'reservas' => array_map(
                 fn (Reserva $r): array => self::fila($r, $nombres[$r->usuarioId] ?? null, $conductas[$r->id] ?? null, $funcion),
                 $reservas,
@@ -189,6 +189,17 @@ final class ReservasDeLaFuncion extends Controlador
         }
 
         return $this->vista('reservas_de_la_funcion.html.twig', $datos, $estado);
+    }
+
+    /**
+     * Lo recaudado, escrito para el panel (EF-06.5). «A la gorra» es de la función y no del número:
+     * una función que cobra entrada y todavía no cobró nada muestra «$ 0», que no es lo mismo. Con
+     * monto() cualquier total en cero se leía «A la gorra», y un panel sin pagos parecía una
+     * función a la gorra.
+     */
+    private static function recaudado(FuncionDeProgramacion $funcion, float $recaudado): string
+    {
+        return $funcion->precioBase > 0 ? TextoParaMostrar::suma($recaudado) : TextoParaMostrar::A_LA_GORRA;
     }
 
     /**

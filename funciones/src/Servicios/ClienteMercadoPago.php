@@ -95,14 +95,29 @@ final class ClienteMercadoPago
 
     /**
      * Devuelve el pago entero al comprador. Con el pago como clave de idempotencia: pedirlo dos
-     * veces no lo devuelve dos veces.
+     * veces no lo devuelve dos veces, así que reintentarlo es seguro.
+     *
+     * @return ?string el id del reembolso, para dejarlo en la reserva (EF-06.4); null si la
+     *                 respuesta no lo trae, y entonces el reembolso se hizo pero queda sin anotar:
+     *                 el próximo intento lo vuelve a pedir, y la clave de idempotencia hace que
+     *                 Mercado Pago conteste el mismo en lugar de devolver la plata de nuevo
      *
      * @throws ExcepcionHttp    503 si Mercado Pago no responde o falla
      * @throws RuntimeException si lo rechaza, por ejemplo porque ya se devolvió
      */
-    public function reembolsar(string $pagoId): void
+    public function reembolsar(string $pagoId): ?string
     {
-        $this->pedir('POST', '/v1/payments/' . rawurlencode($pagoId) . '/refunds', [], "reembolso-{$pagoId}");
+        $respuesta = $this->pedir('POST', '/v1/payments/' . rawurlencode($pagoId) . '/refunds', [], "reembolso-{$pagoId}");
+        $id = is_array($respuesta) ? $respuesta['id'] ?? null : null;
+        // Un reembolso sin id no se puede anotar, pero la plata ya volvió: no es un error que corte
+        // la cancelación.
+        if (!is_string($id) && !is_int($id)) {
+            $this->log->warning('Mercado Pago devolvió el pago {pago} sin el id del reembolso.', ['pago' => $pagoId]);
+
+            return null;
+        }
+
+        return (string) $id;
     }
 
     /**

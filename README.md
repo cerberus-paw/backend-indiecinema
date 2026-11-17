@@ -760,6 +760,32 @@ Para pagar con el comprador de prueba, las tarjetas de prueba están en la docum
 Checkout Pro («Tarjetas de prueba»), con el titular `APRO` para un pago aprobado y `OTHE` para
 uno rechazado.
 
+Cancelar una reserva pagada le devuelve la plata al espectador (EF-06.4), y las tres cancelaciones
+pasan por lo mismo: la del espectador desde su reserva, la anulación del administrador y la
+cancelación de la función. Se devuelve el pago entero, y una sola vez: la reserva guarda el
+`reembolso_id` que contestó Mercado Pago, y el pedido va con la clave de idempotencia
+`reembolso-<pago>`, así que repetirlo no devuelve dos veces.
+
+Si Mercado Pago no responde o lo rechaza, la cancelación queda igual —el espectador no se come un
+error por algo que se arregla del otro lado— y la reserva queda con el **reembolso pendiente**:
+cancelada, con pago y sin reembolso. El panel del administrador la marca así y el motivo queda en
+el log. Lo que se devolvió no se reparte: el neto de `/interno/cobros` lo descuenta, y lo que quedó
+pendiente sigue contando, porque la plata todavía está en la cuenta.
+
+El total del panel del organizador cuenta lo mismo (EF-06.5): las reservas con pago de Mercado
+Pago que no se devolvió, `Reserva::cobrada()`. Una pendiente todavía no pagó, y una confirmada con
+el cobro apagado —o a la gorra— no pagó nunca, aunque su total diga 3500; una cancelada que espera
+su reembolso sigue contando, y el total baja recién cuando la plata vuelve. Por eso la tarjeta dice
+«Total cobrado» y no «Total de las reservas». Y «A la gorra» es de la función: si cobra entrada y
+todavía no entró nada, el panel muestra `$ 0`.
+
+Al espectador se le dice en qué quedó su reserva (EF-06.3). Una cancelada no se queda en
+«Cancelada»: «Mis reservas» y el comprobante muestran el motivo del historial —«Venció el plazo
+para pagar.», «Se canceló la función.», «Anulada por el administrador.»—, que lo escribe quien
+cancela y ya está redactado para el espectador, y la fecha del reembolso si la plata volvió. La que
+canceló el espectador no muestra ningún motivo: la canceló él. Un reembolso pendiente no se le
+anuncia, que todavía no hay nada que reintentar: lo ve el administrador en su panel.
+
 Las credenciales nunca van al repositorio: gitleaks frena un `APP_USR-…` o un `TEST-…` en el CI.
 
 ### Integración continua

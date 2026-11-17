@@ -60,6 +60,7 @@ final class DatosDePruebaTest extends TestCase
             ['correo' => 'eva@indiecinema.test', 'roles' => 'espectador', 'estado' => 'activa'],
             ['correo' => 'organizador@indiecinema.test', 'roles' => 'espectador,organizador', 'estado' => 'activa'],
         ], $roles);
+        $this->assertSame(0, (int) $this->base->valor('SELECT COUNT(*) FROM usuario WHERE correo_verificado_en IS NULL'));
     }
 
     public function testCadaUsuarioQuedaConSuIdFijo(): void

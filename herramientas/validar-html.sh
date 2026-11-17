@@ -16,11 +16,11 @@ set -euo pipefail
 readonly VALIDADOR=ghcr.io/validator/validator@sha256:0af71abb9e40083cc0e8b3fcbe51a55a45889c662a3f507fbf1f9f013a109842
 # Las pruebas que dibujan cada página, por subsistema.
 readonly -A PRUEBAS=(
-	[programacion]='CalificacionesEnLasFichasTest|InicioTest|CarteleraTest|FichaDeLaFuncionTest|ObrasTest|SalasDelOrganizadorTest|ObrasDelOrganizadorTest|FuncionesDelOrganizadorTest'
-	[cuentas]='IngresoTest|RegistroTest|MiCuentaTest|AdministracionDeUsuariosTest'
+	[programacion]='CalificacionesEnLasFichasTest|InicioTest|CarteleraTest|FichaDeLaFuncionTest|ObrasTest|SalasDelOrganizadorTest|ObrasDelOrganizadorTest|FuncionesDelOrganizadorTest|AcercaDeTest'
+	[cuentas]='IngresoTest|RegistroTest|MiCuentaTest|AdministracionDeUsuariosTest|VerificacionDeCorreoTest|RecuperacionDeContrasenaTest'
 	[funciones]='ReservasTest|PanelDeReservasTest|CalificacionesTest'
 	[moderacion]='ArranqueTest|SolicitudDeSalaTest|AdministracionDeSolicitudesTest'
-	[recaudacion]='ArranqueTest'
+	[recaudacion]='ArranqueTest|ReportesTest'
 )
 
 main() {

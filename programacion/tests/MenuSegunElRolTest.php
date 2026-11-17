@@ -33,14 +33,14 @@ final class MenuSegunElRolTest extends TestCase
     private const SECRETO = 'secreto-de-nginx';
 
     /** En el encabezado, con o sin sesión: el logo, la barra y el buscador (que va por action). */
-    private const ENCABEZADO_PUBLICO = ['/', '/cartelera', '/obras', '/salas', '/acerca-de#como-funciona', '/acerca-de'];
+    private const ENCABEZADO_PUBLICO = ['/', '/cartelera', '/obras', '/salas', '/como-funciona', '/acerca-de'];
     /** En el pie, con o sin sesión: «Explorar» y «Comunidad». */
-    private const PIE_PUBLICO = ['/cartelera', '/obras', '/salas', '/acerca-de#quienes-somos', '/acerca-de#como-funciona'];
+    private const PIE_PUBLICO = ['/cartelera', '/obras', '/salas', '/acerca-de#quienes-somos', '/como-funciona'];
     private const SIN_SESION = ['/cuenta/ingresar', '/cuenta/registro'];
     private const CON_SESION = ['/cuenta/', '/funcion/reservas'];
     private const DEL_ESPECTADOR = ['/solicitar-sala'];
-    private const DEL_ORGANIZADOR = ['/organizador/salas', '/organizador/obras', '/organizador/obras/nueva', '/organizador/funciones', '/organizador/funciones/nueva', '/solicitar-sala'];
-    private const DEL_ADMINISTRADOR = ['/cuenta/administracion/usuarios', '/moderacion/solicitudes'];
+    private const DEL_ORGANIZADOR = ['/organizador/salas', '/organizador/obras', '/organizador/obras/nueva', '/organizador/funciones', '/organizador/funciones/nueva', '/recaudacion/reportes', '/solicitar-sala'];
+    private const DEL_ADMINISTRADOR = ['/cuenta/administracion/usuarios', '/recaudacion/reportes', '/moderacion/solicitudes'];
 
     /**
      * El encabezado y el pie de /acerca-de, por separado.
@@ -200,12 +200,12 @@ final class MenuSegunElRolTest extends TestCase
     {
         $organizador = [
             'Mi cuenta' => ['/cuenta/', '/funcion/reservas'],
-            'Panel del Organizador' => ['/organizador/salas', '/organizador/obras', '/organizador/obras/nueva', '/organizador/funciones', '/organizador/funciones/nueva', '/solicitar-sala'],
+            'Panel del Organizador' => ['/organizador/salas', '/organizador/obras', '/organizador/obras/nueva', '/organizador/funciones', '/organizador/funciones/nueva', '/recaudacion/reportes', '/solicitar-sala'],
         ];
         yield 'espectador' => ['espectador', ['Mi cuenta' => ['/cuenta/', '/funcion/reservas', '/solicitar-sala']]];
         yield 'organizador' => ['organizador', $organizador];
         yield 'moderador' => ['moderador', $organizador];
-        yield 'administrador' => ['administrador', ['Administración' => ['/cuenta/administracion/usuarios', '/moderacion/solicitudes']]];
+        yield 'administrador' => ['administrador', ['Administración' => ['/cuenta/administracion/usuarios', '/recaudacion/reportes', '/moderacion/solicitudes']]];
     }
 
     /**

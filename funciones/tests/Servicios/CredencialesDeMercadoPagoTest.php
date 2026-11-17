@@ -80,7 +80,9 @@ final class CredencialesDeMercadoPagoTest extends TestCase
     {
         yield 'sin access token' => [['activo' => true, 'clave_webhook' => 'clave'], 'mercadopago.access_token'];
         yield 'con el access token vacío' => [['activo' => true, 'access_token' => '', 'clave_webhook' => 'clave'], 'mercadopago.access_token'];
+        yield 'con el access token del ejemplo' => [['activo' => true, 'access_token' => Configuracion::VALOR_DE_EJEMPLO, 'clave_webhook' => 'clave'], 'mercadopago.access_token'];
         yield 'sin la clave del webhook' => [['activo' => true, 'access_token' => 'TEST-1'], 'mercadopago.clave_webhook'];
+        yield 'con la clave del webhook del ejemplo' => [['activo' => true, 'access_token' => 'TEST-1', 'clave_webhook' => Configuracion::VALOR_DE_EJEMPLO], 'mercadopago.clave_webhook'];
         yield 'con el plazo en cero' => [['activo' => true, 'access_token' => 'TEST-1', 'clave_webhook' => 'clave', 'minutos_para_pagar' => 0], 'minutos_para_pagar'];
         yield 'con más de un día' => [['activo' => true, 'access_token' => 'TEST-1', 'clave_webhook' => 'clave', 'minutos_para_pagar' => 1441], 'minutos_para_pagar'];
         yield 'con el plazo como texto' => [['activo' => true, 'access_token' => 'TEST-1', 'clave_webhook' => 'clave', 'minutos_para_pagar' => 'quince'], 'minutos_para_pagar'];

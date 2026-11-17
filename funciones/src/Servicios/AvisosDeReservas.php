@@ -139,14 +139,36 @@ final class AvisosDeReservas
      */
     public function acuerdoSinMinimo(array $usuariosIds, string $titulo, int $minimo): int
     {
+        return $this->acuerdoCancelado($usuariosIds, $titulo, 'sin mínimo', static fn (string $nombre): string => self::textoDeSinMinimo($nombre, $titulo, $minimo));
+    }
+
+    /**
+     * Lo mismo cuando la tarea canceló la función porque la franja ganadora se pisaba con otra
+     * función de la sala (EF-05.5): el correo dice eso, y no que faltó gente.
+     *
+     * @param list<string> $usuariosIds
+     *
+     * @return int a cuántos les salió
+     */
+    public function acuerdoConHorarioOcupado(array $usuariosIds, string $titulo): int
+    {
+        return $this->acuerdoCancelado($usuariosIds, $titulo, 'con el horario ocupado', static fn (string $nombre): string => self::textoDeHorarioOcupado($nombre, $titulo));
+    }
+
+    /**
+     * @param list<string>             $usuariosIds
+     * @param callable(string): string $texto       el cuerpo, con el nombre de cada uno
+     */
+    private function acuerdoCancelado(array $usuariosIds, string $titulo, string $cual, callable $texto): int
+    {
         $avisados = 0;
         foreach ($usuariosIds as $usuarioId) {
             try {
                 [$correo, $nombre] = $this->destinatario($usuarioId);
-                $this->correo->enviar(new Correo($correo, "Se canceló la función «{$titulo}»", self::textoDeSinMinimo($nombre, $titulo, $minimo)));
+                $this->correo->enviar(new Correo($correo, "Se canceló la función «{$titulo}»", $texto($nombre)));
                 ++$avisados;
             } catch (ExcepcionHttp | CorreoNoEnviado | RuntimeException $error) {
-                $this->log->warning('No salió el aviso del acuerdo sin mínimo a {usuario}: {motivo}', [
+                $this->log->warning("No salió el aviso del acuerdo {$cual} a {usuario}: {motivo}", [
                     'usuario' => $usuarioId,
                     'motivo' => $error->getMessage(),
                 ]);
@@ -240,6 +262,20 @@ final class AvisosDeReservas
             $comprobante,
             '',
             'Si al final no podés ir, cancelá la reserva desde «Mis reservas»: así otro usa el lugar.',
+            '',
+            'IndieCinema',
+        ]);
+    }
+
+    private static function textoDeHorarioOcupado(string $nombre, string $titulo): string
+    {
+        return implode("\n", [
+            "Hola, {$nombre}:",
+            '',
+            "Marcaste que te servía una fecha para «{$titulo}», pero el horario que eligieron se superpuso con otra función de la sala.",
+            'La función se canceló: no se programa y no tenés que hacer nada.',
+            '',
+            'En la cartelera de IndieCinema podés elegir otra función.',
             '',
             'IndieCinema',
         ]);

@@ -23,6 +23,7 @@ final class MigracionesTest extends TestCase
     private const RESTRICCION_CHECK = 3819;
     private const CAMPO_OBLIGATORIO = 1364;
     private const REPETIDO = 1062;
+    private const REFERENCIA_INEXISTENTE = 1452;
 
     private BaseDeDatos $base;
 
@@ -81,6 +82,7 @@ final class MigracionesTest extends TestCase
         self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM acuerdo_fecha'));
         self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM acuerdo_franja'));
         self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM voto_acuerdo'));
+        self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM conducta'));
     }
 
     public function testLaReservaQuedaGuardadaConfirmadaYConSusValores(): void
@@ -343,6 +345,39 @@ final class MigracionesTest extends TestCase
         $this->assertRechaza(self::VALOR_INVALIDO, fn () => $this->base->ejecutar(
             'UPDATE acuerdo_fecha SET estado = ? WHERE id = ?',
             ['estado_invalido', $acuerdoId],
+        ));
+    }
+
+    public function testLaConductaEsUnaPorReservaYExigeMotivoSiEsNegativa(): void
+    {
+        $reserva = $this->reservaValida();
+        $this->insertarReserva($reserva);
+        $organizador = Uuid::nuevo();
+
+        $this->base->ejecutar(
+            'INSERT INTO conducta (reserva_id, usuario_id, organizador_id, positiva, motivo, creada_en) VALUES (?, ?, ?, 1, NULL, ?)',
+            [$reserva['id'], $reserva['usuario_id'], $organizador, '2026-10-22 10:00:00'],
+        );
+        self::assertSame(1, (int) $this->base->valor('SELECT COUNT(*) FROM conducta'));
+
+        // A lo sumo una calificación de conducta por reserva.
+        $this->assertRechaza(self::REPETIDO, fn () => $this->base->ejecutar(
+            'INSERT INTO conducta (reserva_id, usuario_id, organizador_id, positiva, motivo, creada_en) VALUES (?, ?, ?, 0, ?, ?)',
+            [$reserva['id'], $reserva['usuario_id'], $organizador, 'Otro', '2026-10-22 10:05:00'],
+        ));
+
+        // Negativa sin motivo o sólo espacios se rechaza.
+        $otra = ['id' => Uuid::nuevo(), 'codigo' => 'B8N4P7M2'] + $reserva;
+        $this->insertarReserva($otra);
+        $this->assertRechaza(self::RESTRICCION_CHECK, fn () => $this->base->ejecutar(
+            'INSERT INTO conducta (reserva_id, usuario_id, organizador_id, positiva, motivo, creada_en) VALUES (?, ?, ?, 0, ?, ?)',
+            [$otra['id'], $otra['usuario_id'], $organizador, '   ', '2026-10-22 10:05:00'],
+        ));
+
+        // FK a reserva existente.
+        $this->assertRechaza(self::REFERENCIA_INEXISTENTE, fn () => $this->base->ejecutar(
+            'INSERT INTO conducta (reserva_id, usuario_id, organizador_id, positiva, motivo, creada_en) VALUES (?, ?, ?, 1, NULL, ?)',
+            [Uuid::nuevo(), $reserva['usuario_id'], $organizador, '2026-10-22 10:05:00'],
         ));
     }
 }

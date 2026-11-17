@@ -9,6 +9,8 @@ use IndieCinema\Nucleo\BaseDeDatos;
 use IndieCinema\Programacion\Modelo\EstadoFuncion;
 use IndieCinema\Programacion\Modelo\Funcion;
 use IndieCinema\Programacion\Modelo\FuncionDelOrganizador;
+use IndieCinema\Programacion\Modelo\FuncionFinalizada;
+use IndieCinema\Programacion\Modelo\ObraVotada;
 use IndieCinema\Programacion\Modelo\ResumenDeFuncion;
 
 /**
@@ -55,7 +57,8 @@ final class RepositorioDeFunciones
         $filas = $this->base->filas(
             "SELECT f.id, f.estado, f.fecha_hora, f.precio_base, f.cupo,
                     s.id AS sala_id, s.nombre AS sala_nombre, s.localidad AS sala_localidad,
-                    s.direccion AS sala_direccion, s.habilitada AS sala_habilitada, s.organizador_id
+                    s.direccion AS sala_direccion, s.duracion_funcion AS sala_duracion_funcion,
+                    s.habilitada AS sala_habilitada, s.organizador_id
              FROM funcion f
              JOIN sala s ON s.id = f.sala_id
              WHERE f.id IN ({$marcas}) AND s.dada_de_baja_en IS NULL",
@@ -96,6 +99,7 @@ final class RepositorioDeFunciones
                 (string) $fila['organizador_id'],
                 array_values(array_map(static fn (array $obra): string => (string) $obra['id'], $proyectadas)),
                 (string) $fila['sala_direccion'],
+                (int) $fila['sala_duracion_funcion'],
             );
         }
 
@@ -381,6 +385,85 @@ final class RepositorioDeFunciones
 
         // resumenes() no respeta el orden: se vuelve al de la consulta.
         return array_values(array_filter(array_map(static fn (string $id): ?ResumenDeFuncion => $resumenes[$id] ?? null, $ids)));
+    }
+
+    /**
+     * Las finalizadas que empezaron entre $desde (incluido) y $hasta (excluido), de la primera a la
+     * última, para la reportería de recaudación (EF-09): las de las salas de un organizador, las
+     * que proyectaron alguna obra de un dueño, o todas. También las de una sala dada de baja: lo
+     * que pasó en ella sigue contando para el período.
+     *
+     * Trae las obras de cada una con sus votos, y quiénes votaron, en dos consultas más para todas
+     * juntas: una por función serían cientos de consultas para un período largo.
+     *
+     * @return list<FuncionFinalizada>
+     */
+    public function finalizadasEntre(
+        DateTimeImmutable $desde,
+        DateTimeImmutable $hasta,
+        ?string $organizadorId,
+        ?string $duenoId,
+        int $cuantas,
+    ): array {
+        $condiciones = ['f.estado = ?', 'f.fecha_hora >= ?', 'f.fecha_hora < ?'];
+        $valores = [EstadoFuncion::Finalizada, $desde, $hasta];
+        if ($organizadorId !== null) {
+            $condiciones[] = 's.organizador_id = ?';
+            $valores[] = $organizadorId;
+        }
+        if ($duenoId !== null) {
+            $condiciones[] = 'EXISTS (SELECT 1 FROM funcion_obra fo JOIN obra o ON o.id = fo.obra_id WHERE fo.funcion_id = f.id AND o.dueno_id = ?)';
+            $valores[] = $duenoId;
+        }
+        $filas = $this->base->filas(
+            'SELECT f.id, f.fecha_hora, f.cupo, f.precio_base, s.id AS sala_id, s.nombre AS sala_nombre, s.organizador_id
+             FROM funcion f
+             JOIN sala s ON s.id = f.sala_id
+             WHERE ' . implode(' AND ', $condiciones) . '
+             ORDER BY f.fecha_hora, f.id
+             LIMIT ?',
+            [...$valores, $cuantas],
+        );
+        if ($filas === []) {
+            return [];
+        }
+        $ids = array_map(static fn (array $fila): string => (string) $fila['id'], $filas);
+        $marcas = implode(', ', array_fill(0, count($ids), '?'));
+
+        $obras = [];
+        foreach ($this->base->filas(
+            "SELECT fo.funcion_id, fo.estado, o.id, o.titulo, o.dueno_id,
+                    (SELECT COUNT(*) FROM voto v WHERE v.funcion_id = fo.funcion_id AND v.obra_id = o.id) AS votos
+             FROM funcion_obra fo
+             JOIN obra o ON o.id = fo.obra_id
+             WHERE fo.funcion_id IN ({$marcas})
+             ORDER BY o.titulo, o.id",
+            $ids,
+        ) as $obra) {
+            $obras[(string) $obra['funcion_id']][] = new ObraVotada(
+                (string) $obra['id'],
+                (string) $obra['titulo'],
+                (string) $obra['dueno_id'],
+                $obra['estado'] === 'elegida',
+                (int) $obra['votos'],
+            );
+        }
+        $votantes = [];
+        foreach ($this->base->filas("SELECT funcion_id, usuario_id FROM voto WHERE funcion_id IN ({$marcas}) ORDER BY usuario_id", $ids) as $voto) {
+            $votantes[(string) $voto['funcion_id']][] = (string) $voto['usuario_id'];
+        }
+
+        return array_map(static fn (array $fila): FuncionFinalizada => new FuncionFinalizada(
+            (string) $fila['id'],
+            new DateTimeImmutable((string) $fila['fecha_hora']),
+            (int) $fila['cupo'],
+            (string) $fila['precio_base'],
+            (string) $fila['sala_id'],
+            (string) $fila['sala_nombre'],
+            (string) $fila['organizador_id'],
+            $obras[(string) $fila['id']] ?? [],
+            $votantes[(string) $fila['id']] ?? [],
+        ), $filas);
     }
 
     /**

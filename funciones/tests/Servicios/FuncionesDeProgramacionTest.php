@@ -131,4 +131,24 @@ final class FuncionesDeProgramacionTest extends TestCase
             }
         }
     }
+
+    public function testMarcaSiElUsuarioEstaBloqueadoEnLaSalaDeLaFuncion(): void
+    {
+        $bloqueado = '66666666-6666-4666-8666-666666666666';
+        $otro = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+
+        $paraBloqueado = $this->funciones()->buscar(self::PROGRAMADA, $bloqueado);
+        $paraOtro = $this->funciones()->buscar(self::PROGRAMADA, $otro);
+        $sinUsuario = $this->funciones()->buscar(self::PROGRAMADA);
+        $enOtraSala = $this->funciones()->buscar('67676767-6767-4767-8767-676767676767', $bloqueado);
+
+        self::assertNotNull($paraBloqueado);
+        self::assertTrue($paraBloqueado->usuarioBloqueado);
+        self::assertNotNull($paraOtro);
+        self::assertFalse($paraOtro->usuarioBloqueado);
+        self::assertNotNull($sinUsuario);
+        self::assertFalse($sinUsuario->usuarioBloqueado);
+        self::assertNotNull($enOtraSala);
+        self::assertFalse($enOtraSala->usuarioBloqueado);
+    }
 }

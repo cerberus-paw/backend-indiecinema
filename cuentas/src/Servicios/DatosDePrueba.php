@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace IndieCinema\Cuentas\Servicios;
 
+use DateTimeImmutable;
+use DateTimeZone;
 use IndieCinema\Cuentas\Modelo\EstadoCuenta;
 use IndieCinema\Cuentas\Modelo\Usuario;
 use IndieCinema\Cuentas\Repositorios\RepositorioDeUsuarios;
@@ -101,6 +103,7 @@ final class DatosDePrueba
      */
     public function cargar(): array
     {
+        $ahora = new DateTimeImmutable('now', new DateTimeZone('UTC'));
         $resultado = [];
         foreach ($this->aCargar as $datos) {
             if ($this->usuarios->buscarPorCorreo($datos['correo']) !== null) {
@@ -114,6 +117,7 @@ final class DatosDePrueba
                 password_hash($datos['contrasena'], PASSWORD_ARGON2ID),
                 EstadoCuenta::Activa,
                 $datos['roles'],
+                $ahora,
             ));
             $resultado[$datos['correo']] = true;
         }

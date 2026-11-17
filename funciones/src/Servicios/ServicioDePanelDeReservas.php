@@ -6,15 +6,18 @@ namespace IndieCinema\Funciones\Servicios;
 
 use DateTimeImmutable;
 use IndieCinema\Funciones\Modelo\AutorDelCambio;
+use IndieCinema\Funciones\Modelo\Conducta;
 use IndieCinema\Funciones\Modelo\EstadoReserva;
 use IndieCinema\Funciones\Modelo\FuncionDeProgramacion;
 use IndieCinema\Funciones\Modelo\ReglaIncumplida;
 use IndieCinema\Funciones\Modelo\Reserva;
+use IndieCinema\Funciones\Repositorios\RepositorioDeConducta;
 use IndieCinema\Funciones\Repositorios\RepositorioDeReservas;
 use IndieCinema\Nucleo\Http\ExcepcionHttp;
 use IndieCinema\Nucleo\Seguridad\Rol;
 use IndieCinema\Nucleo\Seguridad\Usuario;
 use IndieCinema\Nucleo\Uuid;
+use LogicException;
 
 /**
  * El seguimiento de las reservas (E4-03): el organizador ve las de sus funciones y registra la
@@ -29,6 +32,7 @@ final class ServicioDePanelDeReservas
     public function __construct(
         private readonly FuncionesDeProgramacion $funciones,
         private readonly RepositorioDeReservas $reservas,
+        private readonly ?RepositorioDeConducta $conductas = null,
     ) {
     }
 
@@ -96,6 +100,51 @@ final class ServicioDePanelDeReservas
         }
 
         return $conAsistencia;
+    }
+
+    /**
+     * Calificaciones de conducta ya cargadas para esa función, indexadas por reserva_id.
+     *
+     * @return array<string, Conducta>
+     */
+    public function conductasDeLaFuncion(string $funcionId): array
+    {
+        return $this->conductas?->deLaFuncion($funcionId) ?? [];
+    }
+
+    /**
+     * El organizador califica la conducta de una reserva con asistencia, dentro de los 7 días de
+     * la función (EF-13.1). Que la función sea suya lo controla funcionPropia() (404 si es de otro).
+     *
+     * @return array{Reserva, Conducta}
+     *
+     * @throws ExcepcionHttp   404 si la función no existe o no es del organizador
+     * @throws ReglaIncumplida si la reserva no es de esta función, no asistió, venció el plazo,
+     *                         falta el motivo en negativa o ya fue calificada
+     */
+    public function calificarConducta(
+        Usuario $organizador,
+        string $funcionId,
+        string $reservaId,
+        bool $positiva,
+        ?string $motivo,
+        DateTimeImmutable $ahora = new DateTimeImmutable(),
+    ): array {
+        if ($this->conductas === null) {
+            throw new LogicException('Falta RepositorioDeConducta para calificar conducta.');
+        }
+        $funcion = $this->funcionPropia($organizador, $funcionId);
+        $reserva = Uuid::esValido($reservaId) ? $this->reservas->buscar($reservaId) : null;
+        if ($reserva === null || $reserva->funcionId !== $funcion->id) {
+            throw new ReglaIncumplida('No hay ninguna reserva con ese identificador para esta función.');
+        }
+
+        $conducta = Conducta::nueva($reserva, $funcion, $organizador->id, $positiva, $motivo, $ahora);
+        if (!$this->conductas->agregar($conducta)) {
+            throw new ReglaIncumplida("La conducta de la reserva {$reserva->codigo} ya fue calificada.");
+        }
+
+        return [$reserva, $conducta];
     }
 
     /**

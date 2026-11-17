@@ -258,6 +258,7 @@ final class Cartelera extends Controlador
             // El aviso de que se acaba de guardar: sólo para el organizador que la editó. La ficha
             // es pública, y si no, lo vería cualquiera que abra el enlace con el parámetro puesto.
             'guardada' => $esPropia && $peticion->consulta('guardada') === '1',
+            'verificacion_reenviada' => $usuario !== null && !$usuario->correoVerificado && $peticion->consulta('reenviado') === '1',
             'accion_votar_franja' => "/cartelera/{$id}/votar",
         ])->conCabecera('Vary', 'Accept');
     }
@@ -278,7 +279,7 @@ final class Cartelera extends Controlador
         $cupo = $this->servicio->cupo((string) $peticion->parametro('id'));
         $lugares = $this->lugaresDe($cupo, $usuario?->id);
 
-        return $this->json([
+        $respuesta = [
             'lugares_libres' => $lugares['lugares_libres'],
             'agotada' => $lugares['agotada'],
             'cupo' => $cupo->cupo,
@@ -286,18 +287,24 @@ final class Cartelera extends Controlador
             'maximo_por_persona' => $lugares['maximo_por_persona'],
             'lugares_restantes_usuario' => $lugares['lugares_restantes_usuario'],
             'maximo_reserva' => $lugares['maximo_reserva'],
-        ]);
+        ];
+        if ($lugares['aviso_conducta'] !== null) {
+            $respuesta['aviso_conducta'] = $lugares['aviso_conducta'];
+            $respuesta['limite_conducta_alcanzado'] = $lugares['limite_conducta_alcanzado'];
+        }
+
+        return $this->json($respuesta);
     }
 
     /**
      * Los lugares libres de una función, si está agotada y lo que puede reservar el espectador.
      * Sólo de una programada por darse se pregunta: en otro estado no hay reservas que contar, y
      * una que ya pasó no está «agotada» aunque se hayan tomado todos los lugares. El tope por
-     * persona lo manda funciones con la ocupación, así el número está en un solo lugar (IC-463).
-     * Sin el dato de funciones, todo null: la ficha deja el campo hasta el cupo y la reserva la
-     * controla funciones igual.
+     * persona y la restricción de conducta vienen de funciones con la ocupación, así las reglas
+     * están en un solo lugar (IC-463, EF-13.2). Sin el dato de funciones, todo null: la ficha deja
+     * el campo hasta el cupo y la reserva la controla funciones igual.
      *
-     * @return array{lugares_libres: ?int, agotada: bool, maximo_por_persona: ?int, lugares_restantes_usuario: ?int, maximo_reserva: ?int}
+     * @return array{lugares_libres: ?int, agotada: bool, maximo_por_persona: ?int, lugares_restantes_usuario: ?int, maximo_reserva: ?int, aviso_conducta: ?string, limite_conducta_alcanzado: bool}
      */
     private function lugaresDe(CupoDeFuncion $funcion, ?string $usuarioId = null): array
     {
@@ -306,11 +313,20 @@ final class Cartelera extends Controlador
             : null;
         $libres = TarjetaDeFuncion::lugaresLibres($funcion->estado, $funcion->fechaHora, $funcion->cupo, $ocupacion['ocupados'] ?? null);
         if ($ocupacion === null || $libres === null) {
-            return ['lugares_libres' => null, 'agotada' => false, 'maximo_por_persona' => null, 'lugares_restantes_usuario' => null, 'maximo_reserva' => null];
+            return [
+                'lugares_libres' => null,
+                'agotada' => false,
+                'maximo_por_persona' => null,
+                'lugares_restantes_usuario' => null,
+                'maximo_reserva' => null,
+                'aviso_conducta' => null,
+                'limite_conducta_alcanzado' => false,
+            ];
         }
 
         $maximoPorPersona = min($ocupacion['maximo_por_persona'], $funcion->cupo);
         $restantesUsuario = max(0, $maximoPorPersona - $ocupacion['del_usuario']);
+        $topeConducta = $ocupacion['tope_reservas_conducta'];
 
         return [
             'lugares_libres' => $libres,
@@ -318,6 +334,10 @@ final class Cartelera extends Controlador
             'maximo_por_persona' => $maximoPorPersona,
             'lugares_restantes_usuario' => $restantesUsuario,
             'maximo_reserva' => min($libres, $restantesUsuario),
+            'aviso_conducta' => $topeConducta === null
+                ? null
+                : "Por tu historial de conducta podés tener hasta {$topeConducta} " . ($topeConducta === 1 ? 'reserva' : 'reservas') . ' a la vez.',
+            'limite_conducta_alcanzado' => $topeConducta !== null && $ocupacion['reservas_activas_usuario'] >= $topeConducta,
         ];
     }
 
@@ -345,6 +365,14 @@ final class Cartelera extends Controlador
         if ($usuario === null) {
             throw ExcepcionHttp::prohibida();
         }
+        if (!$usuario->correoVerificado) {
+            $mensaje = 'Verificá tu correo para votar.';
+            if ($peticion->aceptaJson() || $peticion->cabecera('Content-Type') === 'application/json') {
+                return $this->json(['error' => $mensaje], 403);
+            }
+
+            throw new ExcepcionHttp(403, $mensaje);
+        }
 
         $cuerpo = $peticion->cuerpo();
         $franjaId = (string) ($cuerpo['franja_id'] ?? '');
@@ -358,8 +386,9 @@ final class Cartelera extends Controlador
                 $this->servicio->votar($id, $usuario->id, $obraId);
             }
         } catch (ReglaIncumplida $regla) {
-            if ($peticion->cabecera('Accept') === 'application/json' || $peticion->cabecera('Content-Type') === 'application/json') {
-                return $this->json(['error' => $regla->getMessage()], 422);
+            $estado = $regla->getMessage() === ServicioDeCartelera::MENSAJE_USUARIO_BLOQUEADO ? 403 : 422;
+            if ($peticion->aceptaJson() || $peticion->cabecera('Accept') === 'application/json' || $peticion->cabecera('Content-Type') === 'application/json') {
+                return $this->json(['error' => $regla->getMessage()], $estado);
             }
 
             return $this->redirigir($this->avisos->direccion($id, AvisosDeLaFicha::VOTO, $regla->getMessage()));

@@ -12,8 +12,10 @@ use IndieCinema\Funciones\Modelo\ReglaIncumplida;
 use IndieCinema\Funciones\Modelo\Reserva;
 use IndieCinema\Funciones\Servicios\AvisosDeReservas;
 use IndieCinema\Funciones\Modelo\Calificacion;
+use IndieCinema\Funciones\Modelo\Conducta;
 use IndieCinema\Funciones\Servicios\PagosDeReservas;
 use IndieCinema\Funciones\Servicios\ServicioDeCalificaciones;
+use IndieCinema\Funciones\Servicios\ServicioDeConducta;
 use IndieCinema\Funciones\Servicios\ServicioDeReservas;
 use IndieCinema\Nucleo\Controlador;
 use IndieCinema\Nucleo\Http\ExcepcionHttp;
@@ -43,6 +45,7 @@ final class Reservas extends Controlador
         private readonly PagosDeReservas $pagos,
         private readonly LoggerInterface $log,
         private readonly ServicioDeCalificaciones $calificaciones,
+        private readonly ?ServicioDeConducta $conducta = null,
     ) {
     }
 
@@ -80,6 +83,7 @@ final class Reservas extends Controlador
         $calificadas = $this->calificaciones->deLasReservas($espectador, $reservas);
 
         return $this->vista('mis_reservas.html.twig', [
+            'resumen_conducta' => $this->conducta?->actividadYConducta($espectador->id),
             'reservas' => array_map(static function (Reserva $reserva) use ($funciones, $sinProgramacion, $calificadas): array {
                 $funcion = $funciones[$reserva->funcionId] ?? null;
 
@@ -124,18 +128,35 @@ final class Reservas extends Controlador
 
     public function formulario(Peticion $peticion): Respuesta
     {
-        $funcion = $this->servicio->funcion((string) $peticion->parametro('id'));
+        $usuario = self::usuario($peticion);
+        $funcion = $this->servicio->funcion((string) $peticion->parametro('id'), $usuario->id);
 
-        return $this->pantalla($funcion, ['cantidad' => '1'], usuario: self::usuario($peticion));
+        return $this->pantalla($funcion, ['cantidad' => '1'], usuario: $usuario);
     }
 
     public function reservar(Peticion $peticion): Respuesta
     {
-        $funcion = $this->servicio->funcion((string) $peticion->parametro('id'));
         $usuario = self::usuario($peticion);
+        $funcion = $this->servicio->funcion((string) $peticion->parametro('id'), $usuario->id);
         $enJson = $peticion->aceptaJson();
         $valor = $peticion->campo('cantidad');
         $valor = is_string($valor) ? trim($valor) : '';
+
+        if (!$usuario->correoVerificado) {
+            $mensaje = 'Verificá tu correo para reservar.';
+
+            return $enJson
+                ? $this->json(['error' => $mensaje, ...$this->lugaresDe($funcion, $usuario)], 403)
+                : $this->pantalla($funcion, ['cantidad' => $valor], error: $mensaje, usuario: $usuario, estado: 403);
+        }
+
+        if ($funcion->usuarioBloqueado) {
+            $mensaje = FuncionDeProgramacion::MENSAJE_USUARIO_BLOQUEADO;
+
+            return $enJson
+                ? $this->json(['error' => $mensaje, ...$this->lugaresDe($funcion, $usuario)], 403)
+                : $this->pantalla($funcion, ['cantidad' => $valor], error: $mensaje, usuario: $usuario, estado: 403);
+        }
 
         // Entero y dentro del cupo, como el min y el max del campo: el navegador controla lo mismo.
         // El mensaje nombra el tope por persona y no el cupo: es lo más que se puede pedir, y si
@@ -155,10 +176,12 @@ final class Reservas extends Controlador
         try {
             $reserva = $this->servicio->reservar($usuario, $funcion->id, $cantidad);
         } catch (ReglaIncumplida $error) {
+            $estado = $error->getMessage() === FuncionDeProgramacion::MENSAJE_USUARIO_BLOQUEADO ? 403 : 422;
+
             // El mensaje de la regla es para el espectador («Quedan 2 lugares.»), no interno.
             return $enJson
-                ? $this->json(['error' => $error->getMessage(), ...$this->lugaresDe($funcion, $usuario)], 422)
-                : $this->pantalla($funcion, ['cantidad' => $valor], error: $error->getMessage(), usuario: $usuario, estado: 422);
+                ? $this->json(['error' => $error->getMessage(), ...$this->lugaresDe($funcion, $usuario)], $estado)
+                : $this->pantalla($funcion, ['cantidad' => $valor], error: $error->getMessage(), usuario: $usuario, estado: $estado);
         }
 
         // Pendiente de pago: al paso «Pago», en el comprobante. El correo sale recién cuando llega
@@ -278,7 +301,7 @@ final class Reservas extends Controlador
      * Los lugares que quedan después de reservar, para que la ficha actualice el número sin
      * volver a preguntar (E4-05.1), y lo que le queda al espectador según el tope por persona.
      *
-     * @return array{lugares_libres: int, lugares_restantes_usuario?: int, maximo_reserva?: int, maximo_por_persona?: int}
+     * @return array{lugares_libres: int, lugares_restantes_usuario?: int, maximo_reserva?: int, maximo_por_persona?: int, aviso_conducta?: string, limite_conducta_alcanzado?: bool}
      */
     private function lugaresDe(FuncionDeProgramacion $funcion, ?Usuario $usuario = null): array
     {
@@ -289,6 +312,11 @@ final class Reservas extends Controlador
             $datos['lugares_restantes_usuario'] = $restantes;
             $datos['maximo_reserva'] = min($libres, $restantes);
             $datos['maximo_por_persona'] = ServicioDeReservas::maximoPorPersona($funcion);
+            $topeConducta = $this->conducta?->topeSimultaneoPara($usuario->id);
+            if ($topeConducta !== null) {
+                $datos['aviso_conducta'] = Conducta::mensajeDeTopeBajoUmbral($topeConducta);
+                $datos['limite_conducta_alcanzado'] = $this->servicio->activasDelUsuario($usuario->id) >= $topeConducta;
+            }
         }
 
         return $datos;
@@ -355,9 +383,17 @@ final class Reservas extends Controlador
         $restantesUsuario = $usuario !== null ? $this->servicio->lugaresRestantesPara($funcion, $usuario->id) : $maximoPorPersona;
         $libres = $this->servicio->lugaresLibres($funcion);
         $maximoCampo = min($libres, $restantesUsuario);
+        $topeConducta = $usuario !== null ? $this->conducta?->topeSimultaneoPara($usuario->id) : null;
+        $avisoConducta = $topeConducta !== null ? Conducta::mensajeDeTopeBajoUmbral($topeConducta) : null;
 
+        if ($error === null && $motivo === null && $usuario !== null && !$usuario->correoVerificado) {
+            $motivo = 'Verificá tu correo para reservar.';
+        }
         if ($error === null && $motivo === null && $usuario !== null && $restantesUsuario === 0) {
             $motivo = "Ya tenés reservados los {$maximoPorPersona} lugares máximos por persona para esta función.";
+        }
+        if ($error === null && $motivo === null && $usuario !== null && $topeConducta !== null && $avisoConducta !== null && $this->servicio->activasDelUsuario($usuario->id) >= $topeConducta) {
+            $motivo = $avisoConducta;
         }
 
         $datos = [
@@ -366,6 +402,7 @@ final class Reservas extends Controlador
             'con_pago' => $this->pagos->activos() && $funcion->precioBase > 0,
             // Si ya no se puede, la página lo dice en lugar del formulario.
             'motivo' => $motivo,
+            'aviso_conducta' => $error !== $avisoConducta ? $avisoConducta : null,
             'reglas' => [
                 'cantidad' => [
                     'minimo' => 1,

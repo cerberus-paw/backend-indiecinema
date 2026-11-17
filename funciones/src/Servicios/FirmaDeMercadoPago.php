@@ -24,20 +24,32 @@ use SensitiveParameter;
  */
 final class FirmaDeMercadoPago
 {
+    /** Máxima antigüedad (o adelanto de reloj) admitida en la marca de tiempo `ts` del aviso (EF-18.3). */
+    public const TOLERANCIA_SEGUNDOS = 300;
+
     /**
      * @param ?string $firma       la cabecera x-signature
      * @param ?string $idDelPedido la cabecera x-request-id
      * @param string  $recurso     el data.id de la dirección del aviso
+     * @param ?int    $ahora       instante de referencia en segundos Unix (null = hora actual)
      */
-    public static function esValida(?string $firma, ?string $idDelPedido, string $recurso, #[SensitiveParameter] string $clave): bool
-    {
+    public static function esValida(
+        ?string $firma,
+        ?string $idDelPedido,
+        string $recurso,
+        #[SensitiveParameter] string $clave,
+        ?int $ahora = null,
+    ): bool {
         if ($firma === null || $clave === '') {
             return false;
         }
         $partes = self::partes($firma);
         $ts = $partes['ts'] ?? '';
         $v1 = $partes['v1'] ?? '';
-        if ($ts === '' || preg_match('/^[0-9a-f]{64}$/', $v1) !== 1) {
+        if (preg_match('/^\d{1,12}$/', $ts) !== 1 || preg_match('/^[0-9a-f]{64}$/', $v1) !== 1) {
+            return false;
+        }
+        if (abs(($ahora ?? time()) - (int) $ts) > self::TOLERANCIA_SEGUNDOS) {
             return false;
         }
 

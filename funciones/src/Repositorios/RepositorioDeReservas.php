@@ -11,6 +11,7 @@ use IndieCinema\Funciones\Modelo\EstadoReserva;
 use IndieCinema\Funciones\Modelo\Reserva;
 use IndieCinema\Nucleo\BaseDeDatos;
 use IndieCinema\Nucleo\Http\ExcepcionHttp;
+use LogicException;
 use PDOException;
 
 final class RepositorioDeReservas
@@ -164,8 +165,11 @@ final class RepositorioDeReservas
 
     /**
      * Las reservas en pie de esas funciones, para lo cobrado que pide recaudación (EF-02.5): las que
-     * ocupan lugares salvo las que todavía esperan el pago, que no se cobraron. Las canceladas no:
-     * soltaron sus lugares, y si se habían pagado, el reembolso es de EF-06.4.
+     * ocupan lugares salvo las que todavía esperan el pago, que no se cobraron.
+     *
+     * Y las canceladas que se habían pagado (EF-06.4): soltaron sus lugares, pero su plata entró, y
+     * recaudación tiene que ver si volvió. Si el reembolso salió, el neto las descuenta; si quedó
+     * pendiente, siguen contando, porque la plata todavía está en la cuenta.
      *
      * @param list<string> $funcionesIds
      *
@@ -184,7 +188,7 @@ final class RepositorioDeReservas
         $porFuncion = array_fill_keys($funcionesIds, []);
         foreach ($this->base->filas(
             'SELECT * FROM reserva WHERE funcion_id IN (' . implode(', ', array_fill(0, count($funcionesIds), '?')) . ')
-             AND estado IN (' . implode(', ', array_fill(0, count($estados), '?')) . ')
+             AND (estado IN (' . implode(', ', array_fill(0, count($estados), '?')) . ') OR pago_id IS NOT NULL)
              ORDER BY creada_en, codigo',
             [...$funcionesIds, ...$estados],
         ) as $fila) {
@@ -219,6 +223,8 @@ final class RepositorioDeReservas
             $fila['preferencia_id'],
             $fila['enlace_de_pago'],
             $fila['pago_id'],
+            $fila['reembolso_id'],
+            $fila['reembolsada_en'] === null ? null : new DateTimeImmutable($fila['reembolsada_en'], new DateTimeZone('UTC')),
         );
     }
 
@@ -288,6 +294,28 @@ final class RepositorioDeReservas
             }
             throw $error;
         }
+    }
+
+    /**
+     * Anota el reembolso del pago de la reserva, si todavía no tenía ninguno (EF-06.4). Es una sola
+     * sentencia, como tomarRecordatorio(): si dos cancelaciones compiten, una sola lo anota, y la
+     * otra se entera por el false y no se lo vuelve a pedir a Mercado Pago.
+     *
+     * No deja línea en cambio_reserva: ese historial anota cambios de estado —su CHECK
+     * cambio_reserva_cambia_el_estado no acepta dos iguales— y el reembolso no cambia el estado,
+     * que ya quedó cancelado. Queda en la reserva y en el log.
+     *
+     * @return bool false si ya estaba reembolsada, y entonces no guardó nada
+     */
+    public function guardarReembolso(Reserva $reembolsada): bool
+    {
+        $reembolsoId = $reembolsada->reembolsoId
+            ?? throw new LogicException("La reserva {$reembolsada->id} no tiene ningún reembolso que guardar.");
+
+        return $this->base->ejecutar(
+            'UPDATE reserva SET reembolso_id = ?, reembolsada_en = ? WHERE id = ? AND pago_id IS NOT NULL AND reembolso_id IS NULL',
+            [$reembolsoId, $reembolsada->reembolsadaEn, $reembolsada->id],
+        ) === 1;
     }
 
     private function anotarCambio(Reserva $reserva, EstadoReserva $anterior, AutorDelCambio $autor, DateTimeImmutable $ahora): void

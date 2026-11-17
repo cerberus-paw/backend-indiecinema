@@ -36,19 +36,29 @@ final class FirmaDeMercadoPagoTest extends TestCase
 
     public function testPasaLaFirmaHechaConLaClave(): void
     {
-        self::assertTrue(FirmaDeMercadoPago::esValida(self::firma(), self::PEDIDO, self::PAGO, self::CLAVE));
+        self::assertTrue(FirmaDeMercadoPago::esValida(self::firma(), self::PEDIDO, self::PAGO, self::CLAVE, (int) self::TS));
     }
 
     public function testPasaConEspaciosEntreLasPartes(): void
     {
         $firma = str_replace(',', ', ', self::firma());
 
-        self::assertTrue(FirmaDeMercadoPago::esValida($firma, self::PEDIDO, self::PAGO, self::CLAVE));
+        self::assertTrue(FirmaDeMercadoPago::esValida($firma, self::PEDIDO, self::PAGO, self::CLAVE, (int) self::TS));
     }
 
     public function testPasaSinXRequestIdSiSeFirmoSinEl(): void
     {
-        self::assertTrue(FirmaDeMercadoPago::esValida(self::firma(pedido: null), null, self::PAGO, self::CLAVE));
+        self::assertTrue(FirmaDeMercadoPago::esValida(self::firma(pedido: null), null, self::PAGO, self::CLAVE, (int) self::TS));
+    }
+
+    public function testRechazaTsDeMasDeCincoMinutosOAdelantadoMasDeCincoMinutos(): void
+    {
+        $ts = (int) self::TS;
+        self::assertTrue(FirmaDeMercadoPago::esValida(self::firma(), self::PEDIDO, self::PAGO, self::CLAVE, $ts + 300));
+        self::assertFalse(FirmaDeMercadoPago::esValida(self::firma(), self::PEDIDO, self::PAGO, self::CLAVE, $ts + 301));
+        self::assertTrue(FirmaDeMercadoPago::esValida(self::firma(), self::PEDIDO, self::PAGO, self::CLAVE, $ts - 300));
+        self::assertFalse(FirmaDeMercadoPago::esValida(self::firma(), self::PEDIDO, self::PAGO, self::CLAVE, $ts - 301));
+        self::assertFalse(FirmaDeMercadoPago::esValida(self::firma(ts: 'no-numerico'), self::PEDIDO, self::PAGO, self::CLAVE, $ts));
     }
 
     /**
@@ -73,6 +83,6 @@ final class FirmaDeMercadoPagoTest extends TestCase
     #[DataProvider('firmasQueNoPasan')]
     public function testNoPasa(?string $firma, ?string $pedido, string $recurso, string $clave): void
     {
-        self::assertFalse(FirmaDeMercadoPago::esValida($firma, $pedido, $recurso, $clave));
+        self::assertFalse(FirmaDeMercadoPago::esValida($firma, $pedido, $recurso, $clave, (int) self::TS));
     }
 }

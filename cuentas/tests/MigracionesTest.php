@@ -100,4 +100,56 @@ final class MigracionesTest extends TestCase
 
         self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM rol'));
     }
+
+    public function testTokensDeCuentaValidaPropositoUnicidadYBorradoEnCascada(): void
+    {
+        $id = $this->registrar('ana@ejemplo.com');
+        $huella = hash('sha256', 'token-de-prueba');
+        $this->base->ejecutar(
+            "INSERT INTO token_de_cuenta (huella, usuario_id, proposito, creado_en, vence_en)
+             VALUES (?, ?, 'verificar', UTC_TIMESTAMP(), UTC_TIMESTAMP() + INTERVAL 24 HOUR)",
+            [$huella, $id],
+        );
+
+        $this->assertRechaza(
+            self::CLAVE_DUPLICADA,
+            fn () => $this->base->ejecutar(
+                "INSERT INTO token_de_cuenta (huella, usuario_id, proposito, creado_en, vence_en)
+                 VALUES (?, ?, 'verificar', UTC_TIMESTAMP(), UTC_TIMESTAMP() + INTERVAL 24 HOUR)",
+                [$huella, $id],
+            ),
+        );
+        $this->assertRechaza(
+            self::VALOR_INVALIDO,
+            fn () => $this->base->ejecutar(
+                "INSERT INTO token_de_cuenta (huella, usuario_id, proposito, creado_en, vence_en)
+                 VALUES (?, ?, 'otro', UTC_TIMESTAMP(), UTC_TIMESTAMP() + INTERVAL 24 HOUR)",
+                [hash('sha256', 'otro'), $id],
+            ),
+        );
+        $this->assertRechaza(
+            self::FALTA_EL_PADRE,
+            fn () => $this->base->ejecutar(
+                "INSERT INTO token_de_cuenta (huella, usuario_id, proposito, creado_en, vence_en)
+                 VALUES (?, ?, 'verificar', UTC_TIMESTAMP(), UTC_TIMESTAMP() + INTERVAL 24 HOUR)",
+                [hash('sha256', 'huerfano'), Uuid::nuevo()],
+            ),
+        );
+
+        $this->base->ejecutar('DELETE FROM usuario WHERE id = ?', [$id]);
+        self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM token_de_cuenta'));
+    }
+
+    public function testMigracionVerificaCuentasExistentesSinPisarLasYaVerificadas(): void
+    {
+        $sinVerificar = $this->registrar('vieja@ejemplo.com');
+        $yaVerificada = $this->registrar('verificada@ejemplo.com');
+        $this->base->ejecutar("UPDATE usuario SET correo_verificado_en = '2026-01-15 10:00:00' WHERE id = ?", [$yaVerificada]);
+
+        $sql = (string) file_get_contents(dirname(__DIR__) . '/migraciones/007_verificar_cuentas_existentes.sql');
+        $this->base->ejecutar($sql);
+
+        self::assertNotNull($this->base->valor('SELECT correo_verificado_en FROM usuario WHERE id = ?', [$sinVerificar]));
+        self::assertSame('2026-01-15 10:00:00', $this->base->valor('SELECT correo_verificado_en FROM usuario WHERE id = ?', [$yaVerificada]));
+    }
 }

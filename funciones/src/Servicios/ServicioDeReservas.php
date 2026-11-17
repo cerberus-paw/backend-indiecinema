@@ -33,13 +33,16 @@ final class ServicioDeReservas
     public const POR_PAGINA = 20;
 
     /**
-     * @param ?PagosDeReservas $pagos el cobro con Mercado Pago; sin él, como con el cobro apagado,
-     *                                toda reserva nace confirmada
+     * @param ?PagosDeReservas      $pagos      el cobro con Mercado Pago; sin él, como con el cobro
+     *                                          apagado, toda reserva nace confirmada
+     * @param ?ServicioDeReembolsos $reembolsos la devolución del pago al cancelar (EF-06.4); sin
+     *                                          él, la reserva se cancela y no se devuelve nada
      */
     public function __construct(
         private readonly FuncionesDeProgramacion $funciones,
         private readonly RepositorioDeReservas $reservas,
         private readonly ?PagosDeReservas $pagos = null,
+        private readonly ?ServicioDeReembolsos $reembolsos = null,
         private readonly ?ServicioDeConducta $conducta = null,
     ) {
     }
@@ -115,6 +118,23 @@ final class ServicioDeReservas
     }
 
     /**
+     * Por qué se canceló cada una de esas reservas (EF-06.3), para que «Mis reservas» y el
+     * comprobante lo digan en lugar de dejar un «Cancelada» sin explicación. Sólo pregunta por las
+     * canceladas: las demás no tienen nada que explicar, y si no hay ninguna no consulta la base.
+     *
+     * @param list<Reserva> $reservas
+     *
+     * @return array<string, string> reserva_id => motivo; sólo las que tienen uno
+     */
+    public function motivosDeCancelacion(array $reservas): array
+    {
+        return $this->reservas->motivosDeCancelacion(array_values(array_map(
+            static fn (Reserva $reserva): string => $reserva->id,
+            array_filter($reservas, static fn (Reserva $reserva): bool => $reserva->estado === EstadoReserva::Cancelada),
+        )));
+    }
+
+    /**
      * Si el espectador todavía puede cancelar la reserva: confirmada, y antes de que empiece la
      * función. Después ya no tiene sentido soltar los lugares, y quien entró ya usó la entrada.
      * Si programación ya no muestra la función (su sala se dio de baja), se puede.
@@ -128,6 +148,10 @@ final class ServicioDeReservas
     /**
      * Cancela la reserva del espectador: sus lugares vuelven a quedar libres para otros. No
      * bloquea la función como reservar(): soltar lugares nunca pasa el cupo.
+     *
+     * Si la había pagado, se le devuelve la plata (EF-06.4). Si Mercado Pago no la devuelve, la
+     * reserva queda cancelada igual: el espectador no se come un error por algo que se arregla del
+     * otro lado, y el reembolso queda pendiente para el administrador.
      *
      * @throws ExcepcionHttp   404 si no es suya
      * @throws ReglaIncumplida si ya no está confirmada, la función ya empezó, o cambió mientras
@@ -152,7 +176,8 @@ final class ServicioDeReservas
             throw new ReglaIncumplida('La reserva cambió mientras tanto. Volvé a cargarla para ver en qué quedó.');
         }
 
-        return $cancelada;
+        // Después de guardarla: sólo se devuelve el pago de una cancelación que de verdad quedó.
+        return $this->reembolsos?->reembolsar($cancelada, $ahora) ?? $cancelada;
     }
 
     /**

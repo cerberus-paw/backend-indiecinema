@@ -70,6 +70,8 @@ reemplazos=(
 	-e "s/^clave = \"cambiar\"/clave = \"${clave}\"/"
 	-e "s/^token = \"cambiar\"/token = \"${token}\"/"
 	-e "s/^secreto = \"cambiar\"/secreto = \"${secreto}\"/"
+	-e 's/^access_token = "cambiar"/access_token = ""/'
+	-e 's/^clave_webhook = "cambiar"/clave_webhook = ""/'
 )
 for otro in "${otros[@]}"; do
 	token_otro=$(valor_ini "$otro/config/config.ini" interno token)

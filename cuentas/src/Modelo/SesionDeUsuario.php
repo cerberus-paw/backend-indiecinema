@@ -20,6 +20,7 @@ final readonly class SesionDeUsuario
         public string $nombre,
         public EstadoCuenta $estado,
         public array $roles,
+        public bool $correoVerificado = false,
     ) {
     }
 

@@ -165,6 +165,9 @@ reservar=/funcion/reservar/00000003-0000-4000-8000-000000000001
 rafaga 6 POST $reservar application/json application/json
 demasiados POST $reservar text/html
 
+echo "Muchos pedidos de títulos seguidos desde una IP:"
+rafaga 3 POST /pedidos/nuevo text/html
+
 if ((fallas > 0)); then
 	echo "$fallas comprobaciones fallaron."
 	exit 1

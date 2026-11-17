@@ -25,6 +25,7 @@ final class CalificacionesInternasTest extends TestCase
     private const TOKEN_DE_PROGRAMACION = 'token-de-programacion';
     private const TOKEN_DE_MODERACION = 'token-de-moderacion';
     private const MODERADORA = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+    private const TOKEN_DE_RECAUDACION = 'token-de-recaudacion';
     private const SALA = '5a5a5a5a-5a5a-45a5-85a5-5a5a5a5a5a5a';
     private const OTRA_SALA = '6b6b6b6b-6b6b-46b6-86b6-6b6b6b6b6b6b';
     private const ORGANIZADORA = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
@@ -56,18 +57,22 @@ final class CalificacionesInternasTest extends TestCase
             'nginx' => ['secreto' => 'secreto-de-nginx'],
             'subsistemas' => ['cuentas' => self::$urlCuentas],
             'interno' => ['token' => 'token-de-funciones'],
-            'llamadores' => ['programacion' => hash('sha256', self::TOKEN_DE_PROGRAMACION), 'moderacion' => hash('sha256', self::TOKEN_DE_MODERACION)],
+            'llamadores' => [
+                'programacion' => hash('sha256', self::TOKEN_DE_PROGRAMACION),
+                'recaudacion' => hash('sha256', self::TOKEN_DE_RECAUDACION),
+                'moderacion' => hash('sha256', self::TOKEN_DE_MODERACION),
+            ],
         ]);
         $this->base = self::baseConTablasNuevas($this->configuracion);
     }
 
-    private function pedir(string $ruta, string $token = self::TOKEN_DE_PROGRAMACION): Respuesta
+    private function pedir(string $ruta, string $token = self::TOKEN_DE_PROGRAMACION, string $llamador = 'programacion'): Respuesta
     {
         $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion, new Log('funciones', fopen('php://memory', 'w')));
         parse_str((string) parse_url($ruta, PHP_URL_QUERY), $consulta);
 
         return $aplicacion->atender(new Peticion('GET', (string) parse_url($ruta, PHP_URL_PATH), $consulta, [], [
-            'X-Llamador' => 'programacion',
+            'X-Llamador' => $llamador,
             'Authorization' => "Bearer {$token}",
         ], [], []));
     }
@@ -229,5 +234,15 @@ final class CalificacionesInternasTest extends TestCase
         self::assertSame(404, $this->deModeracion('POST', '/interno/calificaciones/' . Uuid::nuevo() . '/ocultar', ['moderador_id' => self::MODERADORA])->estado());
         self::assertSame(400, $this->deModeracion('POST', "/interno/calificaciones/{$id}/ocultar", ['moderador_id' => 'nadie'])->estado());
         self::assertSame(403, $this->deModeracion('POST', "/interno/calificaciones/{$id}/ocultar", ['moderador_id' => self::MODERADORA], 'programacion', self::TOKEN_DE_PROGRAMACION)->estado());
+    }
+
+    /**
+     * La reportería de recaudación (EF-09) pide los promedios de las funciones; las últimas, con el
+     * nombre de cada espectador, siguen siendo sólo para las fichas de programación.
+     */
+    public function testRecaudacionPideElResumenPeroNoLasUltimas(): void
+    {
+        self::assertSame(200, $this->pedir('/interno/calificaciones/resumen?funciones=' . self::UNA, self::TOKEN_DE_RECAUDACION, 'recaudacion')->estado());
+        self::assertSame(403, $this->pedir('/interno/calificaciones?sala=' . self::SALA, self::TOKEN_DE_RECAUDACION, 'recaudacion')->estado());
     }
 }

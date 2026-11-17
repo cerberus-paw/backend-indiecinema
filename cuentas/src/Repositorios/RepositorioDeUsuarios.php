@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace IndieCinema\Cuentas\Repositorios;
 
 use DateTimeImmutable;
+use DateTimeZone;
 use IndieCinema\Cuentas\Modelo\EstadoCuenta;
 use IndieCinema\Cuentas\Modelo\FiltrosDeUsuarios;
 use IndieCinema\Cuentas\Modelo\PaginaDeUsuarios;
@@ -39,12 +40,29 @@ final class RepositorioDeUsuarios
     public function buscarPorCorreo(string $correo): ?Usuario
     {
         $fila = $this->base->fila(
-            'SELECT id, nombre, correo, contrasena_hash, estado FROM usuario WHERE correo = ?',
+            'SELECT id, nombre, correo, contrasena_hash, estado, correo_verificado_en, verificacion_reenviada_en FROM usuario WHERE correo = ?',
             [$correo],
         );
-        if ($fila === null) {
-            return null;
-        }
+
+        return $fila === null ? null : $this->usuarioDesdeFila($fila);
+    }
+
+    public function buscarPorId(string $id, bool $bloquear = false): ?Usuario
+    {
+        $bloqueo = $bloquear ? ' FOR UPDATE' : '';
+        $fila = $this->base->fila(
+            "SELECT id, nombre, correo, contrasena_hash, estado, correo_verificado_en, verificacion_reenviada_en FROM usuario WHERE id = ?{$bloqueo}",
+            [$id],
+        );
+
+        return $fila === null ? null : $this->usuarioDesdeFila($fila);
+    }
+
+    /**
+     * @param array<string, mixed> $fila
+     */
+    private function usuarioDesdeFila(array $fila): Usuario
+    {
         $roles = $this->base->filas('SELECT tipo FROM rol WHERE usuario_id = ?', [$fila['id']]);
 
         return new Usuario(
@@ -54,6 +72,12 @@ final class RepositorioDeUsuarios
             (string) $fila['contrasena_hash'],
             EstadoCuenta::from((string) $fila['estado']),
             array_map(static fn (array $rol): Rol => Rol::from((string) $rol['tipo']), $roles),
+            $fila['correo_verificado_en'] === null
+                ? null
+                : new DateTimeImmutable((string) $fila['correo_verificado_en'], new DateTimeZone('UTC')),
+            $fila['verificacion_reenviada_en'] === null
+                ? null
+                : new DateTimeImmutable((string) $fila['verificacion_reenviada_en'], new DateTimeZone('UTC')),
         );
     }
 
@@ -220,8 +244,8 @@ final class RepositorioDeUsuarios
         try {
             $this->base->enTransaccion(function (BaseDeDatos $base) use ($usuario): void {
                 $base->ejecutar(
-                    'INSERT INTO usuario (id, nombre, correo, contrasena_hash, estado) VALUES (?, ?, ?, ?, ?)',
-                    [$usuario->id, $usuario->nombre, $usuario->correo, $usuario->contrasenaHash, $usuario->estado->value],
+                    'INSERT INTO usuario (id, nombre, correo, contrasena_hash, estado, correo_verificado_en) VALUES (?, ?, ?, ?, ?, ?)',
+                    [$usuario->id, $usuario->nombre, $usuario->correo, $usuario->contrasenaHash, $usuario->estado->value, $usuario->correoVerificadoEn],
                 );
                 foreach ($usuario->roles as $rol) {
                     $base->ejecutar('INSERT INTO rol (usuario_id, tipo) VALUES (?, ?)', [$usuario->id, $rol->value]);
@@ -233,6 +257,22 @@ final class RepositorioDeUsuarios
             }
             throw $error;
         }
+    }
+
+    public function marcarCorreoVerificado(string $usuarioId, DateTimeImmutable $cuando): void
+    {
+        $this->base->ejecutar(
+            'UPDATE usuario SET correo_verificado_en = COALESCE(correo_verificado_en, ?) WHERE id = ?',
+            [$cuando, $usuarioId],
+        );
+    }
+
+    public function marcarVerificacionReenviada(string $usuarioId, DateTimeImmutable $cuando): void
+    {
+        $this->base->ejecutar(
+            'UPDATE usuario SET verificacion_reenviada_en = ? WHERE id = ?',
+            [$cuando, $usuarioId],
+        );
     }
 
     public function agregarRol(string $usuarioId, Rol $rol): void
@@ -279,6 +319,51 @@ final class RepositorioDeUsuarios
             'UPDATE usuario SET estado = ? WHERE id = ?',
             [$estado->value, $usuarioId],
         ));
+    }
+
+    public function cambiarContrasena(string $usuarioId, string $contrasenaHash): void
+    {
+        $this->cerrandoSesiones($usuarioId, fn (BaseDeDatos $base) => $base->ejecutar(
+            'UPDATE usuario SET contrasena_hash = ? WHERE id = ?',
+            [$contrasenaHash, $usuarioId],
+        ));
+    }
+
+    /**
+     * Actualiza la contraseña dejando abierta sólo la sesión indicada en $exceptoHuella, o
+     * ninguna si no se informa.
+     */
+    public function actualizarContrasena(string $usuarioId, string $contrasenaHash): void
+    {
+        $this->base->ejecutar(
+            'UPDATE usuario SET contrasena_hash = ? WHERE id = ?',
+            [$contrasenaHash, $usuarioId],
+        );
+    }
+
+    /**
+     * @throws CorreoYaRegistrado si otro usuario ya usa ese correo
+     */
+    public function actualizarPerfil(string $usuarioId, string $nombre, string $correo, bool $reiniciarVerificacion): void
+    {
+        try {
+            if ($reiniciarVerificacion) {
+                $this->base->ejecutar(
+                    'UPDATE usuario SET nombre = ?, correo = ?, correo_verificado_en = NULL, verificacion_reenviada_en = NULL WHERE id = ?',
+                    [$nombre, $correo, $usuarioId],
+                );
+            } else {
+                $this->base->ejecutar(
+                    'UPDATE usuario SET nombre = ?, correo = ? WHERE id = ?',
+                    [$nombre, $correo, $usuarioId],
+                );
+            }
+        } catch (PDOException $error) {
+            if (($error->errorInfo[1] ?? null) === self::CLAVE_DUPLICADA) {
+                throw new CorreoYaRegistrado('Ya hay una cuenta con este correo.', previous: $error);
+            }
+            throw $error;
+        }
     }
 
     /**

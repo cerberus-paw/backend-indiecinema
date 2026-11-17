@@ -41,14 +41,15 @@ backend-indiecinema/
 │   ├── init/              esquemas, usuarios y permisos; corre una vez, con la base vacía
 │   └── herramientas/      aplicar migraciones y comprobar que cada subsistema sólo ve su esquema
 ├── herramientas/          servidor de desarrollo sin Docker y despliegue en el VPS
-├── docs/seguridad.md      seguridad por capa: qué protege cada una y dónde está configurado
+├── docs/seguridad.md      seguridad por capa: qué protege cada una y dónde está configurado, y
+│                          las amenazas ordenadas por impacto y probabilidad
 ├── docs/guion-de-prueba.md  el recorrido de punta a punta en el sitio publicado, con cada rol
 ├── nucleo/                MVC común: ruteo, middleware, base de datos, vistas y errores
 ├── cuentas/               /cuenta/   registro, ingreso, sesión, roles y usuarios del administrador
 ├── programacion/          /          obras, salas, funciones, cartelera y votación de títulos
 ├── funciones/             /funcion/  las reservas con el cupo de cada función, sus paneles y el acuerdo de fecha
 ├── moderacion/            /moderacion/  las solicitudes de sala y su bandeja (EF-07.2); lo demás de EF-07 y los términos llegan con EF-07 y EF-16
-└── recaudacion/           /recaudacion/ armado (EF-02): el reparto, las liquidaciones y la reportería llegan con EF-08 y EF-09
+└── recaudacion/           /recaudacion/: los reportes (EF-09) y el reparto de lo cobrado (EF-08.1); las liquidaciones llegan con EF-08.3
 ```
 
 Lo que todavía no está (los beneficios, dentro de recaudación) se suma con la misma forma.
@@ -66,7 +67,7 @@ Cada subsistema tiene la misma estructura por dentro:
 │   ├── Modelo/            entidades y enumeraciones de estado
 │   └── Repositorios/      todo el SQL del subsistema, con consultas preparadas
 ├── migraciones/           001_*.sql, 002_*.sql… sólo sobre el esquema propio
-├── herramientas/          datos-de-prueba.php, que carga los de la demo (cuentas y programación)
+├── herramientas/          datos-de-prueba.php, que carga los de la demo (cuentas y programación), e historial-de-prueba.php (programación y funciones)
 ├── datos-prueba/          las fotos de las salas y los afiches de la demo (sólo programación)
 ├── tests/
 └── config/
@@ -264,6 +265,21 @@ todo el sitio se vea igual aunque lo sirvan subsistemas distintos.
   para eso. Están en «Tareas programadas»: los cierres por fecha límite de la votación y del
   acuerdo, el fin de las funciones, el recordatorio del día antes y las reservas que vencieron sin
   pagar. El organizador puede cerrar la votación y el acuerdo antes desde la ficha.
+- **Los reportes los arma recaudación** (`/recaudacion/reportes`) pidiendo lo que necesita por la
+  API interna: las funciones finalizadas y sus votos a programación, y las ventas y calificaciones
+  a funciones. Si uno no responde, sale lo que hay con un aviso. Desde dónde sugiere una promoción,
+  un título para repetir o lo que el público pidió está en `[reportes]` de su `config.ini`. Los
+  totales van de a un mes por página, y el CSV trae todas las funciones del período. El dueño de
+  una obra ve cómo le fue en cualquier sala, también en las votaciones que perdió.
+- **El reparto de lo cobrado es un parámetro con fecha de vigencia**, no una constante
+  (`/recaudacion/administracion/reparto`, EF-08.1): el administrador carga con cuánto se reparte
+  entre la sala, el dueño de la obra y la plataforma —70/15/15 es lo que deja la migración— y
+  desde cuándo rige. Un parámetro no se corrige ni se borra: cada cambio es una fila nueva, el
+  anterior queda en el historial y cada función se reparte con el vigente en su `fecha_hora`, así
+  un cambio no mueve lo de las funciones que ya pasaron. La vigencia puede ser futura, para
+  anunciarlo antes, pero no anterior a ahora. Los porcentajes van en `DECIMAL(5,2)` y la base
+  controla que sumen 100 exacto; la aplicación los maneja en centésimas de punto (70 % es 7000),
+  porque con `float` un reparto como 33,33 / 33,33 / 33,34 no suma 100 y quedaría plata sin dueño.
 - **Las rutas dentro del contenedor copian las del disco** (`/src/backend-indiecinema/<subsistema>`
   y `/src/frontend-indiecinema`), así los repositorios `path` de Composer funcionan igual si se
   instala desde afuera o desde adentro del contenedor.
@@ -470,6 +486,24 @@ La segunda vez, todo sale en «ya estaban». Para comprobar la carga en el naveg
   cuatro como `PUBLICADA`, y cada una se puede editar.
 - http://localhost:8080/cartelera muestra las quince funciones, cada una con su afiche.
 
+Para que los reportes de recaudación tengan qué mostrar, hay además un historial: dos meses de
+funciones que ya terminaron en tres de esas salas, con sus votaciones, sus ventas, la asistencia y
+las calificaciones. Programación carga las funciones y los votos, y funciones, lo que se vendió y
+quiénes fueron. Va después de los datos de prueba y en ese orden:
+
+```
+docker compose exec programacion php herramientas/historial-de-prueba.php
+docker compose exec funciones php herramientas/historial-de-prueba.php
+#   funciones         28 agregadas,  0 ya estaban
+#   reservas        1112 agregadas
+#   calificaciones   620 agregadas
+```
+
+Está armado para que el reporte (`/recaudacion/reportes`, como Omar Organizador) muestre cada
+sugerencia: los miércoles flojos del Alambique, «Metrópolis» y «Nosferatu» para repetir, y
+«El gabinete del Dr. Caligari», que pierde todas sus votaciones y no se proyecta. Las fechas se
+cuentan hacia atrás desde el día en que se carga, y correrlo de nuevo no agrega nada.
+
 En producción (cualquier `entorno` que no sea `"desarrollo"`) no hace nada sin la confirmación
 explícita, para que los datos inventados no lleguen al sitio real por un comando copiado de acá.
 Para cargarlos en el servidor, a propósito:
@@ -478,6 +512,8 @@ Para cargarlos en el servidor, a propósito:
 docker compose exec cuentas php herramientas/datos-de-prueba.php --confirmar-produccion
 docker compose exec programacion php herramientas/datos-de-prueba.php --confirmar-produccion
 ```
+
+El historial, igual: los dos scripts con `--confirmar-produccion`.
 
 En producción, cuentas carga sólo el administrador, el organizador y Eva, con las contraseñas
 de la sección `[datos_de_prueba]` de su `config.ini` (está comentada en el ejemplo). Si falta
@@ -570,9 +606,11 @@ Las corre el cron de cada servidor. Están en `herramientas/crontab` y las insta
 no duplica nada:
 
 - `liberar-vencidas`: cancela las reservas que vencieron sin pagar (ver «Mercado Pago»).
-- `cerrar-por-fecha`: cierra las votaciones vencidas con la obra más votada. En los acuerdos
+- `cerrar-por-fecha`: cierra las votaciones vencidas con las obras más votadas que entran
+  en la duración de la sala, tantas como películas por función tiene. En los acuerdos
   vencidos, programa la franja que llegó al mínimo, o cancela la función y avisa a los que
-  marcaron «Me sirve».
+  marcaron «Me sirve». También la cancela si la franja ganadora se pisa con otra función de la
+  sala, y el correo dice ese motivo.
 - `finalizar-funciones`: pasa a finalizada cada función terminada (su hora más la duración de
   las funciones de la sala) y deja «ausente» a quien no fue.
 - `recordar-funciones`: manda el recordatorio por correo a las reservas confirmadas de las
@@ -616,6 +654,9 @@ Después de publicar `dev`, el CD corre las pruebas de punta a punta del front c
 sitio (su `e2e/README.md`). Para eso el environment `desarrollo` tiene además la variable `E2E_URL`,
 los secretos `E2E_CORREO` y `E2E_CLAVE` (una cuenta de espectador) y la variable `E2E_FUNCION` (el
 id de una función con lugares), distintas de las del front para que las dos corridas no se pisen.
+Las dos funciones las crea, gratuitas y a un año, `programacion/herramientas/funciones-e2e.php`
+(en el servidor de dev, con `--confirmar-produccion`): en una paga, con Mercado Pago activo, la
+reserva queda pendiente de pago y las pruebas fallan, y las de los datos de prueba van pasando.
 
 ### Sin Docker
 
@@ -679,7 +720,7 @@ inválidos y el 404, la misma consulta en JSON según la cabecera `Accept`, `/ca
 mismos filtros, la ficha de la función en cada estado, con sus 404, la ficha de la sala, con quién
 la ve, sus próximas funciones y el camino de la función a su sala y de vuelta, el buscador del
 listado de salas, la API interna de salas para moderación, la votación de títulos
-(votar, cambiar el voto y cerrarla con la más votada), el acuerdo de fecha visto desde
+(votar, cambiar el voto y cerrarla con las más votadas que entran en la sala, hasta las películas por función), el acuerdo de fecha visto desde
 programación, los lugares libres de la ficha y de las tarjetas, la cancelación de una función con
 reservas, la portada con las destacadas y las próximas funciones, «Acerca de», con los enlaces del encabezado y del pie, las opciones del
 menú y del pie que ve cada rol, y la página de error, que vuelve a la portada); en cuentas, el
@@ -768,7 +809,7 @@ En cada PR y en cada push a `main` o a `dev`, GitHub Actions (`.github/workflows
 - **El análisis estático** de cada paquete con PHPStan (`composer analisis`, nivel 5): lo que ya
   estaba antes de sumarlo queda en su `phpstan-baseline.neon`, y marca sólo lo nuevo. Al arreglar
   algo de la lista, se regenera con `composer analisis -- --generate-baseline`.
-- **Las pruebas** del núcleo, cuentas, programación y funciones contra un MySQL 8.4, con el front al lado: el
+- **Las pruebas** del núcleo, cuentas, programación, funciones y recaudación contra un MySQL 8.4, con el front al lado: el
   de la rama del mismo nombre si existe en el front, y si no el de la base del PR (`dev` o `main`). Un cambio que toca los
   dos repositorios va en ramas que se llaman igual, y sus dos PR pasan sin esperar al otro.
 - **`composer audit`** sobre el `composer.lock` de cada subsistema y del núcleo.

@@ -18,6 +18,7 @@ use IndieCinema\Programacion\Modelo\ObraEnDetalle;
 use IndieCinema\Programacion\Modelo\OrdenDeCartelera;
 use IndieCinema\Programacion\Modelo\PaginaDeCartelera;
 use IndieCinema\Programacion\Modelo\ReglaIncumplida;
+use IndieCinema\Programacion\Repositorios\RepositorioDeBloqueos;
 use IndieCinema\Programacion\Repositorios\RepositorioDeCartelera;
 use IndieCinema\Programacion\Repositorios\RepositorioDeGeneros;
 use IndieCinema\Programacion\Repositorios\RepositorioDeVotos;
@@ -36,6 +37,9 @@ final class ServicioDeCartelera
     /** Cuántas búsquedas recientes guarda la cartelera en el navegador: al entrar una sexta se borra la más vieja (E4-06.4). */
     public const ULTIMAS_BUSQUEDAS = 5;
 
+    /** Mensaje genérico para el espectador bloqueado en la sala, sin revelar el motivo (EF-12.2). */
+    public const MENSAJE_USUARIO_BLOQUEADO = 'No podés votar en esta sala.';
+
     private readonly int $porPagina;
 
     /**
@@ -49,6 +53,7 @@ final class ServicioDeCartelera
         private readonly ?AcuerdosDeFunciones $acuerdos = null,
         // Para ordenar por reputación (EF-04.4): los promedios viven en funciones.
         private readonly ?CalificacionesDeFunciones $calificaciones = null,
+        private readonly ?RepositorioDeBloqueos $bloqueos = null,
     ) {
         $porPagina = $configuracion->obtener('cartelera.por_pagina', self::POR_PAGINA);
         if (!is_int($porPagina) || $porPagina < 1 || $porPagina > self::MAXIMO_POR_PAGINA) {
@@ -198,14 +203,27 @@ final class ServicioDeCartelera
         return $this->votos->conteoPorObra($funcionId);
     }
 
+    public function usuarioBloqueadoEnSala(string $salaId, ?string $usuarioId): bool
+    {
+        return $this->bloqueos !== null
+            && $usuarioId !== null
+            && Uuid::esValido($usuarioId)
+            && $this->bloqueos->estaBloqueado($salaId, $usuarioId);
+    }
+
     /**
      * Registra o cambia el voto de un espectador por una obra candidata en una función en votación de títulos (E3-12.3).
      *
-     * @throws ReglaIncumplida si la función no está en votación de títulos o si la obra no es una candidata
+     * @throws ReglaIncumplida si la función no está en votación de títulos, el usuario está
+     *                         bloqueado en la sala o si la obra no es una candidata
      */
     public function votar(string $funcionId, string $usuarioId, string $obraId): void
     {
         $detalle = $this->detalle($funcionId);
+
+        if ($this->usuarioBloqueadoEnSala($detalle->sala->id, $usuarioId)) {
+            throw new ReglaIncumplida(self::MENSAJE_USUARIO_BLOQUEADO);
+        }
 
         if ($detalle->estado !== EstadoFuncion::EnVotacionTitulos) {
             throw new ReglaIncumplida('La votación de títulos para esta función no está abierta.');
@@ -275,6 +293,10 @@ final class ServicioDeCartelera
     public function votarFranjaAcuerdo(string $funcionId, string $usuarioId, string $franjaId, bool $marcar = true): void
     {
         $detalle = $this->detalle($funcionId);
+
+        if ($this->usuarioBloqueadoEnSala($detalle->sala->id, $usuarioId)) {
+            throw new ReglaIncumplida(self::MENSAJE_USUARIO_BLOQUEADO);
+        }
 
         if ($detalle->estado !== EstadoFuncion::EnAcuerdoFecha) {
             throw new ReglaIncumplida('El acuerdo de fecha para esta función no está abierto.');

@@ -165,6 +165,9 @@ final class FormularioDeFuncion
                 $this->errores['obras'] = "En esta sala entran hasta {$salaElegida->datos->peliculasPorFuncion} películas por función.";
             } elseif ($this->esProgramada() && $salaElegida !== null && $duracion > $salaElegida->datos->duracionFuncion) {
                 $this->errores['obras'] = "Las obras duran {$duracion} minutos y en esta sala una función puede durar hasta {$salaElegida->datos->duracionFuncion}.";
+            } elseif (!$this->esProgramada() && $salaElegida !== null && ($larga = self::primeraQueNoEntra($obrasDisponibles, $obrasIds, $salaElegida->datos->duracionFuncion)) !== null) {
+                // En una votación cada candidata tiene que entrar sola (EF-05.4); juntas pueden pasarse.
+                $this->errores['obras'] = Sala::noEntra($larga, $salaElegida->datos->duracionFuncion);
             } else {
                 $this->obrasIds = $obrasIds;
             }
@@ -316,6 +319,23 @@ final class FormularioDeFuncion
         $fechaHora = DateTimeImmutable::createFromFormat('!Y-m-d H:i', "{$fecha} {$hora}");
 
         return $fechaHora !== false && $fechaHora->format('Y-m-d H:i') === "{$fecha} {$hora}" ? $fechaHora : null;
+    }
+
+    /**
+     * La primera de las candidatas elegidas que dura más que una función de la sala, o null.
+     *
+     * @param list<Obra>   $obrasDisponibles
+     * @param list<string> $obrasIds
+     */
+    private static function primeraQueNoEntra(array $obrasDisponibles, array $obrasIds, int $duracionFuncion): ?Obra
+    {
+        foreach ($obrasDisponibles as $obra) {
+            if (in_array($obra->id, $obrasIds, true) && $obra->duracionMinutos > $duracionFuncion) {
+                return $obra;
+            }
+        }
+
+        return null;
     }
 
     private static function texto(mixed $valor): string

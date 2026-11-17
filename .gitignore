@@ -1,6 +1,8 @@
 # Secretos: se versiona sólo el ejemplo de cada archivo (.env.ejemplo, config.ejemplo.ini).
 .env
 */config/config.ini
+# Las claves SSH de los servidores (el .pem de la EC2, las del despliegue): nunca al repositorio.
+*.pem
 
 # Dependencias: se instalan con composer install.
 */vendor/

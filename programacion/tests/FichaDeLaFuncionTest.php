@@ -74,7 +74,7 @@ final class FichaDeLaFuncionTest extends TestCase
      *
      * @param bool $conSesion si la mira un espectador que ingresó; si no, un visitante
      */
-    private function ficha(string $id, bool $conSesion = false): DOMXPath
+    private function ficha(string $id, bool $conSesion = false, bool $correoVerificado = true): DOMXPath
     {
         $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion(), new Log('programacion', fopen('php://memory', 'w')));
         $cabeceras = $conSesion ? [
@@ -82,6 +82,7 @@ final class FichaDeLaFuncionTest extends TestCase
             'X-Usuario-Id' => 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
             'X-Rol' => 'espectador',
             'X-Usuario-Nombre' => rawurlencode('Ana Prueba'),
+            'X-Correo-Verificado' => $correoVerificado ? '1' : '0',
         ] : [];
         $respuesta = $aplicacion->atender(new Peticion('GET', "/cartelera/{$id}", [], [], $cabeceras, [], []));
         self::assertSame(200, $respuesta->estado());
@@ -188,6 +189,16 @@ final class FichaDeLaFuncionTest extends TestCase
 
         self::assertSame(1, $ficha->query("//main//aside//a[@href = '/cuenta/ingresar']")->length);
         self::assertSame(0, $ficha->query('//main//form[@data-formulario-reserva]')->length);
+    }
+
+    public function testConSesionSinCorreoVerificadoMuestraAvisoEnLugarDelFormulario(): void
+    {
+        $ficha = $this->ficha($this->programadaConocida(), conSesion: true, correoVerificado: false);
+
+        self::assertSame(0, $ficha->query('//main//form[@data-formulario-reserva]')->length);
+        self::assertSame(1, $ficha->query("//main//aside//p[normalize-space() = 'Verificá tu correo para reservar.']")->length);
+        self::assertSame(1, $ficha->query("//main//aside//strong[normalize-space() = 'Todavía no verificaste tu correo']")->length);
+        self::assertSame(1, $ficha->query("//main//aside//form[@action = '/cuenta/verificar/reenviar']//button[contains(normalize-space(), 'Mandarme el enlace otra vez')]")->length);
     }
 
     /**

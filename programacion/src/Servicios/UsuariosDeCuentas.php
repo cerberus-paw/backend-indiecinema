@@ -10,16 +10,59 @@ use IndieCinema\Nucleo\Http\ClienteInterno;
 use IndieCinema\Nucleo\Http\ExcepcionHttp;
 use IndieCinema\Nucleo\Uuid;
 use IndieCinema\Programacion\Modelo\UsuarioDeCuentas;
+use Psr\Log\LoggerInterface;
 use RuntimeException;
+use Throwable;
 
 /**
- * Los usuarios de cuentas, por su API interna (E2): quién mandó una solicitud de sala y darle el
- * rol de organizador al aprobarla. Programación no tiene usuarios: sólo guarda sus ids.
+ * Los usuarios de cuentas, por su API interna (E2): quién mandó una solicitud de sala, darle el
+ * rol de organizador al aprobarla y resolver nombres en lote para los bloqueos por sala (EF-12.1).
+ * Programación no tiene usuarios: sólo guarda sus ids.
  */
 final class UsuariosDeCuentas
 {
-    public function __construct(private readonly ClienteInterno $cliente)
+    public function __construct(
+        private readonly ClienteInterno $cliente,
+        private readonly LoggerInterface $log,
+    ) {
+    }
+
+    /**
+     * Nombres visibles de varios usuarios, en un solo pedido cada 100 ids (EF-12.1). Si cuentas
+     * no responde o devuelve algo inesperado, devuelve los que pudo juntar y deja el aviso en el
+     * log: la lista se muestra igual con el id cuando falta el nombre.
+     *
+     * @param list<string> $usuariosIds
+     *
+     * @return array<string, string> mapa de usuario_id => nombre
+     */
+    public function nombresDe(array $usuariosIds): array
     {
+        $unicos = array_values(array_unique(array_filter($usuariosIds, Uuid::esValido(...))));
+        if ($unicos === []) {
+            return [];
+        }
+
+        $nombres = [];
+        foreach (array_chunk($unicos, 100) as $lote) {
+            try {
+                $datos = $this->cliente->get('cuentas', '/interno/usuarios', ['ids' => implode(',', $lote)]);
+            } catch (Throwable $error) {
+                $this->log->warning('No se pudieron pedir los nombres de los usuarios bloqueados a cuentas.', ['error' => $error->getMessage()]);
+                continue;
+            }
+            if (!is_array($datos)) {
+                $this->log->warning('cuentas respondió algo distinto de una lista a /interno/usuarios.');
+                continue;
+            }
+            foreach ($datos as $id => $usuario) {
+                if (is_string($id) && is_array($usuario) && is_string($usuario['nombre'] ?? null)) {
+                    $nombres[$id] = $usuario['nombre'];
+                }
+            }
+        }
+
+        return $nombres;
     }
 
     /**

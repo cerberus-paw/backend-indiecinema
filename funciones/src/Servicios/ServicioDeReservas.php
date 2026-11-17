@@ -6,6 +6,7 @@ namespace IndieCinema\Funciones\Servicios;
 
 use DateTimeImmutable;
 use IndieCinema\Funciones\Modelo\AutorDelCambio;
+use IndieCinema\Funciones\Modelo\Conducta;
 use IndieCinema\Funciones\Modelo\EstadoReserva;
 use IndieCinema\Funciones\Modelo\FuncionDeProgramacion;
 use IndieCinema\Funciones\Modelo\ReglaIncumplida;
@@ -42,7 +43,13 @@ final class ServicioDeReservas
         private readonly RepositorioDeReservas $reservas,
         private readonly ?PagosDeReservas $pagos = null,
         private readonly ?ServicioDeReembolsos $reembolsos = null,
+        private readonly ?ServicioDeConducta $conducta = null,
     ) {
+    }
+
+    public function activasDelUsuario(string $usuarioId, DateTimeImmutable $ahora = new DateTimeImmutable()): int
+    {
+        return $this->reservas->activasDelUsuario($usuarioId, $ahora);
     }
 
     /**
@@ -51,9 +58,9 @@ final class ServicioDeReservas
      * @throws ExcepcionHttp 404 si no existe o su sala no está publicada; 503 si programación no
      *                       responde
      */
-    public function funcion(string $funcionId): FuncionDeProgramacion
+    public function funcion(string $funcionId, ?string $usuarioId = null): FuncionDeProgramacion
     {
-        $funcion = $this->funciones->buscar($funcionId);
+        $funcion = $this->funciones->buscar($funcionId, $usuarioId);
         // Una sala sin publicar no muestra sus funciones: es lo mismo que si no existiera.
         if ($funcion === null || !$funcion->salaHabilitada) {
             throw ExcepcionHttp::noEncontrada();
@@ -245,7 +252,7 @@ final class ServicioDeReservas
         int $cantidad,
         DateTimeImmutable $ahora = new DateTimeImmutable(),
     ): Reserva {
-        $funcion = $this->funcion($funcionId);
+        $funcion = $this->funcion($funcionId, $espectador->id);
         $reserva = Reserva::nueva($funcion, $espectador->id, $cantidad, $ahora, $this->pagos?->minutosParaPagar());
         $reserva = $this->agregar($funcion, $reserva, $ahora);
         if ($reserva->estado !== EstadoReserva::PendientePago || $this->pagos === null) {
@@ -277,6 +284,9 @@ final class ServicioDeReservas
     private function agregar(FuncionDeProgramacion $funcion, Reserva $reserva, DateTimeImmutable $ahora): Reserva
     {
         return $this->reservas->conLaFuncionBloqueada($funcion->id, function () use ($funcion, $reserva, $ahora): Reserva {
+            if ($funcion->usuarioBloqueado) {
+                throw new ReglaIncumplida(FuncionDeProgramacion::MENSAJE_USUARIO_BLOQUEADO);
+            }
             $libres = $this->lugaresLibres($funcion, $ahora);
             if ($reserva->cantidad > $libres) {
                 throw new ReglaIncumplida(match ($libres) {
@@ -284,6 +294,10 @@ final class ServicioDeReservas
                     1 => 'Queda 1 lugar.',
                     default => "Quedan {$libres} lugares.",
                 });
+            }
+            $topeConducta = $this->conducta?->topeSimultaneoPara($reserva->usuarioId, $ahora);
+            if ($topeConducta !== null && $this->reservas->activasDelUsuario($reserva->usuarioId, $ahora) >= $topeConducta) {
+                throw new ReglaIncumplida(Conducta::mensajeDeTopeBajoUmbral($topeConducta));
             }
             $yaReservados = $this->reservas->lugaresOcupadosPorUsuario($funcion->id, $reserva->usuarioId, $ahora);
             $maximo = self::maximoPorPersona($funcion);

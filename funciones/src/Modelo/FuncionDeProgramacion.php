@@ -16,6 +16,9 @@ final readonly class FuncionDeProgramacion
     /** Los estados de programación en los que la función sigue abierta: en votación, en acuerdo o programada. */
     private const EN_CURSO = ['en_votacion_titulos', 'en_acuerdo_fecha', 'programada'];
 
+    /** Mensaje genérico cuando el espectador está bloqueado en esta sala (EF-12.2). */
+    public const MENSAJE_USUARIO_BLOQUEADO = 'No podés reservar en esta sala.';
+
     /**
      * @param string             $estado          el de programación (en_votacion_titulos,
      *                                            en_acuerdo_fecha, programada, cancelada o
@@ -42,6 +45,7 @@ final readonly class FuncionDeProgramacion
         public array $obrasIds = [],
         /** Adónde hay que ir, para el recordatorio (EF-03.3). */
         public string $salaDireccion = '',
+        public bool $usuarioBloqueado = false,
     ) {
     }
 
@@ -62,6 +66,9 @@ final readonly class FuncionDeProgramacion
      */
     public function motivoParaNoReservar(DateTimeImmutable $ahora = new DateTimeImmutable()): ?string
     {
+        if ($this->usuarioBloqueado) {
+            return self::MENSAJE_USUARIO_BLOQUEADO;
+        }
         if ($this->estado === 'cancelada') {
             return 'La función se canceló: ya no se puede reservar.';
         }

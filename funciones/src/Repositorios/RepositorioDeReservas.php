@@ -450,6 +450,19 @@ final class RepositorioDeReservas
     }
 
     /**
+     * Cuántas reservas activas a la vez tiene la persona (confirmadas o pendientes de pago todavía
+     * a tiempo), para el tope por conducta bajo el umbral (EF-13.2). Las canceladas, con asistencia
+     * o ausentes no ocupan cupo de reservas simultáneas.
+     */
+    public function activasDelUsuario(string $usuarioId, DateTimeImmutable $ahora = new DateTimeImmutable()): int
+    {
+        return (int) $this->base->valor(
+            'SELECT COUNT(*) FROM reserva WHERE usuario_id = ? AND (estado = ? OR (estado = ? AND vence_en > ?))',
+            [$usuarioId, EstadoReserva::Confirmada, EstadoReserva::PendientePago, $ahora->setTimezone(new DateTimeZone('UTC'))],
+        );
+    }
+
+    /**
      * Las reservas de un espectador, de la más nueva a la más vieja, para «Mis reservas»
      * (E4-04.1). Usa el índice por usuario y fecha de alta.
      *

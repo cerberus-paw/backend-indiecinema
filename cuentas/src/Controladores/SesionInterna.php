@@ -32,6 +32,10 @@ final class SesionInterna extends Controlador
             ->conCabecera(Identificacion::CABECERA_ID, $deUsuario->sesion->usuarioId ?? '')
             ->conCabecera(Identificacion::CABECERA_ROL, $deUsuario?->rol()->value ?? '')
             // Codificado: una cabecera no garantiza UTF-8, y así el nombre no puede meter un salto de línea.
-            ->conCabecera(Identificacion::CABECERA_NOMBRE, $deUsuario === null ? '' : rawurlencode($deUsuario->nombre));
+            ->conCabecera(Identificacion::CABECERA_NOMBRE, $deUsuario === null ? '' : rawurlencode($deUsuario->nombre))
+            ->conCabecera(
+                Identificacion::CABECERA_CORREO_VERIFICADO,
+                $deUsuario === null ? '' : ($deUsuario->correoVerificado ? '1' : '0'),
+            );
     }
 }

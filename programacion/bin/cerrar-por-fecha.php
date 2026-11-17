@@ -20,6 +20,8 @@ use IndieCinema\Nucleo\Configuracion;
 use IndieCinema\Nucleo\Http\ClienteInterno;
 use IndieCinema\Nucleo\Log;
 use IndieCinema\Programacion\Repositorios\RepositorioDeFunciones;
+use IndieCinema\Programacion\Repositorios\RepositorioDeObras;
+use IndieCinema\Programacion\Repositorios\RepositorioDeSalas;
 use IndieCinema\Programacion\Repositorios\RepositorioDeVotos;
 use IndieCinema\Programacion\Servicios\AcuerdosDeFunciones;
 use IndieCinema\Programacion\Servicios\CierresPorFecha;
@@ -39,7 +41,10 @@ try {
     $cierres = new CierresPorFecha(
         new RepositorioDeFunciones($base),
         new RepositorioDeVotos($base),
+        new RepositorioDeSalas($base),
+        new RepositorioDeObras($base),
         new AcuerdosDeFunciones(ClienteInterno::desdeConfiguracion($configuracion, $log)),
+        $log,
     );
 } catch (Throwable $error) {
     $log->error('No arrancó la tarea de los cierres por fecha: {mensaje}', ['mensaje' => $error->getMessage(), 'exception' => $error]);

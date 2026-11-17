@@ -212,18 +212,25 @@ class ServicioDeAcuerdos
      * las siguientes, ninguno. Así la tarea de programación puede pedirlo de nuevo si no recibió
      * la respuesta, sin que nadie reciba el correo dos veces.
      *
+     * Con el horario ocupado (EF-05.5) vale también uno confirmado: la tarea lo confirmó, se cortó
+     * antes de programar la función, y en el medio se programó otra en ese horario.
+     *
      * @return list<string> los ids de usuario
      *
-     * @throws ReglaIncumplida si el acuerdo no existe o no cerró sin mínimo
+     * @throws ReglaIncumplida si el acuerdo no existe, o no cerró sin mínimo (ni está confirmado,
+     *                         con el horario ocupado)
      */
-    public function comprometidosParaAvisarCancelacion(string $acuerdoId): array
+    public function comprometidosParaAvisarCancelacion(string $acuerdoId, bool $horarioOcupado = false): array
     {
         $acuerdo = $this->acuerdoPorId($acuerdoId);
         if ($acuerdo === null) {
             throw new ReglaIncumplida('El acuerdo de fecha no existe.');
         }
-        // Sólo uno que cerró sin mínimo: el aviso dice que la función no juntó el interés.
-        if ($acuerdo->estado !== EstadoAcuerdo::SinMinimo) {
+        // Uno que cerró sin mínimo, o uno confirmado cuyo horario quedó ocupado: el de un acuerdo
+        // abierto todavía puede salir, y el de uno confirmado sin motivo ya se programó.
+        $avisable = $acuerdo->estado === EstadoAcuerdo::SinMinimo
+            || ($horarioOcupado && $acuerdo->estado === EstadoAcuerdo::Confirmado);
+        if (!$avisable) {
             throw new ReglaIncumplida('El acuerdo no cerró sin mínimo.');
         }
         if (!$this->repositorio->tomarAvisoDeCancelacion($acuerdo->id)) {

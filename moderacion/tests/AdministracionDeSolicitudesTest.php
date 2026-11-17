@@ -626,7 +626,7 @@ final class AdministracionDeSolicitudesTest extends TestCase
     {
         // El logo y las secciones que puede abrir: al moderador, sólo la bandeja.
         yield 'moderador' => ['moderador', ['/moderacion/solicitudes']];
-        yield 'administrador' => ['administrador', ['/cuenta/administracion/usuarios', '/funcion/administracion/reservas', '/moderacion/solicitudes']];
+        yield 'administrador' => ['administrador', ['/cuenta/administracion/usuarios', '/funcion/administracion/reservas', '/moderacion/solicitudes', '/recaudacion/administracion/reparto', '/recaudacion/reportes']];
     }
 
     /**

@@ -606,6 +606,9 @@ Después de publicar `dev`, el CD corre las pruebas de punta a punta del front c
 sitio (su `e2e/README.md`). Para eso el environment `desarrollo` tiene además la variable `E2E_URL`,
 los secretos `E2E_CORREO` y `E2E_CLAVE` (una cuenta de espectador) y la variable `E2E_FUNCION` (el
 id de una función con lugares), distintas de las del front para que las dos corridas no se pisen.
+Las dos funciones las crea, gratuitas y a un año, `programacion/herramientas/funciones-e2e.php`
+(en el servidor de dev, con `--confirmar-produccion`): en una paga, con Mercado Pago activo, la
+reserva queda pendiente de pago y las pruebas fallan, y las de los datos de prueba van pasando.
 
 ### Sin Docker
 

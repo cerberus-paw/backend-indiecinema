@@ -201,12 +201,15 @@ final class RepartoDeFuncionesTest extends TestCase
 
     public function testElCursorQuedaEnLaUltimaFinalizacionRepartida(): void
     {
-        self::assertNull($this->repartos->ultimaFinalizacion());
+        $antes = $this->repartos->ultimaFinalizacion();
 
         $this->tarea()->repartir();
 
-        // La última que se finalizó, que es la función vieja: por ahí sigue la próxima pasada.
-        self::assertSame('2026-11-23 10:00:00', $this->repartos->ultimaFinalizacion()?->format('Y-m-d H:i:s'));
+        // Sin repartos no hay cursor, y después queda en la última que se finalizó, que es la
+        // función vieja: por ahí sigue la próxima pasada.
+        $despues = $this->repartos->ultimaFinalizacion();
+        self::assertNull($antes);
+        self::assertSame('2026-11-23 10:00:00', $despues?->format('Y-m-d H:i:s'));
     }
 
     public function testSiProgramacionNoRespondeNoSeReparteNada(): void

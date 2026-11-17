@@ -174,13 +174,27 @@ final readonly class Reserva
     }
 
     /**
-     * Si hay plata que devolverle al espectador (EF-06.4): la reserva se cobró con Mercado Pago y
-     * todavía no se reembolsó. Una a la gorra, una confirmada con el cobro apagado y una que
-     * venció sin pagar no tienen pago; y una ya reembolsada no se devuelve de nuevo.
+     * Si su plata está en la cuenta: se cobró con Mercado Pago y no se devolvió. Es lo que suman el
+     * total del panel del organizador (EF-06.5) y el neto que reparte recaudación (EF-02.5). Una a
+     * la gorra, una confirmada con el cobro apagado y una que venció sin pagar no tienen pago, así
+     * que no suman nada aunque su total diga otra cosa.
+     *
+     * No mira el estado: una cancelada que todavía no se reembolsó sigue contando, porque la plata
+     * sigue estando, y deja de contar en el momento en que vuelve.
+     */
+    public function cobrada(): bool
+    {
+        return $this->pagoId !== null && $this->reembolsoId === null;
+    }
+
+    /**
+     * Si hay plata que devolverle al espectador (EF-06.4): es exactamente la que está en la cuenta,
+     * la que cobrada() cuenta. Una a la gorra, una confirmada con el cobro apagado y una que venció
+     * sin pagar no tienen pago; y una ya reembolsada no se devuelve de nuevo.
      */
     public function seReembolsa(): bool
     {
-        return $this->pagoId !== null && $this->reembolsoId === null;
+        return $this->cobrada();
     }
 
     /**

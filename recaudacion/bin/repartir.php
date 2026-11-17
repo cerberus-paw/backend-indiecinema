@@ -7,6 +7,9 @@
  *
  *     docker compose exec -T recaudacion php bin/repartir.php
  *
+ * Con lo que repartió, rearma las liquidaciones de esos meses (EF-08.3), que es lo que después
+ * miran el organizador, el dueño y el administrador.
+ *
  * Correrla de más no duplica nada: una función ya repartida se saltea. Si programación o funciones
  * no responden, no reparte nada, sale con error y la próxima pasada lo vuelve a intentar.
  */
@@ -17,11 +20,13 @@ use IndieCinema\Nucleo\BaseDeDatos;
 use IndieCinema\Nucleo\Configuracion;
 use IndieCinema\Nucleo\Http\ClienteInterno;
 use IndieCinema\Nucleo\Log;
+use IndieCinema\Recaudacion\Repositorios\RepositorioDeLiquidaciones;
 use IndieCinema\Recaudacion\Repositorios\RepositorioDeParametrosDeReparto;
 use IndieCinema\Recaudacion\Repositorios\RepositorioDeRepartos;
 use IndieCinema\Recaudacion\Servicios\CobrosDeFunciones;
 use IndieCinema\Recaudacion\Servicios\FuncionesFinalizadas;
 use IndieCinema\Recaudacion\Servicios\RepartoDeFunciones;
+use IndieCinema\Recaudacion\Servicios\ServicioDeLiquidaciones;
 use IndieCinema\Recaudacion\Servicios\ServicioDeParametrosDeReparto;
 
 // Está fuera del webroot, pero por las dudas: no se ejecuta desde un pedido HTTP.
@@ -37,13 +42,17 @@ try {
     $configuracion = Configuracion::desdeArchivo($raiz . '/config/config.ini');
     $base = BaseDeDatos::conectar($configuracion);
     $cliente = ClienteInterno::desdeConfiguracion($configuracion, $log);
+    $repartos = new RepositorioDeRepartos($base);
     $tarea = new RepartoDeFunciones(
         new FuncionesFinalizadas($cliente),
         new CobrosDeFunciones($cliente),
         new ServicioDeParametrosDeReparto(new RepositorioDeParametrosDeReparto($base)),
-        new RepositorioDeRepartos($base),
+        $repartos,
     );
     $hecho = $tarea->repartir();
+    // Con lo repartido se rearman las liquidaciones de esos meses (EF-08.3): las que ya están
+    // transferidas no se tocan.
+    $liquidadas = (new ServicioDeLiquidaciones(new RepositorioDeLiquidaciones($base), $repartos))->armar($hecho['meses']);
 } catch (Throwable $error) {
     $log->error('No se repartió lo cobrado de las funciones finalizadas: {mensaje}', ['mensaje' => $error->getMessage(), 'exception' => $error]);
     exit(1);
@@ -51,9 +60,10 @@ try {
 
 // Sólo si hizo algo: el cron corre cada hora y un log por vuelta no dice nada.
 if ($hecho['repartidas'] > 0 || $hecho['sinPlata'] > 0) {
-    $log->info('Funciones repartidas: {repartidas}, y sin nada que repartir: {sinPlata}.', [
+    $log->info('Funciones repartidas: {repartidas}, sin nada que repartir: {sinPlata}, y liquidaciones armadas: {liquidadas}.', [
         'repartidas' => $hecho['repartidas'],
         'sinPlata' => $hecho['sinPlata'],
+        'liquidadas' => $liquidadas,
     ]);
 }
 // Programación cortó la lista: quedaron más, que entran en la próxima pasada.

@@ -14,6 +14,7 @@ use IndieCinema\Nucleo\Seguridad\Rol;
 use IndieCinema\Nucleo\Seguridad\Usuario;
 use IndieCinema\Recaudacion\Modelo\DiaFlojo;
 use IndieCinema\Recaudacion\Modelo\FuncionFinalizada;
+use IndieCinema\Recaudacion\Modelo\Monto;
 use IndieCinema\Recaudacion\Modelo\ObraVotada;
 use IndieCinema\Recaudacion\Modelo\PedidoDelPublico;
 use IndieCinema\Recaudacion\Modelo\Periodo;
@@ -320,9 +321,7 @@ final class Reportes extends Controlador
     /** 15400000 → «$ 154.000», con los centavos sólo si los hay, como el resto del sitio. */
     private static function pesos(int $centavos): string
     {
-        $texto = number_format(intdiv($centavos, 100), 0, ',', '.');
-
-        return '$ ' . ($centavos % 100 === 0 ? $texto : $texto . ',' . sprintf('%02d', $centavos % 100));
+        return Monto::comoPesos($centavos);
     }
 
     /** «2026-11» → «Noviembre de 2026». */

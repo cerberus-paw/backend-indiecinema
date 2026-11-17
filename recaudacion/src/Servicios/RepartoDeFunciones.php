@@ -6,6 +6,7 @@ namespace IndieCinema\Recaudacion\Servicios;
 
 use DateTimeImmutable;
 use IndieCinema\Recaudacion\Modelo\FuncionFinalizada;
+use IndieCinema\Recaudacion\Modelo\Mes;
 use IndieCinema\Recaudacion\Modelo\Monto;
 use IndieCinema\Recaudacion\Modelo\Reparto;
 use IndieCinema\Recaudacion\Repositorios\RepositorioDeRepartos;
@@ -42,9 +43,10 @@ final class RepartoDeFunciones
     }
 
     /**
-     * @return array{repartidas: int, sinPlata: int, quedanMas: bool} las que repartieron plata, las
-     *                                                               que no tenían qué repartir y si
-     *                                                               quedaron más para la próxima
+     * @return array{repartidas: int, sinPlata: int, quedanMas: bool, meses: list<Mes>} las que
+     *                        repartieron plata, las que no tenían qué repartir, si quedaron más
+     *                        para la próxima pasada, y en qué meses cayó lo repartido, para
+     *                        rearmar sus liquidaciones (EF-08.3)
      *
      * @throws RuntimeException si una función no se puede repartir, o si programación o funciones
      *                          responden algo que no se entiende
@@ -55,7 +57,7 @@ final class RepartoDeFunciones
         $respuesta = $this->finalizadas->desdeLaFinalizacion($desde);
         $pendientes = $this->sinReparto($respuesta['funciones']);
         if ($pendientes === []) {
-            return ['repartidas' => 0, 'sinPlata' => 0, 'quedanMas' => !$respuesta['completas']];
+            return ['repartidas' => 0, 'sinPlata' => 0, 'quedanMas' => !$respuesta['completas'], 'meses' => []];
         }
 
         // Lo cobrado de las pagas, en tandas de cien: a las de a la gorra no hace falta pedírselo.
@@ -64,20 +66,23 @@ final class RepartoDeFunciones
 
         $repartidas = 0;
         $sinPlata = 0;
+        $meses = [];
         foreach ($pendientes as $funcion) {
             $neto = $funcion->esALaGorra() ? 0 : Monto::centavos($cobrado[$funcion->id]->neto);
             $reparto = $neto === 0
-                ? Reparto::sinPlata($funcion->id, $funcion->finalizadaEn, $ahora)
+                ? Reparto::sinPlata($funcion, $ahora)
                 : $this->reparto($funcion, $neto, $ahora);
             $this->repartos->guardar($reparto);
             if ($reparto->sinPartes()) {
                 ++$sinPlata;
             } else {
                 ++$repartidas;
+                // El mes en el que cae: con eso se rearman las liquidaciones (EF-08.3).
+                $meses[] = $reparto->mes();
             }
         }
 
-        return ['repartidas' => $repartidas, 'sinPlata' => $sinPlata, 'quedanMas' => !$respuesta['completas']];
+        return ['repartidas' => $repartidas, 'sinPlata' => $sinPlata, 'quedanMas' => !$respuesta['completas'], 'meses' => $meses];
     }
 
     /**
@@ -92,20 +97,11 @@ final class RepartoDeFunciones
         if ($parametro === null) {
             throw new RuntimeException("No hay parámetro de reparto vigente en la fecha de la función {$funcion->id}.");
         }
-        $duenos = $funcion->duenosDeLasObras();
-        if ($duenos === []) {
+        if ($funcion->duenosDeLasObras() === []) {
             throw new RuntimeException("La función {$funcion->id} se finalizó sin ninguna obra proyectada: no hay cómo repartirla.");
         }
 
-        return Reparto::calcular(
-            $funcion->id,
-            $funcion->finalizadaEn,
-            $neto,
-            $funcion->organizadorId,
-            $duenos,
-            $parametro,
-            $ahora,
-        );
+        return Reparto::calcular($funcion, $neto, $parametro, $ahora);
     }
 
     /**

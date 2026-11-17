@@ -7,8 +7,10 @@ namespace IndieCinema\Recaudacion\Repositorios;
 use DateTimeImmutable;
 use IndieCinema\Nucleo\BaseDeDatos;
 use IndieCinema\Nucleo\Uuid;
+use IndieCinema\Recaudacion\Modelo\Mes;
 use IndieCinema\Recaudacion\Modelo\Monto;
 use IndieCinema\Recaudacion\Modelo\ParteDelReparto;
+use IndieCinema\Recaudacion\Modelo\ParteLiquidada;
 use IndieCinema\Recaudacion\Modelo\Reparto;
 use IndieCinema\Recaudacion\Modelo\RolDelReparto;
 
@@ -33,8 +35,9 @@ final class RepositorioDeRepartos
     {
         $this->base->enTransaccion(function (BaseDeDatos $base) use ($reparto): void {
             $base->ejecutar(
-                'INSERT INTO reparto (id, funcion_id, cobrado, parametro_id, finalizada_en, calculado_en)
-                 VALUES (?, ?, ?, ?, ?, ?)',
+                'INSERT INTO reparto (id, funcion_id, cobrado, parametro_id, finalizada_en, calculado_en,
+                                      funcion_fecha_hora, sala_nombre, titulos)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
                 [
                     $reparto->id,
                     $reparto->funcionId,
@@ -42,6 +45,9 @@ final class RepositorioDeRepartos
                     $reparto->parametroId,
                     $reparto->finalizadaEn,
                     $reparto->calculadoEn,
+                    $reparto->funcionFechaHora,
+                    $reparto->salaNombre,
+                    $reparto->titulos,
                 ],
             );
             foreach ($reparto->partes as $parte) {
@@ -83,6 +89,60 @@ final class RepositorioDeRepartos
         return array_map(
             static fn (array $fila): string => (string) $fila['funcion_id'],
             $this->base->filas("SELECT funcion_id FROM reparto WHERE funcion_id IN ({$marcas})", $funcionesIds),
+        );
+    }
+
+    /**
+     * Lo que le toca a cada beneficiario en el mes: la suma de sus partes de los repartos que se
+     * finalizaron en él, que es con lo que se arma la liquidación (EF-08.3). La parte de la
+     * plataforma no cuenta: es el sitio, no hay a quién transferirle.
+     *
+     * @return array<string, int> beneficiario => centavos, del que más cobra al que menos
+     */
+    public function sumasDelMes(Mes $mes): array
+    {
+        $sumas = [];
+        foreach ($this->base->filas(
+            'SELECT p.beneficiario_id, SUM(p.monto) AS total
+             FROM reparto_parte p
+             JOIN reparto r ON r.id = p.reparto_id
+             WHERE p.beneficiario_id IS NOT NULL AND r.finalizada_en >= ? AND r.finalizada_en < ?
+             GROUP BY p.beneficiario_id
+             ORDER BY total DESC, p.beneficiario_id',
+            [$mes->empieza(), $mes->termina()],
+        ) as $fila) {
+            $sumas[(string) $fila['beneficiario_id']] = Monto::centavos((string) $fila['total']);
+        }
+
+        return $sumas;
+    }
+
+    /**
+     * El detalle de la liquidación de un beneficiario: una línea por parte suya en el mes, de la
+     * función más vieja a la más nueva.
+     *
+     * @return list<ParteLiquidada>
+     */
+    public function detalleDelMes(string $beneficiarioId, Mes $mes): array
+    {
+        return array_map(
+            static fn (array $fila): ParteLiquidada => new ParteLiquidada(
+                (string) $fila['funcion_id'],
+                $fila['funcion_fecha_hora'] === null ? null : new DateTimeImmutable((string) $fila['funcion_fecha_hora']),
+                $fila['sala_nombre'] === null ? null : (string) $fila['sala_nombre'],
+                $fila['titulos'] === null ? null : (string) $fila['titulos'],
+                Monto::centavos((string) $fila['cobrado']),
+                RolDelReparto::from((string) $fila['rol']),
+                Monto::centavos((string) $fila['monto']),
+            ),
+            $this->base->filas(
+                'SELECT r.funcion_id, r.funcion_fecha_hora, r.sala_nombre, r.titulos, r.cobrado, p.rol, p.monto
+                 FROM reparto_parte p
+                 JOIN reparto r ON r.id = p.reparto_id
+                 WHERE p.beneficiario_id = ? AND r.finalizada_en >= ? AND r.finalizada_en < ?
+                 ORDER BY r.funcion_fecha_hora, r.funcion_id, FIELD(p.rol, \'sala\', \'dueno\')',
+                [$beneficiarioId, $mes->empieza(), $mes->termina()],
+            ),
         );
     }
 

@@ -97,7 +97,7 @@ final class AvisosDePagoTest extends TestCase
         // nginx siempre manda su secreto; sin sesión, sin usuario.
         $cabeceras['X-Nginx-Secreto'] = self::SECRETO;
         if ($usuario !== null) {
-            $cabeceras += ['X-Usuario-Id' => $usuario, 'X-Rol' => 'espectador'];
+            $cabeceras += ['X-Usuario-Id' => $usuario, 'X-Rol' => 'espectador', 'X-Correo-Verificado' => '1'];
         }
         $this->log = fopen('php://memory', 'w+');
         $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion, new Log('funciones', $this->log));
@@ -443,5 +443,48 @@ final class AvisosDePagoTest extends TestCase
         $this->configurar(['activo' => false]);
 
         self::assertSame(404, $this->avisar()->estado());
+    }
+
+    public function testUnAvisoConTsDeMasDeCincoMinutosSeRechazaAunqueTengaFirmaValida(): void
+    {
+        $reserva = $this->pendiente();
+        self::pagoEnMercadoPago(self::PAGO, $reserva['id'], $reserva['total']);
+
+        $respuesta = $this->avisar(cabeceras: self::cabecerasFirmadas(self::PAGO, self::CLAVE_WEBHOOK, time() - 301));
+
+        self::assertSame(401, $respuesta->estado());
+        self::assertSame('pendiente_pago', $this->reserva()['estado']);
+        self::assertSame([], self::pedidosAMercadoPago());
+        self::assertSame([], self::$correo->correos());
+    }
+
+    public function testLaFirmaDeOtroXRequestIdNoSirve(): void
+    {
+        $reserva = $this->pendiente();
+        self::pagoEnMercadoPago(self::PAGO, $reserva['id'], $reserva['total']);
+        $cabeceras = self::cabecerasFirmadas(self::PAGO);
+        $cabeceras['x-request-id'] = 'otro-request-id';
+
+        self::assertSame(401, $this->avisar(cabeceras: $cabeceras)->estado());
+        self::assertSame('pendiente_pago', $this->reserva()['estado']);
+        self::assertSame([], self::pedidosAMercadoPago());
+    }
+
+    public function testUnAvisoFueraDeOrdenDePagoYaConfirmadoYLuegoCanceladoOReembolsadoNoRevierte(): void
+    {
+        $reserva = $this->pendiente();
+        self::pagoEnMercadoPago(self::PAGO, $reserva['id'], $reserva['total']);
+
+        self::assertSame(200, $this->avisar()->estado());
+        self::assertSame('confirmada', $this->reserva()['estado']);
+
+        // Llega fuera de orden un aviso de rechazo/cancelación de otro intento o del mismo pago devuelto.
+        self::pagoEnMercadoPago(self::OTRO_PAGO, $reserva['id'], $reserva['total'], ['status' => 'cancelled']);
+        self::assertSame(200, $this->avisar(self::OTRO_PAGO)->estado());
+
+        self::assertSame('confirmada', $this->reserva()['estado']);
+        self::assertSame(self::PAGO, $this->reserva()['pago_id']);
+        self::assertCount(1, $this->historial($reserva['id']));
+        self::assertCount(1, self::$correo->correos());
     }
 }

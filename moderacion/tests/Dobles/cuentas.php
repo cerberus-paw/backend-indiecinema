@@ -14,6 +14,7 @@ declare(strict_types=1);
 
 const ESPECTADORA = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const ORGANIZADOR = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+const OTRO_ESPECTADOR = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 const LENTO = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
 const MODERADORA = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
 
@@ -31,9 +32,28 @@ $usuarios = [
     ORGANIZADOR => ['nombre' => 'Omar Prueba', 'correo' => 'omar@ejemplo.com', 'roles' => ['espectador', 'organizador'], 'creado_en' => '2024-11-02T12:00:00'],
     // Una moderadora que pidió una sala (EF-07.3).
     MODERADORA => ['nombre' => 'Mora Prueba', 'correo' => 'mora@ejemplo.com', 'roles' => ['espectador', 'moderador'], 'creado_en' => '2024-06-01T09:00:00'],
+    OTRO_ESPECTADOR => ['nombre' => 'Clara Prueba', 'correo' => 'clara@ejemplo.com', 'roles' => ['espectador'], 'creado_en' => '2025-04-10T18:00:00'],
 ];
 
-if (!preg_match('#^/interno/usuarios/([^/]+)(/roles)?$#', (string) parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH), $partes)) {
+$ruta = (string) parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+if ($ruta === '/interno/usuarios' && ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET') {
+    $idsCrudo = (string) ($_GET['ids'] ?? '');
+    if (getenv('REGISTRO_CONSULTAS') !== false && getenv('REGISTRO_CONSULTAS') !== '') {
+        file_put_contents((string) getenv('REGISTRO_CONSULTAS'), $idsCrudo . "\n", FILE_APPEND);
+    }
+    $respuesta = [];
+    foreach (array_filter(explode(',', $idsCrudo)) as $id) {
+        $id = trim($id);
+        if (isset($usuarios[$id])) {
+            $respuesta[$id] = ['id' => $id, 'nombre' => $usuarios[$id]['nombre']];
+        }
+    }
+    echo json_encode($respuesta, JSON_FORCE_OBJECT);
+
+    return;
+}
+
+if (!preg_match('#^/interno/usuarios/([^/]+)(/roles)?$#', $ruta, $partes)) {
     http_response_code(404);
 
     return;

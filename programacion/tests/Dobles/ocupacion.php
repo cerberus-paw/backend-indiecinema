@@ -43,6 +43,11 @@ if ($ruta === '/interno/ocupacion') {
             ? ($ocupados[$partes[1] . ':usuario'][$_GET['usuario']] ?? 0)
             : ($ocupados[$partes[1] . ':usuario'] ?? 0);
         $respuesta['lugares_del_usuario'] = is_int($delUsuario) ? $delUsuario : 0;
+        $conducta = $ocupados['conducta:' . $_GET['usuario']] ?? null;
+        if (is_array($conducta)) {
+            $respuesta['tope_reservas_conducta'] = $conducta['tope'];
+            $respuesta['reservas_activas_usuario'] = $conducta['activas'];
+        }
     }
     echo json_encode($respuesta);
 } else {

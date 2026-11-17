@@ -144,4 +144,25 @@ final class SesionesTest extends TestCase
 
         self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM sesion'));
     }
+
+    public function testBorrarDeUsuarioCierraTodasOSalvoLaActual(): void
+    {
+        $ana = $this->usuario();
+        $otro = $this->usuario('otro@ejemplo.com');
+        $repo = new RepositorioDeSesiones($this->base);
+
+        $actual = $this->servicio->abrir($ana)->identificador;
+        $otraDeAna = $this->servicio->abrir($ana)->identificador;
+        $deOtro = $this->servicio->abrir($otro)->identificador;
+
+        $repo->borrarDeUsuario($ana, Sesion::huellaDe($actual));
+        self::assertNotNull($this->servicio->validar($actual));
+        self::assertNull($this->servicio->validar($otraDeAna));
+        self::assertNotNull($this->servicio->validar($deOtro));
+
+        $repo->borrarDeUsuario($ana);
+        self::assertNull($this->servicio->validar($actual));
+        self::assertSame(0, $this->sesionesDe($ana));
+        self::assertNotNull($this->servicio->validar($deOtro));
+    }
 }

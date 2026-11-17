@@ -5,9 +5,12 @@ declare(strict_types=1);
 use IndieCinema\Cuentas\Controladores\AdministracionDeUsuarios;
 use IndieCinema\Cuentas\Controladores\Ingreso;
 use IndieCinema\Cuentas\Controladores\Inicio;
+use IndieCinema\Cuentas\Controladores\Perfil;
+use IndieCinema\Cuentas\Controladores\RecuperacionDeContrasena;
 use IndieCinema\Cuentas\Controladores\Registro;
 use IndieCinema\Cuentas\Controladores\SesionInterna;
 use IndieCinema\Cuentas\Controladores\UsuariosInternos;
+use IndieCinema\Cuentas\Controladores\VerificacionDeCorreo;
 use IndieCinema\Nucleo\Http\EstadoInterno;
 use IndieCinema\Nucleo\Ruteo\Router;
 use IndieCinema\Nucleo\Seguridad\Rol;
@@ -17,14 +20,24 @@ use IndieCinema\Nucleo\Seguridad\Rol;
  * middleware del núcleo lo controla antes de llegar al controlador.
  */
 return static function (Router $router): void {
-    // «Mi cuenta»: los datos de quien está en sesión.
+    // «Mi cuenta»: los datos de quien está en sesión y su edición (EF-15.1).
     $router->get('/', [Inicio::class, 'mostrar'], Rol::Espectador);
+    $router->get('/datos', [Perfil::class, 'mostrarDatos'], Rol::Espectador);
+    $router->post('/datos', [Perfil::class, 'guardarDatos'], Rol::Espectador);
+    $router->get('/contrasena', [Perfil::class, 'mostrarContrasena'], Rol::Espectador);
+    $router->post('/contrasena', [Perfil::class, 'guardarContrasena'], Rol::Espectador);
 
     // Sin sesión: es para el visitante que todavía no tiene cuenta.
     $router->get('/registro', [Registro::class, 'mostrar']);
     $router->post('/registro', [Registro::class, 'registrar']);
+    $router->get('/verificar', [VerificacionDeCorreo::class, 'verificar']);
+    $router->post('/verificar/reenviar', [VerificacionDeCorreo::class, 'reenviar'], Rol::Espectador);
     $router->get('/ingresar', [Ingreso::class, 'mostrar']);
     $router->post('/ingresar', [Ingreso::class, 'ingresar']);
+    $router->get('/recuperar', [RecuperacionDeContrasena::class, 'mostrarSolicitud']);
+    $router->post('/recuperar', [RecuperacionDeContrasena::class, 'solicitar']);
+    $router->get('/recuperar/nueva', [RecuperacionDeContrasena::class, 'mostrarNueva']);
+    $router->post('/recuperar/nueva', [RecuperacionDeContrasena::class, 'restablecer']);
     // Sin rol mínimo: trabaja con la cookie, y sin sesión válida igual la borra.
     $router->post('/salir', [Ingreso::class, 'salir']);
 

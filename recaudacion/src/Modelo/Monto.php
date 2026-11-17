@@ -25,4 +25,12 @@ final class Monto
     {
         return sprintf('%d.%02d', intdiv($centavos, 100), $centavos % 100);
     }
+
+    /** 15400000 → «$ 154.000», con los centavos sólo si los hay, como el resto del sitio. */
+    public static function comoPesos(int $centavos): string
+    {
+        $texto = number_format(intdiv($centavos, 100), 0, ',', '.');
+
+        return '$ ' . ($centavos % 100 === 0 ? $texto : $texto . ',' . sprintf('%02d', $centavos % 100));
+    }
 }

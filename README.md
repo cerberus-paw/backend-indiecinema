@@ -49,7 +49,7 @@ backend-indiecinema/
 ├── programacion/          /          obras, salas, funciones, cartelera y votación de títulos
 ├── funciones/             /funcion/  las reservas con el cupo de cada función, sus paneles y el acuerdo de fecha
 ├── moderacion/            /moderacion/  las solicitudes de sala y su bandeja (EF-07.2); lo demás de EF-07 y los términos llegan con EF-07 y EF-16
-└── recaudacion/           /recaudacion/: los reportes (EF-09) y el reparto de lo cobrado (EF-08.1, EF-08.2); las liquidaciones llegan con EF-08.3
+└── recaudacion/           /recaudacion/: los reportes (EF-09), el reparto de lo cobrado (EF-08.1, EF-08.2) y las liquidaciones por mes (EF-08.3)
 ```
 
 Lo que todavía no está (los beneficios, dentro de recaudación) se suma con la misma forma.
@@ -293,6 +293,17 @@ todo el sitio se vea igual aunque lo sirvan subsistemas distintos.
   partes: no reparten, pero así la tarea no las vuelve a mirar en cada pasada. Si una función no se
   puede repartir, la tarea corta ahí y no sigue con las que vienen después, para no dejarla atrás
   del cursor sin repartir.
+- **La liquidación es por mes y por beneficiario, y no se vuelve a tocar una vez transferida**
+  (`/recaudacion/liquidaciones` y `/recaudacion/administracion/liquidaciones`, EF-08.3): la tarea
+  del reparto suma las partes de cada organizador y de cada dueño del mes y las deja en
+  `liquidacion`, una fila por beneficiario y período. El mes es el de la finalización de la
+  función, el mismo criterio con el que la tarea recorre los repartos, así una función que se
+  finalizó tarde se liquida en el mes en que se finalizó y no queda afuera de todos. La
+  transferencia se hace fuera del sitio: el administrador la marca con la fecha y una nota, y
+  desde ahí el monto no se mueve aunque después se reparta otra función de ese mes. El detalle por
+  función sale de lo que el reparto guardó (la fecha, la sala y los títulos), no de volver a
+  preguntarle a programación: una liquidación es el comprobante de lo que se pagó y tiene que
+  seguir diciendo de qué función fue aunque la sala se dé de baja.
 - **Las rutas dentro del contenedor copian las del disco** (`/src/backend-indiecinema/<subsistema>`
   y `/src/frontend-indiecinema`), así los repositorios `path` de Composer funcionan igual si se
   instala desde afuera o desde adentro del contenedor.
@@ -632,7 +643,8 @@ no duplica nada:
   finalizada entre la sala, los dueños de las obras que se proyectaron y la plataforma, con los
   porcentajes que regían en la fecha de la función (ver «El reparto de lo cobrado»). Le pide a
   programación las finalizadas desde la última que repartió y a funciones lo cobrado de cada una,
-  que ya viene neto de reembolsos. Las funciones a la gorra no reparten.
+  que ya viene neto de reembolsos. Las funciones a la gorra no reparten. Con lo que repartió
+  rearma las liquidaciones de esos meses (EF-08.3).
 - `suspender-vencidas` (moderación, una vez por día): suspende las salas con el seguro o la
   habilitación aceptados vencidos y las apaga en programación, hasta que se acepte uno nuevo. Le
   avisa por correo al organizador siete días antes y al suspenderla. Con `[documentos]

@@ -18,9 +18,16 @@ use IndieCinema\Nucleo\Uuid;
  *
  * Una función que no repartió nada —a la gorra, o paga pero sin un peso cobrado— también se
  * registra, sin partes: así la tarea no la vuelve a mirar en cada pasada.
+ *
+ * Guarda también de qué función fue, como era en ese momento (la fecha, la sala y los títulos):
+ * es lo que muestra el detalle de la liquidación (EF-08.3), y así sigue diciendo de qué función
+ * fue aunque después la sala se dé de baja o la obra cambie de título.
  */
 final readonly class Reparto
 {
+    /** Lo que entra en la columna reparto.titulos. */
+    private const LARGO_DE_LOS_TITULOS = 500;
+
     /**
      * @param list<ParteDelReparto> $partes
      *
@@ -32,6 +39,9 @@ final readonly class Reparto
         public int $cobradoCentavos,
         public ?string $parametroId,
         public DateTimeImmutable $finalizadaEn,
+        public DateTimeImmutable $funcionFechaHora,
+        public string $salaNombre,
+        public string $titulos,
         public DateTimeImmutable $calculadoEn,
         public array $partes,
     ) {
@@ -42,26 +52,20 @@ final readonly class Reparto
     }
 
     /**
-     * @param DateTimeImmutable $finalizadaEn      cuándo pasó a finalizada en programación, que es
-     *                                             por donde la tarea sigue desde su última pasada
-     * @param string            $organizadorId     el de la sala: le toca la parte de la sala
-     * @param list<string>      $duenosDeLasObras  el dueño de cada obra que se proyectó, repetido
-     *                                             si proyectó más de una
+     * @param int $cobradoCentavos lo cobrado neto de reembolsos, que es lo que se reparte
      *
      * @throws ReglaIncumplida si no hay nada cobrado, o si la función no proyectó ninguna obra
      */
     public static function calcular(
-        string $funcionId,
-        DateTimeImmutable $finalizadaEn,
+        FuncionFinalizada $funcion,
         int $cobradoCentavos,
-        string $organizadorId,
-        array $duenosDeLasObras,
         ParametroDeReparto $parametro,
         DateTimeImmutable $ahora = new DateTimeImmutable(),
     ): self {
         if ($cobradoCentavos <= 0) {
             throw new ReglaIncumplida('Una función sin nada cobrado no tiene qué repartir.');
         }
+        $duenosDeLasObras = $funcion->duenosDeLasObras();
         if ($duenosDeLasObras === []) {
             throw new ReglaIncumplida('Una función sin obras proyectadas no se puede repartir.');
         }
@@ -77,7 +81,7 @@ final readonly class Reparto
             $porDueno[$duenoId] = ($porDueno[$duenoId] ?? 0) + $porObra;
         }
 
-        $partes = [new ParteDelReparto(RolDelReparto::Sala, $organizadorId, $sala)];
+        $partes = [new ParteDelReparto(RolDelReparto::Sala, $funcion->organizadorId, $sala)];
         foreach ($porDueno as $duenoId => $centavos) {
             $partes[] = new ParteDelReparto(RolDelReparto::Dueno, (string) $duenoId, $centavos);
         }
@@ -85,19 +89,42 @@ final readonly class Reparto
         // calcula con el porcentaje, sino restando, y las partes cierran al centavo.
         $partes[] = new ParteDelReparto(RolDelReparto::Plataforma, null, $cobradoCentavos - $sala - $porObra * count($duenosDeLasObras));
 
-        return new self(Uuid::nuevo(), $funcionId, $cobradoCentavos, $parametro->id, $finalizadaEn, $ahora, $partes);
+        return self::de($funcion, $cobradoCentavos, $parametro->id, $ahora, $partes);
     }
 
     /**
      * Una función que no repartió nada: a la gorra, o paga y sin un peso cobrado. Sin partes y sin
      * parámetro, porque no hubo con qué ni a quién.
      */
-    public static function sinPlata(
-        string $funcionId,
-        DateTimeImmutable $finalizadaEn,
-        DateTimeImmutable $ahora = new DateTimeImmutable(),
+    public static function sinPlata(FuncionFinalizada $funcion, DateTimeImmutable $ahora = new DateTimeImmutable()): self
+    {
+        return self::de($funcion, 0, null, $ahora, []);
+    }
+
+    /**
+     * @param list<ParteDelReparto> $partes
+     */
+    private static function de(
+        FuncionFinalizada $funcion,
+        int $cobradoCentavos,
+        ?string $parametroId,
+        DateTimeImmutable $ahora,
+        array $partes,
     ): self {
-        return new self(Uuid::nuevo(), $funcionId, 0, null, $finalizadaEn, $ahora, []);
+        $titulos = implode(', ', array_map(static fn (ObraVotada $obra): string => $obra->titulo, $funcion->elegidas()));
+
+        return new self(
+            Uuid::nuevo(),
+            $funcion->id,
+            $cobradoCentavos,
+            $parametroId,
+            $funcion->finalizadaEn,
+            $funcion->fechaHora,
+            $funcion->salaNombre,
+            mb_substr($titulos, 0, self::LARGO_DE_LOS_TITULOS),
+            $ahora,
+            $partes,
+        );
     }
 
     /** «10000.00», con dos decimales como la columna. */
@@ -110,5 +137,11 @@ final readonly class Reparto
     public function sinPartes(): bool
     {
         return $this->partes === [];
+    }
+
+    /** El mes en el que se liquida: el de la finalización, que es por donde va la tarea. */
+    public function mes(): Mes
+    {
+        return Mes::de($this->finalizadaEn);
     }
 }

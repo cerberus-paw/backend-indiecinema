@@ -10,6 +10,7 @@ use IndieCinema\Nucleo\Http\ClienteInterno;
 use IndieCinema\Nucleo\Http\ExcepcionHttp;
 use IndieCinema\Nucleo\Log;
 use IndieCinema\Nucleo\Uuid;
+use IndieCinema\Recaudacion\Modelo\Mes;
 use IndieCinema\Recaudacion\Modelo\ParteDelReparto;
 use IndieCinema\Recaudacion\Pruebas\ConBaseDePruebas;
 use IndieCinema\Recaudacion\Pruebas\ConDoblesDeSubsistemas;
@@ -119,7 +120,12 @@ final class RepartoDeFuncionesTest extends TestCase
     {
         $hecho = $this->tarea()->repartir();
 
-        self::assertSame(['repartidas' => 3, 'sinPlata' => 1, 'quedanMas' => false], $hecho);
+        self::assertSame([3, 1, false], [$hecho['repartidas'], $hecho['sinPlata'], $hecho['quedanMas']]);
+        // Todo lo repartido cayó en noviembre: con eso se rearman sus liquidaciones (EF-08.3).
+        self::assertSame(
+            ['2026-11'],
+            array_values(array_unique(array_map(static fn (Mes $mes): string => $mes->comoTexto(), $hecho['meses']))),
+        );
         // $ 10.000 cobrados y 70/15/15: 7.000 para la sala, 1.500 para la dueña de la obra y 1.500
         // para la plataforma. Lo reembolsado no está en lo cobrado, así que no se repartió.
         self::assertSame('10000.00', $this->cobradoDe(self::SIMPLE));
@@ -162,6 +168,16 @@ final class RepartoDeFuncionesTest extends TestCase
     {
         $this->tarea()->repartir();
 
+        // Y queda guardado de qué función fue, para el detalle de la liquidación (EF-08.3).
+        $funcion = $this->base->fila(
+            'SELECT funcion_fecha_hora, sala_nombre, titulos FROM reparto WHERE funcion_id = ?',
+            [self::VIEJA],
+        );
+        self::assertNotNull($funcion);
+        self::assertSame(
+            ['2026-10-05 20:00:00', 'El Galpón', 'Rojo'],
+            [(string) $funcion['funcion_fecha_hora'], (string) $funcion['sala_nombre'], (string) $funcion['titulos']],
+        );
         self::assertSame('3500.00', $this->cobradoDe(self::VIEJA));
         self::assertSame('2450.00', $this->partes(self::VIEJA)['sala:' . self::ORGANIZADORA]);
     }
@@ -173,7 +189,7 @@ final class RepartoDeFuncionesTest extends TestCase
 
         $otraVez = $this->tarea()->repartir();
 
-        self::assertSame(['repartidas' => 0, 'sinPlata' => 0, 'quedanMas' => false], $otraVez);
+        self::assertSame([0, 0, false, []], [$otraVez['repartidas'], $otraVez['sinPlata'], $otraVez['quedanMas'], $otraVez['meses']]);
         self::assertSame(4, $this->base->valor('SELECT COUNT(*) FROM reparto'));
         self::assertSame($partes, $this->base->valor('SELECT COUNT(*) FROM reparto_parte'));
     }

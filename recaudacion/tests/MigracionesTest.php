@@ -180,6 +180,55 @@ final class MigracionesTest extends TestCase
         self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM reparto_parte'));
     }
 
+    private function liquidar(string $beneficiarioId, string $periodo = '2026-11', string $monto = '7070.00'): string
+    {
+        $id = Uuid::nuevo();
+        $this->base->ejecutar(
+            'INSERT INTO liquidacion (id, beneficiario_id, periodo, monto) VALUES (?, ?, ?, ?)',
+            [$id, $beneficiarioId, $periodo, $monto],
+        );
+
+        return $id;
+    }
+
+    public function testUnBeneficiarioTieneUnaSolaLiquidacionPorMes(): void
+    {
+        $beneficiario = Uuid::nuevo();
+        $this->liquidar($beneficiario);
+
+        // La tarea rearma la del mes en vez de agregar otra: si no, se pagaría dos veces.
+        $this->assertRechaza(self::CLAVE_DUPLICADA, fn () => $this->liquidar($beneficiario));
+        // Otro mes del mismo beneficiario sí es otra liquidación.
+        $this->liquidar($beneficiario, '2026-10');
+        self::assertSame(2, $this->base->valor('SELECT COUNT(*) FROM liquidacion'));
+    }
+
+    public function testUnaLiquidacionNoPuedeSerNegativa(): void
+    {
+        $this->assertRechaza(self::RESTRICCION_INCUMPLIDA, fn () => $this->liquidar(Uuid::nuevo(), monto: '-1.00'));
+    }
+
+    /**
+     * El estado y la fecha no se pueden contradecir: una transferida sin fecha no diría cuándo se
+     * pagó, y una pendiente con fecha diría que se pagó sin estarlo.
+     */
+    public function testUnaLiquidacionTransferidaTieneFechaYUnaPendienteNo(): void
+    {
+        $id = $this->liquidar(Uuid::nuevo());
+
+        $this->assertRechaza(
+            self::RESTRICCION_INCUMPLIDA,
+            fn () => $this->base->ejecutar("UPDATE liquidacion SET estado = 'transferida' WHERE id = ?", [$id]),
+        );
+        $this->assertRechaza(
+            self::RESTRICCION_INCUMPLIDA,
+            fn () => $this->base->ejecutar('UPDATE liquidacion SET transferida_en = NOW() WHERE id = ?', [$id]),
+        );
+
+        $this->base->ejecutar("UPDATE liquidacion SET estado = 'transferida', transferida_en = NOW() WHERE id = ?", [$id]);
+        self::assertSame('transferida', (string) $this->base->valor('SELECT estado FROM liquidacion WHERE id = ?', [$id]));
+    }
+
     public function testDosRepartosNoPuedenEmpezarAVivirEnElMismoMomento(): void
     {
         $this->cargar(['60.00', '20.00', '20.00'], '2026-12-01 00:00:00');

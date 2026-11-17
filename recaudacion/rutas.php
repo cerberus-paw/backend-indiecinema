@@ -5,6 +5,8 @@ declare(strict_types=1);
 use IndieCinema\Nucleo\Http\EstadoInterno;
 use IndieCinema\Nucleo\Ruteo\Router;
 use IndieCinema\Nucleo\Seguridad\Rol;
+use IndieCinema\Recaudacion\Controladores\Liquidaciones;
+use IndieCinema\Recaudacion\Controladores\LiquidacionesDelAdministrador;
 use IndieCinema\Recaudacion\Controladores\ParametrosDeReparto;
 use IndieCinema\Recaudacion\Controladores\Reportes;
 
@@ -12,8 +14,8 @@ use IndieCinema\Recaudacion\Controladores\Reportes;
  * Las rutas de recaudación, sin el prefijo que saca nginx. Cada una declara su rol mínimo; el
  * middleware del núcleo lo controla antes de llegar al controlador.
  *
- * Las liquidaciones (EF-08.3) y los beneficios (EF-17) se escriben acá. /recaudacion/ sola
- * responde la página de error del sitio con un 404.
+ * Los beneficios (EF-17) se escriben acá. /recaudacion/ sola responde la página de error del sitio
+ * con un 404.
  */
 return static function (Router $router): void {
     // Con cuánto se reparte lo cobrado entre la sala, el dueño y la plataforma, y desde cuándo
@@ -30,6 +32,14 @@ return static function (Router $router): void {
     $router->get('/reportes/funciones.csv', [Reportes::class, 'descargar'], Rol::Organizador);
     // Para el dueño, cómo le fue a cada obra suya en cualquier sala (EF-09.3).
     $router->get('/reportes/obras', [Reportes::class, 'obras'], Rol::Organizador);
+
+    // Lo que le toca a cada uno por mes (EF-08.3): el organizador por sus salas y el dueño por sus
+    // obras ven sólo lo suyo, que se busca por el usuario en sesión.
+    $router->get('/liquidaciones', [Liquidaciones::class, 'mias'], Rol::Organizador);
+    // Todas las del mes y la marca de transferida, con su nota: sólo el administrador, que es
+    // quien hace las transferencias fuera del sitio.
+    $router->get('/administracion/liquidaciones', [LiquidacionesDelAdministrador::class, 'mostrar'], Rol::Administrador);
+    $router->post('/administracion/liquidaciones/{id}/transferida', [LiquidacionesDelAdministrador::class, 'marcarTransferida'], Rol::Administrador);
 
     // Para comprobar que los otros subsistemas llegan hasta acá con su token.
     $router->interna('GET', '/interno/estado', [EstadoInterno::class, 'mostrar'], ['cuentas', 'programacion', 'funciones', 'moderacion']);

@@ -41,8 +41,8 @@ final class BarraDelOrganizadorTest extends TestCase
     private const CSRF = 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc';
     private const ORGANIZADORA = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 
-    /** El logo, a la portada, y las secciones: Mis salas, Mis funciones, Programar función, Reportes, Usuarios bloqueados, Pedidos para programar y Publicar una sala. */
-    private const ENLACES = ['/', '/organizador/bloqueados', '/organizador/funciones', '/organizador/funciones/nueva', '/organizador/pedidos', '/organizador/salas', '/recaudacion/reportes', '/solicitar-sala'];
+    /** El logo, a la portada, y las secciones: Mis salas, Mis funciones, Programar función, Reportes, Mis liquidaciones, Usuarios bloqueados, Pedidos para programar y Publicar una sala. */
+    private const ENLACES = ['/', '/organizador/bloqueados', '/organizador/funciones', '/organizador/funciones/nueva', '/organizador/pedidos', '/organizador/salas', '/recaudacion/liquidaciones', '/recaudacion/reportes', '/solicitar-sala'];
 
     private Configuracion $configuracion;
     private BaseDeDatos $base;

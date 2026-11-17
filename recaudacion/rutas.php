@@ -17,7 +17,8 @@ use IndieCinema\Recaudacion\Controladores\Reportes;
  */
 return static function (Router $router): void {
     // Con cuánto se reparte lo cobrado entre la sala, el dueño y la plataforma, y desde cuándo
-    // (EF-08.1). Sólo el administrador: es el parámetro con el que se le paga a todos.
+    // (EF-08.1). Sólo el administrador: es el parámetro con el que se le paga a todos. El reparto
+    // de cada función no tiene ruta: lo hace la tarea del cron, en bin/repartir.php (EF-08.2).
     $router->get('/administracion/reparto', [ParametrosDeReparto::class, 'mostrar'], Rol::Administrador);
     $router->post('/administracion/reparto', [ParametrosDeReparto::class, 'guardar'], Rol::Administrador);
 

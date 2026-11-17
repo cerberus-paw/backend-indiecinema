@@ -61,15 +61,13 @@ final class TotalDeFunciones
     /** «154000.00», con dos decimales como la base. */
     public function cobrado(): string
     {
-        return sprintf('%d.%02d', intdiv($this->cobradoCentavos, 100), $this->cobradoCentavos % 100);
+        return Monto::comoDecimal($this->cobradoCentavos);
     }
 
     /** «3500.00» → 350000. */
     public static function centavos(string $monto): int
     {
-        [$enteros, $decimales] = explode('.', $monto . '.00');
-
-        return (int) $enteros * 100 + (int) substr(str_pad($decimales, 2, '0'), 0, 2);
+        return Monto::centavos($monto);
     }
 
     private static function porcentaje(int $parte, int $total): int

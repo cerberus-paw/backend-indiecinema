@@ -20,6 +20,8 @@ use PHPUnit\Framework\TestCase;
  */
 final class ReportesTest extends TestCase
 {
+    use ConDoblesDeSubsistemas;
+
     private const ORGANIZADORA = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
     private const SIN_FUNCIONES = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
     private const ADMINISTRADORA = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
@@ -29,9 +31,6 @@ final class ReportesTest extends TestCase
     private const DUENA = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
     private const ZAMA = '20000000-0000-4000-8000-000000000001';
     private const CIENAGA = '20000000-0000-4000-8000-000000000002';
-
-    /** @var list<resource> */
-    private static array $servidores = [];
 
     private static string $programacion;
     private static string $funciones;
@@ -48,43 +47,7 @@ final class ReportesTest extends TestCase
 
     public static function tearDownAfterClass(): void
     {
-        foreach (self::$servidores as $servidor) {
-            proc_terminate($servidor);
-            proc_close($servidor);
-        }
-        self::$servidores = [];
-    }
-
-    private static function puertoLibre(): int
-    {
-        $socket = stream_socket_server('tcp://127.0.0.1:0');
-        $puerto = (int) substr((string) strrchr((string) stream_socket_get_name($socket, false), ':'), 1);
-        fclose($socket);
-
-        return $puerto;
-    }
-
-    private static function levantar(string $doble): string
-    {
-        $puerto = self::puertoLibre();
-        $proceso = proc_open(
-            [PHP_BINARY, '-S', "127.0.0.1:{$puerto}", __DIR__ . "/Dobles/{$doble}"],
-            [['pipe', 'r'], ['file', '/dev/null', 'w'], ['file', '/dev/null', 'w']],
-            $tuberias,
-        );
-        if ($proceso !== false) {
-            self::$servidores[] = $proceso;
-        }
-        for ($intento = 0; $intento < 100; ++$intento) {
-            $conexion = @fsockopen('127.0.0.1', $puerto, $codigo, $mensaje, 0.05);
-            if ($conexion !== false) {
-                fclose($conexion);
-
-                return "http://127.0.0.1:{$puerto}";
-            }
-            usleep(20_000);
-        }
-        self::fail("No arrancó el doble {$doble}.");
+        self::apagarDobles();
     }
 
     /**

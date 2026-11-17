@@ -13,12 +13,17 @@ use IndieCinema\Recaudacion\Modelo\Periodo;
 use RuntimeException;
 
 /**
- * Las funciones finalizadas de un período, pedidas a programación por la API interna
- * (GET /interno/funciones/finalizadas). Como CobrosDeFunciones, lee la respuesta sin suponer nada:
- * si cambió lo que manda, mejor un error claro que un reporte con números a medias.
+ * Las funciones finalizadas que pide recaudación a programación por la API interna
+ * (GET /interno/funciones/finalizadas), de dos maneras: las de un período, para la reportería
+ * (EF-09), y las que se finalizaron desde un momento, para la tarea del reparto (EF-08.2).
+ *
+ * Como CobrosDeFunciones, lee la respuesta sin suponer nada: si cambió lo que manda, mejor un
+ * error claro que un reporte con números a medias o un reparto de menos.
  */
 final class FuncionesFinalizadas
 {
+    private const MONTO = '/^\d+\.\d{2}$/';
+
     public function __construct(private readonly ClienteInterno $cliente)
     {
     }
@@ -42,6 +47,34 @@ final class FuncionesFinalizadas
         if ($duenoId !== null) {
             $consulta['dueno'] = $duenoId;
         }
+
+        return $this->pedir($consulta);
+    }
+
+    /**
+     * Las que se finalizaron desde ese momento (incluido), de la que se finalizó primero a la
+     * última: es por donde sigue la tarea del reparto desde su última pasada. Van todas las del
+     * sitio, sin filtrar por organizador ni por dueño.
+     *
+     * @return array{funciones: list<FuncionFinalizada>, completas: bool} completas en false si
+     *                                                                    quedaron más para la
+     *                                                                    próxima pasada
+     *
+     * @throws ExcepcionHttp    503 si programación no responde a tiempo
+     * @throws RuntimeException si responde algo que no son funciones finalizadas
+     */
+    public function desdeLaFinalizacion(DateTimeImmutable $desde): array
+    {
+        return $this->pedir(['desde' => $desde->format('Y-m-d\TH:i:s')]);
+    }
+
+    /**
+     * @param array<string, string> $consulta
+     *
+     * @return array{funciones: list<FuncionFinalizada>, completas: bool}
+     */
+    private function pedir(array $consulta): array
+    {
         $datos = $this->cliente->get('programacion', '/interno/funciones/finalizadas', $consulta);
         if (!is_array($datos) || !is_array($datos['funciones'] ?? null) || !array_is_list($datos['funciones']) || !is_bool($datos['completas'] ?? null)) {
             throw new RuntimeException('programación no respondió las funciones finalizadas.');
@@ -52,10 +85,12 @@ final class FuncionesFinalizadas
 
     private static function funcion(mixed $datos): FuncionFinalizada
     {
-        $fecha = is_array($datos) && is_string($datos['fecha_hora'] ?? null) ? DateTimeImmutable::createFromFormat('!Y-m-d\TH:i:s', $datos['fecha_hora']) : false;
+        $fecha = is_array($datos) ? self::momento($datos['fecha_hora'] ?? null) : null;
+        $finalizada = is_array($datos) ? self::momento($datos['finalizada_en'] ?? null) : null;
         if (
-            !is_array($datos) || $fecha === false
+            !is_array($datos) || $fecha === null || $finalizada === null
             || !is_string($datos['id'] ?? null) || !is_int($datos['cupo'] ?? null)
+            || !is_string($datos['precio_base'] ?? null) || preg_match(self::MONTO, $datos['precio_base']) !== 1
             || !is_array($datos['sala'] ?? null) || !is_string($datos['sala']['id'] ?? null) || !is_string($datos['sala']['nombre'] ?? null)
             || !is_string($datos['organizador_id'] ?? null)
             || !is_array($datos['obras'] ?? null) || !array_is_list($datos['obras'])
@@ -71,7 +106,9 @@ final class FuncionesFinalizadas
         return new FuncionFinalizada(
             $datos['id'],
             $fecha,
+            $finalizada,
             $datos['cupo'],
+            $datos['precio_base'],
             $datos['sala']['id'],
             $datos['sala']['nombre'],
             $datos['organizador_id'],
@@ -85,5 +122,13 @@ final class FuncionesFinalizadas
             }, $datos['obras']),
             $votantes,
         );
+    }
+
+    /** Un momento de la API interna, en ISO 8601 sin zona; null si no es uno. */
+    private static function momento(mixed $texto): ?DateTimeImmutable
+    {
+        $momento = is_string($texto) ? DateTimeImmutable::createFromFormat('!Y-m-d\TH:i:s', $texto) : false;
+
+        return $momento === false ? null : $momento;
     }
 }

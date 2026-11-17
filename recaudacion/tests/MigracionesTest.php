@@ -11,9 +11,11 @@ use PDOException;
 use PHPUnit\Framework\TestCase;
 
 /**
- * La tabla parametro_reparto tal como la dejan las migraciones, contra un MySQL de verdad (EF-08.1):
- * lo que se prueba son las restricciones de la base, no las de la aplicación. La aplicación avisa
- * antes, pero un reparto que no suma 100 % dejaría plata sin dueño, así que lo rechaza la base.
+ * Las tablas del reparto tal como las dejan las migraciones, contra un MySQL de verdad: el
+ * parámetro con su vigencia (EF-08.1) y los repartos con sus partes (EF-08.2). Lo que se prueba
+ * son las restricciones de la base, no las de la aplicación. La aplicación avisa antes, pero un
+ * reparto que no suma 100 %, o repetido, dejaría plata sin dueño o la pagaría dos veces, así que
+ * también lo rechaza la base.
  */
 final class MigracionesTest extends TestCase
 {
@@ -86,6 +88,96 @@ final class MigracionesTest extends TestCase
     public function testNingunaParteDelRepartoPuedeSerNegativa(): void
     {
         $this->assertRechaza(self::RESTRICCION_INCUMPLIDA, fn () => $this->cargar(['110.00', '-5.00', '-5.00']));
+    }
+
+    /**
+     * Un reparto de una función, con el parámetro de la migración (EF-08.2).
+     *
+     * @return string el id
+     */
+    private function repartir(string $funcionId, string $cobrado = '10000.00', ?string $parametroId = null): string
+    {
+        $id = Uuid::nuevo();
+        $this->base->ejecutar(
+            'INSERT INTO reparto (id, funcion_id, cobrado, parametro_id, finalizada_en)
+             VALUES (?, ?, ?, ?, ?)',
+            [
+                $id,
+                $funcionId,
+                $cobrado,
+                $parametroId ?? (string) $this->base->valor('SELECT id FROM parametro_reparto ORDER BY vigente_desde LIMIT 1'),
+                '2026-11-20 23:20:00',
+            ],
+        );
+
+        return $id;
+    }
+
+    private function agregarParte(string $repartoId, string $rol, ?string $beneficiarioId, string $monto): void
+    {
+        $this->base->ejecutar(
+            'INSERT INTO reparto_parte (id, reparto_id, rol, beneficiario_id, monto) VALUES (?, ?, ?, ?, ?)',
+            [Uuid::nuevo(), $repartoId, $rol, $beneficiarioId, $monto],
+        );
+    }
+
+    public function testUnaFuncionNoPuedeTenerDosRepartos(): void
+    {
+        $funcion = Uuid::nuevo();
+        $this->repartir($funcion);
+
+        // Es lo que hace que correr la tarea de más no reparta dos veces lo mismo.
+        $this->assertRechaza(self::CLAVE_DUPLICADA, fn () => $this->repartir($funcion));
+        self::assertSame(1, $this->base->valor('SELECT COUNT(*) FROM reparto'));
+    }
+
+    public function testUnRepartoNoPuedeSerNegativoNiSusPartes(): void
+    {
+        $reparto = $this->repartir(Uuid::nuevo());
+
+        $this->assertRechaza(self::RESTRICCION_INCUMPLIDA, fn () => $this->repartir(Uuid::nuevo(), '-1.00'));
+        $this->assertRechaza(self::RESTRICCION_INCUMPLIDA, fn () => $this->agregarParte($reparto, 'sala', Uuid::nuevo(), '-0.01'));
+    }
+
+    /**
+     * La plataforma es el sitio y no tiene a quién transferirle; la sala y el dueño, sí. Una parte
+     * sin beneficiario que no sea de la plataforma sería plata sin dueño.
+     */
+    public function testSoloLaParteDeLaPlataformaVaSinBeneficiario(): void
+    {
+        $reparto = $this->repartir(Uuid::nuevo());
+
+        $this->agregarParte($reparto, 'plataforma', null, '1500.00');
+        $this->assertRechaza(self::RESTRICCION_INCUMPLIDA, fn () => $this->agregarParte($reparto, 'plataforma', Uuid::nuevo(), '1500.00'));
+        $this->assertRechaza(self::RESTRICCION_INCUMPLIDA, fn () => $this->agregarParte($reparto, 'dueno', null, '1500.00'));
+    }
+
+    public function testUnBeneficiarioTieneUnaSolaParteDeCadaRolEnUnReparto(): void
+    {
+        $reparto = $this->repartir(Uuid::nuevo());
+        $organizador = Uuid::nuevo();
+
+        // El organizador de la sala puede ser además el dueño de la obra: son dos partes distintas.
+        $this->agregarParte($reparto, 'sala', $organizador, '7000.00');
+        $this->agregarParte($reparto, 'dueno', $organizador, '1500.00');
+
+        // Dos veces la misma, no: las obras de un mismo dueño van sumadas en una.
+        $this->assertRechaza(self::CLAVE_DUPLICADA, fn () => $this->agregarParte($reparto, 'dueno', $organizador, '1500.00'));
+        self::assertSame(2, $this->base->valor('SELECT COUNT(*) FROM reparto_parte'));
+    }
+
+    public function testBorrarUnRepartoSeLlevaSusPartesYBorrarElParametroNoSeLoLleva(): void
+    {
+        $reparto = $this->repartir(Uuid::nuevo());
+        $this->agregarParte($reparto, 'plataforma', null, '1500.00');
+
+        // El parámetro no se borra nunca, pero si se borrara, el reparto ya hecho se queda.
+        $this->base->ejecutar('DELETE FROM parametro_reparto');
+        self::assertSame(1, $this->base->valor('SELECT COUNT(*) FROM reparto'));
+        self::assertNull($this->base->valor('SELECT parametro_id FROM reparto WHERE id = ?', [$reparto]));
+
+        $this->base->ejecutar('DELETE FROM reparto WHERE id = ?', [$reparto]);
+        self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM reparto_parte'));
     }
 
     public function testDosRepartosNoPuedenEmpezarAVivirEnElMismoMomento(): void

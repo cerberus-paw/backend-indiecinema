@@ -28,6 +28,9 @@ final class ReservasDelAdministrador extends Controlador
 {
     private const ZONA = 'America/Argentina/Buenos_Aires';
 
+    /** Cuántas páginas se muestran a cada lado de la actual en el paginado, como «Usuarios y roles». */
+    private const PAGINAS_ALREDEDOR = 2;
+
     public function __construct(
         private readonly ServicioDePanelDeReservas $servicio,
         private readonly FuncionesDeProgramacion $funciones,
@@ -130,10 +133,7 @@ final class ReservasDelAdministrador extends Controlador
                 'total' => $total,
                 'anterior' => $numero > 1 ? $this->urlDePagina($filtro, $numero - 1) : null,
                 'siguiente' => $numero < $paginas ? $this->urlDePagina($filtro, $numero + 1) : null,
-                'paginas' => array_map(
-                    fn (int $n): array => ['numero' => $n, 'url' => $this->urlDePagina($filtro, $n), 'actual' => $n === $numero],
-                    range(1, $paginas),
-                ),
+                'paginas' => $this->paginas($numero, $paginas, $filtro),
             ],
             'anulada' => $anulada !== null && preg_match('/^[A-Z0-9]{8}$/', $anulada) === 1 ? $anulada : null,
         ];
@@ -147,6 +147,35 @@ final class ReservasDelAdministrador extends Controlador
     /**
      * Relativa a la página: así no depende del prefijo de funciones, que pone nginx.
      */
+    /**
+     * Los números del paginado: la primera, la última y las de alrededor de la actual, con null
+     * donde se saltean páginas («…»). Con 32 páginas, en la 1: 1 2 3 4 5 … 32; en la 10: 1 … 8 9
+     * 10 11 12 … 32. Antes iban todas, y con cientos de reservas la barra eran decenas de números.
+     * Es la misma ventana que la de «Usuarios y roles» (AdministracionDeUsuarios de cuentas).
+     *
+     * @return list<?array{numero: int, url: string, actual: bool}>
+     */
+    private function paginas(int $actual, int $total, ?EstadoReserva $filtro): array
+    {
+        // La ventana tiene siempre el mismo ancho, también cerca de los extremos.
+        $ancho = 2 * self::PAGINAS_ALREDEDOR + 1;
+        $desde = max(1, min($actual - self::PAGINAS_ALREDEDOR, $total - $ancho + 1));
+        $hasta = min($total, $desde + $ancho - 1);
+        $numeros = array_values(array_unique([1, ...range($desde, $hasta), $total]));
+
+        $paginas = [];
+        $anterior = 0;
+        foreach ($numeros as $numero) {
+            if ($numero > $anterior + 1) {
+                $paginas[] = null;
+            }
+            $paginas[] = ['numero' => $numero, 'url' => $this->urlDePagina($filtro, $numero), 'actual' => $numero === $actual];
+            $anterior = $numero;
+        }
+
+        return $paginas;
+    }
+
     private function urlDePagina(?EstadoReserva $filtro, int $numero): string
     {
         return '?' . http_build_query(array_filter(['estado' => $filtro?->value, 'pagina' => $numero > 1 ? $numero : null]));

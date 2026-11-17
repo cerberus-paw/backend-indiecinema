@@ -83,9 +83,3 @@ parameters:
 			identifier: staticMethod.alreadyNarrowedType
 			count: 1
 			path: tests/FuncionesDelOrganizadorTest.php
-
-		-
-			message: '#^Expression on left side of \?\? is not nullable\.$#'
-			identifier: nullCoalesce.expr
-			count: 1
-			path: tests/FuncionesDelOrganizadorTest.php

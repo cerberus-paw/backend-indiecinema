@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace IndieCinema\Funciones\Pruebas;
 
+use IndieCinema\Funciones\Servicios\ServicioDePanelDeReservas;
 use IndieCinema\Nucleo\Aplicacion;
 use IndieCinema\Nucleo\BaseDeDatos;
 use IndieCinema\Nucleo\Configuracion;
@@ -486,6 +487,35 @@ final class PanelDeReservasTest extends TestCase
         // Un estado que no existe se ignora; una página que no existe es 404.
         self::assertStringContainsString($confirmada, $this->pedir('GET', '/administracion/reservas?estado=otra', self::ADMINISTRADORA, 'administrador')->cuerpo());
         self::assertSame(404, $this->pedir('GET', '/administracion/reservas?pagina=2', self::ADMINISTRADORA, 'administrador')->estado());
+    }
+
+    public function testElPaginadoDelAdministradorMuestraUnaVentanaDePaginas(): void
+    {
+        // 10 páginas de 20.
+        for ($i = 0; $i < 10 * ServicioDePanelDeReservas::POR_PAGINA; $i++) {
+            $this->reserva(self::PROXIMA, 1);
+        }
+
+        // En la 5: la primera, dos a cada lado, la última y los saltos entre medio.
+        $cuerpo = $this->pedir('GET', '/administracion/reservas?pagina=5', self::ADMINISTRADORA, 'administrador')->cuerpo();
+        self::assertSame(['1', '…', '3', '4', '5', '6', '7', '…', '10'], self::barraDePaginas($cuerpo));
+
+        // En la 1, la ventana no se achica: 1 2 3 4 5 … 10.
+        $cuerpo = $this->pedir('GET', '/administracion/reservas', self::ADMINISTRADORA, 'administrador')->cuerpo();
+        self::assertSame(['1', '2', '3', '4', '5', '…', '10'], self::barraDePaginas($cuerpo));
+    }
+
+    /**
+     * Lo que se lee en la barra del paginado: los números y los «…».
+     *
+     * @return list<string>
+     */
+    private static function barraDePaginas(string $cuerpo): array
+    {
+        self::assertSame(1, preg_match('#<nav class="paginado-numerado"[^>]*>(.*?)</nav>#s', $cuerpo, $barra));
+        preg_match_all('#<li[^>]*>(?:<a[^>]*>)?\s*([^<]+?)\s*(?:</a>)?</li>#s', $barra[1], $items);
+
+        return $items[1];
     }
 
     public function testElAdministradorAnulaUnaReservaYSeLiberaElLugar(): void

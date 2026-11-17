@@ -68,7 +68,7 @@ final class SesionInternaTest extends TestCase
     }
 
     /**
-     * @return array{string, string, string} id, rol y nombre
+     * @return array{string, string, string, string} id, rol, nombre y correo verificado
      */
     private static function identidad(Respuesta $respuesta): array
     {
@@ -76,6 +76,7 @@ final class SesionInternaTest extends TestCase
             (string) $respuesta->cabecera('X-Usuario-Id'),
             (string) $respuesta->cabecera('X-Rol'),
             (string) $respuesta->cabecera('X-Usuario-Nombre'),
+            (string) $respuesta->cabecera('X-Correo-Verificado'),
         ];
     }
 
@@ -86,8 +87,11 @@ final class SesionInternaTest extends TestCase
         $respuesta = $this->pedir($identificador);
 
         self::assertSame(200, $respuesta->estado());
-        self::assertSame([$this->mariana, 'espectador', 'Mariana%20Rossi%20N%C3%BA%C3%B1ez'], self::identidad($respuesta));
+        self::assertSame([$this->mariana, 'espectador', 'Mariana%20Rossi%20N%C3%BA%C3%B1ez', '0'], self::identidad($respuesta));
         self::assertSame('Mariana Rossi Núñez', rawurldecode(self::identidad($respuesta)[2]));
+
+        $this->usuarios->marcarCorreoVerificado($this->mariana, new \DateTimeImmutable('now', new \DateTimeZone('UTC')));
+        self::assertSame([$this->mariana, 'espectador', 'Mariana%20Rossi%20N%C3%BA%C3%B1ez', '1'], self::identidad($this->pedir($identificador)));
     }
 
     public function testConVariosRolesMandaElMasAlto(): void
@@ -103,15 +107,15 @@ final class SesionInternaTest extends TestCase
         $respuesta = $this->pedir(null);
 
         self::assertSame(200, $respuesta->estado());
-        self::assertSame(['', '', ''], self::identidad($respuesta));
+        self::assertSame(['', '', '', ''], self::identidad($respuesta));
     }
 
     public function testConUnaCookieQueNoEsDeNingunaSesionTambienVacias(): void
     {
         $this->sesiones->abrir($this->mariana);
 
-        self::assertSame(['', '', ''], self::identidad($this->pedir('cualquier cosa')));
-        self::assertSame(['', '', ''], self::identidad($this->pedir(str_repeat('a', 64))));
+        self::assertSame(['', '', '', ''], self::identidad($this->pedir('cualquier cosa')));
+        self::assertSame(['', '', '', ''], self::identidad($this->pedir(str_repeat('a', 64))));
     }
 
     public function testUnaSesionVencidaOBorradaDejaDeServirEnElPedidoSiguiente(): void
@@ -121,8 +125,8 @@ final class SesionInternaTest extends TestCase
         $this->base->ejecutar('UPDATE sesion SET vence_en = UTC_TIMESTAMP() - INTERVAL 1 SECOND WHERE huella = ?', [hash('sha256', $vencida)]);
         $this->base->ejecutar('DELETE FROM sesion WHERE huella = ?', [hash('sha256', $borrada)]);
 
-        self::assertSame(['', '', ''], self::identidad($this->pedir($vencida)));
-        self::assertSame(['', '', ''], self::identidad($this->pedir($borrada)));
+        self::assertSame(['', '', '', ''], self::identidad($this->pedir($vencida)));
+        self::assertSame(['', '', '', ''], self::identidad($this->pedir($borrada)));
         self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM sesion'));
     }
 
@@ -133,7 +137,7 @@ final class SesionInternaTest extends TestCase
         $this->base->ejecutar('UPDATE sesion SET usada_en = UTC_TIMESTAMP() - INTERVAL 2 HOUR WHERE huella = ?', [hash('sha256', $quieta)]);
         $this->base->ejecutar('UPDATE sesion SET usada_en = UTC_TIMESTAMP() - INTERVAL 110 MINUTE WHERE huella = ?', [hash('sha256', $reciente)]);
 
-        self::assertSame(['', '', ''], self::identidad($this->pedir($quieta)));
+        self::assertSame(['', '', '', ''], self::identidad($this->pedir($quieta)));
         self::assertSame($this->mariana, self::identidad($this->pedir($reciente))[0]);
         self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM sesion WHERE huella = ?', [hash('sha256', $quieta)]));
     }
@@ -144,7 +148,7 @@ final class SesionInternaTest extends TestCase
         // Sin pasar por el repositorio, que también borraría las sesiones.
         $this->base->ejecutar("UPDATE usuario SET estado = 'suspendida' WHERE id = ?", [$this->mariana]);
 
-        self::assertSame(['', '', ''], self::identidad($this->pedir($identificador)));
+        self::assertSame(['', '', '', ''], self::identidad($this->pedir($identificador)));
     }
 
     public function testElUsoSeAnotaComoMuchoCadaCincoMinutos(): void

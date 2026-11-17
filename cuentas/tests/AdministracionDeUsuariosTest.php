@@ -40,37 +40,86 @@ final class AdministracionDeUsuariosTest extends TestCase
     /** @var resource */
     private $salidaDelLog;
 
+    /** @var resource|null */
+    private static $servidorFunciones = null;
+    private static string $urlFunciones = '';
+    private static string $archivoConducta = '';
+
+    public static function setUpBeforeClass(): void
+    {
+        self::$archivoConducta = (string) tempnam(sys_get_temp_dir(), 'conducta-');
+        file_put_contents(self::$archivoConducta, '{}');
+        $socket = stream_socket_server('tcp://127.0.0.1:0');
+        $puerto = (int) substr((string) strrchr((string) stream_socket_get_name($socket, false), ':'), 1);
+        fclose($socket);
+        self::$urlFunciones = "http://127.0.0.1:{$puerto}";
+
+        $proceso = proc_open(
+            [PHP_BINARY, '-S', "127.0.0.1:{$puerto}", __DIR__ . '/Dobles/funciones.php'],
+            [['pipe', 'r'], ['file', '/dev/null', 'w'], ['file', '/dev/null', 'w']],
+            $tuberias,
+            null,
+            [...getenv(), 'CONDUCTA' => self::$archivoConducta],
+        );
+        self::$servidorFunciones = $proceso === false ? null : $proceso;
+        for ($intento = 0; $intento < 100; ++$intento) {
+            $conexion = @fsockopen('127.0.0.1', $puerto, $codigo, $mensaje, 0.05);
+            if ($conexion !== false) {
+                fclose($conexion);
+
+                return;
+            }
+            usleep(20_000);
+        }
+        self::fail('No arrancó el doble de funciones.');
+    }
+
+    public static function tearDownAfterClass(): void
+    {
+        if (self::$servidorFunciones !== null) {
+            proc_terminate(self::$servidorFunciones);
+            proc_close(self::$servidorFunciones);
+        }
+        if (self::$archivoConducta !== '') {
+            @unlink(self::$archivoConducta);
+        }
+    }
+
     protected function setUp(): void
     {
         $this->configuracion = $this->configuracion();
         $this->base = self::baseConTablasNuevas($this->configuracion);
         $this->usuarios = new RepositorioDeUsuarios($this->base);
         $this->salidaDelLog = fopen('php://memory', 'w+');
+        file_put_contents(self::$archivoConducta, '{}');
     }
 
     /**
-     * @param array<string, mixed> $usuarios la sección [usuarios] de config.ini
+     * @param array<string, mixed>               $usuarios la sección [usuarios] de config.ini
+     * @param array<string, array<string, mixed>> $extra    secciones adicionales para la petición
      */
-    private function configuracion(array $usuarios = []): Configuracion
+    private function configuracion(array $usuarios = [], array $extra = []): Configuracion
     {
         return new Configuracion([
             'app' => ['subsistema' => 'cuentas', 'prefijo' => '/cuenta', 'entorno' => 'desarrollo'],
             'base' => self::baseDePruebas(),
             'nginx' => ['secreto' => self::SECRETO],
             'usuarios' => $usuarios,
+            ...$extra,
         ]);
     }
 
     /**
      * Como llega de nginx: sin el prefijo y, con un rol, con las cabeceras de la sesión.
      *
-     * @param array<string, mixed> $usuarios la sección [usuarios] de config.ini
+     * @param array<string, mixed>               $usuarios la sección [usuarios] de config.ini
+     * @param array<string, array<string, mixed>> $extra    secciones adicionales de configuración
      */
-    private function pedir(string $url = self::URL, ?string $rol = 'administrador', array $usuarios = [], string $metodo = 'GET', array $cuerpo = []): Respuesta
+    private function pedir(string $url = self::URL, ?string $rol = 'administrador', array $usuarios = [], string $metodo = 'GET', array $cuerpo = [], array $extra = []): Respuesta
     {
         parse_str((string) parse_url($url, PHP_URL_QUERY), $consulta);
         $cabeceras = $rol === null ? [] : ['X-Nginx-Secreto' => self::SECRETO, 'X-Usuario-Id' => self::ADMINISTRADOR, 'X-Rol' => $rol];
-        $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion($usuarios), new Log('cuentas', $this->salidaDelLog));
+        $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion($usuarios, $extra), new Log('cuentas', $this->salidaDelLog));
 
         return PaginasParaValidar::anotar($metodo, $url, $aplicacion->atender(new Peticion($metodo, (string) parse_url($url, PHP_URL_PATH), $consulta, $cuerpo, $cabeceras, ['csrf' => self::CSRF])));
     }
@@ -802,5 +851,39 @@ final class AdministracionDeUsuariosTest extends TestCase
 
         self::assertSame(['espectador'], $this->roles($espectadora));
         self::assertSame(['espectador', 'organizador'], $this->roles($organizador));
+    }
+
+    public function testMuestraLaColumnaDeConductaDesdeFuncionesYSinFuncionesSigueConGuion(): void
+    {
+        $eva = $this->agregar('Eva Espectadora', 'eva@ejemplo.com');
+        $penalizado = $this->agregar('Paco Penalizado', 'paco@ejemplo.com');
+        file_put_contents(self::$archivoConducta, json_encode([
+            $penalizado => ['puntaje' => 60, 'bajo_umbral' => true, 'negativas' => 2, 'ausencias' => 4],
+        ]));
+
+        $respuesta = $this->pedir(extra: [
+            'subsistemas' => ['funciones' => self::$urlFunciones],
+            'interno' => ['token' => 'token-de-cuentas'],
+        ]);
+        $cuerpo = $respuesta->cuerpo();
+        self::assertSame(200, $respuesta->estado(), $cuerpo);
+        self::assertSame(['Eva Espectadora', 'Paco Penalizado'], self::nombres($respuesta));
+        self::assertStringContainsString('<th scope="col" class="tabla-admin-columna-conducta">Conducta</th>', $cuerpo);
+
+        preg_match("#<tr data-usuario=\"{$eva}\">.*?</tr>#s", $cuerpo, $filaEva);
+        self::assertStringContainsString('<span class="tabla-admin-conducta">100 pts</span>', $filaEva[0] ?? '');
+
+        preg_match("#<tr data-usuario=\"{$penalizado}\">.*?</tr>#s", $cuerpo, $filaPaco);
+        self::assertStringContainsString('conducta-bajo-umbral', $filaPaco[0] ?? '');
+        self::assertStringContainsString('60 pts', $filaPaco[0] ?? '');
+        self::assertStringContainsString('2 neg. · 4 aus.', $filaPaco[0] ?? '');
+
+        $sinFunciones = $this->pedir(extra: [
+            'subsistemas' => ['funciones' => 'http://127.0.0.1:9'],
+            'interno' => ['token' => 'token-de-cuentas'],
+        ]);
+        self::assertSame(200, $sinFunciones->estado());
+        self::assertSame(['Eva Espectadora', 'Paco Penalizado'], self::nombres($sinFunciones));
+        self::assertStringContainsString('>—</span>', $sinFunciones->cuerpo());
     }
 }

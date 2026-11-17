@@ -71,33 +71,54 @@ final class RepositorioDeVotos
     }
 
     /**
-     * Determina la obra ganadora de la votación entre las candidatas (E3-12.4).
-     * Es la obra con mayor cantidad de votos. Si hay empate o no hay votos,
-     * se resuelve de forma determinista eligiendo la primera candidata con la cantidad máxima de votos.
+     * Las obras que ganan la votación entre las candidatas: las $cuantas más votadas (E3-12.4,
+     * EF-05.1), de la más votada a la menos. Una candidata sin votos cuenta cero, y el empate lo
+     * gana la que va primero entre las candidatas, así que el resultado es siempre el mismo. Si hay
+     * menos candidatas que $cuantas, están todas.
      *
-     * @param list<string> $candidatasIds
+     * Con $duracionMaxima, además, tienen que entrar juntas en esa duración (EF-05.4): se toman de
+     * la más votada a la menos, y la que ya no entra se saltea. Si no entra ni una, queda la más
+     * votada sola, para que la votación se cierre igual: el que llama lo ve porque se pasa.
+     *
+     * @param list<string>       $candidatasIds  en el orden de la votación
+     * @param positive-int       $cuantas        las películas por función de la sala
+     * @param array<string, int> $duraciones     minutos de cada candidata, por id; la que falta
+     *                                           cuenta cero
+     * @param ?int               $duracionMaxima la duración de la función de la sala, en minutos
+     *
+     * @return non-empty-list<string>
      *
      * @throws ReglaIncumplida si no hay obras candidatas
      */
-    public function obraMasVotada(string $funcionId, array $candidatasIds): string
+    public function masVotadas(string $funcionId, array $candidatasIds, int $cuantas, array $duraciones = [], ?int $duracionMaxima = null): array
     {
         if ($candidatasIds === []) {
             throw new ReglaIncumplida('No hay obras candidatas.');
         }
 
         $conteo = $this->conteoPorObra($funcionId);
+        $posiciones = array_flip($candidatasIds);
+        $ordenadas = $candidatasIds;
+        usort($ordenadas, static fn (string $una, string $otra): int => ($conteo[$otra] ?? 0) <=> ($conteo[$una] ?? 0)
+            ?: $posiciones[$una] <=> $posiciones[$otra]);
 
-        $ganadoraId = $candidatasIds[0];
-        $maxVotos = $conteo[$ganadoraId] ?? 0;
+        if ($duracionMaxima === null) {
+            return array_slice($ordenadas, 0, $cuantas);
+        }
 
-        foreach ($candidatasIds as $obraId) {
-            $votos = $conteo[$obraId] ?? 0;
-            if ($votos > $maxVotos) {
-                $maxVotos = $votos;
-                $ganadoraId = $obraId;
+        $elegidas = [];
+        $queda = $duracionMaxima;
+        foreach ($ordenadas as $obraId) {
+            $dura = $duraciones[$obraId] ?? 0;
+            if ($dura <= $queda) {
+                $elegidas[] = $obraId;
+                $queda -= $dura;
+                if (count($elegidas) === $cuantas) {
+                    break;
+                }
             }
         }
 
-        return $ganadoraId;
+        return $elegidas === [] ? [$ordenadas[0]] : $elegidas;
     }
 }

@@ -39,7 +39,7 @@ final class RepositorioDeSesiones
     {
         $fila = $this->base->fila(
             "SELECT sesion.huella, sesion.usuario_id, sesion.creada_en, sesion.usada_en, sesion.vence_en,
-                usuario.nombre, usuario.estado, GROUP_CONCAT(rol.tipo SEPARATOR ',') AS roles
+                usuario.nombre, usuario.estado, usuario.correo_verificado_en, GROUP_CONCAT(rol.tipo SEPARATOR ',') AS roles
              FROM sesion
              JOIN usuario ON usuario.id = sesion.usuario_id
              LEFT JOIN rol ON rol.usuario_id = sesion.usuario_id
@@ -62,6 +62,7 @@ final class RepositorioDeSesiones
             (string) $fila['nombre'],
             EstadoCuenta::from((string) $fila['estado']),
             array_map(Rol::from(...), array_values(array_filter(explode(',', (string) $fila['roles'])))),
+            $fila['correo_verificado_en'] !== null,
         );
     }
 
@@ -73,6 +74,22 @@ final class RepositorioDeSesiones
     public function borrar(string $huella): void
     {
         $this->base->ejecutar('DELETE FROM sesion WHERE huella = ?', [$huella]);
+    }
+
+    /**
+     * Cierra todas las sesiones de la cuenta, opcionalmente dejando abierta la actual.
+     */
+    public function borrarDeUsuario(string $usuarioId, ?string $exceptoHuella = null): void
+    {
+        if ($exceptoHuella === null) {
+            $this->base->ejecutar('DELETE FROM sesion WHERE usuario_id = ?', [$usuarioId]);
+
+            return;
+        }
+        $this->base->ejecutar(
+            'DELETE FROM sesion WHERE usuario_id = ? AND huella <> ?',
+            [$usuarioId, $exceptoHuella],
+        );
     }
 
     private static function fecha(mixed $valor): DateTimeImmutable

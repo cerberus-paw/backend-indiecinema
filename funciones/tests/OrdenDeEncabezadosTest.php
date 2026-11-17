@@ -81,6 +81,7 @@ final class OrdenDeEncabezadosTest extends TestCase
             'X-Usuario-Id' => $usuarios[$rol],
             'X-Rol' => $rol,
             'X-Usuario-Nombre' => rawurlencode('Eva Espectadora'),
+            'X-Correo-Verificado' => '1',
         ];
         $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion, new Log('funciones', fopen('php://memory', 'w')));
 

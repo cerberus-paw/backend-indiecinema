@@ -145,4 +145,37 @@ final class OcupacionInternaTest extends TestCase
         self::assertSame(403, $this->pedir('/interno/ocupacion', [], 'cuentas', self::TOKEN_DE_CUENTAS)->estado());
         self::assertSame(403, $this->pedir('/interno/ocupacion', [], 'programacion', 'otro-token')->estado());
     }
+
+    public function testConUsuarioBajoElUmbralInformaTopeYActivasDeConducta(): void
+    {
+        $usuario = Uuid::nuevo();
+        $organizador = Uuid::nuevo();
+        $reciente = gmdate('Y-m-d H:i:s', strtotime('-3 days'));
+        for ($i = 0; $i < 2; ++$i) {
+            $reservaId = Uuid::nuevo();
+            $this->base->ejecutar(
+                "INSERT INTO reserva (id, funcion_id, usuario_id, codigo, cantidad, total, estado, creada_en) VALUES (?, ?, ?, ?, 1, 0, 'asistio', ?)",
+                [$reservaId, self::FUNCION, $usuario, strtoupper(substr(bin2hex(random_bytes(4)), 0, 8)), $reciente],
+            );
+            $this->base->ejecutar(
+                'INSERT INTO conducta (reserva_id, usuario_id, organizador_id, positiva, motivo, creada_en) VALUES (?, ?, ?, 0, ?, ?)',
+                [$reservaId, $usuario, $organizador, 'Falta', $reciente],
+            );
+        }
+        for ($i = 0; $i < 4; ++$i) {
+            $this->base->ejecutar(
+                "INSERT INTO reserva (id, funcion_id, usuario_id, codigo, cantidad, total, estado, creada_en) VALUES (?, ?, ?, ?, 1, 0, 'ausente', ?)",
+                [Uuid::nuevo(), self::FUNCION, $usuario, strtoupper(substr(bin2hex(random_bytes(4)), 0, 8)), $reciente],
+            );
+        }
+        // Una reserva confirmada activa (las ausentes y asistidas ya terminaron y no cuentan).
+        $this->base->ejecutar(
+            "INSERT INTO reserva (id, funcion_id, usuario_id, codigo, cantidad, total, estado, creada_en) VALUES (?, ?, ?, 'ACTV1234', 1, 0, 'confirmada', ?)",
+            [Uuid::nuevo(), self::OTRA, $usuario, $reciente],
+        );
+
+        $json = self::json($this->pedir('/interno/funciones/' . self::FUNCION . '/ocupacion', ['usuario' => $usuario]));
+        self::assertSame(2, $json['tope_reservas_conducta']);
+        self::assertSame(1, $json['reservas_activas_usuario']);
+    }
 }

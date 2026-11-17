@@ -7,6 +7,8 @@ use IndieCinema\Nucleo\Ruteo\Router;
 use IndieCinema\Nucleo\Seguridad\Rol;
 use IndieCinema\Programacion\Controladores\AcercaDe;
 use IndieCinema\Programacion\Controladores\AficheDeObra;
+use IndieCinema\Programacion\Controladores\ComoFunciona;
+use IndieCinema\Programacion\Controladores\BloqueosDelOrganizador;
 use IndieCinema\Programacion\Controladores\Cartelera;
 use IndieCinema\Programacion\Controladores\FuncionesDelOrganizador;
 use IndieCinema\Programacion\Controladores\FuncionesInternas;
@@ -15,6 +17,8 @@ use IndieCinema\Programacion\Controladores\Inicio;
 use IndieCinema\Programacion\Controladores\Obras;
 use IndieCinema\Programacion\Controladores\ObrasInternas;
 use IndieCinema\Programacion\Controladores\ObrasDelOrganizador;
+use IndieCinema\Programacion\Controladores\Pedidos;
+use IndieCinema\Programacion\Controladores\PedidosDelOrganizador;
 use IndieCinema\Programacion\Controladores\Salas;
 use IndieCinema\Programacion\Controladores\SalasInternas;
 use IndieCinema\Programacion\Controladores\SalasDelOrganizador;
@@ -27,6 +31,8 @@ return static function (Router $router): void {
     $router->get('/', [Inicio::class, 'mostrar']);
     // Quiénes somos y cómo funciona: el encabezado y el pie enlazan a sus secciones.
     $router->get('/acerca-de', [AcercaDe::class, 'mostrar']);
+    // Circuito paso a paso de una función y qué hace cada rol.
+    $router->get('/como-funciona', [ComoFunciona::class, 'mostrar']);
     // La cartelera pública, sin sesión. Los filtros y la página van en la URL.
     $router->get('/cartelera', [Cartelera::class, 'listar']);
     // La misma, con los mismos filtros, para abrir en una planilla.
@@ -39,14 +45,29 @@ return static function (Router $router): void {
     $router->post('/cartelera/{id}/votar-franja', [Cartelera::class, 'votar'], Rol::Espectador);
     $router->post('/cartelera/{id}/acuerdo/votar', [Cartelera::class, 'votar'], Rol::Espectador);
 
+    // Pedidos de títulos ausentes en el catálogo y adhesiones de espectadores (EF-11.1 / IC-576, EF-11.2 / IC-577).
+    $router->get('/pedidos', [Pedidos::class, 'listar']);
+    $router->get('/pedidos/nuevo', [Pedidos::class, 'nuevo'], Rol::Espectador);
+    $router->post('/pedidos/nuevo', [Pedidos::class, 'crear'], Rol::Espectador);
+    $router->post('/pedidos/{id}/sumarme', [Pedidos::class, 'sumarme'], Rol::Espectador);
+    $router->post('/pedidos/{id}/quitar', [Pedidos::class, 'quitar'], Rol::Espectador);
+
     // «Mis salas» y la edición de la sala propia; las nuevas entran por la solicitud. Que la sala
     // sea del que la edita lo controla el servicio.
     $router->get('/organizador/salas', [SalasDelOrganizador::class, 'listar'], Rol::Organizador);
     $router->get('/organizador/salas/{id}/editar', [SalasDelOrganizador::class, 'editar'], Rol::Organizador);
     $router->post('/organizador/salas/{id}/editar', [SalasDelOrganizador::class, 'actualizar'], Rol::Organizador);
+    // Bloqueos de espectadores en salas propias (EF-12.1 / IC-580). Que la sala sea del
+    // organizador lo controla el servicio.
+    $router->get('/organizador/bloqueados', [BloqueosDelOrganizador::class, 'listar'], Rol::Organizador);
+    $router->post('/organizador/salas/{id}/bloqueos', [BloqueosDelOrganizador::class, 'bloquear'], Rol::Organizador);
+    $router->post('/organizador/salas/{id}/bloqueos/{usuario}/quitar', [BloqueosDelOrganizador::class, 'desbloquear'], Rol::Organizador);
 
     // «Mis obras», alta y edición de obras del catálogo.
     $router->get('/organizador/obras', [ObrasDelOrganizador::class, 'listar'], Rol::Organizador);
+    // Pedidos activos de títulos ausentes para tomar y programar (EF-11.3 / IC-578).
+    $router->get('/organizador/pedidos', [PedidosDelOrganizador::class, 'listar'], Rol::Organizador);
+    $router->post('/organizador/pedidos/{id}/tomar', [PedidosDelOrganizador::class, 'tomar'], Rol::Organizador);
     $router->get('/organizador/obras/nueva', [ObrasDelOrganizador::class, 'nueva'], Rol::Organizador);
     $router->post('/organizador/obras/nueva', [ObrasDelOrganizador::class, 'crear'], Rol::Organizador);
     $router->get('/organizador/obras/{id}/editar', [ObrasDelOrganizador::class, 'editar'], Rol::Organizador);
@@ -90,6 +111,9 @@ return static function (Router $router): void {
     // Las programadas que empiezan en un rango, para el recordatorio del día antes (EF-03.3). Antes
     // que la de a una, para que «proximas» no se tome como un id.
     $router->interna('GET', '/interno/funciones/proximas', [FuncionesInternas::class, 'proximas'], ['funciones']);
+    // Las finalizadas de un período, con sus obras y sus votos, para la reportería (EF-09). También
+    // antes que la de a una.
+    $router->interna('GET', '/interno/funciones/finalizadas', [FuncionesInternas::class, 'finalizadas'], ['recaudacion']);
     // Una función para el subsistema funciones (acuerdo de fecha y reservas) y para moderación,
     // que muestra la denunciada (EF-07.8).
     $router->interna('GET', '/interno/funciones/{id}', [FuncionesInternas::class, 'mostrar'], ['funciones', 'moderacion']);

@@ -8,6 +8,7 @@ use IndieCinema\Funciones\Controladores\Calificaciones;
 use IndieCinema\Funciones\Controladores\CalificacionesInternas;
 use IndieCinema\Funciones\Controladores\CancelacionDeAcuerdos;
 use IndieCinema\Funciones\Controladores\CobrosInternos;
+use IndieCinema\Funciones\Controladores\ConductaInterna;
 use IndieCinema\Funciones\Controladores\OcupacionInterna;
 use IndieCinema\Funciones\Controladores\Reservas;
 use IndieCinema\Funciones\Controladores\ReservasDeLaFuncion;
@@ -49,6 +50,7 @@ return static function (Router $router): void {
     // sea suya lo controla el servicio, con el id del que pide.
     $router->get('/organizador/funciones/{id}/reservas', [ReservasDeLaFuncion::class, 'listar'], Rol::Organizador);
     $router->post('/organizador/funciones/{id}/asistencia', [ReservasDeLaFuncion::class, 'registrarAsistencia'], Rol::Organizador);
+    $router->post('/organizador/funciones/{id}/conducta', [ReservasDeLaFuncion::class, 'calificarConducta'], Rol::Organizador);
     $router->get('/organizador/funciones/{id}/reservas.csv', [ReservasDeLaFuncion::class, 'descargar'], Rol::Organizador);
     // El administrador, todas, y anula la que haga falta.
     $router->get('/administracion/reservas', [ReservasDelAdministrador::class, 'listar'], Rol::Administrador);
@@ -63,8 +65,9 @@ return static function (Router $router): void {
     $router->interna('GET', '/interno/funciones/{id}/ocupacion', [OcupacionInterna::class, 'deUna'], ['programacion']);
     $router->interna('GET', '/interno/ocupacion', [OcupacionInterna::class, 'deVarias'], ['programacion']);
 
-    // Los promedios y las últimas calificaciones, para las fichas de programación (EF-04.3).
-    $router->interna('GET', '/interno/calificaciones/resumen', [CalificacionesInternas::class, 'resumen'], ['programacion']);
+    // Los promedios y las últimas calificaciones, para las fichas de programación (EF-04.3). Los
+    // promedios, también para la reportería de recaudación (EF-09).
+    $router->interna('GET', '/interno/calificaciones/resumen', [CalificacionesInternas::class, 'resumen'], ['programacion', 'recaudacion']);
     $router->interna('GET', '/interno/calificaciones', [CalificacionesInternas::class, 'ultimas'], ['programacion']);
     // El comentario denunciado, para moderación, que lo oculta (EF-07.8).
     $router->interna('GET', '/interno/calificaciones/{id}', [CalificacionesInternas::class, 'mostrar'], ['moderacion']);
@@ -73,6 +76,9 @@ return static function (Router $router): void {
     // Lo cobrado de cada función, para el reparto de recaudación (EF-02.5).
     $router->interna('GET', '/interno/funciones/{id}/cobros', [CobrosInternos::class, 'deUna'], ['recaudacion']);
     $router->interna('GET', '/interno/cobros', [CobrosInternos::class, 'deVarias'], ['recaudacion']);
+
+    // Puntaje de conducta en lote, para «Usuarios y roles» del administrador en cuentas (EF-13.3).
+    $router->interna('GET', '/interno/usuarios/conducta', [ConductaInterna::class, 'deVarios'], ['cuentas']);
 
     // Para comprobar que los otros subsistemas llegan hasta acá con su token.
     $router->interna('GET', '/interno/estado', [EstadoInterno::class, 'mostrar'], ['cuentas', 'programacion', 'moderacion', 'recaudacion']);

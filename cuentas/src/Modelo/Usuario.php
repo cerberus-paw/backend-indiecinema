@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace IndieCinema\Cuentas\Modelo;
 
+use DateTimeImmutable;
 use IndieCinema\Nucleo\Seguridad\Rol;
 use IndieCinema\Nucleo\Uuid;
 
@@ -25,6 +26,8 @@ final class Usuario
         public readonly string $contrasenaHash,
         public readonly EstadoCuenta $estado,
         public readonly array $roles,
+        public readonly ?DateTimeImmutable $correoVerificadoEn = null,
+        public readonly ?DateTimeImmutable $verificacionReenviadaEn = null,
     ) {
     }
 

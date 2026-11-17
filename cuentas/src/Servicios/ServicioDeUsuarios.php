@@ -94,6 +94,11 @@ final class ServicioDeUsuarios
         return Uuid::esValido($id) ? $this->usuarios->buscarEnListado($id) : null;
     }
 
+    public function buscarPorId(string $id): ?\IndieCinema\Cuentas\Modelo\Usuario
+    {
+        return Uuid::esValido($id) ? $this->usuarios->buscarPorId($id) : null;
+    }
+
     /**
      * Varios usuarios como los ve el administrador o los otros subsistemas, indexados por id. Los
      * que no existen o no son un UUID válido se ignoran.

@@ -125,6 +125,8 @@ if ($metodo === 'POST' && preg_match('#^/interno/acuerdos/([^/]+)/(votar|quitar-
 }
 
 if ($metodo === 'POST' && preg_match('#^/interno/acuerdos/([^/]+)/confirmar$#', $ruta, $matches)) {
+    // Para que la prueba sepa si se le pidió confirmar (EF-05.6), sin cambiar lo que leen las demás.
+    file_put_contents(sys_get_temp_dir() . '/acuerdo_confirmado.txt', $matches[1]);
     echo json_encode([
         'id' => $matches[1],
         'estado' => 'confirmado',

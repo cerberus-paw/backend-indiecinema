@@ -26,7 +26,11 @@ final class Ingreso extends Controlador
 
     public function mostrar(Peticion $peticion): Respuesta
     {
-        return $this->formulario(null, volver: self::volver($peticion->consulta('volver')));
+        $exito = $peticion->consulta('recuperada') === '1'
+            ? 'Ya podés iniciar sesión con tu nueva contraseña.'
+            : null;
+
+        return $this->formulario(null, volver: self::volver($peticion->consulta('volver')), mensajeExito: $exito);
     }
 
     public function ingresar(Peticion $peticion): Respuesta
@@ -99,7 +103,7 @@ final class Ingreso extends Controlador
         return $volver;
     }
 
-    private function formulario(?FormularioDeIngreso $formulario, ?string $error = null, ?string $volver = null): Respuesta
+    private function formulario(?FormularioDeIngreso $formulario, ?string $error = null, ?string $volver = null, ?string $mensajeExito = null): Respuesta
     {
         $datos = [
             'valores' => $formulario?->valores ?? [],
@@ -109,6 +113,9 @@ final class Ingreso extends Controlador
         // La plantilla muestra el mensaje si la variable existe, aunque sea null.
         if ($error !== null) {
             $datos['error_general'] = $error;
+        }
+        if ($mensajeExito !== null) {
+            $datos['mensaje_exito'] = $mensajeExito;
         }
 
         return $this->vista(self::PLANTILLA, $datos, $error === null && $datos['errores'] === [] ? 200 : 422);

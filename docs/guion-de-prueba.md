@@ -56,7 +56,7 @@ crean en el guion (pasos 14 y 16) se cancelan al final, así no quedan en la car
 | Paso | Qué hacer | Qué se tiene que ver |
 |---|---|---|
 | 18 | (Privada) Ingresar como Eva, abrir la función del paso 16, votar una obra y después cambiar el voto a otra | «Esta es tu elección actual» sobre la obra votada. El voto se cambia sin sumar dos |
-| 19 | (Normal) Como organizador, abrir la ficha de esa función y «Cerrar votación» | Antes de cerrar ve cuántos votos lleva cada obra: 1 la última que votó Eva en el paso 18, y 0 las otras. Al cerrar gana la más votada y lleva a «Proponer franjas horarias» |
+| 19 | (Normal) Como organizador, abrir la ficha de esa función y «Cerrar votación» | Antes de cerrar ve cuántos votos lleva cada obra: 1 la última que votó Eva en el paso 18, y 0 las otras. Al cerrar quedan las más votadas que entran en la duración de la sala, tantas como películas por función tiene (en un empate, la que va primero entre las candidatas), y lleva a «Proponer franjas horarias» |
 | 20 | Proponer una franja que termina antes de empezar. Después, dos franjas de mañana en adelante con un mínimo de 1 asistente, y «Publicar franjas y abrir acuerdo» | Primero, el error junto a la opción. Después la función pasa a «En acuerdo de fecha», con las dos franjas y la fecha límite: las 23:59 del día anterior a la primera |
 | 21 | (Privada) Como Eva, marcar «Me sirve» en las dos franjas; desmarcar una y volver a marcarla | Cada franja cuenta a los que la marcaron, y se puede marcar más de una |
 | 22 | (Normal) Recargar la ficha y «Confirmar franja ganadora y programar función» | Antes de confirmar, «¡La franja ganadora alcanzó el mínimo requerido!». Después la función queda programada con esa fecha, y aparece en la cartelera y en la portada |
@@ -78,7 +78,7 @@ crean en el guion (pasos 14 y 16) se cancelan al final, así no quedan en la car
 | Paso | Qué hacer | Qué se tiene que ver |
 |---|---|---|
 | 30 | (Normal) Como organizador, en «Mis funciones», «Reservas» de la función del paso 22 | Las tres reservas (la del paso 27, cancelada) con su código, a nombre de quién están, los lugares, el total y el estado. Arriba, 3 de 3 lugares reservados. «Exportar listado» baja el CSV, también con el nombre |
-| 31 | Registrar la asistencia de la reserva confirmada de 2 lugares, con su código tal como lo muestra el comprobante | Pasa a «con asistencia» sin recargar la lista, y suma en «Asistentes registrados» |
+| 31 | Registrar la asistencia de la reserva confirmada de 2 lugares, con su código tal como lo muestra el comprobante | Como la función todavía no empezó, el error «La asistencia se registra desde una hora antes de la función: desde las … del …», y la reserva sigue confirmada. Desde una hora antes hasta que termina, pasa a «con asistencia» sin recargar la lista y suma en «Asistentes registrados» |
 | 32 | Cerrar sesión e ingresar como administrador. Abrir «Solicitudes de sala» | La solicitud del paso 11, primera entre las pendientes |
 | 33 | Aprobarla con un motivo | La sala aparece en «Salas», y el espectador del paso 8 pasa a organizador |
 | 34 | En «Usuarios y roles», buscar al usuario del paso 8 | Figura como organizador. Si se lo vuelve a espectador y se guarda, su sesión se cierra |

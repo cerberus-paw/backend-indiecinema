@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace IndieCinema\Recaudacion\Pruebas\Modelo;
 
 use DateTimeImmutable;
+use IndieCinema\Recaudacion\Modelo\FuncionFinalizada;
+use IndieCinema\Recaudacion\Modelo\ObraVotada;
 use IndieCinema\Recaudacion\Modelo\ParametroDeReparto;
 use IndieCinema\Recaudacion\Modelo\ParteDelReparto;
 use IndieCinema\Recaudacion\Modelo\Reparto;
@@ -38,16 +40,40 @@ final class RepartoTest extends TestCase
     }
 
     /**
+     * Una función finalizada como la manda programación: una obra por dueño de la lista, todas
+     * proyectadas.
+     *
+     * @param list<string> $duenos
+     */
+    private static function funcion(array $duenos): FuncionFinalizada
+    {
+        $obras = [];
+        foreach ($duenos as $numero => $duenoId) {
+            $obras[] = new ObraVotada("obra-{$numero}", "Obra {$numero}", $duenoId, true, 0);
+        }
+
+        return new FuncionFinalizada(
+            self::FUNCION,
+            new DateTimeImmutable('2026-11-20 21:00:00'),
+            new DateTimeImmutable('2026-11-20 23:20:00'),
+            40,
+            '2500.00',
+            '10000000-0000-4000-8000-000000000001',
+            'El Galpón',
+            self::ORGANIZADOR,
+            $obras,
+            [],
+        );
+    }
+
+    /**
      * @param list<string> $duenos
      */
     private static function calcular(int $centavos, array $duenos = [self::DUENA], ?ParametroDeReparto $parametro = null): Reparto
     {
         return Reparto::calcular(
-            self::FUNCION,
-            new DateTimeImmutable('2026-11-20 23:20:00'),
+            self::funcion($duenos),
             $centavos,
-            self::ORGANIZADOR,
-            $duenos,
             $parametro ?? self::parametro(),
             new DateTimeImmutable('2026-11-20 23:20:30'),
         );
@@ -121,11 +147,26 @@ final class RepartoTest extends TestCase
 
     public function testUnaFuncionSinPlataQuedaRegistradaSinPartes(): void
     {
-        $reparto = Reparto::sinPlata(self::FUNCION, new DateTimeImmutable('2026-11-22 22:20:00'));
+        $reparto = Reparto::sinPlata(self::funcion([self::DUENA]), new DateTimeImmutable('2026-11-22 22:20:00'));
 
         self::assertTrue($reparto->sinPartes());
         self::assertSame('0.00', $reparto->cobrado());
         self::assertNull($reparto->parametroId);
+    }
+
+    /**
+     * De qué función fue, como era en ese momento: es lo que muestra el detalle de la liquidación
+     * (EF-08.3), sin volver a preguntarle a programación.
+     */
+    public function testElRepartoGuardaDeQueFuncionFueYEnQueMesCae(): void
+    {
+        $reparto = self::calcular(1_000_000, [self::DUENA, self::OTRO_DUENO]);
+
+        self::assertSame('El Galpón', $reparto->salaNombre);
+        self::assertSame('Obra 0, Obra 1', $reparto->titulos);
+        self::assertSame('2026-11-20 21:00:00', $reparto->funcionFechaHora->format('Y-m-d H:i:s'));
+        // El mes de la liquidación es el de la finalización, no el de la función.
+        self::assertSame('2026-11', $reparto->mes()->comoTexto());
     }
 
     public function testSinPlataNiObrasNoHayNadaQueCalcular(): void

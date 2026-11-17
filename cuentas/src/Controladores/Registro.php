@@ -25,7 +25,7 @@ final class Registro extends Controlador
     public function mostrar(Peticion $peticion): Respuesta
     {
         return $this->formulario(null, $peticion->consulta('creada') === '1'
-            ? 'Ya podés iniciar sesión con tu correo y tu contraseña.'
+            ? 'Ya podés iniciar sesión con tu correo y tu contraseña. Revisá tu casilla para verificar tu correo.'
             : null);
     }
 

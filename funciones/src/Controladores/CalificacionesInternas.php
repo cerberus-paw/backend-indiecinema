@@ -17,8 +17,9 @@ use IndieCinema\Nucleo\Uuid;
 
 /**
  * Las calificaciones para las fichas de programación (EF-04.3): los promedios de las salas, las
- * obras, los organizadores y las funciones, y las últimas que dejaron los espectadores. Sólo las
- * pide programación, con su token: lo controla la ruta.
+ * obras, los organizadores y las funciones, y las últimas que dejaron los espectadores. Las pide
+ * programación, con su token: lo controla la ruta. Los promedios los pide también recaudación,
+ * para la reportería (EF-09).
  */
 final class CalificacionesInternas extends Controlador
 {

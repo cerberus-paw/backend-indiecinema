@@ -72,6 +72,8 @@ for subsistema in "${SUBSISTEMAS[@]}"; do
 		-e "s/^clave = \"cambiar\"/clave = \"${clave[$subsistema]}\"/" \
 		-e "s/^token = \"cambiar\"/token = \"${token[$subsistema]}\"/" \
 		-e "s/^secreto = \"cambiar\"/secreto = \"${secreto[$subsistema]}\"/" \
+		-e 's/^access_token = "cambiar"/access_token = ""/' \
+		-e 's/^clave_webhook = "cambiar"/clave_webhook = ""/' \
 		-e "s/^cuentas = \"d3fd[0-9a-f]*\"/cuentas = \"$(huella "${token[cuentas]}")\"/" \
 		-e "s/^programacion = \"d3fd[0-9a-f]*\"/programacion = \"$(huella "${token[programacion]}")\"/" \
 		-e "s/^funciones = \"d3fd[0-9a-f]*\"/funciones = \"$(huella "${token[funciones]}")\"/" \
@@ -96,3 +98,4 @@ for subsistema in "${SUBSISTEMAS[@]}"; do
 done
 
 echo "Listo: .env y config.ini de ${SUBSISTEMAS[*]}, en producción y sin valores de ejemplo."
+echo "Mercado Pago queda apagado en funciones/config/config.ini: para cobrar, cargar access_token, clave_webhook y activo = true (ver el README)."

@@ -91,7 +91,7 @@ final class PagoConMercadoPagoTest extends TestCase
      */
     private function pedir(string $metodo, string $ruta, array $cuerpo = [], ?string $acepta = null, string $usuario = self::EVA): Respuesta
     {
-        $cabeceras = ['X-Nginx-Secreto' => self::SECRETO, 'X-Usuario-Id' => $usuario, 'X-Rol' => 'espectador'];
+        $cabeceras = ['X-Nginx-Secreto' => self::SECRETO, 'X-Usuario-Id' => $usuario, 'X-Rol' => 'espectador', 'X-Correo-Verificado' => '1'];
         if ($acepta !== null) {
             $cabeceras['Accept'] = $acepta;
         }

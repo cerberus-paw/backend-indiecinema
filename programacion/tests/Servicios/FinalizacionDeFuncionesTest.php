@@ -190,6 +190,27 @@ final class FinalizacionDeFuncionesTest extends TestCase
         self::assertSame('finalizada', $this->estadoDe($terminada));
     }
 
+    /**
+     * Cuándo se finalizó, que es por donde las busca la tarea del reparto (EF-08.2): la de la
+     * pasada, no la de la función, que fue tres horas antes. Y una sola vez: la función no se
+     * vuelve a tocar, pero si se volviera a guardar, la fecha es la de cuando se finalizó.
+     */
+    public function testDejaAnotadoCuandoSeFinalizoYNoCuandoSeDio(): void
+    {
+        $terminada = $this->funcion('-3 hours');
+
+        $this->finalizacion()->finalizar();
+
+        $fila = $this->base->fila('SELECT fecha_hora, finalizada_en FROM funcion WHERE id = ?', [$terminada]);
+        self::assertNotNull($fila);
+        self::assertNotNull($fila['finalizada_en']);
+        self::assertGreaterThan((string) $fila['fecha_hora'], (string) $fila['finalizada_en']);
+
+        $primera = (string) $fila['finalizada_en'];
+        $this->finalizacion()->finalizar();
+        self::assertSame($primera, (string) $this->base->valor('SELECT finalizada_en FROM funcion WHERE id = ?', [$terminada]));
+    }
+
     public function testTambienFinalizaLasDeUnaSalaDadaDeBaja(): void
     {
         $terminada = $this->funcion('-3 hours');

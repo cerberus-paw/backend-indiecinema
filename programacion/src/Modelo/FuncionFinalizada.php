@@ -14,9 +14,11 @@ use DateTimeImmutable;
 final readonly class FuncionFinalizada
 {
     /**
-     * @param DateTimeImmutable $fechaHora   la hora de la sala, como la guarda programación
-     * @param string            $precioBase  con dos decimales, como la base: recaudación no pasa
-     *                                       la plata por float
+     * @param DateTimeImmutable $fechaHora    la hora de la sala, como la guarda programación
+     * @param DateTimeImmutable $finalizadaEn cuándo pasó a finalizada, que no es cuándo se dio: es
+     *                                        por donde la busca el reparto (EF-08.2)
+     * @param string            $precioBase   con dos decimales, como la base: recaudación no pasa
+     *                                        la plata por float
      * @param list<ObraVotada>  $obras       todas las que estuvieron en la función: las elegidas y,
      *                                       si hubo votación, las candidatas que perdieron
      * @param list<string>      $votantesIds quienes votaron títulos, para cruzarlos con las
@@ -25,6 +27,7 @@ final readonly class FuncionFinalizada
     public function __construct(
         public string $id,
         public DateTimeImmutable $fechaHora,
+        public DateTimeImmutable $finalizadaEn,
         public int $cupo,
         public string $precioBase,
         public string $salaId,

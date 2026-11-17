@@ -172,8 +172,10 @@ final class HistorialDePrueba
                 continue;
             }
             if ($funcion['votos'] === []) {
-                // Con fecha fija: se guarda finalizada, con sus obras ya elegidas.
-                $this->funciones->agregar(new Funcion($funcion['id'], $funcion['sala_id'], $funcion['elegidas'], $funcion['precio'], $funcion['cupo'], EstadoFuncion::Finalizada, $funcion['fecha']));
+                // Con fecha fija: se guarda finalizada, con sus obras ya elegidas. Se da por
+                // finalizada a su hora, como las de la migración 017, para que la tarea del
+                // reparto (EF-08.2) las encuentre en los datos de prueba.
+                $this->funciones->agregar(new Funcion($funcion['id'], $funcion['sala_id'], $funcion['elegidas'], $funcion['precio'], $funcion['cupo'], EstadoFuncion::Finalizada, $funcion['fecha'], finalizadaEn: $funcion['fecha']));
             } else {
                 // Con votación, como en la web: primero todas candidatas, los votos, y después la
                 // función finalizada con la ganadora elegida (guardar() marca sólo ésa).
@@ -184,7 +186,7 @@ final class HistorialDePrueba
                         $this->votos->votar($funcion['id'], self::idDeEspectador(++$votante), (string) $obraId);
                     }
                 }
-                $this->funciones->guardar(new Funcion($funcion['id'], $funcion['sala_id'], $funcion['elegidas'], $funcion['precio'], $funcion['cupo'], EstadoFuncion::Finalizada, $funcion['fecha']));
+                $this->funciones->guardar(new Funcion($funcion['id'], $funcion['sala_id'], $funcion['elegidas'], $funcion['precio'], $funcion['cupo'], EstadoFuncion::Finalizada, $funcion['fecha'], finalizadaEn: $funcion['fecha']));
             }
             ++$agregadas;
         }

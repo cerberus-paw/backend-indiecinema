@@ -18,9 +18,9 @@ final class CalificacionesParaMostrar
      * funciones no respondió: la ficha lo avisa en lugar de decir que no hay calificaciones.
      *
      * @param ?array{promedio: float, cantidad: int}                                                                        $resumen el de la sala o la obra; null si no tiene
-     * @param ?list<array{funcion_id: string, puntaje: int, comentario: ?string, espectador: ?string, fecha: string}> $ultimas
+     * @param ?list<array{id?: string, funcion_id: string, puntaje: int, comentario: ?string, espectador: ?string, fecha: string}> $ultimas
      *
-     * @return ?array{promedio: ?float, cantidad: int, ultimas: list<array{puntaje: int, comentario: ?string, espectador: string, fecha: string}>}
+     * @return ?array{promedio: ?float, cantidad: int, ultimas: list<array{id: ?string, puntaje: int, comentario: ?string, espectador: string, fecha: string}>}
      */
     public static function datos(bool $respondio, ?array $resumen, ?array $ultimas): ?array
     {
@@ -32,6 +32,8 @@ final class CalificacionesParaMostrar
             'promedio' => $resumen['promedio'] ?? null,
             'cantidad' => $resumen['cantidad'] ?? 0,
             'ultimas' => array_map(static fn (array $calificacion): array => [
+                // Para denunciar el comentario (EF-07.8).
+                'id' => $calificacion['id'] ?? null,
                 'puntaje' => $calificacion['puntaje'],
                 'comentario' => $calificacion['comentario'],
                 // Si cuentas no respondió, funciones la manda sin el nombre.

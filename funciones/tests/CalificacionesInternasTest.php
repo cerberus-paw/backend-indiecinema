@@ -23,6 +23,8 @@ final class CalificacionesInternasTest extends TestCase
     use ConCuentasDePrueba;
 
     private const TOKEN_DE_PROGRAMACION = 'token-de-programacion';
+    private const TOKEN_DE_MODERACION = 'token-de-moderacion';
+    private const MODERADORA = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
     private const TOKEN_DE_RECAUDACION = 'token-de-recaudacion';
     private const SALA = '5a5a5a5a-5a5a-45a5-85a5-5a5a5a5a5a5a';
     private const OTRA_SALA = '6b6b6b6b-6b6b-46b6-86b6-6b6b6b6b6b6b';
@@ -58,6 +60,7 @@ final class CalificacionesInternasTest extends TestCase
             'llamadores' => [
                 'programacion' => hash('sha256', self::TOKEN_DE_PROGRAMACION),
                 'recaudacion' => hash('sha256', self::TOKEN_DE_RECAUDACION),
+                'moderacion' => hash('sha256', self::TOKEN_DE_MODERACION),
             ],
         ]);
         $this->base = self::baseConTablasNuevas($this->configuracion);
@@ -69,6 +72,21 @@ final class CalificacionesInternasTest extends TestCase
         parse_str((string) parse_url($ruta, PHP_URL_QUERY), $consulta);
 
         return $aplicacion->atender(new Peticion('GET', (string) parse_url($ruta, PHP_URL_PATH), $consulta, [], [
+            'X-Llamador' => $llamador,
+            'Authorization' => "Bearer {$token}",
+        ], [], []));
+    }
+
+    /**
+     * Un pedido de moderación (EF-07.8).
+     *
+     * @param array<string, mixed> $cuerpo
+     */
+    private function deModeracion(string $metodo, string $ruta, array $cuerpo = [], string $llamador = 'moderacion', string $token = self::TOKEN_DE_MODERACION): Respuesta
+    {
+        $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion, new Log('funciones', fopen('php://memory', 'w')));
+
+        return $aplicacion->atender(new Peticion($metodo, $ruta, [], $cuerpo, [
             'X-Llamador' => $llamador,
             'Authorization' => "Bearer {$token}",
         ], [], []));
@@ -89,7 +107,7 @@ final class CalificacionesInternasTest extends TestCase
      *
      * @param list<string> $obras
      */
-    private function calificacion(string $funcion, string $sala, string $usuario, int $puntaje, ?string $comentario, array $obras, string $creada, int $lugares = 1): void
+    private function calificacion(string $funcion, string $sala, string $usuario, int $puntaje, ?string $comentario, array $obras, string $creada, int $lugares = 1): string
     {
         $reserva = Uuid::nuevo();
         $this->base->ejecutar(
@@ -104,6 +122,8 @@ final class CalificacionesInternasTest extends TestCase
         foreach ($obras as $obra) {
             $this->base->ejecutar('INSERT INTO calificacion_obra (calificacion_id, obra_id) VALUES (?, ?)', [$id, $obra]);
         }
+
+        return $id;
     }
 
     private function cargar(): void
@@ -148,10 +168,12 @@ final class CalificacionesInternasTest extends TestCase
         $this->cargar();
 
         $deLaSala = $this->json($this->pedir('/interno/calificaciones?sala=' . self::SALA))['calificaciones'];
+        $ids = array_column($deLaSala, 'id');
         self::assertSame([
-            ['funcion_id' => self::UNA, 'puntaje' => 4, 'comentario' => null, 'espectador' => 'Elías', 'fecha' => '2026-11-02'],
+            // El id, para denunciar el comentario (EF-07.8).
+            ['id' => $ids[0], 'funcion_id' => self::UNA, 'puntaje' => 4, 'comentario' => null, 'espectador' => 'Elías', 'fecha' => '2026-11-02'],
             // Las 23 h en UTC son las 20 h en la Argentina: el mismo día.
-            ['funcion_id' => self::UNA, 'puntaje' => 5, 'comentario' => 'Hermosa copia.', 'espectador' => 'Eva', 'fecha' => '2026-11-01'],
+            ['id' => $ids[1], 'funcion_id' => self::UNA, 'puntaje' => 5, 'comentario' => 'Hermosa copia.', 'espectador' => 'Eva', 'fecha' => '2026-11-01'],
         ], $deLaSala);
 
         $deLaObra = $this->json($this->pedir('/interno/calificaciones?obra=' . self::CIENAGA))['calificaciones'];
@@ -166,6 +188,52 @@ final class CalificacionesInternasTest extends TestCase
         self::assertSame(403, $this->pedir('/interno/calificaciones/resumen', 'otro-token')->estado());
         $muchas = implode(',', array_map(static fn (): string => Uuid::nuevo(), range(1, 101)));
         self::assertSame(400, $this->pedir("/interno/calificaciones/resumen?salas={$muchas}")->estado());
+    }
+
+    /**
+     * EF-07.8: moderación lee el comentario denunciado, con su autor, que no denuncia lo suyo.
+     */
+    public function testModeracionLeeUnaCalificacion(): void
+    {
+        $id = $this->calificacion(self::UNA, self::SALA, self::EVA, 5, 'Hermosa copia.', [self::ZAMA], '2026-11-01 23:00:00');
+
+        self::assertSame([
+            'id' => $id,
+            'funcion_id' => self::UNA,
+            'sala_id' => self::SALA,
+            'usuario_id' => self::EVA,
+            'espectador' => 'Eva',
+            'puntaje' => 5,
+            'comentario' => 'Hermosa copia.',
+            'fecha' => '2026-11-01',
+            'oculto' => false,
+        ], $this->json($this->deModeracion('GET', "/interno/calificaciones/{$id}")));
+        self::assertSame(404, $this->deModeracion('GET', '/interno/calificaciones/' . Uuid::nuevo())->estado());
+        self::assertSame(404, $this->deModeracion('GET', '/interno/calificaciones/no-es-un-id')->estado());
+        self::assertSame(403, $this->deModeracion('GET', "/interno/calificaciones/{$id}", [], 'programacion', self::TOKEN_DE_PROGRAMACION)->estado());
+    }
+
+    /**
+     * Ocultar saca el comentario de las fichas: el puntaje sigue contando (Q11). Repetirlo no
+     * cambia nada.
+     */
+    public function testOcultarSacaElComentarioYElPuntajeSigueContando(): void
+    {
+        $id = $this->calificacion(self::UNA, self::SALA, self::EVA, 5, 'Algo ofensivo.', [self::ZAMA], '2026-11-01 23:00:00');
+        $this->calificacion(self::UNA, self::SALA, self::ELIAS, 4, 'Bien.', [self::ZAMA], '2026-11-02 12:00:00');
+
+        $respuesta = $this->deModeracion('POST', "/interno/calificaciones/{$id}/ocultar", ['moderador_id' => self::MODERADORA]);
+
+        self::assertSame(['id' => $id, 'cambio' => true], $this->json($respuesta));
+        self::assertSame(['Bien.', null], array_column($this->json($this->pedir('/interno/calificaciones?sala=' . self::SALA))['calificaciones'], 'comentario'));
+        self::assertEquals([self::SALA => ['promedio' => 4.5, 'cantidad' => 2]], $this->json($this->pedir('/interno/calificaciones/resumen?salas=' . self::SALA))['salas']);
+        self::assertTrue($this->json($this->deModeracion('GET', "/interno/calificaciones/{$id}"))['oculto']);
+        self::assertSame(['comentario' => 'Algo ofensivo.', 'comentario_oculto_por' => self::MODERADORA], $this->base->fila('SELECT comentario, comentario_oculto_por FROM calificacion WHERE id = ?', [$id]));
+
+        self::assertSame(['id' => $id, 'cambio' => false], $this->json($this->deModeracion('POST', "/interno/calificaciones/{$id}/ocultar", ['moderador_id' => self::MODERADORA])));
+        self::assertSame(404, $this->deModeracion('POST', '/interno/calificaciones/' . Uuid::nuevo() . '/ocultar', ['moderador_id' => self::MODERADORA])->estado());
+        self::assertSame(400, $this->deModeracion('POST', "/interno/calificaciones/{$id}/ocultar", ['moderador_id' => 'nadie'])->estado());
+        self::assertSame(403, $this->deModeracion('POST', "/interno/calificaciones/{$id}/ocultar", ['moderador_id' => self::MODERADORA], 'programacion', self::TOKEN_DE_PROGRAMACION)->estado());
     }
 
     /**

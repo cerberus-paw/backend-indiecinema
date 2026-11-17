@@ -8,7 +8,6 @@ use IndieCinema\Nucleo\Seguridad\Rol;
 use IndieCinema\Programacion\Controladores\AcercaDe;
 use IndieCinema\Programacion\Controladores\AficheDeObra;
 use IndieCinema\Programacion\Controladores\ComoFunciona;
-use IndieCinema\Programacion\Controladores\AdministracionDeSolicitudes;
 use IndieCinema\Programacion\Controladores\BloqueosDelOrganizador;
 use IndieCinema\Programacion\Controladores\Cartelera;
 use IndieCinema\Programacion\Controladores\FuncionesDelOrganizador;
@@ -16,12 +15,13 @@ use IndieCinema\Programacion\Controladores\FuncionesInternas;
 use IndieCinema\Programacion\Controladores\ImagenDeSala;
 use IndieCinema\Programacion\Controladores\Inicio;
 use IndieCinema\Programacion\Controladores\Obras;
+use IndieCinema\Programacion\Controladores\ObrasInternas;
 use IndieCinema\Programacion\Controladores\ObrasDelOrganizador;
 use IndieCinema\Programacion\Controladores\Pedidos;
 use IndieCinema\Programacion\Controladores\PedidosDelOrganizador;
 use IndieCinema\Programacion\Controladores\Salas;
+use IndieCinema\Programacion\Controladores\SalasInternas;
 use IndieCinema\Programacion\Controladores\SalasDelOrganizador;
-use IndieCinema\Programacion\Controladores\SolicitudDeSala;
 
 /*
  * Las rutas de programación, sin el prefijo que saca nginx. Cada una declara su rol mínimo; el
@@ -44,11 +44,6 @@ return static function (Router $router): void {
     $router->post('/cartelera/{id}/votar', [Cartelera::class, 'votar'], Rol::Espectador);
     $router->post('/cartelera/{id}/votar-franja', [Cartelera::class, 'votar'], Rol::Espectador);
     $router->post('/cartelera/{id}/acuerdo/votar', [Cartelera::class, 'votar'], Rol::Espectador);
-
-    // La solicitud para abrir una sala (E2): la manda el espectador que quiere ser organizador y
-    // el organizador que suma otra sala. Aprobarla habilita la sala y da el rol.
-    $router->get('/solicitar-sala', [SolicitudDeSala::class, 'mostrar'], Rol::Espectador);
-    $router->post('/solicitar-sala', [SolicitudDeSala::class, 'enviar'], Rol::Espectador);
 
     // Pedidos de títulos ausentes en el catálogo y adhesiones de espectadores (EF-11.1 / IC-576, EF-11.2 / IC-577).
     $router->get('/pedidos', [Pedidos::class, 'listar']);
@@ -100,13 +95,6 @@ return static function (Router $router): void {
     $router->get('/organizador/funciones/{id}/proponer-franjas', [FuncionesDelOrganizador::class, 'mostrarProponerFranjas'], Rol::Organizador);
     $router->get('/organizador/funciones/{id}/franjas', [FuncionesDelOrganizador::class, 'mostrarProponerFranjas'], Rol::Organizador);
     $router->post('/organizador/funciones/{id}/franjas', [FuncionesDelOrganizador::class, 'proponerAcuerdo'], Rol::Organizador);
-    // La bandeja de solicitudes de sala del administrador: aprobar una habilita la sala y le da el
-    // rol de organizador a quien la mandó. Desde una aprobada, la sala se retira o se vuelve a
-    // publicar.
-    $router->get('/administracion/solicitudes', [AdministracionDeSolicitudes::class, 'listar'], Rol::Administrador);
-    $router->post('/administracion/solicitudes/{id}/resolver', [AdministracionDeSolicitudes::class, 'resolver'], Rol::Administrador);
-    $router->post('/administracion/solicitudes/{id}/deshabilitar-sala', [AdministracionDeSolicitudes::class, 'deshabilitarSala'], Rol::Administrador);
-    $router->post('/administracion/solicitudes/{id}/habilitar-sala', [AdministracionDeSolicitudes::class, 'habilitarSala'], Rol::Administrador);
     // El listado público: sólo las habilitadas, sin sesión.
     $router->get('/salas', [Salas::class, 'listar']);
     // La ficha de una, con sus próximas funciones. Una sin habilitar sólo la ve su organizador.
@@ -126,10 +114,21 @@ return static function (Router $router): void {
     // Las finalizadas de un período, con sus obras y sus votos, para la reportería (EF-09). También
     // antes que la de a una.
     $router->interna('GET', '/interno/funciones/finalizadas', [FuncionesInternas::class, 'finalizadas'], ['recaudacion']);
-    // Una función para el subsistema funciones (acuerdo de fecha y reservas): sólo la pide él.
-    $router->interna('GET', '/interno/funciones/{id}', [FuncionesInternas::class, 'mostrar'], ['funciones']);
+    // Una función para el subsistema funciones (acuerdo de fecha y reservas) y para moderación,
+    // que muestra la denunciada (EF-07.8).
+    $router->interna('GET', '/interno/funciones/{id}', [FuncionesInternas::class, 'mostrar'], ['funciones', 'moderacion']);
     // Las de una página de «Mis reservas» en un solo pedido (E4-04.1).
     $router->interna('GET', '/interno/funciones', [FuncionesInternas::class, 'varias'], ['funciones']);
+
+    // Las salas de la bandeja de moderación (EF-07.1), y la de una solicitud: la habilita o la
+    // suspende.
+    $router->interna('GET', '/interno/salas', [SalasInternas::class, 'varias'], ['moderacion']);
+    $router->interna('POST', '/interno/salas', [SalasInternas::class, 'crear'], ['moderacion']);
+    // Las obras que revisa la moderación (EF-07.7).
+    $router->interna('GET', '/interno/obras/pendientes', [ObrasInternas::class, 'pendientes'], ['moderacion']);
+    $router->interna('GET', '/interno/obras/{id}', [ObrasInternas::class, 'mostrar'], ['moderacion']);
+    $router->interna('POST', '/interno/obras/{id}/revision', [ObrasInternas::class, 'revisar'], ['moderacion']);
+    $router->interna('POST', '/interno/salas/{id}/habilitacion', [SalasInternas::class, 'habilitacion'], ['moderacion']);
 
     // Para comprobar que los otros subsistemas llegan hasta acá con su token.
     $router->interna('GET', '/interno/estado', [EstadoInterno::class, 'mostrar'], ['cuentas', 'funciones', 'moderacion', 'recaudacion']);

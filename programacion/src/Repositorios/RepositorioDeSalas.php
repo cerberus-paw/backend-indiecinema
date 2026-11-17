@@ -40,6 +40,51 @@ final class RepositorioDeSalas
     }
 
     /**
+     * Si hay una fila con ese id, aunque la sala se haya dado de baja: un id así no se puede volver
+     * a usar (EF-07.1).
+     */
+    public function idUsado(string $id): bool
+    {
+        return $this->base->valor('SELECT COUNT(*) FROM sala WHERE id = ?', [$id]) > 0;
+    }
+
+    /**
+     * Las que existen de esos ids, con el id como clave; las dadas de baja no vienen, como en
+     * buscar(). Es lo que lee moderación para su bandeja (EF-07.1).
+     *
+     * @param list<string> $ids
+     *
+     * @return array<string, Sala>
+     */
+    public function varias(array $ids): array
+    {
+        if ($ids === []) {
+            return [];
+        }
+        $salas = array_map(self::sala(...), $this->base->filas(
+            'SELECT ' . self::COLUMNAS . ' FROM sala
+             WHERE id IN (' . implode(', ', array_fill(0, count($ids), '?')) . ') AND dada_de_baja_en IS NULL',
+            $ids,
+        ));
+
+        return array_column($salas, null, 'id');
+    }
+
+    /**
+     * Las habilitadas que no se dieron de baja, con el id como clave.
+     *
+     * @return array<string, Sala>
+     */
+    public function habilitadas(): array
+    {
+        $salas = array_map(self::sala(...), $this->base->filas(
+            'SELECT ' . self::COLUMNAS . ' FROM sala WHERE habilitada = TRUE AND dada_de_baja_en IS NULL ORDER BY nombre',
+        ));
+
+        return array_column($salas, null, 'id');
+    }
+
+    /**
      * Corre $trabajo en una transacción con la sala bloqueada (EF-05.6): programar en una sala es
      * de a uno. Todo lo que deja una función programada (programar y editar a mano, confirmar el
      * acuerdo, la tarea que cierra los vencidos) lee la ocupación, controla que no se pise y guarda
@@ -161,6 +206,24 @@ final class RepositorioDeSalas
     }
 
     /**
+     * La última solicitud de moderación que se le aplicó (EF-07.6), o null.
+     */
+    public function solicitudAplicada(string $id): ?string
+    {
+        $solicitud = $this->base->valor('SELECT solicitud_id FROM sala WHERE id = ?', [$id]);
+
+        return $solicitud === null ? null : (string) $solicitud;
+    }
+
+    /**
+     * Anota la solicitud que se le acaba de aplicar.
+     */
+    public function anotarSolicitud(string $id, string $solicitudId): void
+    {
+        $this->base->ejecutar('UPDATE sala SET solicitud_id = ? WHERE id = ?', [$solicitudId, $id]);
+    }
+
+    /**
      * Guarda sólo el flag de habilitada, que cambia el administrador: los datos de la sala son
      * del organizador y no se pisan con lo que se leyó antes.
      */
@@ -170,8 +233,7 @@ final class RepositorioDeSalas
     }
 
     /**
-     * La sala de una fila con las columnas de COLUMNAS. Pública para el repositorio de solicitudes,
-     * que trae cada solicitud con su sala en la misma consulta.
+     * La sala de una fila con las columnas de COLUMNAS.
      *
      * @param array<string, mixed> $fila
      */

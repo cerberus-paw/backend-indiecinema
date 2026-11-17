@@ -10,6 +10,7 @@ parameters:
     # La de la imagen de los subsistemas y del CI, aunque se corra con otro PHP.
     phpVersion: 80400
     paths:
+        - bin
         - src
         - tests
         - rutas.php

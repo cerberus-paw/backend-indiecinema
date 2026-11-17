@@ -1,0 +1,84 @@
+<?php
+
+/*
+ * Cuentas de mentira, atendiendo con `php -S` las dos rutas que llama la bandeja de solicitudes de
+ * sala: así AdministracionDeSolicitudesTest prueba la llamada por la red, como en el compose.
+ * Responde lo mismo que /interno/usuarios/{id} de cuentas (UsuariosInternosTest de cuentas prueba
+ * ese mismo JSON del otro lado), y como ella, sólo a moderación con su token (EF-07.2).
+ *
+ * Cada rol que le piden lo anota en el archivo de la variable REGISTRO, para que la prueba vea qué
+ * le llegó.
+ */
+
+declare(strict_types=1);
+
+const ESPECTADORA = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+const ORGANIZADOR = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+const OTRO_ESPECTADOR = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+const LENTO = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+const MODERADORA = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
+
+header('Content-Type: application/json');
+$cabeceras = getallheaders();
+if (($cabeceras['X-Llamador'] ?? null) !== 'moderacion' || ($cabeceras['Authorization'] ?? null) !== 'Bearer token-de-moderacion') {
+    http_response_code(403);
+    echo '{"error":"Llamador no autorizado."}';
+
+    return;
+}
+
+$usuarios = [
+    ESPECTADORA => ['nombre' => 'Eva Prueba', 'correo' => 'eva@ejemplo.com', 'roles' => ['espectador'], 'creado_en' => '2025-03-08T15:00:00'],
+    ORGANIZADOR => ['nombre' => 'Omar Prueba', 'correo' => 'omar@ejemplo.com', 'roles' => ['espectador', 'organizador'], 'creado_en' => '2024-11-02T12:00:00'],
+    // Una moderadora que pidió una sala (EF-07.3).
+    MODERADORA => ['nombre' => 'Mora Prueba', 'correo' => 'mora@ejemplo.com', 'roles' => ['espectador', 'moderador'], 'creado_en' => '2024-06-01T09:00:00'],
+    OTRO_ESPECTADOR => ['nombre' => 'Clara Prueba', 'correo' => 'clara@ejemplo.com', 'roles' => ['espectador'], 'creado_en' => '2025-04-10T18:00:00'],
+];
+
+$ruta = (string) parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+if ($ruta === '/interno/usuarios' && ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET') {
+    $idsCrudo = (string) ($_GET['ids'] ?? '');
+    if (getenv('REGISTRO_CONSULTAS') !== false && getenv('REGISTRO_CONSULTAS') !== '') {
+        file_put_contents((string) getenv('REGISTRO_CONSULTAS'), $idsCrudo . "\n", FILE_APPEND);
+    }
+    $respuesta = [];
+    foreach (array_filter(explode(',', $idsCrudo)) as $id) {
+        $id = trim($id);
+        if (isset($usuarios[$id])) {
+            $respuesta[$id] = ['id' => $id, 'nombre' => $usuarios[$id]['nombre']];
+        }
+    }
+    echo json_encode($respuesta, JSON_FORCE_OBJECT);
+
+    return;
+}
+
+if (!preg_match('#^/interno/usuarios/([^/]+)(/roles)?$#', $ruta, $partes)) {
+    http_response_code(404);
+
+    return;
+}
+$id = $partes[1];
+// Cuentas caída: la prueba lo pide creando el archivo de la variable CAIDA.
+if (is_file((string) getenv('CAIDA'))) {
+    http_response_code(500);
+
+    return;
+}
+if ($id === LENTO) {
+    sleep(3);
+}
+$usuario = $usuarios[$id] ?? null;
+if ($usuario === null) {
+    http_response_code(404);
+
+    return;
+}
+
+if (($partes[2] ?? '') === '/roles') {
+    $pedido = json_decode((string) file_get_contents('php://input'), true);
+    file_put_contents((string) getenv('REGISTRO'), json_encode(['usuario' => $id] + (array) $pedido) . "\n", FILE_APPEND);
+    $usuario['roles'] = array_values(array_unique([...$usuario['roles'], 'organizador']));
+}
+
+echo json_encode(['id' => $id, 'estado' => 'activa'] + $usuario);

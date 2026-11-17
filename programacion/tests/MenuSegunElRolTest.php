@@ -40,7 +40,8 @@ final class MenuSegunElRolTest extends TestCase
     private const CON_SESION = ['/cuenta/', '/funcion/reservas'];
     private const DEL_ESPECTADOR = ['/solicitar-sala'];
     private const DEL_ORGANIZADOR = ['/organizador/salas', '/organizador/obras', '/organizador/obras/nueva', '/organizador/funciones', '/organizador/funciones/nueva', '/recaudacion/reportes', '/solicitar-sala'];
-    private const DEL_ADMINISTRADOR = ['/cuenta/administracion/usuarios', '/recaudacion/reportes', '/administracion/solicitudes'];
+    private const DEL_MODERADOR = ['/moderacion/solicitudes'];
+    private const DEL_ADMINISTRADOR = ['/cuenta/administracion/usuarios', '/recaudacion/reportes', '/moderacion/solicitudes'];
 
     /**
      * El encabezado y el pie de /acerca-de, por separado.
@@ -105,7 +106,7 @@ final class MenuSegunElRolTest extends TestCase
         yield 'sin sesión' => [null, self::SIN_SESION];
         yield 'espectador' => ['espectador', [...self::CON_SESION, ...self::DEL_ESPECTADOR]];
         yield 'organizador' => ['organizador', [...self::CON_SESION, ...self::DEL_ORGANIZADOR]];
-        yield 'moderador' => ['moderador', [...self::CON_SESION, ...self::DEL_ORGANIZADOR]];
+        yield 'moderador' => ['moderador', [...self::CON_SESION, ...self::DEL_ORGANIZADOR, ...self::DEL_MODERADOR]];
         yield 'administrador' => ['administrador', self::DEL_ADMINISTRADOR];
     }
 
@@ -204,8 +205,8 @@ final class MenuSegunElRolTest extends TestCase
         ];
         yield 'espectador' => ['espectador', ['Mi cuenta' => ['/cuenta/', '/funcion/reservas', '/solicitar-sala']]];
         yield 'organizador' => ['organizador', $organizador];
-        yield 'moderador' => ['moderador', $organizador];
-        yield 'administrador' => ['administrador', ['Administración' => ['/cuenta/administracion/usuarios', '/recaudacion/reportes', '/administracion/solicitudes']]];
+        yield 'moderador' => ['moderador', $organizador + ['Moderación' => ['/moderacion/solicitudes']]];
+        yield 'administrador' => ['administrador', ['Administración' => ['/cuenta/administracion/usuarios', '/recaudacion/reportes', '/moderacion/solicitudes']]];
     }
 
     /**

@@ -27,10 +27,12 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * «Mi cuenta» (/cuenta/, /cuenta/datos y /cuenta/contrasena) de punta a punta contra MySQL real.
+ * «Mi solicitud de sala» (EF-07.6) se la pide a una moderación de mentira, por la red.
  */
 final class MiCuentaTest extends TestCase
 {
     use ConBaseDePruebas;
+    use ConModeracionDePrueba;
 
     private const SECRETO = 'secreto-de-nginx';
     private const CSRF = 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc';
@@ -42,21 +44,26 @@ final class MiCuentaTest extends TestCase
 
     public static function setUpBeforeClass(): void
     {
+        self::iniciarModeracion();
         self::$correo = ServidorSmtpDePrueba::iniciar();
     }
 
     public static function tearDownAfterClass(): void
     {
+        self::detenerModeracion();
         self::$correo->detener();
     }
 
     protected function setUp(): void
     {
+        self::reiniciarModeracion();
         self::$correo->vaciar();
         $this->configuracion = new Configuracion([
             'app' => ['subsistema' => 'cuentas', 'prefijo' => '/cuenta', 'entorno' => 'desarrollo'],
             'base' => self::baseDePruebas(),
             'nginx' => ['secreto' => self::SECRETO],
+            'subsistemas' => ['moderacion' => self::$urlDeModeracion],
+            'interno' => ['token' => 'token-de-cuentas'],
             'sitio' => ['url' => 'https://indiecinema.test'],
             'correo' => ['servidor' => self::$correo->url(), 'remitente' => 'no-responder@indiecinema.test', 'nombre' => 'IndieCinema'],
         ]);
@@ -361,6 +368,58 @@ final class MiCuentaTest extends TestCase
         $barra = self::barra($this->pedir($this->agregar($roles), $rol));
 
         self::assertSame($loVe, str_contains($barra, 'href="/organizador/salas"'));
+    }
+
+    /**
+     * EF-07.6: el estado de la última solicitud de sala, con su motivo y el enlace para verla.
+     */
+    public function testMuestraMiSolicitudDeSalaConSuEstadoYElEnlace(): void
+    {
+        $id = $this->agregar();
+        self::solicitudesEnModeracion([$id => ['estado' => 'en_revision_manual', 'sala' => 'El Galpón', 'motivo' => 'Coordinamos una <b>visita</b>.', 'fecha' => '2026-10-02T12:00:00+00:00']]);
+
+        $contenido = self::contenido($this->pedir($id));
+
+        self::assertStringContainsString('Mi solicitud de sala', $contenido);
+        self::assertStringContainsString('El Galpón', $contenido);
+        self::assertStringContainsString('En revisión manual desde el 02/10/2026', $contenido);
+        self::assertStringContainsString('Coordinamos una &lt;b&gt;visita&lt;/b&gt;.', $contenido);
+        self::assertMatchesRegularExpression('#<a href="/solicitar-sala"[^>]*>Ver la solicitud</a>#', $contenido);
+    }
+
+    public function testUnaRechazadaLlevaACorregirlaYReenviarla(): void
+    {
+        $id = $this->agregar();
+        self::solicitudesEnModeracion([$id => ['estado' => 'rechazada', 'sala' => 'El Galpón', 'motivo' => 'Falta la póliza.', 'fecha' => '2026-10-03T15:30:00+00:00']]);
+
+        $contenido = self::contenido($this->pedir($id));
+
+        self::assertStringContainsString('Rechazada el 03/10/2026', $contenido);
+        self::assertStringContainsString('Falta la póliza.', $contenido);
+        self::assertMatchesRegularExpression('#<a href="/solicitar-sala"[^>]*>Corregirla y reenviarla</a>#', $contenido);
+    }
+
+    public function testSinSolicitudNoHayBloque(): void
+    {
+        $contenido = self::contenido($this->pedir($this->agregar()));
+
+        self::assertStringNotContainsString('Mi solicitud de sala', $contenido);
+        self::assertStringNotContainsString('/solicitar-sala', $contenido);
+    }
+
+    /**
+     * Otro servicio caído no deja al usuario sin su cuenta: se ve igual, sin el bloque.
+     */
+    public function testSiModeracionNoRespondeSeVeIgualSinElBloque(): void
+    {
+        $id = $this->agregar();
+        self::solicitudesEnModeracion([$id => ['estado' => 'pendiente', 'sala' => 'El Galpón', 'motivo' => null, 'fecha' => '2026-10-01T10:00:00+00:00']]);
+        self::tirarModeracion();
+
+        $contenido = self::contenido($this->pedir($id));
+
+        self::assertStringContainsString('Eva Ramos', $contenido);
+        self::assertStringNotContainsString('Mi solicitud de sala', $contenido);
     }
 
     public function testSinSesionPideIngresar(): void

@@ -95,13 +95,24 @@ final class ServicioDeFuncionesDelOrganizador
     }
 
     /**
-     * El catálogo de obras disponibles para proyectar.
+     * El catálogo de obras disponibles para proyectar: las aprobadas (EF-07.7). Al editar una
+     * función, también las que ya tenía, aunque después las hayan rechazado: rechazar una obra no
+     * toca lo programado (grilling de EF-07, Q3).
      *
      * @return list<Obra>
      */
-    public function catalogoDeObras(): array
+    public function catalogoDeObras(?Funcion $funcion = null): array
     {
-        return $this->obras->todas();
+        $catalogo = $this->obras->todas();
+        $ids = array_column($catalogo, 'id');
+        foreach ($funcion === null ? [] : array_diff($funcion->obrasIds, $ids) as $obraId) {
+            $obra = $this->obras->buscar($obraId);
+            if ($obra !== null) {
+                $catalogo[] = $obra;
+            }
+        }
+
+        return $catalogo;
     }
 
     /**
@@ -221,7 +232,7 @@ final class ServicioDeFuncionesDelOrganizador
             throw new ReglaIncumplida('La sala no existe o no pertenece a tu cuenta.');
         }
 
-        $duraciones = array_column($this->obras->todas(), 'duracionMinutos', 'id');
+        $duraciones = array_column($this->catalogoDeObras($funcion), 'duracionMinutos', 'id');
         $duracion = 0;
         foreach ($obrasIds as $obraId) {
             $duracion += $duraciones[$obraId] ?? throw new ReglaIncumplida('Una de las obras no está en el catálogo.');

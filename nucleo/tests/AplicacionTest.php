@@ -189,6 +189,18 @@ final class AplicacionTest extends TestCase
         self::assertStringContainsString('Tenés que ingresar', $respuesta->cuerpo());
     }
 
+    /**
+     * EF-07.8: después de ingresar, vuelve a la página que pidió, con el prefijo del subsistema y
+     * su consulta.
+     */
+    public function testElLinkDeIngresarDelErrorVuelveALaPaginaPedida(): void
+    {
+        $respuesta = $this->aplicacion()->atender(new Peticion('GET', '/organizador', ['tipo' => 'obra', 'id' => 'abc']));
+
+        self::assertSame(401, $respuesta->estado());
+        self::assertStringContainsString('href="/cuenta/ingresar?volver=' . rawurlencode('/cuenta/organizador?tipo=obra&id=abc') . '"', $respuesta->cuerpo());
+    }
+
     public function testUnaRutaDeOrganizadorRechazaAUnEspectador(): void
     {
         $respuesta = $this->pedir('GET', '/organizador', self::sesion('espectador'));

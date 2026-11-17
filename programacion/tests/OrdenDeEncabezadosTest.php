@@ -89,9 +89,6 @@ final class OrdenDeEncabezadosTest extends TestCase
                 'funciones' => self::$urlFunciones,
             ],
             'interno' => ['token' => 'token-de-programacion'],
-            // Las páginas no mandan correos: en el puerto 1 no escucha nadie.
-            'correo' => ['servidor' => 'smtp://127.0.0.1:1', 'remitente' => 'no-responder@indiecinema.test'],
-            'solicitudes' => ['destino' => 'equipo@indiecinema.test'],
         ]);
     }
 
@@ -115,8 +112,6 @@ final class OrdenDeEncabezadosTest extends TestCase
         yield 'obras' => ['/obras', null, 'GET', [], 200];
         yield 'obras sin resultados' => ['/obras?q=zzzz', null, 'GET', [], 200];
         yield 'ficha de una obra' => ['/obras/' . self::OBRA, null, 'GET', [], 200];
-        yield 'solicitar sala' => ['/solicitar-sala', 'espectador', 'GET', [], 200];
-        yield 'solicitar sala con errores' => ['/solicitar-sala', 'espectador', 'POST', [], 422];
         yield 'pedir un título' => ['/pedidos/nuevo', 'espectador', 'GET', [], 200];
         yield 'pedir un título con errores' => ['/pedidos/nuevo', 'espectador', 'POST', [], 422];
         yield 'pedidos de títulos' => ['/pedidos', null, 'GET', [], 200];
@@ -140,7 +135,6 @@ final class OrdenDeEncabezadosTest extends TestCase
         yield 'usuarios bloqueados' => ['/organizador/bloqueados', 'organizador', 'GET', [], 200];
         yield 'pedidos para programar' => ['/organizador/pedidos', 'organizador', 'GET', [], 200];
         yield 'bloquear en sala con errores' => ['/organizador/salas/' . self::SALA . '/bloqueos', 'organizador', 'POST', [], 422];
-        yield 'solicitudes del administrador' => ['/administracion/solicitudes', 'administrador', 'GET', [], 200];
         yield 'página que no existe' => ['/no-existe', null, 'GET', [], 404];
         yield 'función que no existe' => ['/cartelera/00000003-0000-4000-8000-999999999999', null, 'GET', [], 404];
         yield 'obra que no existe' => ['/obras/00000002-0000-4000-8000-999999999999', null, 'GET', [], 404];

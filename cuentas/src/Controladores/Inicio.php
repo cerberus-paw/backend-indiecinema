@@ -6,6 +6,7 @@ namespace IndieCinema\Cuentas\Controladores;
 
 use IndieCinema\Cuentas\Modelo\UsuarioEnListado;
 use IndieCinema\Cuentas\Servicios\ServicioDeUsuarios;
+use IndieCinema\Cuentas\Servicios\SolicitudesDeModeracion;
 use IndieCinema\Nucleo\Controlador;
 use IndieCinema\Nucleo\Http\ExcepcionHttp;
 use IndieCinema\Nucleo\Http\Peticion;
@@ -18,13 +19,18 @@ use LogicException;
  * nombre, desde cuándo tiene la cuenta y los roles, y «Mis datos» con el nombre y el correo, sólo
  * de lectura (editarlos y cambiar la contraseña todavía no tienen ruta). Los datos salen de la
  * cuenta y no de las cabeceras de nginx, que traen sólo el nombre y el mayor rol.
+ *
+ * Si el usuario mandó alguna solicitud de sala, «Mi solicitud de sala» muestra en qué quedó la
+ * última (EF-07.6), según moderación.
  */
 final class Inicio extends Controlador
 {
     private const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 
-    public function __construct(private readonly ServicioDeUsuarios $usuarios)
-    {
+    public function __construct(
+        private readonly ServicioDeUsuarios $usuarios,
+        private readonly SolicitudesDeModeracion $solicitudes,
+    ) {
     }
 
     /**
@@ -37,11 +43,20 @@ final class Inicio extends Controlador
         $registro = $this->usuarios->buscarPorId($usuario->id);
         $verificado = $registro?->correoVerificadoEn !== null;
 
-        return $this->vista('mi_cuenta.html.twig', self::datosDeMiCuenta(
-            $cuenta,
-            $verificado,
-            $peticion->consulta('reenviado') === '1',
-        ));
+        $datos = self::datosDeMiCuenta($cuenta, $verificado, $peticion->consulta('reenviado') === '1');
+        // La plantilla muestra el bloque si la variable existe: sin solicitud, o si moderación no
+        // responde, no se pasa.
+        $solicitud = $this->solicitudes->ultimaDe($cuenta->id);
+        if ($solicitud !== null) {
+            $datos['solicitud_de_sala'] = [
+                'estado' => $solicitud['estado'],
+                'sala' => $solicitud['sala'],
+                'motivo' => $solicitud['motivo'],
+                'fecha' => $solicitud['fecha']->format('d/m/Y'),
+            ];
+        }
+
+        return $this->vista('mi_cuenta.html.twig', $datos);
     }
 
     /**

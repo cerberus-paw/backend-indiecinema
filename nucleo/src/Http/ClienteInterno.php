@@ -6,6 +6,7 @@ namespace IndieCinema\Nucleo\Http;
 
 use IndieCinema\Nucleo\Configuracion;
 use IndieCinema\Nucleo\Seguridad\ControlDeLlamadores;
+use CURLFile;
 use JsonException;
 use LogicException;
 use Psr\Log\LoggerInterface;
@@ -23,6 +24,9 @@ use SensitiveParameter;
  */
 final class ClienteInterno
 {
+    /** Cuánto espera un pedido con un archivo de unos megas, como la foto de una sala. */
+    private const ESPERA_CON_ARCHIVO_MS = 10_000;
+
     /**
      * @param string                $llamador este subsistema, como lo conocen los demás
      * @param array<string, string> $urls     subsistema => URL base (sección [subsistemas])
@@ -75,6 +79,24 @@ final class ClienteInterno
         return $this->pedir('POST', $subsistema, $ruta, $this->url($subsistema, $ruta), json_encode($datos, JSON_THROW_ON_ERROR));
     }
 
+    /**
+     * Un POST multipart, como un formulario con un archivo: los campos y el archivo, que al otro
+     * lado llega como subido. Es para lo que no entra en un JSON, como la foto de una sala, que en
+     * base64 pasa el post_max_size de PHP (EF-07.1). Espera más que los demás pedidos, porque
+     * manda unos megas.
+     *
+     * @param array<string, scalar> $campos
+     *
+     * @return mixed como en get()
+     */
+    public function postConArchivo(string $subsistema, string $ruta, array $campos, string $campoDelArchivo, string $archivo): mixed
+    {
+        $cuerpo = array_map(strval(...), $campos);
+        $cuerpo[$campoDelArchivo] = new CURLFile($archivo, (string) mime_content_type($archivo), basename($archivo));
+
+        return $this->pedir('POST', $subsistema, $ruta, $this->url($subsistema, $ruta), $cuerpo, max($this->esperaMaximaMs, self::ESPERA_CON_ARCHIVO_MS));
+    }
+
     private function url(string $subsistema, string $ruta): string
     {
         if (!str_starts_with($ruta, '/interno/')) {
@@ -85,14 +107,19 @@ final class ClienteInterno
         return rtrim($base, '/') . $ruta;
     }
 
-    private function pedir(string $metodo, string $subsistema, string $ruta, string $url, ?string $json): mixed
+    /**
+     * @param string|array<string, string|CURLFile>|null $cuerpo JSON, o los campos de un multipart
+     *                                                           (curl pone el Content-Type)
+     */
+    private function pedir(string $metodo, string $subsistema, string $ruta, string $url, string|array|null $cuerpo, ?int $esperaMaximaMs = null): mixed
     {
+        $esperaMaximaMs ??= $this->esperaMaximaMs;
         $cabeceras = [
             'Authorization: Bearer ' . $this->token,
             ControlDeLlamadores::CABECERA_LLAMADOR . ': ' . $this->llamador,
             'Accept: application/json',
         ];
-        if ($json !== null) {
+        if (is_string($cuerpo)) {
             $cabeceras[] = 'Content-Type: application/json';
         }
 
@@ -102,11 +129,11 @@ final class ClienteInterno
             CURLOPT_HTTPHEADER => $cabeceras,
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_FOLLOWLOCATION => false,
-            CURLOPT_CONNECTTIMEOUT_MS => $this->esperaMaximaMs,
-            CURLOPT_TIMEOUT_MS => $this->esperaMaximaMs,
+            CURLOPT_CONNECTTIMEOUT_MS => $esperaMaximaMs,
+            CURLOPT_TIMEOUT_MS => $esperaMaximaMs,
         ]);
-        if ($json !== null) {
-            curl_setopt($curl, CURLOPT_POSTFIELDS, $json);
+        if ($cuerpo !== null) {
+            curl_setopt($curl, CURLOPT_POSTFIELDS, $cuerpo);
         }
         $cuerpo = curl_exec($curl);
         $estado = (int) curl_getinfo($curl, CURLINFO_RESPONSE_CODE);

@@ -98,7 +98,7 @@ final class AdministracionDeUsuarios extends Controlador
         foreach ($roles as $id => $valor) {
             $rol = is_string($valor) ? Rol::tryFrom($valor) : null;
             if ($rol === null) {
-                throw ExcepcionHttp::solicitudInvalida('Elegí espectador u organizador.');
+                throw ExcepcionHttp::solicitudInvalida('Elegí espectador, organizador o moderador.');
             }
             if (!is_array($antes) || ($antes[$id] ?? null) !== $valor) {
                 $cambios[(string) $id] = $rol;
@@ -112,7 +112,9 @@ final class AdministracionDeUsuarios extends Controlador
         return self::volverAlListado($peticion, match (true) {
             $hechos === [] => [],
             count($hechos) > 1 => ['roles_cambiados' => (string) count($hechos)],
-            $hechos[$id] === Rol::Organizador => ['organizador_dado' => $id],
+            $hechos[$id]['despues'] === Rol::Moderador => ['moderador_dado' => $id],
+            $hechos[$id]['antes'] === Rol::Moderador => ['moderador_quitado' => $id],
+            $hechos[$id]['despues'] === Rol::Organizador => ['organizador_dado' => $id],
             default => ['organizador_quitado' => $id],
         });
     }
@@ -151,6 +153,8 @@ final class AdministracionDeUsuarios extends Controlador
         $avisos = [
             'organizador_dado' => 'Le diste el rol de organizador a «%s». Lo va a tener la próxima vez que ingrese.',
             'organizador_quitado' => 'Le quitaste el rol de organizador a «%s».',
+            'moderador_dado' => 'Le diste el rol de moderador a «%s». Lo va a tener la próxima vez que ingrese.',
+            'moderador_quitado' => 'Le quitaste el rol de moderador a «%s».',
         ];
         foreach ($avisos as $clave => $texto) {
             $id = $peticion->consulta($clave);

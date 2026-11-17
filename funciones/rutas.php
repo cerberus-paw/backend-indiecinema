@@ -69,6 +69,9 @@ return static function (Router $router): void {
     // promedios, también para la reportería de recaudación (EF-09).
     $router->interna('GET', '/interno/calificaciones/resumen', [CalificacionesInternas::class, 'resumen'], ['programacion', 'recaudacion']);
     $router->interna('GET', '/interno/calificaciones', [CalificacionesInternas::class, 'ultimas'], ['programacion']);
+    // El comentario denunciado, para moderación, que lo oculta (EF-07.8).
+    $router->interna('GET', '/interno/calificaciones/{id}', [CalificacionesInternas::class, 'mostrar'], ['moderacion']);
+    $router->interna('POST', '/interno/calificaciones/{id}/ocultar', [CalificacionesInternas::class, 'ocultar'], ['moderacion']);
 
     // Lo cobrado de cada función, para el reparto de recaudación (EF-02.5).
     $router->interna('GET', '/interno/funciones/{id}/cobros', [CobrosInternos::class, 'deUna'], ['recaudacion']);

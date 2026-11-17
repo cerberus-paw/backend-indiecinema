@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace IndieCinema\Funciones\Controladores;
 
+use DateTimeImmutable;
 use DateTimeZone;
 use IndieCinema\Funciones\Modelo\Calificacion;
 use IndieCinema\Funciones\Repositorios\RepositorioDeCalificaciones;
@@ -82,12 +83,67 @@ final class CalificacionesInternas extends Controlador
         $nombres = $this->usuarios->nombresDe(array_map(static fn (Calificacion $calificacion): string => $calificacion->usuarioId, $calificaciones));
 
         return $this->json(['calificaciones' => array_map(static fn (Calificacion $calificacion): array => [
+            // Para denunciar el comentario (EF-07.8).
+            'id' => $calificacion->id,
             'funcion_id' => $calificacion->funcionId,
             'puntaje' => $calificacion->puntaje,
-            'comentario' => $calificacion->comentario,
+            // El que ocultó la moderación no se muestra (EF-07.8).
+            'comentario' => $calificacion->comentarioOculto ? null : $calificacion->comentario,
             // Sólo el nombre: el correo y el id del espectador no salen de funciones.
             'espectador' => $nombres[$calificacion->usuarioId] ?? null,
             'fecha' => $calificacion->creadaEn->setTimezone(new DateTimeZone(date_default_timezone_get()))->format('Y-m-d'),
         ], $calificaciones)]);
+    }
+
+    /**
+     * GET /interno/calificaciones/{id}, para moderación (EF-07.8): el comentario denunciado, con su
+     * autor (que no denuncia lo suyo) y si ya está oculto.
+     *
+     * @throws ExcepcionHttp 404 si no existe
+     */
+    public function mostrar(Peticion $peticion): Respuesta
+    {
+        $calificacion = $this->calificacionDe($peticion);
+
+        return $this->json([
+            'id' => $calificacion->id,
+            'funcion_id' => $calificacion->funcionId,
+            'sala_id' => $calificacion->salaId,
+            'usuario_id' => $calificacion->usuarioId,
+            'espectador' => $this->usuarios->nombresDe([$calificacion->usuarioId])[$calificacion->usuarioId] ?? null,
+            'puntaje' => $calificacion->puntaje,
+            'comentario' => $calificacion->comentario,
+            'fecha' => $calificacion->creadaEn->setTimezone(new DateTimeZone(date_default_timezone_get()))->format('Y-m-d'),
+            'oculto' => $calificacion->comentarioOculto,
+        ]);
+    }
+
+    /**
+     * POST /interno/calificaciones/{id}/ocultar con {moderador_id}, para moderación (EF-07.8): el
+     * comentario deja de verse en las fichas. cambio dice si estaba a la vista: el reintento
+     * responde lo mismo sin tocar nada.
+     *
+     * @throws ExcepcionHttp 404 si no existe
+     */
+    public function ocultar(Peticion $peticion): Respuesta
+    {
+        $calificacion = $this->calificacionDe($peticion);
+        $moderador = $peticion->campo('moderador_id');
+        if (!is_string($moderador) || !Uuid::esValido($moderador)) {
+            return $this->json(['error' => '«moderador_id» es el UUID del moderador.'], 400);
+        }
+        $cambio = $this->calificaciones->ocultarComentario($calificacion->id, $moderador, new DateTimeImmutable('now', new DateTimeZone('UTC')));
+
+        return $this->json(['id' => $calificacion->id, 'cambio' => $cambio]);
+    }
+
+    /**
+     * @throws ExcepcionHttp 404 si no existe
+     */
+    private function calificacionDe(Peticion $peticion): Calificacion
+    {
+        $id = (string) $peticion->parametro('id');
+
+        return (Uuid::esValido($id) ? $this->calificaciones->buscar($id) : null) ?? throw ExcepcionHttp::noEncontrada();
     }
 }

@@ -125,6 +125,31 @@ final class ObrasTest extends TestCase
         self::assertStringNotContainsString('Balnearios', $respuesta->cuerpo());
     }
 
+    /**
+     * EF-07.7: la que no aprobó la moderación no está en el sitio, ni para su dueño.
+     */
+    public function testLasPendientesYLasRechazadasNoSeVenEnElCatalogoNiTienenFicha(): void
+    {
+        $this->cargarObrasDeEjemplo();
+        [$generoId] = $this->genero('Drama');
+        $ids = [];
+        foreach (['pendiente' => 'Mi película pendiente', 'rechazada' => 'Mi película rechazada'] as $estado => $titulo) {
+            $obra = Obra::crear(self::ORGANIZADORA, new DatosDeObra($titulo, 'Sinopsis.', 2020, 'Alguien', 90, TipoObra::Pelicula, OrigenCopia::ObraPropia, [$generoId]));
+            $this->repositorio->agregar($obra);
+            $this->base->ejecutar('UPDATE obra SET estado = ? WHERE id = ?', [$estado, $obra->id]);
+            $ids[] = $obra->id;
+        }
+
+        $catalogo = $this->pedir('/obras')->cuerpo();
+        self::assertStringContainsString('La flor', $catalogo);
+        self::assertStringNotContainsString('Mi película', $catalogo);
+        self::assertStringNotContainsString('Mi película', $this->pedir('/obras', ['q' => 'película'])->cuerpo());
+        foreach ($ids as $id) {
+            self::assertSame(404, $this->pedir("/obras/{$id}")->estado());
+            self::assertSame(404, $this->pedir("/obras/{$id}", cabecerasAdicionales: ['X-Usuario-Id' => self::ORGANIZADORA, 'X-Rol' => 'organizador'])->estado());
+        }
+    }
+
     public function testBuscarObrasPorTituloYDirector(): void
     {
         $this->cargarObrasDeEjemplo();
@@ -283,5 +308,24 @@ final class ObrasTest extends TestCase
         $datosDueno = json_decode($dueno->cuerpo(), true);
         self::assertTrue($datosDueno['obra']['editable']);
         self::assertSame("/organizador/obras/{$obra->id}/editar", $datosDueno['obra']['url_editar']);
+    }
+
+    /**
+     * EF-07.8: la ficha lleva a denunciar la obra, salvo a su dueño. Sin sesión también: el
+     * formulario lo manda a ingresar y vuelve.
+     */
+    public function testLaFichaLlevaADenunciarLaObraSalvoASuDueno(): void
+    {
+        [$generoId] = $this->genero('Drama');
+        $obra = Obra::crear(
+            self::ORGANIZADORA,
+            new DatosDeObra('Obra Propia', 'Sinopsis', 2021, 'Director Y', 90, TipoObra::Pelicula, OrigenCopia::ObraPropia, [$generoId]),
+        );
+        $this->repositorio->agregar($obra);
+        $link = "href=\"/moderacion/denuncias/nueva?tipo=obra&amp;id={$obra->id}\"";
+
+        self::assertStringContainsString($link, $this->pedir("/obras/{$obra->id}")->cuerpo());
+        self::assertStringContainsString($link, $this->pedir("/obras/{$obra->id}", [], ['X-Usuario-Id' => Uuid::nuevo(), 'X-Rol' => 'espectador'])->cuerpo());
+        self::assertStringNotContainsString('/moderacion/denuncias/nueva', $this->pedir("/obras/{$obra->id}", [], ['X-Usuario-Id' => self::ORGANIZADORA, 'X-Rol' => 'organizador'])->cuerpo());
     }
 }

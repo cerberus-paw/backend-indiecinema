@@ -35,7 +35,16 @@ final readonly class Obra
         public array $generosIds,
         /** El nombre del archivo en el volumen, o null si no tiene. */
         public ?string $afiche = null,
+        /** EF-07.7: las que carga un organizador nacen pendientes (ServicioDeObras::crear()). */
+        public EstadoObra $estado = EstadoObra::Aprobada,
+        /** El motivo de la última resolución de la moderación, o null. */
+        public ?string $motivo = null,
     ) {
+    }
+
+    public function estaAprobada(): bool
+    {
+        return $this->estado === EstadoObra::Aprobada;
     }
 
     /**
@@ -65,6 +74,7 @@ final readonly class Obra
         string $duenoId,
         DatosDeObra $datos,
         ?string $afiche = null,
+        EstadoObra $estado = EstadoObra::Aprobada,
     ): self {
         self::validar($datos->titulo, $datos->duracionMinutos, $datos->anio, $datos->generosIds);
 
@@ -80,9 +90,14 @@ final readonly class Obra
             $datos->origenCopia,
             $datos->generosIds,
             $afiche,
+            $estado,
         );
     }
 
+    /**
+     * Con los datos corregidos. Corregir una rechazada la vuelve a pendiente, para que la revise la
+     * moderación; una aprobada o una pendiente siguen como estaban (EF-07.7, grilling de EF-07, Q7).
+     */
     public function actualizar(DatosDeObra $datos, ?string $nuevoAfiche = null): self
     {
         self::validar($datos->titulo, $datos->duracionMinutos, $datos->anio, $datos->generosIds);
@@ -99,6 +114,8 @@ final readonly class Obra
             $datos->origenCopia,
             $datos->generosIds,
             $nuevoAfiche ?? $this->afiche,
+            $this->estado === EstadoObra::Rechazada ? EstadoObra::Pendiente : $this->estado,
+            $this->motivo,
         );
     }
 

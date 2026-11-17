@@ -1656,6 +1656,43 @@ final class FuncionesDelOrganizadorTest extends TestCase
         self::assertSame(0, $this->cuantasFunciones($sala));
     }
 
+    /**
+     * EF-07.7: una obra pendiente o rechazada no está en el catálogo para armar una función, ni
+     * escribiendo su id.
+     */
+    public function testUnaObraPendienteORechazadaNoEntraEnUnaFuncion(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $this->base->ejecutar("UPDATE obra SET estado = 'pendiente' WHERE id = ?", [$this->obras['Zama']]);
+        $this->base->ejecutar("UPDATE obra SET estado = 'rechazada', motivo = 'No.' WHERE id = ?", [$this->obras['La ciénaga']]);
+
+        self::assertStringNotContainsString($this->obras['Zama'], $this->pedir('GET', '/organizador/funciones/nueva')->cuerpo());
+        foreach ($this->obras as $obra) {
+            $programar = $this->programar($sala, ['obras' => [$obra]]);
+            self::assertSame(422, $programar->estado());
+            self::assertStringContainsString('Una de las obras seleccionadas no existe en el catálogo.', $programar->cuerpo());
+        }
+        $votacion = $this->programar($sala, ['modo' => FormularioDeFuncion::MODO_EN_VOTACION_TITULOS, 'obras' => array_values($this->obras), 'cierre_fecha' => '2030-10-20', 'cierre_hora' => '23:00']);
+        self::assertSame(422, $votacion->estado());
+        self::assertSame(0, $this->cuantasFunciones($sala));
+    }
+
+    /**
+     * Q3: rechazar una obra después no toca lo programado, y la función se sigue editando con ella.
+     */
+    public function testUnaFuncionSeEditaConUnaObraQueRechazaronDespues(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $funcion = $this->programada($sala, '2030-10-25 20:30:00');
+        $this->base->ejecutar("UPDATE obra SET estado = 'rechazada', motivo = 'No.' WHERE id = ?", [$this->obras['Zama']]);
+
+        self::assertStringContainsString($this->obras['Zama'], $this->pedir('GET', "/organizador/funciones/{$funcion->id}/editar")->cuerpo());
+        $respuesta = $this->actualizar($funcion->id, $sala, ['fecha' => '2030-10-25', 'hora' => '20:30', 'precio' => '4900', 'cupo' => '45']);
+
+        self::assertSame(303, $respuesta->estado(), $respuesta->cuerpo());
+        self::assertSame('4900.00', $this->base->valor('SELECT precio_base FROM funcion WHERE id = ?', [$funcion->id]));
+    }
+
     public function testRechazaUnaObraQueNoEstaEnElCatalogo(): void
     {
         $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');

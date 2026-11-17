@@ -36,6 +36,8 @@ final readonly class Calificacion
         public string $organizadorId,
         public array $obrasIds,
         public DateTimeImmutable $creadaEn,
+        // EF-07.8: la moderación lo ocultó por una denuncia; el puntaje sigue contando.
+        public bool $comentarioOculto = false,
     ) {
     }
 

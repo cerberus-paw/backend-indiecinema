@@ -49,7 +49,7 @@ crean en el guion (pasos 14 y 16) se cancelan al final, así no quedan en la car
 | 14 | «Programar una función»: escribir un precio negativo y pasar al campo siguiente; mandarla con una fecha pasada y un cupo mayor que la capacidad de la sala; después, bien | El error del precio aparece antes de mandar. Los de la fecha y el cupo, al mandar, junto a cada campo. Después la función aparece en «Mis funciones» y en la cartelera |
 | 15 | «Editar» esa función y cambiarle el precio | «¡Cambios guardados!» en la ficha, con el precio nuevo |
 | 16 | «Programar una función» con «Abrir a votación de títulos»: tres obras candidatas, cupo 3 | Queda en «Mis funciones» en votación y sin fecha, y en la cartelera con «En votación de títulos» |
-| 17 | Abrir `/administracion/solicitudes` | «No tenés permiso para entrar acá» |
+| 17 | Abrir `/moderacion/solicitudes` | «No tenés permiso para entrar acá» |
 
 ## La votación y el acuerdo de fecha
 

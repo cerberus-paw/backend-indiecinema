@@ -1,13 +1,12 @@
 <?php
 
 /*
- * Cuentas de mentira, atendiendo con `php -S` las dos rutas que llama la bandeja de solicitudes de
- * sala: así AdministracionDeSolicitudesTest prueba la llamada por la red, como en el compose.
- * Responde lo mismo que /interno/usuarios/{id} de cuentas (UsuariosInternosTest de cuentas prueba
- * ese mismo JSON del otro lado), y como ella, sólo a programación con su token.
+ * Cuentas de mentira, atendiendo con `php -S` lo que le piden los bloqueos (EF-12) y los pedidos
+ * de títulos (EF-11): nombres y correos de usuarios. Así sus pruebas hacen la llamada por la red,
+ * como en el compose. Responde lo mismo que /interno/usuarios de cuentas (UsuariosInternosTest de
+ * cuentas prueba ese mismo JSON del otro lado), y como ella, sólo a programación con su token.
  *
- * Cada rol que le piden lo anota en el archivo de la variable REGISTRO, para que la prueba vea qué
- * le llegó.
+ * Los roles ya no: desde EF-07.2 los da moderación, que tiene su propio doble.
  */
 
 declare(strict_types=1);
@@ -50,7 +49,7 @@ if ($ruta === '/interno/usuarios' && ($_SERVER['REQUEST_METHOD'] ?? 'GET') === '
     return;
 }
 
-if (!preg_match('#^/interno/usuarios/([^/]+)(/roles)?$#', $ruta, $partes)) {
+if (!preg_match('#^/interno/usuarios/([^/]+)$#', $ruta, $partes)) {
     http_response_code(404);
 
     return;
@@ -64,12 +63,6 @@ if ($usuario === null) {
     http_response_code(404);
 
     return;
-}
-
-if (($partes[2] ?? '') === '/roles') {
-    $pedido = json_decode((string) file_get_contents('php://input'), true);
-    file_put_contents((string) getenv('REGISTRO'), json_encode(['usuario' => $id] + (array) $pedido) . "\n", FILE_APPEND);
-    $usuario['roles'] = array_values(array_unique([...$usuario['roles'], 'organizador']));
 }
 
 echo json_encode(['id' => $id, 'estado' => 'activa'] + $usuario);

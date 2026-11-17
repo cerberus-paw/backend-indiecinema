@@ -25,18 +25,6 @@ parameters:
 			path: src/Controladores/SalasDelOrganizador.php
 
 		-
-			message: '#^Using nullsafe property access "\?\-\>errores" on left side of \?\? is unnecessary\. Use \-\> instead\.$#'
-			identifier: nullsafe.neverNull
-			count: 1
-			path: src/Controladores/SolicitudDeSala.php
-
-		-
-			message: '#^Using nullsafe property access "\?\-\>valores" on left side of \?\? is unnecessary\. Use \-\> instead\.$#'
-			identifier: nullsafe.neverNull
-			count: 1
-			path: src/Controladores/SolicitudDeSala.php
-
-		-
 			message: '#^Parameter \#1 \$array \(list\<string\>\) of array_values is already a list, call has no effect\.$#'
 			identifier: arrayValues.list
 			count: 1

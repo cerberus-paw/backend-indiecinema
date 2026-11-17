@@ -19,9 +19,9 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * GET /interno/usuarios/{id} y POST /interno/usuarios/{id}/roles de punta a punta, como los llama
- * la bandeja de solicitudes de sala de programación: con su token, contra un MySQL de verdad. El
- * JSON es el que espera UsuariosDeCuentas en programación (su prueba usa una cuentas de mentira
- * que responde lo mismo).
+ * la bandeja de solicitudes de sala de moderación (EF-07.2): con su token, contra un MySQL de
+ * verdad. El JSON es el que espera UsuariosDeCuentas en moderación (su prueba usa una cuentas de
+ * mentira que responde lo mismo).
  */
 final class UsuariosInternosTest extends TestCase
 {
@@ -86,7 +86,7 @@ final class UsuariosInternosTest extends TestCase
      */
     private function darRol(string $id, array $cuerpo = ['rol' => 'organizador', 'otorgado_por' => self::ADMINISTRADOR]): Respuesta
     {
-        return $this->pedir('POST', "/interno/usuarios/{$id}/roles", $cuerpo);
+        return $this->pedir('POST', "/interno/usuarios/{$id}/roles", $cuerpo, 'moderacion', self::TOKEN_DE_MODERACION);
     }
 
     /**
@@ -185,15 +185,16 @@ final class UsuariosInternosTest extends TestCase
         self::assertSame(['espectador'], $this->roles());
     }
 
-    public function testSoloLasLlamaProgramacionConSuToken(): void
+    public function testCadaSubsistemaLlamaSoloLoQueLeToca(): void
     {
         // Funciones existe y tiene su token: lee usuarios (para avisarles por correo), pero no da roles.
         self::assertSame(200, $this->pedir('GET', "/interno/usuarios/{$this->eva}", llamador: 'funciones', token: self::TOKEN_DE_FUNCIONES)->estado());
         self::assertSame(403, $this->pedir('GET', "/interno/usuarios/{$this->eva}", llamador: 'funciones', token: 'otro-token')->estado());
         self::assertSame(403, $this->pedir('POST', "/interno/usuarios/{$this->eva}/roles", ['rol' => 'organizador', 'otorgado_por' => self::ADMINISTRADOR], 'funciones', self::TOKEN_DE_FUNCIONES)->estado());
-        // Moderación lee el nombre y el correo de quien manda una solicitud (EF-01.5), pero tampoco da roles.
+        // Moderación lee el nombre y el correo de quien manda una solicitud (EF-01.5) y, al aprobarla,
+        // da el rol (EF-07.2); programación ya no, desde que las solicitudes se mudaron.
         self::assertSame(200, $this->pedir('GET', "/interno/usuarios/{$this->eva}", llamador: 'moderacion', token: self::TOKEN_DE_MODERACION)->estado());
-        self::assertSame(403, $this->pedir('POST', "/interno/usuarios/{$this->eva}/roles", ['rol' => 'organizador', 'otorgado_por' => self::ADMINISTRADOR], 'moderacion', self::TOKEN_DE_MODERACION)->estado());
+        self::assertSame(403, $this->pedir('POST', "/interno/usuarios/{$this->eva}/roles", ['rol' => 'organizador', 'otorgado_por' => self::ADMINISTRADOR])->estado());
         self::assertSame(403, $this->pedir('GET', '/interno/usuarios', llamador: 'moderacion', token: self::TOKEN_DE_MODERACION, consulta: ['ids' => $this->eva])->estado());
         // Recaudación pide los nombres de una lista, para las liquidaciones (EF-02.4), y nada más.
         self::assertSame(200, $this->pedir('GET', '/interno/usuarios', llamador: 'recaudacion', token: self::TOKEN_DE_RECAUDACION, consulta: ['ids' => $this->eva])->estado());
@@ -202,6 +203,10 @@ final class UsuariosInternosTest extends TestCase
         // Programación con un token que no es el suyo.
         self::assertSame(403, $this->pedir('GET', "/interno/usuarios/{$this->eva}", token: 'otro-token')->estado());
         self::assertSame(['espectador'], $this->roles());
+
+        // El único que lo da.
+        self::assertSame(200, $this->pedir('POST', "/interno/usuarios/{$this->eva}/roles", ['rol' => 'organizador', 'otorgado_por' => self::ADMINISTRADOR], 'moderacion', self::TOKEN_DE_MODERACION)->estado());
+        self::assertSame(['espectador', 'organizador'], $this->roles());
     }
 
     public function testElRolDadoSeVeConElRolMayor(): void

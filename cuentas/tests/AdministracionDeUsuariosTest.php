@@ -529,6 +529,7 @@ final class AdministracionDeUsuariosTest extends TestCase
         $espectadora = $this->agregar('Eva Espectadora', 'eva@ejemplo.com');
         $organizador = $this->agregar('Omar Organizador', 'omar@ejemplo.com', [Rol::Organizador]);
         $moderadora = $this->agregar('Mora Moderadora', 'mora@ejemplo.com', [Rol::Moderador]);
+        $administradora = $this->agregar('Ada Administradora', 'ada@ejemplo.com', [Rol::Administrador]);
 
         $cuerpo = $this->pedir(self::URL . '?q=ejemplo')->cuerpo();
 
@@ -539,18 +540,21 @@ final class AdministracionDeUsuariosTest extends TestCase
         self::assertStringContainsString('<input type="hidden" name="q" value="ejemplo">', $formulario[0]);
         self::assertStringContainsString('>Guardar cambios</button>', $formulario[0]);
         self::assertStringContainsString('<button type="reset"', $formulario[0]);
-        foreach ([$espectadora => 'espectador', $organizador => 'organizador'] as $id => $rol) {
+        foreach ([$espectadora => 'espectador', $organizador => 'organizador', $moderadora => 'moderador'] as $id => $rol) {
             preg_match("#<tr data-usuario=\"{$id}\">.*?</tr>#s", $formulario[0], $fila);
             self::assertStringContainsString("<select name=\"roles[{$id}]\"", $fila[0] ?? '');
+            // EF-07.3: el administrador da y quita el de moderador.
+            preg_match_all('#<option value="([^"]*)"#', $fila[0] ?? '', $opciones);
+            self::assertSame(['espectador', 'organizador', 'moderador'], $opciones[1]);
             self::assertStringContainsString("<option value=\"{$rol}\" selected>", $fila[0] ?? '');
             // El rol con el que se mostró, para cambiar sólo el que se tocó.
             self::assertStringContainsString("<input type=\"hidden\" name=\"antes[{$id}]\" value=\"{$rol}\">", $fila[0] ?? '');
         }
-        // El moderador y el administrador no se cambian desde la web: el desplegable, deshabilitado
-        // y sin nombre, no se manda.
-        preg_match("#<tr data-usuario=\"{$moderadora}\">.*?</tr>#s", $formulario[0], $fila);
+        // El administrador no se cambia desde la web: el desplegable, deshabilitado y sin nombre,
+        // no se manda.
+        preg_match("#<tr data-usuario=\"{$administradora}\">.*?</tr>#s", $formulario[0], $fila);
         self::assertStringNotContainsString('name="roles[', $fila[0] ?? '');
-        self::assertMatchesRegularExpression('#<select[^>]* disabled[^>]*>\s*<option>Moderador</option>#', $fila[0] ?? '');
+        self::assertMatchesRegularExpression('#<select[^>]* disabled[^>]*>\s*<option>Administrador</option>#', $fila[0] ?? '');
     }
 
     public function testLasTarjetasCuentanTodasLasCuentas(): void
@@ -603,6 +607,81 @@ final class AdministracionDeUsuariosTest extends TestCase
         self::assertStringContainsString(
             'Le quitaste el rol de organizador a «Omar Organizador»',
             $this->pedir(self::URL . "?organizador_quitado={$id}")->cuerpo(),
+        );
+    }
+
+    /**
+     * @return iterable<string, array{list<Rol>, list<string>}>
+     */
+    public static function quienesPasanAModerador(): iterable
+    {
+        yield 'un espectador' => [[], ['espectador', 'moderador']];
+        // Conserva el de organizador: si después le quitan el de moderador, no pierde «Mis salas».
+        yield 'un organizador' => [[Rol::Organizador], ['espectador', 'organizador', 'moderador']];
+    }
+
+    /**
+     * EF-07.3: el administrador da el rol de moderador, como el de organizador.
+     *
+     * @param list<Rol>    $roles
+     * @param list<string> $quedan
+     */
+    #[DataProvider('quienesPasanAModerador')]
+    public function testDarElRolDeModeradorCierraSusSesionesYQuedaEnElLog(array $roles, array $quedan): void
+    {
+        $id = $this->agregar('Mora Moderadora', 'mora@ejemplo.com', $roles);
+        $this->abrirSesion($id);
+
+        $respuesta = $this->guardar([$id => 'moderador'], [$id => $roles === [] ? 'espectador' : 'organizador']);
+
+        self::assertSame(303, $respuesta->estado(), $respuesta->cuerpo());
+        self::assertSame("/cuenta/administracion/usuarios?moderador_dado={$id}", $respuesta->cabecera('Location'));
+        self::assertSame($quedan, $this->roles($id));
+        self::assertSame(0, $this->sesiones($id));
+        self::assertStringContainsString(self::ADMINISTRADOR . " le dio el rol de moderador a {$id}.", $this->log());
+        self::assertStringContainsString(
+            'Le diste el rol de moderador a «Mora Moderadora»',
+            $this->pedir(self::URL . "?moderador_dado={$id}")->cuerpo(),
+        );
+    }
+
+    /**
+     * @return iterable<string, array{list<Rol>, string, list<string>, list<string>}>
+     */
+    public static function quienesDejanDeSerModerador(): iterable
+    {
+        yield 'a organizador, sin el rol guardado' => [[Rol::Moderador], 'organizador', ['espectador', 'organizador'], ['le quitó el rol de moderador', 'le dio el rol de organizador']];
+        yield 'a organizador, con el rol guardado' => [[Rol::Organizador, Rol::Moderador], 'organizador', ['espectador', 'organizador'], ['le quitó el rol de moderador']];
+        yield 'a espectador' => [[Rol::Organizador, Rol::Moderador], 'espectador', ['espectador'], ['le quitó el rol de moderador', 'le quitó el rol de organizador']];
+    }
+
+    /**
+     * Quitarle el de moderador lo deja en el rol que eligió el administrador: organizador, sin
+     * perder «Mis salas», o espectador, sin ninguno de los dos. Todo junto, cerrando sus sesiones.
+     *
+     * @param list<Rol>    $roles
+     * @param list<string> $quedan
+     * @param list<string> $registros
+     */
+    #[DataProvider('quienesDejanDeSerModerador')]
+    public function testQuitarElRolDeModeradorLoDejaEnElQueSeEligio(array $roles, string $rol, array $quedan, array $registros): void
+    {
+        $id = $this->agregar('Mora Moderadora', 'mora@ejemplo.com', $roles);
+        $this->abrirSesion($id);
+
+        $respuesta = $this->guardar([$id => $rol], [$id => 'moderador']);
+
+        self::assertSame(303, $respuesta->estado(), $respuesta->cuerpo());
+        self::assertSame("/cuenta/administracion/usuarios?moderador_quitado={$id}", $respuesta->cabecera('Location'));
+        self::assertSame($quedan, $this->roles($id));
+        self::assertSame(0, $this->sesiones($id));
+        foreach ($registros as $registro) {
+            self::assertStringContainsString(self::ADMINISTRADOR . " {$registro} a {$id}.", $this->log());
+        }
+        self::assertSame(count($registros), substr_count($this->log(), " a {$id}."));
+        self::assertStringContainsString(
+            'Le quitaste el rol de moderador a «Mora Moderadora»',
+            $this->pedir(self::URL . "?moderador_quitado={$id}")->cuerpo(),
         );
     }
 
@@ -664,6 +743,7 @@ final class AdministracionDeUsuariosTest extends TestCase
     {
         yield 'organizador a quien ya lo es' => [[Rol::Organizador], 'organizador', ['espectador', 'organizador']];
         yield 'espectador a quien ya lo es' => [[], 'espectador', ['espectador']];
+        yield 'moderador a quien ya lo es' => [[Rol::Moderador], 'moderador', ['espectador', 'moderador']];
     }
 
     /**
@@ -687,7 +767,7 @@ final class AdministracionDeUsuariosTest extends TestCase
         }
         self::assertSame($quedan, $this->roles($id));
         self::assertSame(1, $this->sesiones($id));
-        self::assertStringNotContainsString('rol de organizador', $this->log());
+        self::assertStringNotContainsString(' el rol de ', $this->log());
     }
 
     /**
@@ -695,13 +775,13 @@ final class AdministracionDeUsuariosTest extends TestCase
      */
     public static function cambiosQueNoSePuedenHacer(): iterable
     {
-        // Esos roles no se cambian desde la web, ni para sumarles el de organizador.
+        // El administrador no se cambia desde la web, ni para sumarle otro rol.
         yield 'un administrador a organizador' => [[Rol::Administrador], 'organizador'];
         yield 'un administrador a espectador' => [[Rol::Administrador], 'espectador'];
-        yield 'un moderador a espectador' => [[Rol::Moderador], 'espectador'];
-        // Desde la web no se da otro rol que el de organizador.
+        yield 'un administrador a moderador' => [[Rol::Administrador], 'moderador'];
+        // Desde la web no se da el de administrador.
         yield 'un espectador a administrador' => [[], 'administrador'];
-        yield 'un espectador a moderador' => [[], 'moderador'];
+        yield 'un moderador a administrador' => [[Rol::Moderador], 'administrador'];
         yield 'un espectador a visitante' => [[], 'visitante'];
         yield 'un rol que no existe' => [[], 'productor'];
         yield 'el rol como arreglo' => [[], ['organizador']];

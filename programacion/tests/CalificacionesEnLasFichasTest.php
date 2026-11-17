@@ -34,6 +34,8 @@ final class CalificacionesEnLasFichasTest extends TestCase
     use ConBaseDePruebas;
 
     private const ORGANIZADORA = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    private const CON_COMENTARIO = '1c1c1c1c-1c1c-41c1-81c1-1c1c1c1c1c1c';
+    private const SIN_COMENTARIO = '2d2d2d2d-2d2d-42d2-82d2-2d2d2d2d2d2d';
 
     /** @var resource|null */
     private static $servidor = null;
@@ -116,13 +118,16 @@ final class CalificacionesEnLasFichasTest extends TestCase
         ]);
     }
 
-    private function pedir(string $ruta, ?string $funciones = null): Respuesta
+    /**
+     * @param array<string, string> $cabeceras las de nginx, para pedir con sesión
+     */
+    private function pedir(string $ruta, ?string $funciones = null, array $cabeceras = []): Respuesta
     {
         $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion($funciones), new Log('programacion', fopen('php://memory', 'w')));
 
         parse_str((string) parse_url($ruta, PHP_URL_QUERY), $consulta);
 
-        return PaginasParaValidar::anotar('GET', $ruta, $aplicacion->atender(new Peticion('GET', (string) parse_url($ruta, PHP_URL_PATH), $consulta, [], [], [], [])));
+        return PaginasParaValidar::anotar('GET', $ruta, $aplicacion->atender(new Peticion('GET', (string) parse_url($ruta, PHP_URL_PATH), $consulta, [], $cabeceras, [], [])));
     }
 
     /**
@@ -136,8 +141,9 @@ final class CalificacionesEnLasFichasTest extends TestCase
     private function conCalificaciones(): void
     {
         $ultimas = [
-            ['funcion_id' => $this->finalizada, 'puntaje' => 5, 'comentario' => "Hermosa copia.\n<b>Volvería</b>.", 'espectador' => 'Eva', 'fecha' => '2026-09-07'],
-            ['funcion_id' => $this->finalizada, 'puntaje' => 4, 'comentario' => null, 'espectador' => null, 'fecha' => '2026-09-06'],
+            ['id' => self::CON_COMENTARIO, 'funcion_id' => $this->finalizada, 'puntaje' => 5, 'comentario' => "Hermosa copia.\n<b>Volvería</b>.", 'espectador' => 'Eva', 'fecha' => '2026-09-07'],
+            // Sin comentario, o con el que ocultó la moderación (EF-07.8).
+            ['id' => self::SIN_COMENTARIO, 'funcion_id' => $this->finalizada, 'puntaje' => 4, 'comentario' => null, 'espectador' => null, 'fecha' => '2026-09-06'],
         ];
         self::funcionesResponde([
             'salas' => [$this->sala->id => ['promedio' => 4.5, 'cantidad' => 2]],
@@ -280,5 +286,32 @@ final class CalificacionesEnLasFichasTest extends TestCase
         [$mejor, $media, $sinCalificar] = $this->tresSalas();
 
         self::assertEnOrden([$mejor, $media, $sinCalificar], $this->pedir("/obras/{$this->obraId}")->cuerpo());
+    }
+
+    /**
+     * EF-07.8: la ficha lleva a denunciar la sala, salvo a su organizadora.
+     */
+    public function testLaFichaLlevaADenunciarLaSalaSalvoASuOrganizadora(): void
+    {
+        $link = "href=\"/moderacion/denuncias/nueva?tipo=sala&amp;id={$this->sala->id}\"";
+
+        self::assertStringContainsString($link, $this->pedir("/salas/{$this->sala->id}")->cuerpo());
+        self::assertStringContainsString($link, $this->pedir("/salas/{$this->sala->id}", cabeceras: ['X-Nginx-Secreto' => 'secreto-de-nginx', 'X-Usuario-Id' => Uuid::nuevo(), 'X-Rol' => 'espectador'])->cuerpo());
+        self::assertStringNotContainsString($link, $this->pedir("/salas/{$this->sala->id}", cabeceras: ['X-Nginx-Secreto' => 'secreto-de-nginx', 'X-Usuario-Id' => self::ORGANIZADORA, 'X-Rol' => 'organizador'])->cuerpo());
+    }
+
+    /**
+     * EF-07.8: cada comentario se denuncia, en la ficha de la sala y en la de la obra. La ficha no
+     * sabe quién lo escribió: a su autor lo frena el formulario.
+     */
+    public function testCadaComentarioLlevaADenunciarlo(): void
+    {
+        $this->conCalificaciones();
+
+        foreach (["/salas/{$this->sala->id}", "/obras/{$this->obraId}"] as $ficha) {
+            $cuerpo = $this->pedir($ficha)->cuerpo();
+            self::assertStringContainsString('href="/moderacion/denuncias/nueva?tipo=calificacion&amp;id=' . self::CON_COMENTARIO . '"', $cuerpo, $ficha);
+            self::assertStringNotContainsString('id=' . self::SIN_COMENTARIO, $cuerpo, $ficha);
+        }
     }
 }

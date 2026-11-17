@@ -46,9 +46,9 @@ backend-indiecinema/
 ├── docs/guion-de-prueba.md  el recorrido de punta a punta en el sitio publicado, con cada rol
 ├── nucleo/                MVC común: ruteo, middleware, base de datos, vistas y errores
 ├── cuentas/               /cuenta/   registro, ingreso, sesión, roles y usuarios del administrador
-├── programacion/          /          obras, salas, funciones, cartelera, votación de títulos y solicitudes de sala
+├── programacion/          /          obras, salas, funciones, cartelera y votación de títulos
 ├── funciones/             /funcion/  las reservas con el cupo de cada función, sus paneles y el acuerdo de fecha
-├── moderacion/            /moderacion/  armado (EF-01): las solicitudes de sala, las denuncias y los términos llegan con EF-07 y EF-16
+├── moderacion/            /moderacion/  las solicitudes de sala y su bandeja (EF-07.2); lo demás de EF-07 y los términos llegan con EF-07 y EF-16
 └── recaudacion/           /recaudacion/: los reportes (EF-09) y el reparto de lo cobrado (EF-08.1); las liquidaciones llegan con EF-08.3
 ```
 
@@ -168,7 +168,8 @@ todo el sitio se vea igual aunque lo sirvan subsistemas distintos.
 - **Límite de intentos en nginx.** Ingresar y registrarse admiten 5 POST por minuto por IP, con un
   margen de 3 seguidos; al pasarse, 429. Es el control contra la fuerza bruta en la capa de red:
   frena antes de llegar a PHP y a Argon2id, que es caro a propósito. Cuentan sólo los POST (abrir
-  el formulario no gasta intentos) y cada ruta tiene su cuenta.
+  el formulario no gasta intentos) y cada ruta tiene su cuenta. La solicitud de sala y la denuncia
+  (EF-07.8) admiten 2 por minuto, con un margen de 2.
 - **CSRF con doble envío:** el token está en la cookie `csrf` y en cada formulario (campo
   `_csrf`, o la cabecera `X-CSRF-Token` desde JavaScript), y un POST pasa sólo si coinciden. Los
   subsistemas no guardan sesión, así que no hay dónde tener el token del lado del servidor.
@@ -200,9 +201,31 @@ todo el sitio se vea igual aunque lo sirvan subsistemas distintos.
   estado, la fecha, el precio, el cupo, los títulos, la sala y el organizador de una función;
   `GET /interno/funciones?ids=…` da lo mismo de hasta 20 juntas, para una página de «Mis
   reservas».
-  Cuentas tiene `GET /interno/usuarios/{id}` (el nombre y el correo, para programación y para los
-  correos de funciones) y `POST /interno/usuarios/{id}/roles`, que llama programación desde la
+  Cuentas tiene `GET /interno/usuarios/{id}` (el nombre y el correo, para moderación y para los
+  correos de funciones) y `POST /interno/usuarios/{id}/roles`, que llama moderación desde la
   bandeja de solicitudes de sala.
+  Programación tiene la API de salas para moderación (EF-07.1): `POST /interno/salas` crea la sala
+  de una solicitud aprobada (o completa la que ya existía), `POST /interno/salas/{id}/habilitacion`
+  la publica o la retira con un motivo, y `GET /interno/salas?ids=…` la lee para la bandeja. Desde
+  EF-07.6 el alta lleva el `solicitud_id`: con otra solicitud que la última que se le aplicó, a una
+  sala habilitada le pone los datos de un cambio de dirección aprobado; con la misma, es un
+  reintento y no la toca.
+  Las obras nuevas (EF-07.7) quedan pendientes hasta que la moderación las revisa con la API de
+  obras de programación: `GET /interno/obras/pendientes` las lista, primero la más vieja;
+  `GET /interno/obras/{id}` lee una en cualquier estado, y `POST /interno/obras/{id}/revision` la
+  aprueba o la rechaza con un motivo. Rechazar una aprobada la saca de las votaciones abiertas y
+  borra sus votos; si era la única candidata, la función se cancela.
+  Las denuncias (EF-07.8) son de moderación, pero lo denunciado es de otro: moderación lee la sala
+  (`GET /interno/salas?ids=…`), la obra (`GET /interno/obras/{id}`) y la función
+  (`GET /interno/funciones/{id}`, que también le responde) de programación, y el comentario de una
+  calificación de funciones (`GET /interno/calificaciones/{id}`). Para resolverlas, suspende la
+  sala (`POST /interno/salas/{id}/habilitacion`, con la suspensión de causa `denuncia`), rechaza la
+  obra (`POST /interno/obras/{id}/revision`) u oculta el comentario
+  (`POST /interno/calificaciones/{id}/ocultar` de funciones: deja de verse y el puntaje sigue
+  contando). Las últimas calificaciones que da funciones llevan su id, para denunciar cada
+  comentario.
+  Moderación tiene `GET /interno/solicitudes/ultima/{usuario}` para cuentas (EF-07.6): el estado
+  y el motivo de la última solicitud de sala, que «Mi cuenta» muestra si moderación responde.
   Funciones tiene `GET /interno/funciones/{id}/ocupacion` y `GET /interno/ocupacion?funciones=…`
   (una página de tarjetas en un solo pedido): los lugares ocupados, con los que programación
   muestra los libres. Si funciones no responde, la cartelera y la ficha se muestran sin ese dato.
@@ -218,13 +241,17 @@ todo el sitio se vea igual aunque lo sirvan subsistemas distintos.
   votar, quitar el voto, confirmar y cerrar sin mínimo). La votación de títulos, en cambio, es
   toda de programación (tabla `voto`).
 - **Pedir ser organizador es pedir una sala**, como el recorrido de la E2 (sección 7): la
-  solicitud de sala (`/solicitar-sala`) guarda la sala sin publicar y le avisa al equipo por
-  correo; aprobarla la publica y programación le pide a cuentas el rol de organizador. Primero el
-  rol: si cuentas no responde no cambia nada, y nunca queda una sala publicada cuyo dueño no
-  puede entrar a «Mis salas». La resuelve el administrador mientras no haya moderación.
+  solicitud de sala (`/solicitar-sala`, de moderación desde EF-07.2) guarda la sala que propone y
+  le avisa al equipo por correo; la sala recién existe en programación cuando se aprueba. Aprobarla
+  le pide a cuentas el rol de organizador, después le pide a programación la sala publicada y
+  recién ahí queda aprobada: si alguno no responde, sigue pendiente y se puede reintentar, y nunca
+  queda una sala publicada cuyo dueño no puede entrar a «Mis salas». La resuelve un moderador
+  (EF-07.3), que no resuelve la suya. Lleva el seguro y la habilitación en PDF con su vencimiento
+  (EF-07.4), en el volumen de moderación; los bajan quien la mandó y la moderación
+  (`/moderacion/documentos/{id}`).
 - **Los correos salen por SMTP con el curl de PHP** (`ClienteSmtp` del núcleo), sin librerías.
   El servidor y el remitente están en `[correo]` del `config.ini` de cada subsistema que manda
-  correos: programación, el aviso de cada solicitud de sala, y funciones, los de los espectadores
+  correos: moderación, el aviso de cada solicitud de sala, y funciones, los de los espectadores
   (la reserva confirmada, con el código y el enlace al comprobante, y la función cancelada). El
   enlace sale de `[sitio] url` de funciones, la dirección pública del sitio sin la barra final:
   si falta o no es http(s), reservar responde 500 y el motivo queda en el log. Si un correo no
@@ -323,10 +350,12 @@ docker run --rm -u "$(id -u):$(id -g)" -v "$PWD/..:/app" -w /app/backend-indieci
 | http://localhost:8080/organizador/obras | las obras del catálogo, con sesión de organizador: el alta y la edición con el afiche, y la baja de una obra sin funciones futuras |
 | http://localhost:8080/organizador/funciones | «Mis funciones»: las de sus salas, en cualquier estado y con su fecha; desde ahí se programa una función o se la abre a votación de títulos, y se proponen las franjas del acuerdo |
 | http://localhost:8080/cuenta/ | «Mi cuenta», con sesión: el nombre, el correo y los roles, y el enlace a «Mis reservas». Sin sesión, `/cuenta/ingresar` y `/cuenta/registro` |
-| http://localhost:8080/solicitar-sala | la solicitud de sala, con sesión: se guarda la sala sin publicar y le llega al equipo por correo |
-| http://localhost:8080/administracion/solicitudes | la bandeja de solicitudes de sala, para aprobarlas (publica la sala y da el rol de organizador) o rechazarlas con un motivo, y el historial; sólo el administrador |
+| http://localhost:8080/solicitar-sala | la solicitud de sala, con sesión: se guarda la sala propuesta con su seguro y su habilitación en PDF, y le llega al equipo por correo |
+| http://localhost:8080/moderacion/solicitudes | la bandeja de solicitudes de sala, para aprobarlas (publica la sala y da el rol de organizador; exige los cuatro puntos del checklist de requisitos) o rechazarlas con un motivo, el historial, y retirar o volver a publicar la sala con un motivo; para el moderador (y el administrador) |
+| http://localhost:8080/moderacion/documentos | la pestaña «Documentos» de la bandeja: el seguro o la habilitación nuevos que suben los organizadores, para aceptarlos (vuelve a publicar la sala si estaba suspendida sólo por ese papel) o rechazarlos con un motivo; para el moderador (y el administrador) |
+| http://localhost:8080/moderacion/salas/{id}/documentacion | la documentación de una sala para su organizador, desde «Mis salas»: por qué está suspendida, sus documentos y la renovación que sube |
 | http://localhost:8025 | el buzón de prueba (Mailpit): los correos que mandan los subsistemas, sin que salgan a nadie |
-| http://localhost:8080/cuenta/administracion/usuarios | usuarios y roles, con los números de las cuentas, buscador por nombre o correo, filtros de rol, estado y año de alta, y el rol de cada uno en un desplegable (espectador u organizador), con «Guardar cambios» para toda la tabla; sólo el administrador |
+| http://localhost:8080/cuenta/administracion/usuarios | usuarios y roles, con los números de las cuentas, buscador por nombre o correo, filtros de rol, estado y año de alta, y el rol de cada uno en un desplegable (espectador, organizador o moderador), con «Guardar cambios» para toda la tabla; sólo el administrador |
 | http://localhost:8080/funcion/reservas | «Mis reservas», con sesión: las del espectador, con su estado, el comprobante (que se imprime) y cancelar mientras se pueda |
 | http://localhost:8080/funcion/organizador/funciones/{id}/reservas | las reservas de una función para su organizador: lugares reservados y libres, asistencia con el código y descarga en CSV |
 | http://localhost:8080/funcion/administracion/reservas | todas las reservas, con filtro por estado y la anulación; sólo el administrador |
@@ -413,6 +442,7 @@ docker compose exec cuentas php herramientas/datos-de-prueba.php
 | Rol | Nombre | Correo | Contraseña |
 |---|---|---|---|
 | administrador | Ana Administradora | `administrador@indiecinema.test` | `administrador2026` |
+| moderador | Mora Moderadora | `moderador@indiecinema.test` | `moderador2026` |
 | organizador | Omar Organizador | `organizador@indiecinema.test` | `organizador2026` |
 | espectador | Eva Espectadora | `eva@indiecinema.test` | `espectador2026` |
 | espectador | Elías Espectador | `elias@indiecinema.test` | `espectador2026` |
@@ -585,6 +615,12 @@ no duplica nada:
   las funciones de la sala) y deja «ausente» a quien no fue.
 - `recordar-funciones`: manda el recordatorio por correo a las reservas confirmadas de las
   funciones de las próximas 24 horas.
+- `suspender-vencidas` (moderación, una vez por día): suspende las salas con el seguro o la
+  habilitación aceptados vencidos y las apaga en programación, hasta que se acepte uno nuevo. Le
+  avisa por correo al organizador siete días antes y al suspenderla. Con `[documentos]
+  exigible_desde` en el `config.ini` de moderación, a las salas habilitadas que no tienen los dos
+  documentos les da 30 días desde esa fecha (con un aviso al empezar y otro siete días antes del
+  fin) y después las suspende. Al desplegar EF-07.5, poner ahí la fecha del despliegue.
 
 En local no se instalan: se prueban a mano con el `docker compose exec` de cada línea, y los correos
 llegan a Mailpit.
@@ -683,16 +719,13 @@ paginado e intentos de inyección SQL, y `/cartelera` con los filtros por la URL
 inválidos y el 404, la misma consulta en JSON según la cabecera `Accept`, `/cartelera.csv` con los
 mismos filtros, la ficha de la función en cada estado, con sus 404, la ficha de la sala, con quién
 la ve, sus próximas funciones y el camino de la función a su sala y de vuelta, el buscador del
-listado de salas, la solicitud de sala con las mismas validaciones en el navegador y en el
-servidor, la foto y el correo al equipo, la bandeja del administrador contra una cuentas de
-mentira (aprobar pide el rol y publica la sala, rechazar exige motivo, el historial y retirar la
-sala, y quién entra), la tabla de solicitudes con una pendiente por sala, la votación de títulos
+listado de salas, la API interna de salas para moderación, la votación de títulos
 (votar, cambiar el voto y cerrarla con las más votadas que entran en la sala, hasta las películas por función), el acuerdo de fecha visto desde
 programación, los lugares libres de la ficha y de las tarjetas, la cancelación de una función con
 reservas, la portada con las destacadas y las próximas funciones, «Acerca de», con los enlaces del encabezado y del pie, las opciones del
 menú y del pie que ve cada rol, y la página de error, que vuelve a la portada); en cuentas, el
 registro de punta a punta, la API interna de usuarios (quién es y el rol de organizador, sólo para
-programación), el listado de usuarios del administrador con su buscador, su paginado, dar y quitar
+moderación), el listado de usuarios del administrador con su buscador, su paginado, dar y quitar
 el rol de organizador y quién entra (en cuentas y en programación, una prueba recorre todas las
 rutas del panel y comprueba que sólo entra el administrador; en programación, otra hace lo
 mismo con las del organizador y fija cuáles son públicas), y las restricciones de las tablas
@@ -703,7 +736,12 @@ token CSRF, cantidad inválida, sin lugares, la reserva de otro y la cancelació
 reserva confirmada (también sin cuentas, sin servidor de correo o sin `[sitio] url`), «Mis
 reservas» (el orden, el paginado, sólo las propias y programación caída), los paneles de reservas
 del organizador y del administrador (la asistencia, el CSV y la anulación), la ocupación que lee
-programación y la API interna del acuerdo de fecha. Para correrlas con el PHP
+programación y la API interna del acuerdo de fecha; en moderación, la solicitud de sala con las
+mismas validaciones en el navegador y en el servidor, la foto y el correo al equipo, la bandeja del
+administrador contra una cuentas y una programación de mentira (aprobar pide el rol y crea la
+sala, rechazar exige motivo, el historial, retirar y volver a publicar la sala con motivo, y quién
+entra), la tabla de solicitudes con una pendiente por sala y la migración que mudó las de
+programación. Para correrlas con el PHP
 de la máquina (8.4 o superior, con `pdo_mysql`), contra un MySQL descartable:
 
 ```

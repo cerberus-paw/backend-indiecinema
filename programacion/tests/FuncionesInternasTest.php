@@ -34,6 +34,7 @@ final class FuncionesInternasTest extends TestCase
     private const ORGANIZADORA = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
     private const TOKEN_DE_FUNCIONES = 'token-de-funciones';
     private const TOKEN_DE_CUENTAS = 'token-de-cuentas';
+    private const TOKEN_DE_MODERACION = 'token-de-moderacion';
     private const TOKEN_DE_RECAUDACION = 'token-de-recaudacion';
     private const OTRO_ORGANIZADOR = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
     private const DUENA = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
@@ -56,6 +57,7 @@ final class FuncionesInternasTest extends TestCase
             'llamadores' => [
                 'funciones' => hash('sha256', self::TOKEN_DE_FUNCIONES),
                 'cuentas' => hash('sha256', self::TOKEN_DE_CUENTAS),
+                'moderacion' => hash('sha256', self::TOKEN_DE_MODERACION),
                 'recaudacion' => hash('sha256', self::TOKEN_DE_RECAUDACION),
             ],
         ]);
@@ -183,7 +185,21 @@ final class FuncionesInternasTest extends TestCase
     }
 
     /**
-     * Sólo funciones: cuentas tiene un token válido, pero la ruta no lo acepta.
+     * EF-07.8: moderación la lee para mostrar la función denunciada y actuar sobre su sala o sus
+     * obras.
+     */
+    public function testModeracionTambienLaLee(): void
+    {
+        $funcion = $this->funcion();
+
+        $respuesta = $this->pedir($funcion->id, 'moderacion', self::TOKEN_DE_MODERACION);
+
+        self::assertSame(200, $respuesta->estado(), $respuesta->cuerpo());
+        self::assertSame(self::ORGANIZADORA, $this->json($respuesta)['organizador_id']);
+    }
+
+    /**
+     * Sólo funciones y moderación: cuentas tiene un token válido, pero la ruta no lo acepta.
      */
     public function testSoloLaPideFuncionesConSuToken(): void
     {

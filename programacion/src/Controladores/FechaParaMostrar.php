@@ -8,7 +8,7 @@ use DateTimeImmutable;
 use DateTimeZone;
 
 /**
- * Las fechas de las solicitudes se guardan en UTC y se muestran con la hora de la Argentina, que
+ * Las fechas se guardan en UTC y se muestran con la hora de la Argentina, que
  * es donde están las salas y el público.
  */
 final class FechaParaMostrar

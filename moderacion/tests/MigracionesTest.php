@@ -1,0 +1,270 @@
+<?php
+
+declare(strict_types=1);
+
+namespace IndieCinema\Moderacion\Pruebas;
+
+use IndieCinema\Nucleo\BaseDeDatos;
+use IndieCinema\Nucleo\Configuracion;
+use IndieCinema\Nucleo\Uuid;
+use PDOException;
+use PHPUnit\Framework\TestCase;
+
+/**
+ * Las tablas de moderación como las dejan sus migraciones, contra un MySQL de verdad: lo que cuida
+ * la base aunque alguien escriba por otro lado.
+ */
+final class MigracionesTest extends TestCase
+{
+    use ConBaseDePruebas;
+
+    /** El error de MySQL de una restricción CHECK. */
+    private const RESTRICCION_CHECK = 3819;
+
+    /** El error de MySQL de una clave foránea que no existe. */
+    private const CLAVE_FORANEA = 1452;
+
+    /** El error de MySQL de una clave única repetida. */
+    private const CLAVE_REPETIDA = 1062;
+
+    private BaseDeDatos $base;
+
+    protected function setUp(): void
+    {
+        $this->base = self::baseConTablasNuevas(new Configuracion(['base' => self::baseDePruebas()]));
+    }
+
+    private function assertRechaza(int $codigo, callable $escritura): void
+    {
+        try {
+            $escritura();
+            self::fail('La base aceptó una escritura que tenía que rechazar.');
+        } catch (PDOException $error) {
+            self::assertSame($codigo, (int) ($error->errorInfo[1] ?? 0), $error->getMessage());
+        }
+    }
+
+    /**
+     * Una solicitud pendiente de esa sala, con datos válidos.
+     */
+    private function solicitar(string $salaId): string
+    {
+        $id = Uuid::nuevo();
+        $this->base->ejecutar(
+            "INSERT INTO solicitud_sala (id, sala_id, usuario_id, nombre, descripcion, direccion, localidad, capacidad,
+                peliculas_por_funcion, duracion_funcion, tiempo_entre_funciones, enviada_en)
+             VALUES (?, ?, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'El Galpón', 'Un galpón.', 'Av. San Martín 450', 'Luján', 60, 2, 120, 15, NOW())",
+            [$id, $salaId],
+        );
+
+        return $id;
+    }
+
+    public function testUnaSalaTieneUnaSolaPendienteYLasResueltasNoCuentan(): void
+    {
+        $sala = Uuid::nuevo();
+        $primera = $this->solicitar($sala);
+
+        $this->assertRechaza(self::CLAVE_REPETIDA, fn () => $this->solicitar($sala));
+
+        $this->base->ejecutar("UPDATE solicitud_sala SET estado = 'rechazada', motivo = 'Falta la póliza.', resuelta_en = NOW() WHERE id = ?", [$primera]);
+        $this->solicitar($sala);
+        $this->solicitar(Uuid::nuevo());
+        self::assertSame(3, $this->base->valor('SELECT COUNT(*) FROM solicitud_sala'));
+    }
+
+    public function testUnaSolicitudResueltaTieneFechaYMotivoYUnaPendienteNo(): void
+    {
+        $solicitud = $this->solicitar(Uuid::nuevo());
+
+        $this->assertRechaza(self::RESTRICCION_CHECK, fn () => $this->base->ejecutar("UPDATE solicitud_sala SET estado = 'aprobada', motivo = 'Bien.' WHERE id = ?", [$solicitud]));
+        $this->assertRechaza(self::RESTRICCION_CHECK, fn () => $this->base->ejecutar("UPDATE solicitud_sala SET estado = 'aprobada', resuelta_en = NOW() WHERE id = ?", [$solicitud]));
+        $this->assertRechaza(self::RESTRICCION_CHECK, fn () => $this->base->ejecutar('UPDATE solicitud_sala SET resuelta_en = NOW() WHERE id = ?', [$solicitud]));
+    }
+
+    /**
+     * EF-07.6: la revisión manual sigue abierta, así que cuenta como la pendiente.
+     */
+    public function testUnaSalaTieneUnaSolaAbiertaContandoLaRevisionManual(): void
+    {
+        $sala = Uuid::nuevo();
+        $primera = $this->solicitar($sala);
+        $this->pasarARevision($primera);
+
+        $this->assertRechaza(self::CLAVE_REPETIDA, fn () => $this->solicitar($sala));
+
+        $this->base->ejecutar("UPDATE solicitud_sala SET estado = 'rechazada', motivo = 'No pasó la visita.', resuelta_en = NOW() WHERE id = ?", [$primera]);
+        $this->solicitar($sala);
+        self::assertSame(2, $this->base->valor('SELECT COUNT(*) FROM solicitud_sala'));
+    }
+
+    /**
+     * El motivo, quién y cuándo de la revisión van juntos, y sólo en una que pasó por ella. En
+     * revisión no está resuelta; resuelta, conserva la revisión aparte de su motivo.
+     */
+    public function testLaRevisionManualTieneSusTresCamposYQuedaAparteDeLaResolucion(): void
+    {
+        $solicitud = $this->solicitar(Uuid::nuevo());
+
+        $this->assertRechaza(self::RESTRICCION_CHECK, fn () => $this->base->ejecutar("UPDATE solicitud_sala SET estado = 'en_revision_manual' WHERE id = ?", [$solicitud]));
+        $this->assertRechaza(self::RESTRICCION_CHECK, fn () => $this->base->ejecutar("UPDATE solicitud_sala SET estado = 'en_revision_manual', revision_motivo = 'Visita.', revision_en = NOW() WHERE id = ?", [$solicitud]));
+        $this->assertRechaza(self::RESTRICCION_CHECK, fn () => $this->pasarARevision($solicitud, 'pendiente'));
+        $this->assertRechaza(self::RESTRICCION_CHECK, fn () => $this->base->ejecutar("UPDATE solicitud_sala SET estado = 'aprobada', motivo = 'Bien.', resuelta_en = NOW(), revision_motivo = 'Visita.' WHERE id = ?", [$solicitud]));
+
+        $this->pasarARevision($solicitud);
+        $this->assertRechaza(self::RESTRICCION_CHECK, fn () => $this->base->ejecutar('UPDATE solicitud_sala SET resuelta_en = NOW() WHERE id = ?', [$solicitud]));
+        $this->base->ejecutar("UPDATE solicitud_sala SET estado = 'aprobada', motivo = 'Bien.', resuelta_en = NOW() WHERE id = ?", [$solicitud]);
+        self::assertSame('Coordinamos una visita.', $this->base->valor('SELECT revision_motivo FROM solicitud_sala WHERE id = ?', [$solicitud]));
+    }
+
+    private function pasarARevision(string $solicitud, string $estado = 'en_revision_manual'): void
+    {
+        $this->base->ejecutar(
+            "UPDATE solicitud_sala SET estado = ?, revision_motivo = 'Coordinamos una visita.',
+                revision_por = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', revision_en = NOW() WHERE id = ?",
+            [$estado, $solicitud],
+        );
+    }
+
+    public function testLaSalaPropuestaTieneCapacidadPeliculasYDuracion(): void
+    {
+        $solicitud = $this->solicitar(Uuid::nuevo());
+
+        foreach (['capacidad', 'peliculas_por_funcion', 'duracion_funcion'] as $columna) {
+            $this->assertRechaza(self::RESTRICCION_CHECK, fn () => $this->base->ejecutar("UPDATE solicitud_sala SET {$columna} = 0 WHERE id = ?", [$solicitud]));
+        }
+    }
+
+    private function documento(?string $solicitudId, string $tipo = 'seguro', ?string $salaId = null): void
+    {
+        $this->base->ejecutar(
+            "INSERT INTO documento (id, sala_id, solicitud_id, tipo, archivo, vence_en, subido_en)
+             VALUES (?, ?, ?, ?, '0123456789abcdef0123456789abcdef.pdf', CURDATE() + INTERVAL 1 YEAR, NOW())",
+            [Uuid::nuevo(), $salaId ?? Uuid::nuevo(), $solicitudId, $tipo],
+        );
+    }
+
+    /**
+     * EF-07.9: el checklist de una resolución es de una solicitud que existe, y una aprobación lleva
+     * los cuatro puntos tildados; rechazar o pasar a revisión, los que sean.
+     */
+    public function testUnaAprobacionLlevaLosCuatroPuntosDelChecklist(): void
+    {
+        $solicitud = $this->solicitar(Uuid::nuevo());
+        $revisar = fn (string $solicitudId, string $resolucion, int $condiciones) => $this->base->ejecutar(
+            "INSERT INTO revision_requisitos (solicitud_id, moderador_id, resolucion, revisado_en, seguro_vigente, habilitacion, capacidad, condiciones)
+             VALUES (?, 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', ?, NOW(), TRUE, TRUE, TRUE, ?)",
+            [$solicitudId, $resolucion, $condiciones],
+        );
+
+        $this->assertRechaza(self::RESTRICCION_CHECK, fn () => $revisar($solicitud, 'aprobada', 0));
+        $this->assertRechaza(self::CLAVE_FORANEA, fn () => $revisar(Uuid::nuevo(), 'rechazada', 0));
+
+        $revisar($solicitud, 'en_revision_manual', 0);
+        $revisar($solicitud, 'rechazada', 0);
+        $revisar($solicitud, 'aprobada', 1);
+        self::assertSame(3, $this->base->valor('SELECT COUNT(*) FROM revision_requisitos'));
+    }
+
+    /**
+     * EF-07.4: una solicitud lleva un seguro y una habilitación, de una solicitud que existe; una
+     * renovación (sin solicitud) puede haber varias por sala.
+     */
+    public function testCadaSolicitudTieneUnDocumentoDeCadaTipo(): void
+    {
+        $solicitud = $this->solicitar(Uuid::nuevo());
+        $this->documento($solicitud);
+        $this->documento($solicitud, 'habilitacion');
+
+        $this->assertRechaza(self::CLAVE_REPETIDA, fn () => $this->documento($solicitud));
+        $this->assertRechaza(self::CLAVE_FORANEA, fn () => $this->documento(Uuid::nuevo()));
+        $sala = Uuid::nuevo();
+        $this->documento(null, salaId: $sala);
+        $this->documento(null, salaId: $sala);
+        self::assertSame(2, $this->base->valor('SELECT COUNT(*) FROM documento WHERE sala_id = ?', [$sala]));
+        self::assertSame('pendiente', $this->base->valor('SELECT DISTINCT estado FROM documento'));
+    }
+
+    private function suspender(string $sala, string $causa = 'retiro', ?string $tipo = null): string
+    {
+        $id = Uuid::nuevo();
+        $this->base->ejecutar(
+            "INSERT INTO suspension (id, sala_id, causa, tipo_documento, motivo, desde) VALUES (?, ?, ?, ?, 'Un motivo.', NOW())",
+            [$id, $sala, $causa, $tipo],
+        );
+
+        return $id;
+    }
+
+    /**
+     * EF-07.5: una sala tiene a lo sumo una suspensión activa por causa (y por tipo de documento en
+     * las de vencimiento); las levantadas no cuentan. Sólo las de vencimiento dicen qué papel.
+     */
+    public function testUnaSuspensionActivaPorSalaCausaYTipo(): void
+    {
+        $sala = Uuid::nuevo();
+        $retiro = $this->suspender($sala);
+        $this->suspender($sala, 'vencimiento', 'seguro');
+        $this->suspender($sala, 'vencimiento', 'habilitacion');
+
+        $this->assertRechaza(self::CLAVE_REPETIDA, fn () => $this->suspender($sala));
+        $this->assertRechaza(self::CLAVE_REPETIDA, fn () => $this->suspender($sala, 'vencimiento', 'seguro'));
+        $this->assertRechaza(self::RESTRICCION_CHECK, fn () => $this->suspender($sala, 'vencimiento'));
+        $this->assertRechaza(self::RESTRICCION_CHECK, fn () => $this->suspender($sala, 'denuncia', 'seguro'));
+
+        $this->base->ejecutar('UPDATE suspension SET levantada_en = NOW() WHERE id = ?', [$retiro]);
+        $this->suspender($sala);
+        self::assertSame(4, $this->base->valor('SELECT COUNT(*) FROM suspension WHERE sala_id = ?', [$sala]));
+    }
+
+    /**
+     * EF-07.5: cada aviso a una sala sale una vez.
+     */
+    public function testUnAvisoPorSalaYClave(): void
+    {
+        $sala = Uuid::nuevo();
+        $this->base->ejecutar("INSERT INTO aviso (sala_id, clave, enviado_en) VALUES (?, 'plazo-inicio', NOW())", [$sala]);
+
+        $this->assertRechaza(self::CLAVE_REPETIDA, fn () => $this->base->ejecutar("INSERT INTO aviso (sala_id, clave, enviado_en) VALUES (?, 'plazo-inicio', NOW())", [$sala]));
+        $this->base->ejecutar("INSERT INTO aviso (sala_id, clave, enviado_en) VALUES (?, 'plazo-7', NOW())", [$sala]);
+        $this->base->ejecutar("INSERT INTO aviso (sala_id, clave, enviado_en) VALUES (?, 'plazo-inicio', NOW())", [Uuid::nuevo()]);
+        self::assertSame(3, $this->base->valor('SELECT COUNT(*) FROM aviso'));
+    }
+
+    /**
+     * EF-07.2: las solicitudes que había en programación se mudan con los datos de su sala, sin
+     * foto propia, y programación se queda sin la tabla. Las de salas dadas de baja no, como no se
+     * veían en la bandeja.
+     */
+    public function testLasSolicitudesDeProgramacionSeMudanConSuSalaYAllaSeBorraLaTabla(): void
+    {
+        $this->base->ejecutar('DELETE FROM solicitud_sala');
+        self::programacionConSolicitudes($this->base);
+        $sala = Uuid::nuevo();
+        $deBaja = Uuid::nuevo();
+        $this->base->ejecutar(
+            "INSERT INTO programacion.sala (id, nombre, descripcion, direccion, localidad, capacidad, peliculas_por_funcion, duracion_funcion, tiempo_entre_funciones, dada_de_baja_en)
+             VALUES (?, 'El Galpón', 'Un galpón.', 'Calle 1', 'Luján', 40, 2, 120, 15, NULL), (?, 'La Vieja', 'Cerró.', 'Calle 2', 'Luján', 30, 1, 90, 10, NOW())",
+            [$sala, $deBaja],
+        );
+        $rechazada = Uuid::nuevo();
+        $pendiente = Uuid::nuevo();
+        $this->base->ejecutar(
+            "INSERT INTO programacion.solicitud_sala (id, sala_id, usuario_id, solicitante_nombre, estado, enviada_en, resuelta_por, resuelta_en, motivo)
+             VALUES (?, ?, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'Eva Prueba', 'rechazada', '2026-09-01 10:00:00', 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', '2026-09-02 10:00:00', 'Falta la póliza.'),
+                    (?, ?, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', NULL, 'pendiente', '2026-09-03 10:00:00', NULL, NULL, NULL),
+                    (?, ?, 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', NULL, 'pendiente', '2026-09-03 10:00:00', NULL, NULL, NULL)",
+            [$rechazada, $sala, $pendiente, $sala, Uuid::nuevo(), $deBaja],
+        );
+
+        foreach (['002_solicitudes_de_programacion.sql', '003_sin_solicitudes_en_programacion.sql'] as $migracion) {
+            $this->base->ejecutar((string) file_get_contents(dirname(__DIR__) . "/migraciones/{$migracion}"));
+        }
+
+        self::assertSame([
+            ['id' => $rechazada, 'sala_id' => $sala, 'solicitante_nombre' => 'Eva Prueba', 'nombre' => 'El Galpón', 'capacidad' => 40, 'tiempo_entre_funciones' => 15, 'imagen' => null, 'estado' => 'rechazada', 'motivo' => 'Falta la póliza.'],
+            ['id' => $pendiente, 'sala_id' => $sala, 'solicitante_nombre' => null, 'nombre' => 'El Galpón', 'capacidad' => 40, 'tiempo_entre_funciones' => 15, 'imagen' => null, 'estado' => 'pendiente', 'motivo' => null],
+        ], $this->base->filas('SELECT id, sala_id, solicitante_nombre, nombre, capacidad, tiempo_entre_funciones, imagen, estado, motivo FROM solicitud_sala ORDER BY enviada_en'));
+        self::assertSame(0, $this->base->valor("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = 'programacion' AND TABLE_NAME = 'solicitud_sala'"));
+    }
+}

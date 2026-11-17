@@ -205,9 +205,8 @@ final class RepartoDeFuncionesTest extends TestCase
 
         $this->tarea()->repartir();
 
-        $ultima = $this->repartos->ultimaFinalizacion();
-        self::assertNotNull($ultima);
-        self::assertSame('2026-11-23 10:00:00', $ultima->format('Y-m-d H:i:s'));
+        // La última que se finalizó, que es la función vieja: por ahí sigue la próxima pasada.
+        self::assertSame('2026-11-23 10:00:00', $this->repartos->ultimaFinalizacion()?->format('Y-m-d H:i:s'));
     }
 
     public function testSiProgramacionNoRespondeNoSeReparteNada(): void

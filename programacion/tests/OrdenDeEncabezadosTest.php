@@ -102,6 +102,7 @@ final class OrdenDeEncabezadosTest extends TestCase
     {
         yield 'portada' => ['/', null, 'GET', [], 200];
         yield 'acerca de' => ['/acerca-de', null, 'GET', [], 200];
+        yield 'cómo funciona' => ['/como-funciona', null, 'GET', [], 200];
         yield 'cartelera' => ['/cartelera', null, 'GET', [], 200];
         yield 'cartelera sin resultados' => ['/cartelera?q=zzzz', null, 'GET', [], 200];
         yield 'ficha de una función' => ['/cartelera/' . self::FUNCION, null, 'GET', [], 200];
@@ -111,6 +112,10 @@ final class OrdenDeEncabezadosTest extends TestCase
         yield 'obras' => ['/obras', null, 'GET', [], 200];
         yield 'obras sin resultados' => ['/obras?q=zzzz', null, 'GET', [], 200];
         yield 'ficha de una obra' => ['/obras/' . self::OBRA, null, 'GET', [], 200];
+        yield 'pedir un título' => ['/pedidos/nuevo', 'espectador', 'GET', [], 200];
+        yield 'pedir un título con errores' => ['/pedidos/nuevo', 'espectador', 'POST', [], 422];
+        yield 'pedidos de títulos' => ['/pedidos', null, 'GET', [], 200];
+        yield 'pedidos de títulos sin resultados' => ['/pedidos?q=zzzz', null, 'GET', [], 200];
         yield 'mis salas' => ['/organizador/salas', 'organizador', 'GET', [], 200];
         yield 'editar una sala' => ['/organizador/salas/' . self::SALA . '/editar', 'organizador', 'GET', [], 200];
         yield 'editar una sala con errores' => ['/organizador/salas/' . self::SALA . '/editar', 'organizador', 'POST', [], 422];
@@ -127,6 +132,9 @@ final class OrdenDeEncabezadosTest extends TestCase
         yield 'proponer franjas' => ['/organizador/funciones/' . self::EN_ACUERDO . '/proponer-franjas', 'organizador', 'GET', [], 200];
         yield 'proponer franjas con errores' => ['/organizador/funciones/' . self::EN_ACUERDO . '/proponer-franjas', 'organizador', 'POST', [], 422];
         yield 'cancelar una función' => ['/organizador/funciones/' . self::FUNCION . '/cancelar', 'organizador', 'GET', [], 200];
+        yield 'usuarios bloqueados' => ['/organizador/bloqueados', 'organizador', 'GET', [], 200];
+        yield 'pedidos para programar' => ['/organizador/pedidos', 'organizador', 'GET', [], 200];
+        yield 'bloquear en sala con errores' => ['/organizador/salas/' . self::SALA . '/bloqueos', 'organizador', 'POST', [], 422];
         yield 'página que no existe' => ['/no-existe', null, 'GET', [], 404];
         yield 'función que no existe' => ['/cartelera/00000003-0000-4000-8000-999999999999', null, 'GET', [], 404];
         yield 'obra que no existe' => ['/obras/00000002-0000-4000-8000-999999999999', null, 'GET', [], 404];

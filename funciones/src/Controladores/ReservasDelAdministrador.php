@@ -72,11 +72,11 @@ final class ReservasDelAdministrador extends Controlador
     }
 
     /**
-     * Lo único que cambia de la fila al anular: su estado y si todavía se puede anular. La función
-     * va aparte en fila(), y pedírsela de nuevo a programación por una anulación sería un pedido
-     * al pedo: esa celda queda como está.
+     * Lo único que cambia de la fila al anular: su estado, qué pasó con el reembolso y si todavía
+     * se puede anular. La función va aparte en fila(), y pedírsela de nuevo a programación por una
+     * anulación sería un pedido al pedo: esa celda queda como está.
      *
-     * @return array{id: string, codigo: string, estado: string, estado_etiqueta: string, anulable: bool}
+     * @return array{id: string, codigo: string, estado: string, estado_etiqueta: string, reembolso: ?string, anulable: bool}
      */
     private static function estadoDeLaFila(Reserva $reserva): array
     {
@@ -85,8 +85,25 @@ final class ReservasDelAdministrador extends Controlador
             'codigo' => $reserva->codigo,
             'estado' => $reserva->estado->value,
             'estado_etiqueta' => $reserva->estado->etiqueta(),
+            'reembolso' => self::reembolso($reserva),
             'anulable' => $reserva->estado === EstadoReserva::Confirmada,
         ];
+    }
+
+    /**
+     * Qué pasó con la plata de la reserva (EF-06.4): «hecho» si se devolvió, «pendiente» si se
+     * canceló estando pagada y la devolución no salió —Mercado Pago no respondió o la rechazó—, y
+     * null si no había nada que devolver: a la gorra, con el cobro apagado, o nunca pagada.
+     *
+     * Pendiente es el único que el administrador tiene que atender: la plata sigue en la cuenta.
+     */
+    private static function reembolso(Reserva $reserva): ?string
+    {
+        if ($reserva->reembolsoId !== null) {
+            return 'hecho';
+        }
+
+        return $reserva->reembolsoPendiente() ? 'pendiente' : null;
     }
 
     private function pantalla(Peticion $peticion, ?string $anulada = null, ?string $error = null, int $estado = 200): Respuesta
@@ -136,7 +153,7 @@ final class ReservasDelAdministrador extends Controlador
     }
 
     /**
-     * @return array{id: string, codigo: string, cantidad: int, total: string, estado: string, estado_etiqueta: string, creada: string, anulable: bool, funcion: ?array{titulo: string, url: string, fecha: ?string}}
+     * @return array{id: string, codigo: string, cantidad: int, total: string, estado: string, estado_etiqueta: string, reembolso: ?string, creada: string, anulable: bool, funcion: ?array{titulo: string, url: string, fecha: ?string}}
      */
     private static function fila(Reserva $reserva, ?FuncionDeProgramacion $funcion): array
     {
@@ -147,6 +164,7 @@ final class ReservasDelAdministrador extends Controlador
             'total' => TextoParaMostrar::monto((float) $reserva->total),
             'estado' => $reserva->estado->value,
             'estado_etiqueta' => $reserva->estado->etiqueta(),
+            'reembolso' => self::reembolso($reserva),
             'creada' => TextoParaMostrar::fecha($reserva->creadaEn->setTimezone(new DateTimeZone(self::ZONA))),
             'anulable' => $reserva->estado === EstadoReserva::Confirmada,
             'funcion' => $funcion === null ? null : [

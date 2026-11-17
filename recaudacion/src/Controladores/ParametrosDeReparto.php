@@ -12,6 +12,7 @@ use IndieCinema\Nucleo\Seguridad\Usuario;
 use IndieCinema\Recaudacion\Modelo\ParametroDeReparto;
 use IndieCinema\Recaudacion\Modelo\ReglaIncumplida;
 use IndieCinema\Recaudacion\Servicios\ServicioDeParametrosDeReparto;
+use IndieCinema\Recaudacion\Servicios\UsuariosDeCuentas;
 use LogicException;
 
 /**
@@ -31,8 +32,10 @@ final class ParametrosDeReparto extends Controlador
 
     private const MESES = [1 => 'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 
-    public function __construct(private readonly ServicioDeParametrosDeReparto $parametros)
-    {
+    public function __construct(
+        private readonly ServicioDeParametrosDeReparto $parametros,
+        private readonly UsuariosDeCuentas $usuarios,
+    ) {
     }
 
     /** GET /recaudacion/administracion/reparto */
@@ -120,10 +123,15 @@ final class ParametrosDeReparto extends Controlador
                 break;
             }
         }
+        $nombres = $this->usuarios->nombresDe(array_values(array_filter(array_map(
+            static fn (ParametroDeReparto $parametro): ?string => $parametro->cargadoPor,
+            $historial,
+        ))));
+        $fila = static fn (ParametroDeReparto $parametro): array => self::comoFila($parametro, $ahora, $vigente, $nombres);
 
         return $this->vista(self::PLANTILLA, [
-            'vigente' => $vigente === null ? null : self::comoFila($vigente, $ahora),
-            'historial' => array_map(static fn (ParametroDeReparto $parametro): array => self::comoFila($parametro, $ahora), $historial),
+            'vigente' => $vigente === null ? null : $fila($vigente),
+            'historial' => array_map($fila, $historial),
             'valores' => $valores ?? [
                 'sala' => $vigente === null ? '' : self::comoCampo($vigente->sala),
                 'dueno' => $vigente === null ? '' : self::comoCampo($vigente->dueno),
@@ -138,18 +146,31 @@ final class ParametrosDeReparto extends Controlador
     }
 
     /**
+     * El estado sale de compararlo con el que rige y no sólo con la fecha: todos los que ya
+     * empezaron «rigen» por fecha, pero el que vale es el más nuevo, y los anteriores ya no.
+     *
+     * @param array<string, string> $nombres los de los administradores, por id
+     *
      * @return array<string, mixed>
      */
-    private static function comoFila(ParametroDeReparto $parametro, DateTimeImmutable $ahora): array
+    private static function comoFila(ParametroDeReparto $parametro, DateTimeImmutable $ahora, ?ParametroDeReparto $vigente, array $nombres): array
     {
         return [
             'sala' => ParametroDeReparto::comoTexto($parametro->sala),
             'dueno' => ParametroDeReparto::comoTexto($parametro->dueno),
             'plataforma' => ParametroDeReparto::comoTexto($parametro->plataforma),
             'vigente_desde' => self::fechaYHora($parametro->vigenteDesde),
-            'rige' => $parametro->rigeEn($ahora),
-            'cargado_por' => $parametro->cargadoPor,
-            'cargado_en' => self::fechaYHora($parametro->cargadoEn),
+            'estado' => match (true) {
+                $parametro->id === $vigente?->id => 'rige',
+                !$parametro->rigeEn($ahora) => 'futuro',
+                default => 'anterior',
+            },
+            // Null en el de la migración. Si cuentas no responde, la pantalla sale igual: «un
+            // administrador» en lugar del nombre.
+            'cargado_por' => $parametro->cargadoPor === null ? null : ($nombres[$parametro->cargadoPor] ?? 'un administrador'),
+            // El de la migración no: lo pone MySQL con su CURRENT_TIMESTAMP, en UTC, y saldría
+            // con unas horas de más al lado de los que carga la aplicación en la hora del sitio.
+            'cargado_en' => $parametro->cargadoPor === null ? null : self::fechaYHora($parametro->cargadoEn),
         ];
     }
 

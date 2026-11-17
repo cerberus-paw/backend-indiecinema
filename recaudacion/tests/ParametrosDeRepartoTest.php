@@ -55,6 +55,9 @@ final class ParametrosDeRepartoTest extends TestCase
             'base' => self::baseDePruebas(),
             'nginx' => ['secreto' => self::SECRETO],
             'interno' => ['token' => 'token-de-recaudacion'],
+            // Cuentas no atiende (nadie escucha en el 9): la pantalla tiene que salir igual, sin
+            // los nombres de quién cargó cada reparto.
+            'subsistemas' => ['cuentas' => 'http://127.0.0.1:9'],
         ]);
     }
 
@@ -126,7 +129,7 @@ final class ParametrosDeRepartoTest extends TestCase
         self::assertStringContainsString('15 %', $cuerpo);
         self::assertStringContainsString('rige ahora', $cuerpo);
         // La carga de la migración no es de ningún administrador.
-        self::assertStringContainsString('carga inicial del sitio', $cuerpo);
+        self::assertStringContainsString('Carga inicial del sitio', $cuerpo);
         // La entrada de la barra del administrador, con el prefijo que repone el subsistema.
         self::assertStringContainsString('href="/recaudacion/administracion/reparto"', $cuerpo);
     }
@@ -170,6 +173,30 @@ final class ParametrosDeRepartoTest extends TestCase
         self::assertStringContainsString('todavía no rige', $cuerpo);
         self::assertStringContainsString('60 %', $cuerpo);
         self::assertStringContainsString('El reparto quedó cargado', $cuerpo);
+    }
+
+    public function testElQueEmpezoDespuesReemplazaAlAnteriorEnElHistorial(): void
+    {
+        // Uno que empezó ayer: el servicio no deja cargarlo con fecha pasada, va por el repositorio.
+        $this->repositorio->guardar(new ParametroDeReparto(
+            'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+            6500,
+            2000,
+            1500,
+            new DateTimeImmutable('-1 day'),
+            self::ADMINISTRADORA,
+            new DateTimeImmutable('-2 days'),
+        ));
+
+        $cuerpo = $this->pedir('GET', self::RUTA)->cuerpo();
+
+        // Rige sólo el de ayer; el 70/15/15 de la migración ya no, aunque también empezó antes.
+        self::assertSame(1, substr_count($cuerpo, 'rige ahora'), $cuerpo);
+        self::assertStringContainsString('ya no rige', $cuerpo);
+        self::assertStringContainsString('value="65"', $cuerpo);
+        // Sin cuentas, en lugar del nombre: nunca el id.
+        self::assertStringContainsString('un administrador', $cuerpo);
+        self::assertStringNotContainsString(self::ADMINISTRADORA, $cuerpo);
     }
 
     public function testUnRepartoQueNoSumaCienVuelveConElErrorYNoSeGuarda(): void

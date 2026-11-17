@@ -62,6 +62,32 @@ final class Sala
     }
 
     /**
+     * Que cada candidata de una votación entre sola en la duración de la función de la sala
+     * (EF-05.4): si no, podría ganar una obra que no se puede proyectar. Juntas sí pueden pasarse:
+     * al cerrar la votación quedan las más votadas que entran.
+     *
+     * @param list<Obra> $candidatas
+     *
+     * @throws ReglaIncumplida con la primera que no entra
+     */
+    public function controlarCandidatas(array $candidatas): void
+    {
+        foreach ($candidatas as $obra) {
+            if ($obra->duracionMinutos > $this->datos->duracionFuncion) {
+                throw new ReglaIncumplida(self::noEntra($obra, $this->datos->duracionFuncion));
+            }
+        }
+    }
+
+    /**
+     * El motivo, para el modelo y para el formulario de función.
+     */
+    public static function noEntra(Obra $obra, int $duracionFuncion): string
+    {
+        return "{$obra->titulo} dura {$obra->duracionMinutos} minutos y en esta sala una función puede durar hasta {$duracionFuncion}.";
+    }
+
+    /**
      * Una función nueva en esta sala, en votación entre las obras candidatas hasta
      * $votacionCierraEn (EF-03.1).
      *
@@ -161,17 +187,33 @@ final class Sala
         if ($duracion > $this->datos->duracionFuncion) {
             throw new ReglaIncumplida("Las obras duran {$duracion} minutos y en esta sala una función puede durar hasta {$this->datos->duracionFuncion}.");
         }
-        // Entre una función y la siguiente tiene que quedar el tiempo que pide la sala, de los dos
-        // lados: ni empezar pegada a la anterior ni terminar pegada a la que sigue.
+        $pisada = $this->motivoParaPisarse($fechaHora, $duracion, $ocupado);
+        if ($pisada !== null) {
+            throw new ReglaIncumplida(ucfirst($pisada));
+        }
+    }
+
+    /**
+     * Por qué una función desde $fechaHora y de $duracion minutos no entra entre las otras de la
+     * sala, o null si entra. Entre una función y la siguiente tiene que quedar el tiempo que pide
+     * la sala, de los dos lados: ni empezar pegada a la anterior ni terminar pegada a la que sigue.
+     * Lo usan programar y editar a mano, y el acuerdo de fecha al proponer y al confirmar
+     * (EF-05.5), que le agregan delante de qué franja se trata; por eso empieza en minúscula.
+     *
+     * @param list<array{DateTimeImmutable, DateTimeImmutable}> $ocupado desde y hasta cuándo va
+     *                                                                   cada función programada
+     */
+    public function motivoParaPisarse(DateTimeImmutable $fechaHora, int $duracion, array $ocupado): ?string
+    {
         $pausa = "{$this->datos->tiempoEntreFunciones} minutes";
         $termina = $fechaHora->modify("+{$duracion} minutes");
         foreach ($ocupado as [$desde, $hasta]) {
             if ($fechaHora < $hasta->modify("+{$pausa}") && $termina->modify("+{$pausa}") > $desde) {
-                throw new ReglaIncumplida(
-                    "Se pisa con otra función de la sala, que va de {$desde->format('H:i')} a {$hasta->format('H:i')}: "
-                    . "entre una y otra tienen que quedar {$this->datos->tiempoEntreFunciones} minutos.",
-                );
+                return "se pisa con otra función de la sala, que va de {$desde->format('H:i')} a {$hasta->format('H:i')}: "
+                    . "entre una y otra tienen que quedar {$this->datos->tiempoEntreFunciones} minutos.";
             }
         }
+
+        return null;
     }
 }

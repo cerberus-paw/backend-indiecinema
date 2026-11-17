@@ -89,7 +89,7 @@ final class PanelDeReservasTest extends TestCase
      */
     private function pedir(string $metodo, string $ruta, ?string $usuario = self::ORGANIZADORA, string $rol = 'organizador', array $cuerpo = [], array $extra = []): Respuesta
     {
-        $cabeceras = $usuario === null ? [] : ['X-Nginx-Secreto' => self::SECRETO, 'X-Usuario-Id' => $usuario, 'X-Rol' => $rol];
+        $cabeceras = $usuario === null ? [] : ['X-Nginx-Secreto' => self::SECRETO, 'X-Usuario-Id' => $usuario, 'X-Rol' => $rol, 'X-Correo-Verificado' => '1'];
         $cabeceras = [...$cabeceras, ...$extra];
         $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion, new Log('funciones', fopen('php://memory', 'w')));
         parse_str((string) parse_url($ruta, PHP_URL_QUERY), $consulta);
@@ -188,7 +188,7 @@ final class PanelDeReservasTest extends TestCase
         preg_match_all('#<a href="([^"]*)"[^>]*aria-current="page"#', $barra, $actuales);
 
         // Los enlaces van sin el prefijo de funciones: las pantallas del panel son de programación.
-        self::assertSame(['/', '/organizador/bloqueados', '/organizador/funciones', '/organizador/funciones/nueva', '/organizador/salas', '/recaudacion/reportes', '/solicitar-sala'], $enlaces);
+        self::assertSame(['/', '/organizador/bloqueados', '/organizador/funciones', '/organizador/funciones/nueva', '/organizador/pedidos', '/organizador/salas', '/recaudacion/reportes', '/solicitar-sala'], $enlaces);
         self::assertSame(['/organizador/funciones'], $actuales[1]);
         self::assertStringContainsString('Ana Prueba', $barra);
         self::assertStringContainsString('action="/cuenta/salir"', $barra);

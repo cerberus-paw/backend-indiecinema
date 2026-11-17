@@ -8,6 +8,7 @@ use IndieCinema\Funciones\Controladores\Calificaciones;
 use IndieCinema\Funciones\Controladores\CalificacionesInternas;
 use IndieCinema\Funciones\Controladores\CancelacionDeAcuerdos;
 use IndieCinema\Funciones\Controladores\CobrosInternos;
+use IndieCinema\Funciones\Controladores\ConductaInterna;
 use IndieCinema\Funciones\Controladores\OcupacionInterna;
 use IndieCinema\Funciones\Controladores\Reservas;
 use IndieCinema\Funciones\Controladores\ReservasDeLaFuncion;
@@ -72,6 +73,9 @@ return static function (Router $router): void {
     // Lo cobrado de cada función, para el reparto de recaudación (EF-02.5).
     $router->interna('GET', '/interno/funciones/{id}/cobros', [CobrosInternos::class, 'deUna'], ['recaudacion']);
     $router->interna('GET', '/interno/cobros', [CobrosInternos::class, 'deVarias'], ['recaudacion']);
+
+    // Puntaje de conducta en lote, para «Usuarios y roles» del administrador en cuentas (EF-13.3).
+    $router->interna('GET', '/interno/usuarios/conducta', [ConductaInterna::class, 'deVarios'], ['cuentas']);
 
     // Para comprobar que los otros subsistemas llegan hasta acá con su token.
     $router->interna('GET', '/interno/estado', [EstadoInterno::class, 'mostrar'], ['cuentas', 'programacion', 'moderacion', 'recaudacion']);

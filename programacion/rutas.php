@@ -17,6 +17,8 @@ use IndieCinema\Programacion\Controladores\ImagenDeSala;
 use IndieCinema\Programacion\Controladores\Inicio;
 use IndieCinema\Programacion\Controladores\Obras;
 use IndieCinema\Programacion\Controladores\ObrasDelOrganizador;
+use IndieCinema\Programacion\Controladores\Pedidos;
+use IndieCinema\Programacion\Controladores\PedidosDelOrganizador;
 use IndieCinema\Programacion\Controladores\Salas;
 use IndieCinema\Programacion\Controladores\SalasDelOrganizador;
 use IndieCinema\Programacion\Controladores\SolicitudDeSala;
@@ -48,6 +50,13 @@ return static function (Router $router): void {
     $router->get('/solicitar-sala', [SolicitudDeSala::class, 'mostrar'], Rol::Espectador);
     $router->post('/solicitar-sala', [SolicitudDeSala::class, 'enviar'], Rol::Espectador);
 
+    // Pedidos de títulos ausentes en el catálogo y adhesiones de espectadores (EF-11.1 / IC-576, EF-11.2 / IC-577).
+    $router->get('/pedidos', [Pedidos::class, 'listar']);
+    $router->get('/pedidos/nuevo', [Pedidos::class, 'nuevo'], Rol::Espectador);
+    $router->post('/pedidos/nuevo', [Pedidos::class, 'crear'], Rol::Espectador);
+    $router->post('/pedidos/{id}/sumarme', [Pedidos::class, 'sumarme'], Rol::Espectador);
+    $router->post('/pedidos/{id}/quitar', [Pedidos::class, 'quitar'], Rol::Espectador);
+
     // «Mis salas» y la edición de la sala propia; las nuevas entran por la solicitud. Que la sala
     // sea del que la edita lo controla el servicio.
     $router->get('/organizador/salas', [SalasDelOrganizador::class, 'listar'], Rol::Organizador);
@@ -61,6 +70,9 @@ return static function (Router $router): void {
 
     // «Mis obras», alta y edición de obras del catálogo.
     $router->get('/organizador/obras', [ObrasDelOrganizador::class, 'listar'], Rol::Organizador);
+    // Pedidos activos de títulos ausentes para tomar y programar (EF-11.3 / IC-578).
+    $router->get('/organizador/pedidos', [PedidosDelOrganizador::class, 'listar'], Rol::Organizador);
+    $router->post('/organizador/pedidos/{id}/tomar', [PedidosDelOrganizador::class, 'tomar'], Rol::Organizador);
     $router->get('/organizador/obras/nueva', [ObrasDelOrganizador::class, 'nueva'], Rol::Organizador);
     $router->post('/organizador/obras/nueva', [ObrasDelOrganizador::class, 'crear'], Rol::Organizador);
     $router->get('/organizador/obras/{id}/editar', [ObrasDelOrganizador::class, 'editar'], Rol::Organizador);

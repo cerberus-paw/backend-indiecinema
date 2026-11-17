@@ -96,4 +96,99 @@ final class RepositorioDeConducta
             [$usuarioId],
         );
     }
+
+    /**
+     * Resumen de actividad y calificaciones de conducta del espectador (EF-13.3).
+     *
+     * @return array{asistencias: int, ausencias: int, conducta_positivas: int, conducta_negativas: int, negativas_vigentes: int, calificaciones_funciones: int}
+     */
+    public function resumenDeActividad(string $usuarioId, DateTimeImmutable $desde): array
+    {
+        $reservas = $this->base->fila(
+            "SELECT
+                COALESCE(SUM(estado = 'asistio'), 0) AS asistencias,
+                COALESCE(SUM(estado = 'ausente'), 0) AS ausencias
+             FROM reserva
+             WHERE usuario_id = ?",
+            [$usuarioId],
+        );
+        $desdeUtc = $desde->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s');
+        $conductas = $this->base->fila(
+            'SELECT
+                COALESCE(SUM(positiva = 1), 0) AS positivas,
+                COALESCE(SUM(positiva = 0), 0) AS negativas,
+                COALESCE(SUM(positiva = 0 AND creada_en >= ?), 0) AS negativas_vigentes
+             FROM conducta
+             WHERE usuario_id = ?',
+            [$desdeUtc, $usuarioId],
+        );
+        $calificaciones = (int) $this->base->valor(
+            'SELECT COUNT(*) FROM calificacion WHERE usuario_id = ?',
+            [$usuarioId],
+        );
+
+        return [
+            'asistencias' => (int) ($reservas['asistencias'] ?? 0),
+            'ausencias' => (int) ($reservas['ausencias'] ?? 0),
+            'conducta_positivas' => (int) ($conductas['positivas'] ?? 0),
+            'conducta_negativas' => (int) ($conductas['negativas'] ?? 0),
+            'negativas_vigentes' => (int) ($conductas['negativas_vigentes'] ?? 0),
+            'calificaciones_funciones' => $calificaciones,
+        ];
+    }
+
+    /**
+     * Calificaciones negativas vigentes por usuario en lote (EF-13.3).
+     *
+     * @param list<string> $usuariosIds
+     *
+     * @return array<string, int>
+     */
+    public function negativasVigentesDeVarios(array $usuariosIds, DateTimeImmutable $desde): array
+    {
+        if ($usuariosIds === []) {
+            return [];
+        }
+        $marcas = implode(', ', array_fill(0, count($usuariosIds), '?'));
+        $desdeUtc = $desde->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s');
+        $porUsuario = [];
+        foreach ($this->base->filas(
+            "SELECT usuario_id, COUNT(*) AS cantidad
+             FROM conducta
+             WHERE positiva = 0 AND creada_en >= ? AND usuario_id IN ({$marcas})
+             GROUP BY usuario_id",
+            [$desdeUtc, ...$usuariosIds],
+        ) as $fila) {
+            $porUsuario[(string) $fila['usuario_id']] = (int) $fila['cantidad'];
+        }
+
+        return $porUsuario;
+    }
+
+    /**
+     * Ausencias totales por usuario en lote (EF-13.3).
+     *
+     * @param list<string> $usuariosIds
+     *
+     * @return array<string, int>
+     */
+    public function ausenciasDeVarios(array $usuariosIds): array
+    {
+        if ($usuariosIds === []) {
+            return [];
+        }
+        $marcas = implode(', ', array_fill(0, count($usuariosIds), '?'));
+        $porUsuario = [];
+        foreach ($this->base->filas(
+            "SELECT usuario_id, COUNT(*) AS cantidad
+             FROM reserva
+             WHERE estado = 'ausente' AND usuario_id IN ({$marcas})
+             GROUP BY usuario_id",
+            $usuariosIds,
+        ) as $fila) {
+            $porUsuario[(string) $fila['usuario_id']] = (int) $fila['cantidad'];
+        }
+
+        return $porUsuario;
+    }
 }

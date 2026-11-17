@@ -6,6 +6,7 @@ namespace IndieCinema\Funciones\Servicios;
 
 use DateTimeImmutable;
 use IndieCinema\Funciones\Modelo\AutorDelCambio;
+use IndieCinema\Funciones\Modelo\Conducta;
 use IndieCinema\Funciones\Modelo\EstadoReserva;
 use IndieCinema\Funciones\Modelo\FuncionDeProgramacion;
 use IndieCinema\Funciones\Modelo\ReglaIncumplida;
@@ -39,7 +40,13 @@ final class ServicioDeReservas
         private readonly FuncionesDeProgramacion $funciones,
         private readonly RepositorioDeReservas $reservas,
         private readonly ?PagosDeReservas $pagos = null,
+        private readonly ?ServicioDeConducta $conducta = null,
     ) {
+    }
+
+    public function activasDelUsuario(string $usuarioId, DateTimeImmutable $ahora = new DateTimeImmutable()): int
+    {
+        return $this->reservas->activasDelUsuario($usuarioId, $ahora);
     }
 
     /**
@@ -262,6 +269,10 @@ final class ServicioDeReservas
                     1 => 'Queda 1 lugar.',
                     default => "Quedan {$libres} lugares.",
                 });
+            }
+            $topeConducta = $this->conducta?->topeSimultaneoPara($reserva->usuarioId, $ahora);
+            if ($topeConducta !== null && $this->reservas->activasDelUsuario($reserva->usuarioId, $ahora) >= $topeConducta) {
+                throw new ReglaIncumplida(Conducta::mensajeDeTopeBajoUmbral($topeConducta));
             }
             $yaReservados = $this->reservas->lugaresOcupadosPorUsuario($funcion->id, $reserva->usuarioId, $ahora);
             $maximo = self::maximoPorPersona($funcion);

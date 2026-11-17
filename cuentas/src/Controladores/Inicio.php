@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace IndieCinema\Cuentas\Controladores;
 
+use IndieCinema\Cuentas\Modelo\UsuarioEnListado;
 use IndieCinema\Cuentas\Servicios\ServicioDeUsuarios;
 use IndieCinema\Nucleo\Controlador;
 use IndieCinema\Nucleo\Http\ExcepcionHttp;
@@ -33,15 +34,36 @@ final class Inicio extends Controlador
     {
         $usuario = $peticion->usuario() ?? throw new LogicException('La ruta pide sesión: sin ella no llega acá.');
         $cuenta = $this->usuarios->buscarEnListado($usuario->id) ?? throw ExcepcionHttp::noEncontrada();
+        $registro = $this->usuarios->buscarPorId($usuario->id);
+        $verificado = $registro?->correoVerificadoEn !== null;
 
-        return $this->vista('mi_cuenta.html.twig', [
+        return $this->vista('mi_cuenta.html.twig', self::datosDeMiCuenta(
+            $cuenta,
+            $verificado,
+            $peticion->consulta('reenviado') === '1',
+        ));
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public static function datosDeMiCuenta(
+        UsuarioEnListado $cuenta,
+        bool $correoVerificado,
+        bool $verificacionReenviada = false,
+        ?string $errorVerificacion = null,
+    ): array {
+        return [
             'cuenta' => [
                 'nombre' => $cuenta->nombre,
                 'correo' => $cuenta->correo,
                 'roles' => array_map(static fn (Rol $rol): string => $rol->value, $cuenta->roles),
                 // «Desde marzo de 2025», como el wireframe.
                 'desde' => self::MESES[(int) $cuenta->creadoEn->format('n') - 1] . ' de ' . $cuenta->creadoEn->format('Y'),
+                'correo_verificado' => $correoVerificado,
             ],
-        ]);
+            'verificacion_reenviada' => $verificacionReenviada,
+            'error_verificacion' => $errorVerificacion,
+        ];
     }
 }

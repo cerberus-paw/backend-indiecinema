@@ -18,6 +18,8 @@ final readonly class Conducta
     public const DESCUENTO_NEGATIVA = 10;
     public const DESCUENTO_AUSENCIA = 5;
     public const MESES_VIGENCIA_NEGATIVA = 6;
+    public const UMBRAL = 60;
+    public const TOPE_BAJO_UMBRAL = 2;
 
     public function __construct(
         public string $reservaId,
@@ -82,5 +84,10 @@ final readonly class Conducta
         }
 
         return new self($reserva->id, $reserva->usuarioId, $organizadorId, $positiva, $motivoLimpio, $ahora);
+    }
+
+    public static function mensajeDeTopeBajoUmbral(int $tope = self::TOPE_BAJO_UMBRAL): string
+    {
+        return "Por tu historial de conducta podés tener hasta {$tope} " . ($tope === 1 ? 'reserva' : 'reservas') . ' a la vez.';
     }
 }

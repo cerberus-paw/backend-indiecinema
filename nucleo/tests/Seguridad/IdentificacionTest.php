@@ -45,9 +45,10 @@ final class IdentificacionTest extends TestCase
             'X-Usuario-Id' => 'u-1',
             'X-Rol' => 'organizador',
             'X-Usuario-Nombre' => rawurlencode('Tomás Resnik'),
+            'X-Correo-Verificado' => '1',
         ]);
 
-        self::assertEquals(new Usuario('u-1', Rol::Organizador, 'Tomás Resnik'), $usuario);
+        self::assertEquals(new Usuario('u-1', Rol::Organizador, 'Tomás Resnik', true), $usuario);
     }
 
     public function testSinNombreElUsuarioIgualSeArma(): void
@@ -56,11 +57,40 @@ final class IdentificacionTest extends TestCase
 
         self::assertNotNull($usuario);
         self::assertNull($usuario->nombre);
+        self::assertFalse($usuario->correoVerificado);
+    }
+
+    public function testElCorreoSoloQuedaVerificadoCuandoLaCabeceraValeUno(): void
+    {
+        foreach (['0', '', 'si'] as $valor) {
+            $usuario = $this->usuarioCon([
+                'X-Nginx-Secreto' => 'secreto',
+                'X-Usuario-Id' => 'u-1',
+                'X-Rol' => 'espectador',
+                'X-Correo-Verificado' => $valor,
+            ]);
+            self::assertNotNull($usuario);
+            self::assertFalse($usuario->correoVerificado);
+        }
+
+        $verificado = $this->usuarioCon([
+            'X-Nginx-Secreto' => 'secreto',
+            'X-Usuario-Id' => 'u-1',
+            'X-Rol' => 'espectador',
+            'X-Correo-Verificado' => '1',
+        ]);
+        self::assertNotNull($verificado);
+        self::assertTrue($verificado->correoVerificado);
     }
 
     public function testSinSesionCuentasMandaLasCabecerasVacias(): void
     {
-        self::assertNull($this->usuarioCon(['X-Nginx-Secreto' => 'secreto', 'X-Usuario-Id' => '', 'X-Rol' => '']));
+        self::assertNull($this->usuarioCon([
+            'X-Nginx-Secreto' => 'secreto',
+            'X-Usuario-Id' => '',
+            'X-Rol' => '',
+            'X-Correo-Verificado' => '',
+        ]));
     }
 
     public function testUnRolDesconocidoNoArmaUsuario(): void

@@ -111,8 +111,9 @@ return static function (Router $router): void {
     // Las programadas que empiezan en un rango, para el recordatorio del día antes (EF-03.3). Antes
     // que la de a una, para que «proximas» no se tome como un id.
     $router->interna('GET', '/interno/funciones/proximas', [FuncionesInternas::class, 'proximas'], ['funciones']);
-    // Las finalizadas de un período, con sus obras y sus votos, para la reportería (EF-09). También
-    // antes que la de a una.
+    // Las finalizadas, con sus obras y sus votos: las de un período para la reportería (EF-09) y,
+    // sin «hasta», las que se finalizaron desde un momento, para la tarea del reparto (EF-08.2).
+    // También antes que la de a una.
     $router->interna('GET', '/interno/funciones/finalizadas', [FuncionesInternas::class, 'finalizadas'], ['recaudacion']);
     // Una función para el subsistema funciones (acuerdo de fecha y reservas) y para moderación,
     // que muestra la denunciada (EF-07.8).

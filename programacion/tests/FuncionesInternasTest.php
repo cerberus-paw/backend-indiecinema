@@ -340,9 +340,10 @@ final class FuncionesInternasTest extends TestCase
      * Una función que se votó, se programó y terminó: «Zama» le gana a «La ciénaga» por los votos
      * que se pasen, uno por espectador.
      *
-     * @param list<string> $votos el título que votó cada espectador
+     * @param list<string> $votos        el título que votó cada espectador
+     * @param string       $finalizadaEn cuándo la finalizó la tarea, que no es cuándo se dio
      */
-    private function finalizadaEl(string $cuando, array $votos = [], ?Sala $sala = null): string
+    private function finalizadaEl(string $cuando, array $votos = [], ?Sala $sala = null, string $finalizadaEn = '2026-12-31 23:00:00'): string
     {
         $funcion = ($sala ?? $this->sala)->crearFuncion(array_values($this->obras), 40, 3500.0);
         $this->funciones->agregar($funcion);
@@ -351,7 +352,7 @@ final class FuncionesInternasTest extends TestCase
         }
         $funcion->cerrarVotacionTitulos([$this->obras['Zama']]);
         $funcion->fijarFechaHora(new DateTimeImmutable($cuando), new DateTimeImmutable('2026-01-01 00:00:00'));
-        $funcion->finalizar(new DateTimeImmutable('2026-12-31 23:00:00'));
+        $funcion->finalizar(new DateTimeImmutable($finalizadaEn));
         $this->funciones->guardar($funcion);
 
         return $funcion->id;
@@ -372,6 +373,8 @@ final class FuncionesInternasTest extends TestCase
         self::assertSame([$conVotos, $ultimoDia], array_column($datos['funciones'], 'id'));
         $funcion = $datos['funciones'][0];
         self::assertSame(['2026-11-04T21:00:00', 40, '3500.00', self::ORGANIZADORA], [$funcion['fecha_hora'], $funcion['cupo'], $funcion['precio_base'], $funcion['organizador_id']]);
+        // Cuándo la finalizó la tarea, que es por donde la busca el reparto (EF-08.2).
+        self::assertSame('2026-12-31T23:00:00', $funcion['finalizada_en']);
         self::assertSame(['id' => $this->sala->id, 'nombre' => 'Cine Club El Galpón'], $funcion['sala']);
         self::assertSame([
             ['id' => $this->obras['La ciénaga'], 'titulo' => 'La ciénaga', 'dueno_id' => self::ORGANIZADORA, 'elegida' => false, 'votos' => 1],
@@ -396,6 +399,47 @@ final class FuncionesInternasTest extends TestCase
         // La ciénaga perdió en las dos, pero estuvo: su dueña ve las dos.
         self::assertSame([$propia, $ajena], array_column($this->json($this->pedirFinalizadas([...$periodo, 'dueno' => self::DUENA]))['funciones'], 'id'));
         self::assertSame([$propia, $ajena], array_column($this->json($this->pedirFinalizadas($periodo))['funciones'], 'id'));
+    }
+
+    /**
+     * El cursor de la tarea del reparto (EF-08.2): va por cuándo se finalizó cada una y no por
+     * cuándo se dio, que es lo que hace que una función vieja finalizada tarde no se saltee.
+     */
+    public function testFinalizadasDesdeUnMomentoVanPorLaFinalizacionYNoPorLaFecha(): void
+    {
+        // La más vieja se finalizó última: con el cursor entra, y va al final.
+        $vieja = $this->finalizadaEl('2026-11-04 21:00:00', finalizadaEn: '2026-11-20 10:00:00');
+        $antes = $this->finalizadaEl('2026-11-10 21:00:00', finalizadaEn: '2026-11-11 00:15:00');
+        $despues = $this->finalizadaEl('2026-11-18 21:00:00', finalizadaEn: '2026-11-19 00:15:00');
+        // Programada todavía: no se finalizó, no tiene por dónde entrar.
+        $this->programadaEl('2026-11-19 20:00:00');
+
+        $datos = $this->json($this->pedirFinalizadas(['desde' => '2026-11-19T00:15:00']));
+
+        self::assertTrue($datos['completas']);
+        self::assertSame([$despues, $vieja], array_column($datos['funciones'], 'id'));
+        self::assertSame(
+            ['2026-11-18T21:00:00', '2026-11-19T00:15:00'],
+            [$datos['funciones'][0]['fecha_hora'], $datos['funciones'][0]['finalizada_en']],
+        );
+        // Desde antes de todas, las tres, de la primera finalizada a la última.
+        self::assertSame(
+            [$antes, $despues, $vieja],
+            array_column($this->json($this->pedirFinalizadas(['desde' => '2026-11-01T00:00:00']))['funciones'], 'id'),
+        );
+    }
+
+    /**
+     * La tarea del reparto reparte todo el sitio: si llegara con un filtro, repartiría de menos y
+     * sin que se note. Mejor un 400.
+     */
+    public function testFinalizadasDesdeUnMomentoPideUnMomentoYNoAceptaFiltros(): void
+    {
+        self::assertSame(400, $this->pedirFinalizadas(['desde' => '2026-11-19'])->estado());
+        self::assertSame(400, $this->pedirFinalizadas(['desde' => 'anoche'])->estado());
+        self::assertSame(400, $this->pedirFinalizadas(['desde' => '2026-11-19T00:15:00', 'organizador' => self::ORGANIZADORA])->estado());
+        self::assertSame(400, $this->pedirFinalizadas(['desde' => '2026-11-19T00:15:00', 'dueno' => self::DUENA])->estado());
+        self::assertSame(403, $this->pedirFinalizadas(['desde' => '2026-11-19T00:15:00'], 'funciones', self::TOKEN_DE_FUNCIONES)->estado());
     }
 
     public function testFinalizadasPideUnPeriodoValidoYSoloLaPideRecaudacion(): void

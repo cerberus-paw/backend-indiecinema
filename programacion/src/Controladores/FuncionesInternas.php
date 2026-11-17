@@ -113,13 +113,29 @@ final class FuncionesInternas extends Controlador
     }
 
     /**
-     * GET /interno/funciones/finalizadas?desde=…&hasta=…, para la reportería de recaudación
-     * (EF-09): las finalizadas que empezaron desde el primer día hasta el último, los dos incluidos,
-     * en AAAA-MM-DD. Con ?organizador=, sólo las de sus salas; con ?dueno=, las que proyectaron
-     * alguna obra suya; sin ninguno, todas (el administrador). Cada una trae sus obras con los
-     * votos, también las que perdieron, y quiénes votaron.
+     * GET /interno/funciones/finalizadas, en dos modos que se distinguen por «hasta»:
+     *
+     * - Con «hasta», el período de la reportería (EF-09): las que empezaron desde el primer día
+     *   hasta el último, los dos incluidos, por su fecha.
+     * - Sin «hasta», el cursor de la tarea del reparto (EF-08.2): las que se finalizaron desde ese
+     *   momento, por su fecha de finalización.
+     *
+     * En los dos, cada una trae sus obras con los votos, también las que perdieron, y quiénes
+     * votaron.
      */
     public function finalizadas(Peticion $peticion): Respuesta
+    {
+        return $peticion->consulta('hasta') === null
+            ? $this->desdeLaFinalizacion($peticion)
+            : $this->delPeriodo($peticion);
+    }
+
+    /**
+     * GET /interno/funciones/finalizadas?desde=…&hasta=…, en AAAA-MM-DD, para la reportería de
+     * recaudación (EF-09). Con ?organizador=, sólo las de sus salas; con ?dueno=, las que
+     * proyectaron alguna obra suya; sin ninguno, todas (el administrador).
+     */
+    private function delPeriodo(Peticion $peticion): Respuesta
     {
         $desde = self::dia($peticion->consulta('desde'));
         $hasta = self::dia($peticion->consulta('hasta'));
@@ -135,18 +151,46 @@ final class FuncionesInternas extends Controlador
         }
 
         // Una de más, para saber si quedaron afuera.
-        $funciones = $this->servicio->finalizadasEntre(
+        return $this->respuesta($this->servicio->finalizadasEntre(
             $desde,
             $hasta->modify('+1 day'),
             is_string($organizador) ? $organizador : null,
             is_string($dueno) ? $dueno : null,
             self::MAXIMAS_FINALIZADAS + 1,
-        );
+        ));
+    }
 
+    /**
+     * GET /interno/funciones/finalizadas?desde=…, en ISO 8601 y sin «hasta», para la tarea del
+     * reparto de recaudación (EF-08.2): las que se finalizaron desde ese momento, de la que se
+     * finalizó primero a la última, que es por donde la tarea sigue desde su última pasada. Van
+     * todas las del sitio: el reparto no es de un organizador ni de un dueño en particular.
+     */
+    private function desdeLaFinalizacion(Peticion $peticion): Respuesta
+    {
+        $desde = self::fecha($peticion->consulta('desde'));
+        if ($desde === null) {
+            return $this->json(['error' => 'Se pide «desde» en ISO 8601, el momento desde el que se finalizaron.'], 400);
+        }
+        if ($peticion->consulta('organizador') !== null || $peticion->consulta('dueno') !== null) {
+            return $this->json(['error' => 'Las finalizadas desde un momento van todas, sin filtrar por organizador ni por dueño.'], 400);
+        }
+
+        return $this->respuesta($this->servicio->finalizadasDesde($desde, self::MAXIMAS_FINALIZADAS + 1));
+    }
+
+    /**
+     * El JSON de las dos. Las fechas van como el resto de la API interna, en ISO 8601 sin zona.
+     *
+     * @param list<FuncionFinalizada> $funciones con una de más, para saber si quedaron afuera
+     */
+    private function respuesta(array $funciones): Respuesta
+    {
         return $this->json([
             'funciones' => array_map(static fn (FuncionFinalizada $funcion): array => [
                 'id' => $funcion->id,
                 'fecha_hora' => $funcion->fechaHora->format('Y-m-d\TH:i:s'),
+                'finalizada_en' => $funcion->finalizadaEn->format('Y-m-d\TH:i:s'),
                 'cupo' => $funcion->cupo,
                 'precio_base' => $funcion->precioBase,
                 'sala' => ['id' => $funcion->salaId, 'nombre' => $funcion->salaNombre],

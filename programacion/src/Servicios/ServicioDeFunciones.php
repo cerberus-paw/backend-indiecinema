@@ -69,4 +69,15 @@ final class ServicioDeFunciones
     {
         return $this->funciones->finalizadasEntre($desde, $hasta, $organizadorId, $duenoId, $cuantas);
     }
+
+    /**
+     * Las que se finalizaron desde ese momento, para la tarea del reparto de recaudación (EF-08.2),
+     * que las pide desde su última pasada.
+     *
+     * @return list<FuncionFinalizada>
+     */
+    public function finalizadasDesde(DateTimeImmutable $desde, int $cuantas): array
+    {
+        return $this->funciones->finalizadasDesde($desde, $cuantas);
+    }
 }

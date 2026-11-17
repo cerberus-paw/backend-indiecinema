@@ -58,6 +58,18 @@ $cobros = static fn (string $id): array => match ($id) {
         ['id' => '11111111-1111-4111-8111-111111111111', 'usuario_id' => '99999999-9999-4999-8999-999999999999', 'cantidad' => 2, 'total' => '7000.00', 'cobrado' => '7000.00', 'pago_id' => 'pago-1', 'estado' => 'asistio', 'reembolsada' => false],
         ['id' => '22222222-2222-4222-8222-222222222222', 'usuario_id' => '99999999-9999-4999-8999-999999999999', 'cantidad' => 1, 'total' => '3500.00', 'cobrado' => '0.00', 'pago_id' => null, 'estado' => 'confirmada', 'reembolsada' => false],
     ], 'neto' => '7000.00'],
+    // Las funciones del reparto (EF-08.2), las mismas de Dobles/programacion.php. La primera tiene
+    // una reserva reembolsada: su plata no está en el neto, así que no se reparte.
+    '50000000-0000-4000-8000-000000000001' => ['reservas' => [
+        ['id' => '60000000-0000-4000-8000-000000000001', 'usuario_id' => '90000000-0000-4000-8000-000000000001', 'cantidad' => 4, 'total' => '10000.00', 'cobrado' => '10000.00', 'pago_id' => 'pago-simple', 'estado' => 'asistio', 'reembolsada' => false],
+        ['id' => '60000000-0000-4000-8000-000000000002', 'usuario_id' => '90000000-0000-4000-8000-000000000002', 'cantidad' => 1, 'total' => '2500.00', 'cobrado' => '2500.00', 'pago_id' => 'pago-devuelto', 'estado' => 'cancelada', 'reembolsada' => true],
+    ], 'neto' => '10000.00'],
+    '50000000-0000-4000-8000-000000000002' => ['reservas' => [
+        ['id' => '60000000-0000-4000-8000-000000000003', 'usuario_id' => '90000000-0000-4000-8000-000000000003', 'cantidad' => 1, 'total' => '100.00', 'cobrado' => '100.00', 'pago_id' => 'pago-tres-obras', 'estado' => 'asistio', 'reembolsada' => false],
+    ], 'neto' => '100.00'],
+    '50000000-0000-4000-8000-000000000004' => ['reservas' => [
+        ['id' => '60000000-0000-4000-8000-000000000004', 'usuario_id' => '90000000-0000-4000-8000-000000000004', 'cantidad' => 1, 'total' => '3500.00', 'cobrado' => '3500.00', 'pago_id' => 'pago-vieja', 'estado' => 'asistio', 'reembolsada' => false],
+    ], 'neto' => '3500.00'],
     // Un cambio en funciones que rompe lo que recaudación espera: el monto como número.
     ROTA => ['reservas' => [], 'neto' => 7000],
     LENTA => (static function (): array {

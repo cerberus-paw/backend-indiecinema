@@ -24,7 +24,11 @@ use IndieCinema\Programacion\Modelo\ResumenDeFuncion;
  */
 final class RepositorioDeFunciones
 {
-    private const COLUMNAS = 'id, sala_id, precio_base, cupo, estado, fecha_hora, votacion_cierra_en';
+    private const COLUMNAS = 'id, sala_id, precio_base, cupo, estado, fecha_hora, votacion_cierra_en, finalizada_en';
+
+    /** Lo que lleva una función finalizada, para las dos consultas que las traen (EF-09, EF-08.2). */
+    private const COLUMNAS_FINALIZADA = 'f.id, f.fecha_hora, f.finalizada_en, f.cupo, f.precio_base,
+                    s.id AS sala_id, s.nombre AS sala_nombre, s.organizador_id';
 
     public function __construct(private readonly BaseDeDatos $base)
     {
@@ -393,9 +397,6 @@ final class RepositorioDeFunciones
      * que proyectaron alguna obra de un dueño, o todas. También las de una sala dada de baja: lo
      * que pasó en ella sigue contando para el período.
      *
-     * Trae las obras de cada una con sus votos, y quiénes votaron, en dos consultas más para todas
-     * juntas: una por función serían cientos de consultas para un período largo.
-     *
      * @return list<FuncionFinalizada>
      */
     public function finalizadasEntre(
@@ -415,15 +416,49 @@ final class RepositorioDeFunciones
             $condiciones[] = 'EXISTS (SELECT 1 FROM funcion_obra fo JOIN obra o ON o.id = fo.obra_id WHERE fo.funcion_id = f.id AND o.dueno_id = ?)';
             $valores[] = $duenoId;
         }
-        $filas = $this->base->filas(
-            'SELECT f.id, f.fecha_hora, f.cupo, f.precio_base, s.id AS sala_id, s.nombre AS sala_nombre, s.organizador_id
+
+        return $this->finalizadas($this->base->filas(
+            'SELECT ' . self::COLUMNAS_FINALIZADA . '
              FROM funcion f
              JOIN sala s ON s.id = f.sala_id
              WHERE ' . implode(' AND ', $condiciones) . '
              ORDER BY f.fecha_hora, f.id
              LIMIT ?',
             [...$valores, $cuantas],
-        );
+        ));
+    }
+
+    /**
+     * Las que se finalizaron desde $desde (incluido), de la que se finalizó primero a la última:
+     * el cursor de la tarea del reparto de recaudación (EF-08.2), que las pide desde su última
+     * pasada. Va por la fecha de finalización y no por la de la función justamente para que una que
+     * se finalizó tarde, con el cron caído, no se saltee.
+     *
+     * @return list<FuncionFinalizada>
+     */
+    public function finalizadasDesde(DateTimeImmutable $desde, int $cuantas): array
+    {
+        return $this->finalizadas($this->base->filas(
+            'SELECT ' . self::COLUMNAS_FINALIZADA . '
+             FROM funcion f
+             JOIN sala s ON s.id = f.sala_id
+             WHERE f.estado = ? AND f.finalizada_en >= ?
+             ORDER BY f.finalizada_en, f.id
+             LIMIT ?',
+            [EstadoFuncion::Finalizada, $desde, $cuantas],
+        ));
+    }
+
+    /**
+     * Las obras de cada función con sus votos, y quiénes votaron, en dos consultas más para todas
+     * juntas: una por función serían cientos de consultas para un período largo.
+     *
+     * @param list<array<string, mixed>> $filas las de COLUMNAS_FINALIZADA, en el orden que va
+     *
+     * @return list<FuncionFinalizada>
+     */
+    private function finalizadas(array $filas): array
+    {
         if ($filas === []) {
             return [];
         }
@@ -456,6 +491,9 @@ final class RepositorioDeFunciones
         return array_map(static fn (array $fila): FuncionFinalizada => new FuncionFinalizada(
             (string) $fila['id'],
             new DateTimeImmutable((string) $fila['fecha_hora']),
+            // Las que se finalizaron antes de que existiera la columna (migración 017) quedaron con
+            // la hora de la función; si alguna quedó nula, vale lo mismo y no se saltea.
+            new DateTimeImmutable((string) ($fila['finalizada_en'] ?? $fila['fecha_hora'])),
             (int) $fila['cupo'],
             (string) $fila['precio_base'],
             (string) $fila['sala_id'],
@@ -493,10 +531,11 @@ final class RepositorioDeFunciones
         $estadoDeLasObras = $funcion->estado === EstadoFuncion::EnVotacionTitulos ? 'candidata' : 'elegida';
         $this->base->enTransaccion(function (BaseDeDatos $base) use ($funcion, $estadoDeLasObras): void {
             $base->ejecutar(
-                'INSERT INTO funcion (id, sala_id, precio_base, cupo, estado, fecha_hora, votacion_cierra_en) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                'INSERT INTO funcion (id, sala_id, precio_base, cupo, estado, fecha_hora, votacion_cierra_en, finalizada_en)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
                 [
                     $funcion->id, $funcion->salaId, self::precio($funcion->precioBase), $funcion->cupo,
-                    $funcion->estado, $funcion->fechaHora, $funcion->votacionCierraEn,
+                    $funcion->estado, $funcion->fechaHora, $funcion->votacionCierraEn, $funcion->finalizadaEn,
                 ],
             );
             foreach ($funcion->obrasIds as $obraId) {
@@ -519,9 +558,11 @@ final class RepositorioDeFunciones
     public function guardar(Funcion $funcion): void
     {
         $this->base->enTransaccion(function (BaseDeDatos $base) use ($funcion): void {
+            // La fecha de finalización se escribe una sola vez: COALESCE deja la que ya está, así
+            // ni una pasada de más ni una función hidratada sin esa columna la mueven (EF-08.2).
             $base->ejecutar(
-                'UPDATE funcion SET estado = ?, fecha_hora = ? WHERE id = ?',
-                [$funcion->estado, $funcion->fechaHora, $funcion->id],
+                'UPDATE funcion SET estado = ?, fecha_hora = ?, finalizada_en = COALESCE(finalizada_en, ?) WHERE id = ?',
+                [$funcion->estado, $funcion->fechaHora, $funcion->finalizadaEn, $funcion->id],
             );
             if (in_array($funcion->estado, [EstadoFuncion::EnVotacionTitulos, EstadoFuncion::Cancelada], true)) {
                 return;
@@ -592,6 +633,7 @@ final class RepositorioDeFunciones
             EstadoFuncion::from((string) $fila['estado']),
             $fila['fecha_hora'] === null ? null : new DateTimeImmutable((string) $fila['fecha_hora']),
             $fila['votacion_cierra_en'] === null ? null : new DateTimeImmutable((string) $fila['votacion_cierra_en']),
+            ($fila['finalizada_en'] ?? null) === null ? null : new DateTimeImmutable((string) $fila['finalizada_en']),
         );
     }
 }

@@ -54,7 +54,9 @@ final class SugerenciasTest extends TestCase
         $this->funciones[] = new FuncionFinalizada(
             $id,
             new DateTimeImmutable($fecha),
+            new DateTimeImmutable($fecha),
             40,
+            '3500.00',
             $sala,
             $sala === self::GALPON ? 'El Galpón' : 'Cineclub Norte',
             'organizadora',

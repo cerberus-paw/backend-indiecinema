@@ -25,8 +25,11 @@ final class Funcion
     public const PRECIO_MAXIMO = 99_999_999.99;
 
     /**
-     * @param non-empty-list<string> $obrasIds las candidatas mientras está en votación; después,
-     *                                         las que se proyectan
+     * @param non-empty-list<string> $obrasIds     las candidatas mientras está en votación; después,
+     *                                             las que se proyectan
+     * @param ?DateTimeImmutable     $finalizadaEn cuándo pasó a finalizada, no cuándo se dio: es el
+     *                                             cursor de la tarea del reparto (EF-08.2). Nula
+     *                                             mientras no esté finalizada
      */
     public function __construct(
         public readonly string $id,
@@ -37,6 +40,7 @@ final class Funcion
         public private(set) EstadoFuncion $estado = EstadoFuncion::EnVotacionTitulos,
         public private(set) ?DateTimeImmutable $fechaHora = null,
         public readonly ?DateTimeImmutable $votacionCierraEn = null,
+        public private(set) ?DateTimeImmutable $finalizadaEn = null,
     ) {
     }
 
@@ -281,6 +285,10 @@ final class Funcion
      * Una función programada termina cuando ya se proyectó: no antes de su fecha. La finaliza
      * FinalizacionDeFunciones, cuando pasó también la duración de las funciones de la sala.
      *
+     * Queda anotado el momento, que no es el de la función: la tarea corre cada cuarto de hora y,
+     * si no corrió, finaliza más tarde lo que ya se dio. El reparto de recaudación (EF-08.2) pide
+     * las finalizadas desde su última pasada, así que necesita esta fecha y no la de la función.
+     *
      * @throws ReglaIncumplida si no está programada, o si su fecha todavía no llegó
      */
     public function finalizar(DateTimeImmutable $ahora = new DateTimeImmutable()): void
@@ -291,6 +299,7 @@ final class Funcion
         }
 
         $this->estado = EstadoFuncion::Finalizada;
+        $this->finalizadaEn = $ahora;
     }
 
     /**

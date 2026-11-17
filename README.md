@@ -49,7 +49,7 @@ backend-indiecinema/
 ├── programacion/          /          obras, salas, funciones, cartelera y votación de títulos
 ├── funciones/             /funcion/  las reservas con el cupo de cada función, sus paneles y el acuerdo de fecha
 ├── moderacion/            /moderacion/  las solicitudes de sala y su bandeja (EF-07.2); lo demás de EF-07 y los términos llegan con EF-07 y EF-16
-└── recaudacion/           /recaudacion/: los reportes (EF-09) y el reparto de lo cobrado (EF-08.1); las liquidaciones llegan con EF-08.3
+└── recaudacion/           /recaudacion/: los reportes (EF-09) y el reparto de lo cobrado (EF-08.1, EF-08.2); las liquidaciones llegan con EF-08.3
 ```
 
 Lo que todavía no está (los beneficios, dentro de recaudación) se suma con la misma forma.
@@ -280,6 +280,19 @@ todo el sitio se vea igual aunque lo sirvan subsistemas distintos.
   anunciarlo antes, pero no anterior a ahora. Los porcentajes van en `DECIMAL(5,2)` y la base
   controla que sumen 100 exacto; la aplicación los maneja en centésimas de punto (70 % es 7000),
   porque con `float` un reparto como 33,33 / 33,33 / 33,34 no suma 100 y quedaría plata sin dueño.
+- **El reparto de cada función lo hace una tarea y queda escrito una sola vez** (`repartir`,
+  EF-08.2): la tarea le pide a programación las funciones finalizadas desde la última que repartió
+  —por `funcion.finalizada_en`, no por la fecha de la función, así una que se finalizó tarde no se
+  saltea— y a funciones lo cobrado de cada una, que ya viene neto de reembolsos. Guarda una fila en
+  `reparto` por función, con la clave única de `funcion_id` que hace que correrla de más no duplique
+  nada, y una en `reparto_parte` por beneficiario. Las partes suman exactamente lo cobrado: cada una
+  sale de una división entera y lo que se pierde en los redondeos queda en la parte de la
+  plataforma. Si una función proyectó varias obras, la parte del dueño se divide en partes iguales
+  entre ellas, y dos obras del mismo dueño son una sola parte, que es lo que se le va a liquidar.
+  Las funciones a la gorra, y las pagas que no cobraron un peso, quedan registradas con 0 y sin
+  partes: no reparten, pero así la tarea no las vuelve a mirar en cada pasada. Si una función no se
+  puede repartir, la tarea corta ahí y no sigue con las que vienen después, para no dejarla atrás
+  del cursor sin repartir.
 - **Las rutas dentro del contenedor copian las del disco** (`/src/backend-indiecinema/<subsistema>`
   y `/src/frontend-indiecinema`), así los repositorios `path` de Composer funcionan igual si se
   instala desde afuera o desde adentro del contenedor.
@@ -615,6 +628,11 @@ no duplica nada:
   las funciones de la sala) y deja «ausente» a quien no fue.
 - `recordar-funciones`: manda el recordatorio por correo a las reservas confirmadas de las
   funciones de las próximas 24 horas.
+- `repartir` (recaudación, una vez por hora, a los veinte): reparte lo cobrado de cada función paga
+  finalizada entre la sala, los dueños de las obras que se proyectaron y la plataforma, con los
+  porcentajes que regían en la fecha de la función (ver «El reparto de lo cobrado»). Le pide a
+  programación las finalizadas desde la última que repartió y a funciones lo cobrado de cada una,
+  que ya viene neto de reembolsos. Las funciones a la gorra no reparten.
 - `suspender-vencidas` (moderación, una vez por día): suspende las salas con el seguro o la
   habilitación aceptados vencidos y las apaga en programación, hasta que se acepte uno nuevo. Le
   avisa por correo al organizador siete días antes y al suspenderla. Con `[documentos]

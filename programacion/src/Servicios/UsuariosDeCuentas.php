@@ -81,28 +81,6 @@ final class UsuariosDeCuentas
         return $datos === null ? null : self::usuario($datos);
     }
 
-    /** Los roles que ya pueden publicar salas: se acumulan, como Rol::alcanza(). */
-    private const ALCANZAN_ORGANIZADOR = ['organizador', 'moderador', 'administrador'];
-
-    /**
-     * Le da el rol de organizador. Si ya lo tiene, o uno mayor, cuentas no cambia nada, así que se
-     * puede reintentar.
-     *
-     * @param string $administradorId quién aprobó la solicitud, para el registro de cuentas
-     *
-     * @throws ExcepcionHttp    503 si cuentas no responde a tiempo
-     * @throws RuntimeException si el usuario no existe o responde otra cosa
-     */
-    public function darOrganizador(string $id, string $administradorId): void
-    {
-        $datos = $this->cliente->post('cuentas', "/interno/usuarios/{$id}/roles", [
-            'rol' => 'organizador',
-            'otorgado_por' => $administradorId,
-        ]);
-        if ($datos === null || array_intersect(self::ALCANZAN_ORGANIZADOR, self::usuario($datos)->roles) === []) {
-            throw new RuntimeException("cuentas no le dio el rol de organizador al usuario {$id}.");
-        }
-    }
 
     /**
      * Lee la respuesta sin suponer nada: si falta un campo o tiene otro tipo, es que cuentas

@@ -104,7 +104,8 @@ final class ReembolsoAlCancelarTest extends TestCase
         // nginx siempre manda su secreto; sin sesión, sin usuario ni rol.
         $cabeceras['X-Nginx-Secreto'] = self::SECRETO;
         if ($usuario !== null) {
-            $cabeceras += ['X-Usuario-Id' => $usuario, 'X-Rol' => $rol];
+            // Con el correo verificado, que desde la verificación de cuentas es lo que pide reservar.
+            $cabeceras += ['X-Usuario-Id' => $usuario, 'X-Rol' => $rol, 'X-Correo-Verificado' => '1'];
         }
         $cuerpo = $metodo === 'POST' && $usuario !== null ? ['_csrf' => self::CSRF, ...$cuerpo] : $cuerpo;
         $this->log = fopen('php://memory', 'w+');

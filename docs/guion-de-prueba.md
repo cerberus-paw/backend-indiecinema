@@ -78,7 +78,7 @@ crean en el guion (pasos 14 y 16) se cancelan al final, así no quedan en la car
 | Paso | Qué hacer | Qué se tiene que ver |
 |---|---|---|
 | 30 | (Normal) Como organizador, en «Mis funciones», «Reservas» de la función del paso 22 | Las tres reservas (la del paso 27, cancelada) con su código, a nombre de quién están, los lugares, el total y el estado. Arriba, 3 de 3 lugares reservados. «Exportar listado» baja el CSV, también con el nombre |
-| 31 | Registrar la asistencia de la reserva confirmada de 2 lugares, con su código tal como lo muestra el comprobante | Pasa a «con asistencia» sin recargar la lista, y suma en «Asistentes registrados» |
+| 31 | Registrar la asistencia de la reserva confirmada de 2 lugares, con su código tal como lo muestra el comprobante | Como la función todavía no empezó, el error «La asistencia se registra desde una hora antes de la función: desde las … del …», y la reserva sigue confirmada. Desde una hora antes hasta que termina, pasa a «con asistencia» sin recargar la lista y suma en «Asistentes registrados» |
 | 32 | Cerrar sesión e ingresar como administrador. Abrir «Solicitudes de sala» | La solicitud del paso 11, primera entre las pendientes |
 | 33 | Aprobarla con un motivo | La sala aparece en «Salas», y el espectador del paso 8 pasa a organizador |
 | 34 | En «Usuarios y roles», buscar al usuario del paso 8 | Figura como organizador. Si se lo vuelve a espectador y se guarda, su sesión se cierra |

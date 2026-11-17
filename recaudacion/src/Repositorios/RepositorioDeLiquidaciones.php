@@ -48,11 +48,13 @@ final class RepositorioDeLiquidaciones
             $armadas = 0;
             foreach ($sumas as $beneficiarioId => $centavos) {
                 // Con el alias de la fila nueva, que es como se escribe desde MySQL 8.0.19;
-                // VALUES() quedó deprecado. Si ya está transferida, el monto se queda como está.
+                // VALUES() quedó deprecado. Las columnas de la que ya está van con el nombre de la
+                // tabla, porque con el alias quedan ambiguas. Si ya está transferida, no se mueve.
                 $base->ejecutar(
                     "INSERT INTO liquidacion (id, beneficiario_id, periodo, monto)
                      VALUES (?, ?, ?, ?) AS nueva
-                     ON DUPLICATE KEY UPDATE monto = IF(estado = 'pendiente', nueva.monto, monto)",
+                     ON DUPLICATE KEY UPDATE
+                         monto = IF(liquidacion.estado = 'pendiente', nueva.monto, liquidacion.monto)",
                     [Uuid::nuevo(), $beneficiarioId, $mes->comoTexto(), Monto::comoDecimal($centavos)],
                 );
                 ++$armadas;

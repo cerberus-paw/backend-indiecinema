@@ -60,9 +60,18 @@ final readonly class CredencialesDeMercadoPago
             throw new RuntimeException('«mercadopago.api» tiene que ser una URL http(s).');
         }
 
+        $accessToken = (string) $configuracion->requerir('mercadopago.access_token');
+        if ($accessToken === Configuracion::VALOR_DE_EJEMPLO) {
+            throw new RuntimeException('«mercadopago.access_token» sigue con el valor del ejemplo.');
+        }
+        $claveWebhook = (string) $configuracion->requerir('mercadopago.clave_webhook');
+        if ($claveWebhook === Configuracion::VALOR_DE_EJEMPLO) {
+            throw new RuntimeException('«mercadopago.clave_webhook» sigue con el valor del ejemplo.');
+        }
+
         return new self(
-            (string) $configuracion->requerir('mercadopago.access_token'),
-            (string) $configuracion->requerir('mercadopago.clave_webhook'),
+            $accessToken,
+            $claveWebhook,
             $minutos,
             rtrim($api, '/'),
         );

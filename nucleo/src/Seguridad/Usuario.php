@@ -14,12 +14,14 @@ namespace IndieCinema\Nucleo\Seguridad;
 final readonly class Usuario
 {
     /**
-     * @param ?string $nombre el nombre público, sólo para mostrar; null si nginx no lo mandó
+     * @param ?string $nombre           el nombre público, sólo para mostrar; null si nginx no lo mandó
+     * @param bool    $correoVerificado si cuentas informó el correo verificado en la sesión (X-02.3)
      */
     public function __construct(
         public string $id,
         public Rol $rol,
         public ?string $nombre = null,
+        public bool $correoVerificado = false,
     ) {
     }
 

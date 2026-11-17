@@ -7,7 +7,9 @@ namespace IndieCinema\Programacion\Servicios;
 use DateTimeImmutable;
 use IndieCinema\Nucleo\Http\ExcepcionHttp;
 use IndieCinema\Nucleo\Uuid;
+use IndieCinema\Programacion\Modelo\FuncionFinalizada;
 use IndieCinema\Programacion\Modelo\ResumenDeFuncion;
+use IndieCinema\Programacion\Repositorios\RepositorioDeBloqueos;
 use IndieCinema\Programacion\Repositorios\RepositorioDeFunciones;
 
 /**
@@ -16,8 +18,15 @@ use IndieCinema\Programacion\Repositorios\RepositorioDeFunciones;
  */
 final class ServicioDeFunciones
 {
-    public function __construct(private readonly RepositorioDeFunciones $funciones)
+    public function __construct(
+        private readonly RepositorioDeFunciones $funciones,
+        private readonly ?RepositorioDeBloqueos $bloqueos = null,
+    ) {
+    }
+
+    public function usuarioBloqueadoEnSala(string $salaId, string $usuarioId): bool
     {
+        return $this->bloqueos !== null && Uuid::esValido($usuarioId) && $this->bloqueos->estaBloqueado($salaId, $usuarioId);
     }
 
     /**
@@ -49,5 +58,15 @@ final class ServicioDeFunciones
     public function programadasEntre(DateTimeImmutable $desde, DateTimeImmutable $hasta, int $cuantas): array
     {
         return $this->funciones->programadasEntre($desde, $hasta, $cuantas);
+    }
+
+    /**
+     * Las finalizadas de un período, para la reportería de recaudación (EF-09).
+     *
+     * @return list<FuncionFinalizada>
+     */
+    public function finalizadasEntre(DateTimeImmutable $desde, DateTimeImmutable $hasta, ?string $organizadorId, ?string $duenoId, int $cuantas): array
+    {
+        return $this->funciones->finalizadasEntre($desde, $hasta, $organizadorId, $duenoId, $cuantas);
     }
 }

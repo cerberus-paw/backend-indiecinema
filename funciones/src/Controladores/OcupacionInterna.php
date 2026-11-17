@@ -6,6 +6,7 @@ namespace IndieCinema\Funciones\Controladores;
 
 use IndieCinema\Funciones\Modelo\Reserva;
 use IndieCinema\Funciones\Repositorios\RepositorioDeReservas;
+use IndieCinema\Funciones\Servicios\ServicioDeConducta;
 use IndieCinema\Nucleo\Controlador;
 use IndieCinema\Nucleo\Http\ExcepcionHttp;
 use IndieCinema\Nucleo\Http\Peticion;
@@ -25,8 +26,10 @@ final class OcupacionInterna extends Controlador
     /** Más que una página de la cartelera (hasta 100): un pedido más largo es un error de quien llama. */
     private const MAXIMO_POR_PEDIDO = 100;
 
-    public function __construct(private readonly RepositorioDeReservas $reservas)
-    {
+    public function __construct(
+        private readonly RepositorioDeReservas $reservas,
+        private readonly ?ServicioDeConducta $conducta = null,
+    ) {
     }
 
     /**
@@ -51,6 +54,11 @@ final class OcupacionInterna extends Controlador
         $usuario = $peticion->consulta('usuario');
         if (is_string($usuario) && Uuid::esValido($usuario)) {
             $datos['lugares_del_usuario'] = $this->reservas->lugaresOcupadosPorUsuario($id, $usuario);
+            $topeConducta = $this->conducta?->topeSimultaneoPara($usuario);
+            if ($topeConducta !== null) {
+                $datos['tope_reservas_conducta'] = $topeConducta;
+                $datos['reservas_activas_usuario'] = $this->reservas->activasDelUsuario($usuario);
+            }
         }
 
         return $this->json($datos);

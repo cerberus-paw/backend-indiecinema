@@ -48,6 +48,7 @@ final class PanelDeReservasTest extends TestCase
     private const CANCELADA = '56565656-5656-4656-8656-565656565656';
     /** La que no cobra entrada: su panel no muestra un total en pesos (EF-06.5). */
     private const A_LA_GORRA = '78787878-7878-4878-8878-787878787878';
+    private const VIEJA = '24242424-2424-4424-8424-242424242424';
     private const TOKEN_DE_PROGRAMACION = 'token-de-programacion';
 
     private static ServidorSmtpDePrueba $correo;
@@ -90,7 +91,7 @@ final class PanelDeReservasTest extends TestCase
      */
     private function pedir(string $metodo, string $ruta, ?string $usuario = self::ORGANIZADORA, string $rol = 'organizador', array $cuerpo = [], array $extra = []): Respuesta
     {
-        $cabeceras = $usuario === null ? [] : ['X-Nginx-Secreto' => self::SECRETO, 'X-Usuario-Id' => $usuario, 'X-Rol' => $rol];
+        $cabeceras = $usuario === null ? [] : ['X-Nginx-Secreto' => self::SECRETO, 'X-Usuario-Id' => $usuario, 'X-Rol' => $rol, 'X-Correo-Verificado' => '1'];
         $cabeceras = [...$cabeceras, ...$extra];
         $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion, new Log('funciones', fopen('php://memory', 'w')));
         parse_str((string) parse_url($ruta, PHP_URL_QUERY), $consulta);
@@ -195,7 +196,10 @@ final class PanelDeReservasTest extends TestCase
         self::assertMatchesRegularExpression('#Asistentes registrados</dt>\s*<dd class="panel-dato-valor"[^>]*>3</dd>#', $cuerpo);
         // Ninguna se pagó: con el cobro apagado se confirman sin pasar por Mercado Pago (EF-06.5).
         self::assertSame('$ 0', self::totalCobrado($cuerpo));
-        self::assertStringContainsString('<td>Eva</td>', $cuerpo);
+        self::assertStringContainsString('<span class="tabla-admin-principal">Eva</span>', $cuerpo);
+        self::assertStringContainsString('/organizador/bloqueados?sala=', $cuerpo);
+        self::assertStringContainsString('&amp;usuario=' . self::EVA, $cuerpo);
+        self::assertStringContainsString('Bloquear en la sala', $cuerpo);
     }
 
     // ---- El total cobrado del panel (EF-06.5) ------------------------------------------------
@@ -276,7 +280,7 @@ final class PanelDeReservasTest extends TestCase
         preg_match_all('#<a href="([^"]*)"[^>]*aria-current="page"#', $barra, $actuales);
 
         // Los enlaces van sin el prefijo de funciones: las pantallas del panel son de programación.
-        self::assertSame(['/', '/organizador/funciones', '/organizador/funciones/nueva', '/organizador/salas', '/solicitar-sala'], $enlaces);
+        self::assertSame(['/', '/organizador/bloqueados', '/organizador/funciones', '/organizador/funciones/nueva', '/organizador/pedidos', '/organizador/salas', '/recaudacion/reportes', '/solicitar-sala'], $enlaces);
         self::assertSame(['/organizador/funciones'], $actuales[1]);
         self::assertStringContainsString('Ana Prueba', $barra);
         self::assertStringContainsString('action="/cuenta/salir"', $barra);
@@ -607,6 +611,7 @@ final class PanelDeReservasTest extends TestCase
     {
         yield 'la lista' => ['GET', '/organizador/funciones/' . self::PROXIMA . '/reservas'];
         yield 'la asistencia' => ['POST', '/organizador/funciones/' . self::PROXIMA . '/asistencia'];
+        yield 'la conducta' => ['POST', '/organizador/funciones/' . self::PROXIMA . '/conducta'];
         yield 'el CSV' => ['GET', '/organizador/funciones/' . self::PROXIMA . '/reservas.csv'];
     }
 
@@ -652,7 +657,69 @@ final class PanelDeReservasTest extends TestCase
         ))->estado();
 
         self::assertSame(403, $sinToken('/organizador/funciones/' . self::PROXIMA . '/asistencia', self::ORGANIZADORA, 'organizador'));
+        self::assertSame(403, $sinToken('/organizador/funciones/' . self::PROXIMA . '/conducta', self::ORGANIZADORA, 'organizador'));
         self::assertSame(403, $sinToken("/administracion/reservas/{$id}/anular", self::ADMINISTRADORA, 'administrador'));
         self::assertSame('confirmada', $this->estadoDe($codigo));
+    }
+
+    public function testCalificaLaConductaDeQuienesAsistieronEnHtmlYJsonYRechazaFueraDeRegla(): void
+    {
+        $asistioUno = $this->reserva(self::PROXIMA, 1, 'asistio', self::EVA);
+        $asistioDos = $this->reserva(self::PROXIMA, 1, 'asistio', self::ELIAS);
+        $confirmada = $this->reserva(self::PROXIMA, 1, 'confirmada', self::EVA);
+        $asistioVieja = $this->reserva(self::VIEJA, 1, 'asistio', self::EVA);
+        $idUno = (string) $this->base->valor('SELECT id FROM reserva WHERE codigo = ?', [$asistioUno]);
+        $idDos = (string) $this->base->valor('SELECT id FROM reserva WHERE codigo = ?', [$asistioDos]);
+        $idConfirmada = (string) $this->base->valor('SELECT id FROM reserva WHERE codigo = ?', [$confirmada]);
+        $idVieja = (string) $this->base->valor('SELECT id FROM reserva WHERE codigo = ?', [$asistioVieja]);
+        $ruta = '/organizador/funciones/' . self::PROXIMA . '/conducta';
+
+        // Negativa sin motivo se rechaza tanto en HTML como en JSON.
+        $sinMotivo = $this->pedir('POST', $ruta, cuerpo: ['reserva_id' => $idUno, 'positiva' => '0', 'motivo' => '   ']);
+        self::assertSame(422, $sinMotivo->estado());
+        self::assertStringContainsString('Escribí el motivo de la calificación negativa.', $sinMotivo->cuerpo());
+
+        $sinMotivoJson = $this->pedir('POST', $ruta, cuerpo: ['reserva_id' => $idUno, 'positiva' => '0', 'motivo' => ''], extra: self::ACEPTA_JSON);
+        self::assertSame(422, $sinMotivoJson->estado());
+        self::assertSame(['error' => 'Escribí el motivo de la calificación negativa.'], json_decode($sinMotivoJson->cuerpo(), true));
+
+        // Valor inválido de positiva se rechaza con 422.
+        $invalida = $this->pedir('POST', $ruta, cuerpo: ['reserva_id' => $idUno, 'positiva' => 'quizas'], extra: self::ACEPTA_JSON);
+        self::assertSame(422, $invalida->estado());
+
+        // Positiva en HTML redirige con 303 y luego la tabla muestra «Positiva».
+        $positiva = $this->pedir('POST', $ruta, cuerpo: ['reserva_id' => $idUno, 'positiva' => '1']);
+        self::assertSame(303, $positiva->estado());
+        self::assertSame('/funcion/organizador/funciones/' . self::PROXIMA . "/reservas?conducta={$asistioUno}", $positiva->cabecera('Location'));
+
+        $panel = $this->pedir('GET', '/organizador/funciones/' . self::PROXIMA . "/reservas?conducta={$asistioUno}");
+        self::assertSame(200, $panel->estado());
+        self::assertStringContainsString("Se calificó la conducta de la reserva {$asistioUno}.", $panel->cuerpo());
+        self::assertStringContainsString('<span class="tabla-admin-principal">Positiva</span>', $panel->cuerpo());
+
+        // Negativa con motivo en JSON devuelve el estado actualizado de la fila.
+        $negativa = $this->pedir('POST', $ruta, cuerpo: ['reserva_id' => $idDos, 'positiva' => '0', 'motivo' => 'Se retiró haciendo ruidos.'], extra: self::ACEPTA_JSON);
+        self::assertSame(200, $negativa->estado());
+        $datosNeg = json_decode($negativa->cuerpo(), true);
+        self::assertFalse($datosNeg['reserva']['conducta']['positiva']);
+        self::assertSame('Negativa', $datosNeg['reserva']['conducta']['etiqueta']);
+        self::assertSame('Se retiró haciendo ruidos.', $datosNeg['reserva']['conducta']['motivo']);
+        self::assertFalse($datosNeg['reserva']['calificable_conducta']);
+
+        // No permite recalificar la misma reserva.
+        $repetida = $this->pedir('POST', $ruta, cuerpo: ['reserva_id' => $idUno, 'positiva' => '0', 'motivo' => 'Cambio'], extra: self::ACEPTA_JSON);
+        self::assertSame(422, $repetida->estado());
+        self::assertStringContainsString('ya fue calificada', json_decode($repetida->cuerpo(), true)['error']);
+
+        // No permite calificar sin asistencia ni pasados los 7 días de la función.
+        $sinAsistencia = $this->pedir('POST', $ruta, cuerpo: ['reserva_id' => $idConfirmada, 'positiva' => '1'], extra: self::ACEPTA_JSON);
+        self::assertSame(422, $sinAsistencia->estado());
+        self::assertStringContainsString('asistencia registrada', json_decode($sinAsistencia->cuerpo(), true)['error']);
+
+        $vencida = $this->pedir('POST', '/organizador/funciones/' . self::VIEJA . '/conducta', cuerpo: ['reserva_id' => $idVieja, 'positiva' => '1'], extra: self::ACEPTA_JSON);
+        self::assertSame(422, $vencida->estado());
+        self::assertStringContainsString('Pasaron más de 7 días', json_decode($vencida->cuerpo(), true)['error']);
+
+        self::assertSame(2, (int) $this->base->valor('SELECT COUNT(*) FROM conducta'));
     }
 }

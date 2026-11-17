@@ -9,6 +9,7 @@ use IndieCinema\Nucleo\Configuracion;
 use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Log;
+use IndieCinema\Nucleo\Pruebas\Dobles\PaginasParaValidar;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -35,7 +36,7 @@ final class AcercaDeTest extends TestCase
         ]);
         $aplicacion = new Aplicacion(dirname(__DIR__), $configuracion, new Log('programacion', fopen('php://memory', 'w')));
 
-        return $aplicacion->atender(new Peticion('GET', $url, [], [], $cabeceras, [], []));
+        return PaginasParaValidar::anotar('GET', $url, $aplicacion->atender(new Peticion('GET', $url, [], [], $cabeceras, [], [])));
     }
 
     /**
@@ -59,7 +60,7 @@ final class AcercaDeTest extends TestCase
         self::assertStringContainsString('<title>Acerca de IndieCinema · IndieCinema</title>', $cuerpo);
         self::assertStringContainsString('<section id="quienes-somos"', $cuerpo);
         self::assertStringContainsString('<section id="como-funciona"', $cuerpo);
-        self::assertSame(4, substr_count($cuerpo, '<li class="acerca-de-paso">'));
+        self::assertStringContainsString('href="/como-funciona"', $cuerpo);
         self::assertStringContainsString('Grupo Cerberus', $cuerpo);
     }
 
@@ -69,14 +70,32 @@ final class AcercaDeTest extends TestCase
 
         // «Acerca de» y «Cómo funciona», y los dos llevan a una ruta que existe.
         self::assertMatchesRegularExpression('#<a href="/acerca-de" class="nav-enlace[^"]*">Acerca de</a>#', $enLaPagina);
-        self::assertStringContainsString('<a href="/acerca-de#como-funciona" class="nav-enlace">Cómo funciona</a>', $enLaPagina);
+        self::assertStringContainsString('<a href="/como-funciona" class="nav-enlace">Cómo funciona</a>', $enLaPagina);
         // En la página, «Acerca de» queda marcado como activo.
         self::assertStringContainsString('<a href="/acerca-de" class="nav-enlace activo">Acerca de</a>', $enLaPagina);
-        // Ni el encabezado ni el pie llevan a /como-funciona, que no existe.
         $encabezadoYPie = self::encabezadoYPie($enLaPagina);
-        self::assertStringContainsString('href="/acerca-de#como-funciona"', $encabezadoYPie);
-        self::assertStringNotContainsString('href="/como-funciona"', $encabezadoYPie);
-        self::assertSame(404, $this->pedir('/como-funciona')->estado());
+        self::assertStringContainsString('href="/como-funciona"', $encabezadoYPie);
+
+        $comoFunciona = $this->pedir('/como-funciona');
+        self::assertSame(200, $comoFunciona->estado(), $comoFunciona->cuerpo());
+        self::assertStringContainsString('<a href="/como-funciona" class="nav-enlace activo">Cómo funciona</a>', $comoFunciona->cuerpo());
+    }
+
+    public function testComoFuncionaExplicaElCircuitoYLosRoles(): void
+    {
+        $respuesta = $this->pedir('/como-funciona');
+
+        self::assertSame(200, $respuesta->estado(), $respuesta->cuerpo());
+        $cuerpo = $respuesta->cuerpo();
+        self::assertStringContainsString('<h1 class="acerca-de-titulo">Cómo funciona IndieCinema</h1>', $cuerpo);
+        self::assertStringContainsString('<title>Cómo funciona · IndieCinema</title>', $cuerpo);
+        self::assertSame(6, substr_count($cuerpo, '<li class="acerca-de-paso">'));
+        self::assertSame(4, substr_count($cuerpo, '<li class="acerca-de-rol">'));
+        self::assertStringContainsString('Espectador', $cuerpo);
+        self::assertStringContainsString('Organizador', $cuerpo);
+        self::assertStringContainsString('Dueño de la obra', $cuerpo);
+        self::assertStringContainsString('Moderador', $cuerpo);
+        self::assertSaltaAlContenido($cuerpo);
     }
 
     public function testLosEncabezadosNoSaltanNiveles(): void

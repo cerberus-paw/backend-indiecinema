@@ -138,18 +138,20 @@ final class LiberacionDeVencidasTest extends TestCase
 
     /**
      * El panel del organizador tampoco la cuenta entre las reservadas, ni la pendiente a tiempo
-     * en lo recaudado.
+     * en lo recaudado, que cuenta sólo lo que de verdad se cobró (EF-06.5).
      */
     public function testElPanelNoCuentaLaVencidaNiSumaLoQueTodaviaNoSePago(): void
     {
         $this->reservada('12:00', 3);
         $this->reservada('12:20', 2);
-        $this->reservada('11:00', 4, pendiente: false);
+        $pagada = $this->reservada('11:00', 4, pendiente: false);
+        $this->base->ejecutar("UPDATE reserva SET pago_id = '1324567890' WHERE id = ?", [$pagada->id]);
 
         $resumen = ServicioDePanelDeReservas::resumen(self::funcion(), $this->reservas->deLaFuncion(self::funcion()->id), self::enArgentina('2026-10-20 12:25:00'));
 
         self::assertSame(6, $resumen['reservados']);
         self::assertSame(34, $resumen['libres']);
+        // Los 14000 de la pagada: la vencida y la que está a tiempo todavía no pusieron nada.
         self::assertEquals(14000, $resumen['recaudado']);
         self::assertSame(2, $resumen['reservas']);
     }

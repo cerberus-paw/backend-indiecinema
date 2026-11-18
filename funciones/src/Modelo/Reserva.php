@@ -54,6 +54,8 @@ final readonly class Reserva
         public ?string $pagoId = null,
         public ?string $reembolsoId = null,
         public ?DateTimeImmutable $reembolsadaEn = null,
+        // El cupón de descuento de recaudación con el que se reservó (EF-17.1), o null.
+        public ?string $cupon = null,
     ) {
     }
 
@@ -101,6 +103,20 @@ final readonly class Reserva
     }
 
     /**
+     * La misma reserva nueva con un cupón de descuento de recaudación (EF-17.1): el precio de cada
+     * lugar baja el porcentaje del cupón, redondeado al centavo, y el total es ese precio por la
+     * cantidad. Así el total se divide justo por la cantidad, que es como lo cobra Mercado Pago
+     * (unit_price × quantity), y lo pagado coincide con el total al centavo.
+     */
+    public function conCupon(string $codigo, int $porcentaje, float $precioBase): self
+    {
+        $porLugar = round($precioBase * (100 - $porcentaje) / 100, 2);
+        $total = number_format(round($porLugar * $this->cantidad, 2), 2, '.', '');
+
+        return new self($this->id, $this->funcionId, $this->usuarioId, $this->codigo, $this->cantidad, $total, $this->estado, $this->creadaEn, $this->venceEn, $this->preferenciaId, $this->enlaceDePago, $this->pagoId, $this->reembolsoId, $this->reembolsadaEn, $codigo);
+    }
+
+    /**
      * Si el plazo para pagarla ya pasó: entonces ya no retiene sus lugares, aunque todavía no se
      * haya marcado como cancelada.
      */
@@ -114,7 +130,7 @@ final readonly class Reserva
      */
     public function conPreferencia(string $preferenciaId, string $enlaceDePago): self
     {
-        return new self($this->id, $this->funcionId, $this->usuarioId, $this->codigo, $this->cantidad, $this->total, $this->estado, $this->creadaEn, $this->venceEn, $preferenciaId, $enlaceDePago, $this->pagoId, $this->reembolsoId, $this->reembolsadaEn);
+        return new self($this->id, $this->funcionId, $this->usuarioId, $this->codigo, $this->cantidad, $this->total, $this->estado, $this->creadaEn, $this->venceEn, $preferenciaId, $enlaceDePago, $this->pagoId, $this->reembolsoId, $this->reembolsadaEn, $this->cupon);
     }
 
     /**
@@ -141,7 +157,7 @@ final readonly class Reserva
         }
         $confirmada = $this->pasarA(EstadoReserva::Confirmada);
 
-        return new self($confirmada->id, $confirmada->funcionId, $confirmada->usuarioId, $confirmada->codigo, $confirmada->cantidad, $confirmada->total, $confirmada->estado, $confirmada->creadaEn, $confirmada->venceEn, $confirmada->preferenciaId, $confirmada->enlaceDePago, $pagoId, $confirmada->reembolsoId, $confirmada->reembolsadaEn);
+        return new self($confirmada->id, $confirmada->funcionId, $confirmada->usuarioId, $confirmada->codigo, $confirmada->cantidad, $confirmada->total, $confirmada->estado, $confirmada->creadaEn, $confirmada->venceEn, $confirmada->preferenciaId, $confirmada->enlaceDePago, $pagoId, $confirmada->reembolsoId, $confirmada->reembolsadaEn, $confirmada->cupon);
     }
 
     /**
@@ -170,7 +186,7 @@ final readonly class Reserva
      */
     public function conOtroCodigo(): self
     {
-        return new self($this->id, $this->funcionId, $this->usuarioId, self::nuevoCodigo(), $this->cantidad, $this->total, $this->estado, $this->creadaEn, $this->venceEn, $this->preferenciaId, $this->enlaceDePago, $this->pagoId, $this->reembolsoId, $this->reembolsadaEn);
+        return new self($this->id, $this->funcionId, $this->usuarioId, self::nuevoCodigo(), $this->cantidad, $this->total, $this->estado, $this->creadaEn, $this->venceEn, $this->preferenciaId, $this->enlaceDePago, $this->pagoId, $this->reembolsoId, $this->reembolsadaEn, $this->cupon);
     }
 
     /**
@@ -213,7 +229,7 @@ final readonly class Reserva
      */
     public function conReembolso(string $reembolsoId, DateTimeImmutable $ahora = new DateTimeImmutable()): self
     {
-        return new self($this->id, $this->funcionId, $this->usuarioId, $this->codigo, $this->cantidad, $this->total, $this->estado, $this->creadaEn, $this->venceEn, $this->preferenciaId, $this->enlaceDePago, $this->pagoId, $reembolsoId, $ahora->setTimezone(new DateTimeZone('UTC')));
+        return new self($this->id, $this->funcionId, $this->usuarioId, $this->codigo, $this->cantidad, $this->total, $this->estado, $this->creadaEn, $this->venceEn, $this->preferenciaId, $this->enlaceDePago, $this->pagoId, $reembolsoId, $ahora->setTimezone(new DateTimeZone('UTC')), $this->cupon);
     }
 
     /**
@@ -225,7 +241,7 @@ final readonly class Reserva
             throw new ReglaIncumplida("Una reserva {$this->estado->etiqueta()} no puede quedar {$siguiente->etiqueta()}.");
         }
 
-        return new self($this->id, $this->funcionId, $this->usuarioId, $this->codigo, $this->cantidad, $this->total, $siguiente, $this->creadaEn, $this->venceEn, $this->preferenciaId, $this->enlaceDePago, $this->pagoId, $this->reembolsoId, $this->reembolsadaEn);
+        return new self($this->id, $this->funcionId, $this->usuarioId, $this->codigo, $this->cantidad, $this->total, $siguiente, $this->creadaEn, $this->venceEn, $this->preferenciaId, $this->enlaceDePago, $this->pagoId, $this->reembolsoId, $this->reembolsadaEn, $this->cupon);
     }
 
     /**

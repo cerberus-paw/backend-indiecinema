@@ -180,18 +180,30 @@ final class Reservas extends Controlador
                 : $this->pantalla($funcion, ['cantidad' => $valor], ['cantidad' => $mensaje], usuario: $usuario, estado: 422);
         }
 
+        // El cupón de descuento (EF-17.1) es opcional: vacío, la reserva es la de siempre. Los
+        // códigos son de 8 letras y números, como los da recaudación; se aceptan en minúscula.
+        $cupon = $peticion->campo('cupon');
+        $cupon = is_string($cupon) ? strtoupper(trim($cupon)) : '';
+        if ($cupon !== '' && preg_match('/^[A-Z0-9]{8}$/', $cupon) !== 1) {
+            $mensaje = 'El cupón son 8 letras y números, como figura en «Mis puntos».';
+
+            return $enJson
+                ? $this->json(['errores' => ['cupon' => $mensaje], ...$this->lugaresDe($funcion, $usuario)], 422)
+                : $this->pantalla($funcion, ['cantidad' => $valor, 'cupon' => $cupon], ['cupon' => $mensaje], usuario: $usuario, estado: 422);
+        }
+
         // Un error de configuración, antes de guardar nada.
         $this->avisos->comprobarConfiguracion();
         $this->pagos->comprobarConfiguracion();
         try {
-            $reserva = $this->servicio->reservar($usuario, $funcion->id, $cantidad);
+            $reserva = $this->servicio->reservar($usuario, $funcion->id, $cantidad, cupon: $cupon === '' ? null : $cupon);
         } catch (ReglaIncumplida $error) {
             $estado = $error->getMessage() === FuncionDeProgramacion::MENSAJE_USUARIO_BLOQUEADO ? 403 : 422;
 
             // El mensaje de la regla es para el espectador («Quedan 2 lugares.»), no interno.
             return $enJson
                 ? $this->json(['error' => $error->getMessage(), ...$this->lugaresDe($funcion, $usuario)], $estado)
-                : $this->pantalla($funcion, ['cantidad' => $valor], error: $error->getMessage(), usuario: $usuario, estado: $estado);
+                : $this->pantalla($funcion, ['cantidad' => $valor, 'cupon' => $cupon], error: $error->getMessage(), usuario: $usuario, estado: $estado);
         }
 
         // Pendiente de pago: al paso «Pago», en el comprobante. El correo sale recién cuando llega
@@ -383,6 +395,8 @@ final class Reservas extends Controlador
             'vence' => $aTiempo && $reserva->venceEn !== null ? self::hora($reserva->venceEn) : null,
             'motivo' => $reserva->estado === EstadoReserva::Cancelada ? $motivo : null,
             'reembolsada_en' => $reserva->reembolsadaEn === null ? null : self::fecha($reserva->reembolsadaEn),
+            // Con qué cupón se reservó (EF-17.1): el comprobante lo dice junto al total.
+            'cupon' => $reserva->cupon,
         ];
     }
 

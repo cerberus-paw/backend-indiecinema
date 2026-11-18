@@ -8,6 +8,7 @@ use DateTimeImmutable;
 use DateTimeZone;
 use IndieCinema\Funciones\Modelo\AutorDelCambio;
 use IndieCinema\Funciones\Modelo\EstadoReserva;
+use IndieCinema\Funciones\Modelo\ReglaIncumplida;
 use IndieCinema\Funciones\Modelo\Reserva;
 use IndieCinema\Nucleo\BaseDeDatos;
 use IndieCinema\Nucleo\Http\ExcepcionHttp;
@@ -17,6 +18,9 @@ use PDOException;
 final class RepositorioDeReservas
 {
     private const CLAVE_DUPLICADA = 1062;
+
+    /** Cuando el cupón ya está en otra reserva (EF-17.1). */
+    public const CUPON_EN_USO = 'Ese cupón ya está en otra reserva tuya. Cancelala para usarlo en esta.';
 
     /**
      * Cuánto espera una reserva a que termine otra de la misma función. Cada una tarda
@@ -255,6 +259,7 @@ final class RepositorioDeReservas
             $fila['pago_id'],
             $fila['reembolso_id'],
             $fila['reembolsada_en'] === null ? null : new DateTimeImmutable($fila['reembolsada_en'], new DateTimeZone('UTC')),
+            $fila['cupon'] ?? null,
         );
     }
 
@@ -484,21 +489,81 @@ final class RepositorioDeReservas
     /**
      * @return bool false si el código ya es de otra reserva, y entonces no guardó nada
      */
+    /**
+     * @throws ReglaIncumplida si el cupón ya está en otra reserva que no se canceló: lo cuida el
+     *                         índice único de la base, también con dos reservas a la vez (EF-17.1)
+     */
     public function agregar(Reserva $reserva): bool
     {
         try {
             $this->base->ejecutar(
-                'INSERT INTO reserva (id, funcion_id, usuario_id, codigo, cantidad, total, estado, creada_en, vence_en) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                [$reserva->id, $reserva->funcionId, $reserva->usuarioId, $reserva->codigo, $reserva->cantidad, $reserva->total, $reserva->estado, $reserva->creadaEn, $reserva->venceEn],
+                'INSERT INTO reserva (id, funcion_id, usuario_id, codigo, cantidad, total, cupon, estado, creada_en, vence_en) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                [$reserva->id, $reserva->funcionId, $reserva->usuarioId, $reserva->codigo, $reserva->cantidad, $reserva->total, $reserva->cupon, $reserva->estado, $reserva->creadaEn, $reserva->venceEn],
             );
 
             return true;
         } catch (PDOException $error) {
-            // El id es un UUID nuevo: lo único que se puede repetir es el código.
             if (($error->errorInfo[1] ?? null) === self::CLAVE_DUPLICADA) {
+                if (str_contains((string) ($error->errorInfo[2] ?? ''), 'reserva_cupon_en_uso')) {
+                    throw new ReglaIncumplida(self::CUPON_EN_USO);
+                }
+
+                // El id es un UUID nuevo: si no es el cupón, lo que se repitió es el código.
                 return false;
             }
             throw $error;
         }
+    }
+
+    /**
+     * Si el cupón está en una reserva que no se canceló. Cancelar la reserva lo libera, venga de
+     * donde venga la cancelación: la columna cupon_en_uso la calcula la base con el estado.
+     */
+    public function cuponEnUso(string $codigo): bool
+    {
+        return $this->base->fila('SELECT 1 FROM reserva WHERE cupon_en_uso = ?', [$codigo]) !== null;
+    }
+
+    /**
+     * De estos cupones, los que están en una reserva que no se canceló (EF-17.1, para recaudación).
+     *
+     * @param list<string> $codigos
+     *
+     * @return list<string>
+     */
+    public function cuponesEnUso(array $codigos): array
+    {
+        if ($codigos === []) {
+            return [];
+        }
+
+        return array_map(
+            static fn (array $fila): string => (string) $fila['cupon_en_uso'],
+            $this->base->filas(
+                'SELECT cupon_en_uso FROM reserva WHERE cupon_en_uso IN (' . implode(', ', array_fill(0, count($codigos), '?')) . ')',
+                $codigos,
+            ),
+        );
+    }
+
+    /**
+     * Las reservas del espectador a las que asistió, de la más nueva a la más vieja: cada una
+     * suma puntos en recaudación (EF-17.1).
+     *
+     * @return list<array{reserva_id: string, codigo: string, creada_en: string}>
+     */
+    public function asistenciasDe(string $usuarioId): array
+    {
+        return array_map(
+            static fn (array $fila): array => [
+                'reserva_id' => (string) $fila['id'],
+                'codigo' => (string) $fila['codigo'],
+                'creada_en' => new DateTimeImmutable((string) $fila['creada_en'], new DateTimeZone('UTC'))->format(DATE_ATOM),
+            ],
+            $this->base->filas(
+                'SELECT id, codigo, creada_en FROM reserva WHERE usuario_id = ? AND estado = ? ORDER BY creada_en DESC, id',
+                [$usuarioId, EstadoReserva::Asistio],
+            ),
+        );
     }
 }

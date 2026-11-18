@@ -175,7 +175,7 @@ final class Reportes extends Controlador
 
         return (new Respuesta(CsvDeFunciones::armar($datos, TotalesDelPeriodo::deLaSala($datos, is_string($sala) && $sala !== '' ? $sala : null))))
             ->conCabecera('Content-Type', 'text/csv; charset=utf-8')
-            ->conCabecera('Content-Disposition', "attachment; filename=\"funciones-{$periodo->desde->format('Y-m-d')}-al-{$periodo->hasta->format('Y-m-d')}.csv\"");
+            ->conCabecera('Content-Disposition', 'attachment; filename="' . self::nombreDelCsv($periodo) . '"');
     }
 
     /**
@@ -263,8 +263,9 @@ final class Reportes extends Controlador
     }
 
     /**
-     * El período del filtro: el elegido o, si no se eligió nada, los últimos noventa días. Si el
-     * elegido no sirve, vuelve el error y lo que se había escrito, para mostrarlo en el formulario.
+     * El período del filtro: el elegido o, si no se eligió nada, todo. Un día vacío no pone límite
+     * de ese lado (Periodo::entre()), y el filtro lo sigue mostrando vacío. Si el elegido no sirve,
+     * vuelve el error y lo que se había escrito, para mostrarlo en el formulario.
      *
      * @return array{Periodo, array{desde: string, hasta: string, texto: ?string}, ?string}
      */
@@ -272,7 +273,7 @@ final class Reportes extends Controlador
     {
         $desde = $peticion->consulta('desde');
         $hasta = $peticion->consulta('hasta');
-        $periodo = Periodo::porDefecto(new DateTimeImmutable('today'));
+        $periodo = Periodo::todo(new DateTimeImmutable('today'));
         $error = null;
         if (is_string($desde) || is_string($hasta)) {
             try {
@@ -283,11 +284,19 @@ final class Reportes extends Controlador
         }
 
         return [$periodo, [
-            'desde' => is_string($desde) && $error !== null ? $desde : $periodo->desde->format('Y-m-d'),
-            'hasta' => is_string($hasta) && $error !== null ? $hasta : $periodo->hasta->format('Y-m-d'),
+            'desde' => is_string($desde) && $error !== null ? $desde : ($periodo->sinDesde ? '' : $periodo->desde->format('Y-m-d')),
+            'hasta' => is_string($hasta) && $error !== null ? $hasta : ($periodo->sinHasta ? '' : $periodo->hasta->format('Y-m-d')),
             // Con un error, el período por defecto no es el que se pidió: la bajada no lo nombra.
             'texto' => $error === null ? self::periodo($periodo) : null,
         ], $error];
+    }
+
+    /** «funciones-2026-10-01-al-2026-11-30.csv»; sin el primer día, «funciones-hasta-2026-11-30.csv». */
+    private static function nombreDelCsv(Periodo $periodo): string
+    {
+        $hasta = $periodo->hasta->format('Y-m-d');
+
+        return $periodo->sinDesde ? "funciones-hasta-{$hasta}.csv" : "funciones-{$periodo->desde->format('Y-m-d')}-al-{$hasta}.csv";
     }
 
     private static function usuario(Peticion $peticion): Usuario
@@ -355,12 +364,23 @@ final class Reportes extends Controlador
 
     /**
      * «del 1 al 30 de noviembre de 2026», «del 1 de agosto al 29 de octubre de 2026» o, si cambia
-     * el año, con los dos.
+     * el año, con los dos. Con un día vacío, «hasta el 30 de noviembre de 2026» o «desde el 1 de
+     * octubre de 2026»; sin ninguno, nada: es todo.
      */
-    private static function periodo(Periodo $periodo): string
+    private static function periodo(Periodo $periodo): ?string
     {
         [$desde, $hasta] = [$periodo->desde, $periodo->hasta];
         $mes = static fn (DateTimeImmutable $fecha): string => self::MESES[(int) $fecha->format('n')];
+        $dia = static fn (DateTimeImmutable $fecha): string => "{$fecha->format('j')} de {$mes($fecha)} de {$fecha->format('Y')}";
+        if ($periodo->sinDesde && $periodo->sinHasta) {
+            return null;
+        }
+        if ($periodo->sinDesde) {
+            return "hasta el {$dia($hasta)}";
+        }
+        if ($periodo->sinHasta) {
+            return "desde el {$dia($desde)}";
+        }
         if ($desde->format('Y') !== $hasta->format('Y')) {
             $primero = "{$desde->format('j')} de {$mes($desde)} de {$desde->format('Y')}";
         } elseif ($desde->format('n') !== $hasta->format('n')) {

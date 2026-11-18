@@ -12,17 +12,38 @@ use PHPUnit\Framework\TestCase;
 
 final class PeriodoTest extends TestCase
 {
-    public function testPorDefectoSonLosUltimosNoventaDiasConHoy(): void
-    {
-        $periodo = Periodo::porDefecto(new DateTimeImmutable('2026-11-12 18:30'));
+    private const HOY = '2026-11-12 18:30';
 
-        self::assertSame(['2026-08-15', '2026-11-12'], [$periodo->desde->format('Y-m-d'), $periodo->hasta->format('Y-m-d')]);
+    /**
+     * @return array{string, string, bool, bool}
+     */
+    private static function dias(Periodo $periodo): array
+    {
+        return [$periodo->desde->format('Y-m-d'), $periodo->hasta->format('Y-m-d'), $periodo->sinDesde, $periodo->sinHasta];
     }
 
-    public function testUnSoloDiaYUnAnioYUnDiaSirven(): void
+    public function testSinElegirNadaEsTodoHastaHoy(): void
+    {
+        self::assertSame([Periodo::PRINCIPIO, '2026-11-12', true, true], self::dias(Periodo::todo(new DateTimeImmutable(self::HOY))));
+        self::assertSame([Periodo::PRINCIPIO, '2026-11-12', true, true], self::dias(Periodo::entre('', '', new DateTimeImmutable(self::HOY))));
+    }
+
+    public function testSinElPrimerDiaEntraTodoLoAnteriorAlUltimo(): void
+    {
+        self::assertSame([Periodo::PRINCIPIO, '2026-10-31', true, false], self::dias(Periodo::entre('', '2026-10-31', new DateTimeImmutable(self::HOY))));
+    }
+
+    public function testSinElUltimoDiaLlegaHastaHoy(): void
+    {
+        self::assertSame(['2026-10-01', '2026-11-12', false, true], self::dias(Periodo::entre('2026-10-01', '', new DateTimeImmutable(self::HOY))));
+        // Desde un día que todavía no llegó: ese día solo, vacío, y no un período al revés.
+        self::assertSame(['2026-12-01', '2026-12-01', false, true], self::dias(Periodo::entre('2026-12-01', '', new DateTimeImmutable(self::HOY))));
+    }
+
+    public function testUnSoloDiaYMasDeUnAnioSirven(): void
     {
         self::assertSame('2026-11-12', Periodo::entre('2026-11-12', '2026-11-12')->hasta->format('Y-m-d'));
-        self::assertSame('2027-11-12', Periodo::entre('2026-11-11', '2027-11-12')->hasta->format('Y-m-d'));
+        self::assertSame('2028-11-12', Periodo::entre('2026-11-11', '2028-11-12')->hasta->format('Y-m-d'));
     }
 
     /**
@@ -30,10 +51,9 @@ final class PeriodoTest extends TestCase
      */
     public static function periodosQueNoSirven(): iterable
     {
-        yield 'sin el primer día' => ['', '2026-11-30', 'El primer día no es una fecha válida.'];
+        yield 'el primer día no es una fecha' => ['2026-13-01', '2026-11-30', 'El primer día no es una fecha válida.'];
         yield 'el 31 de febrero' => ['2026-02-01', '2026-02-31', 'El último día no es una fecha válida.'];
         yield 'al revés' => ['2026-11-30', '2026-11-01', 'El último día no puede ser anterior al primero.'];
-        yield 'más de un año' => ['2026-11-01', '2027-11-03', 'El período puede ser de un año como mucho.'];
     }
 
     #[DataProvider('periodosQueNoSirven')]

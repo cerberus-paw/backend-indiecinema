@@ -122,8 +122,8 @@ return static function (Router $router): void {
     $router->interna('GET', '/interno/funciones', [FuncionesInternas::class, 'varias'], ['funciones']);
 
     // Las salas de la bandeja de moderación (EF-07.1), y la de una solicitud: la habilita o la
-    // suspende.
-    $router->interna('GET', '/interno/salas', [SalasInternas::class, 'varias'], ['moderacion']);
+    // suspende. Cuentas pide los nombres de las que sigue un espectador (EF-15.4).
+    $router->interna('GET', '/interno/salas', [SalasInternas::class, 'varias'], ['moderacion', 'cuentas']);
     $router->interna('POST', '/interno/salas', [SalasInternas::class, 'crear'], ['moderacion']);
     // Las obras que revisa la moderación (EF-07.7).
     $router->interna('GET', '/interno/obras/pendientes', [ObrasInternas::class, 'pendientes'], ['moderacion']);

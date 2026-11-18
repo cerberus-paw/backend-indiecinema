@@ -43,7 +43,7 @@ trait ConBaseDePruebas
         // De la que depende a la que la tiene: reparto_parte apunta a reparto, y reparto al
         // parámetro con el que se repartió. La liquidación no apunta a ninguna: se arma con las
         // partes, pero una vez armada es por su cuenta.
-        foreach (['liquidacion', 'reparto_parte', 'reparto', 'parametro_reparto'] as $tabla) {
+        foreach (['comercio', 'liquidacion', 'reparto_parte', 'reparto', 'parametro_reparto'] as $tabla) {
             $base->ejecutar("DROP TABLE IF EXISTS {$tabla}");
         }
         foreach (glob(dirname(__DIR__) . '/migraciones/*.sql') ?: [] as $migracion) {

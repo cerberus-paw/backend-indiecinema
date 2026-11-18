@@ -5,6 +5,7 @@ declare(strict_types=1);
 use IndieCinema\Nucleo\Http\EstadoInterno;
 use IndieCinema\Nucleo\Ruteo\Router;
 use IndieCinema\Nucleo\Seguridad\Rol;
+use IndieCinema\Recaudacion\Controladores\Comercios;
 use IndieCinema\Recaudacion\Controladores\Liquidaciones;
 use IndieCinema\Recaudacion\Controladores\LiquidacionesDelAdministrador;
 use IndieCinema\Recaudacion\Controladores\ParametrosDeReparto;
@@ -14,7 +15,7 @@ use IndieCinema\Recaudacion\Controladores\Reportes;
  * Las rutas de recaudación, sin el prefijo que saca nginx. Cada una declara su rol mínimo; el
  * middleware del núcleo lo controla antes de llegar al controlador.
  *
- * Los beneficios (EF-17) se escriben acá. /recaudacion/ sola responde la página de error del sitio
+ * /recaudacion/ sola responde la página de error del sitio
  * con un 404.
  */
 return static function (Router $router): void {
@@ -40,6 +41,15 @@ return static function (Router $router): void {
     // quien hace las transferencias fuera del sitio.
     $router->get('/administracion/liquidaciones', [LiquidacionesDelAdministrador::class, 'mostrar'], Rol::Administrador);
     $router->post('/administracion/liquidaciones/{id}/transferida', [LiquidacionesDelAdministrador::class, 'marcarTransferida'], Rol::Administrador);
+
+    // Los comercios asociados y su beneficio (EF-17.3): la página es pública, para que se vean
+    // antes de crear una cuenta; el alta, la edición y la baja son del administrador.
+    $router->get('/beneficios', [Comercios::class, 'publicos']);
+    $router->get('/administracion/comercios', [Comercios::class, 'listar'], Rol::Administrador);
+    $router->post('/administracion/comercios', [Comercios::class, 'crear'], Rol::Administrador);
+    $router->get('/administracion/comercios/{id}', [Comercios::class, 'editar'], Rol::Administrador);
+    $router->post('/administracion/comercios/{id}', [Comercios::class, 'guardar'], Rol::Administrador);
+    $router->post('/administracion/comercios/{id}/activo', [Comercios::class, 'cambiarActivo'], Rol::Administrador);
 
     // Para comprobar que los otros subsistemas llegan hasta acá con su token.
     $router->interna('GET', '/interno/estado', [EstadoInterno::class, 'mostrar'], ['cuentas', 'programacion', 'funciones', 'moderacion']);

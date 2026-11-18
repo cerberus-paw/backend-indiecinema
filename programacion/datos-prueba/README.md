@@ -7,7 +7,7 @@ Cumple con los criterios de **E3-02.1**:
 - **12 obras** con su afiche real, correspondientes a clásicos históricos del cine en **dominio público**.
 - **15 funciones futuras** con cupo dentro de la capacidad de su sala, precio base y obras programadas.
 - **Sin datos personales reales**: nombres de salas y direcciones ficticias, organizadores de prueba (`@indiecinema.test`), y figuras históricas del cine.
-- **Imágenes de licencia libre**: afiches en **dominio público** e ilustraciones de salas bajo **Creative Commons Zero (CC0)**.
+- **Imágenes de licencia libre**: afiches en **dominio público** y fotos de salas de Wikimedia Commons (CC0 y CC BY-SA 4.0, con el autor al pie de la descripción).
 
 ---
 
@@ -72,8 +72,16 @@ Distribuidas entre las 4 salas, con cupo menor o igual a la capacidad de la sala
 ## 4. Licencias y Reproducibilidad
 
 - Los afiches son los originales de cada película, o un fotograma cuando Commons no tiene el afiche, todos en **dominio público** y bajados de Wikimedia Commons (lista abajo). Los fotogramas van recortados, apaisados y sin bandas negras.
-- Las fotos de salas son creaciones visuales originales para IndieCinema bajo licencia **CC0 1.0 Universal (Public Domain Dedication)**.
-- El script reproductor de las fotos de salas está versionado en `generar_imagenes.py` (también dibuja afiches, que ya no se usan: no pisar los de `afiches/`). Necesita Python 3 con Pillow y las fuentes Open Sans Condensed ExtraBold, Noto Serif y Adwaita Sans (todas con licencia libre) en las rutas que figuran al principio del script; si falta alguna, frena en vez de usar otra.
+- Las fotos de las salas son fotos reales de salas de cine de Wikimedia Commons, recortadas a 1200 × 750 (lista abajo). Las CC BY-SA piden nombrar al autor: va al pie de la descripción de cada sala, que es lo que se ve en su ficha. Antes eran imágenes generadas, y `generar_imagenes.py`, que las dibujaba, se borró (IC-659).
+
+### Origen de las fotos de las salas
+
+| Foto | Sala | Autor | Licencia | En Wikimedia Commons |
+| --- | --- | --- | --- | --- |
+| `c1a1a001000000000000000000000001.jpg` | Cine Club El Alambique | Mojmir Churavy | CC0 | [File:Kino Atlas Interier J.jpg](https://commons.wikimedia.org/wiki/File:Kino_Atlas_Interier_J.jpg) |
+| `c1a1a002000000000000000000000002.jpg` | Espacio Cultural La Trocha | Cosasdebeas | CC BY-SA 4.0 | [File:Patio de butacas del Teatro Cine Regio.JPG](https://commons.wikimedia.org/wiki/File:Patio_de_butacas_del_Teatro_Cine_Regio.JPG) |
+| `c1a1a003000000000000000000000003.jpg` | Cine Teatro Eureka | Tuxyso | CC BY-SA 4.0 | [File:Lichtburg-Essen-Kinosaal-2025.jpg](https://commons.wikimedia.org/wiki/File:Lichtburg-Essen-Kinosaal-2025.jpg) |
+| `c1a1a004000000000000000000000004.jpg` | Cine Club Areco | JIP | CC BY-SA 4.0 | [File:Auditorium at Maxim in May 2024.jpg](https://commons.wikimedia.org/wiki/File:Auditorium_at_Maxim_in_May_2024.jpg) |
 
 ### Origen de los afiches
 

@@ -22,13 +22,17 @@ final class UmbralesTest extends TestCase
         $ejemplo = Umbrales::desdeConfiguracion(Configuracion::desdeArchivo(dirname(__DIR__, 2) . '/config/config.ejemplo.ini'));
 
         self::assertEquals($ejemplo, $umbrales);
-        self::assertSame([50, 2, 90, 80, 4.0, 30], [
+        self::assertSame([50, 2, 90, 80, 4.0, 30, 20, 2, 5, 95], [
             $umbrales->diaFlojoOcupacionMaxima,
             $umbrales->diaFlojoFuncionesMinimas,
             $umbrales->repetirOcupacionMinima,
             $umbrales->repetirAsistenciaMinima,
             $umbrales->repetirPromedioMinimo,
             $umbrales->pedidoVotosMinimos,
+            $umbrales->gorraDiferenciaMinima,
+            $umbrales->gorraFuncionesMinimas,
+            $umbrales->votaronSinReservarMinimos,
+            $umbrales->agotadaOcupacionMinima,
         ]);
     }
 
@@ -38,9 +42,10 @@ final class UmbralesTest extends TestCase
             'dia_flojo_ocupacion_maxima' => '40',
             'repetir_promedio_minimo' => '4.5',
             'pedido_votos_minimos' => 25,
+            'votaron_sin_reservar_minimos' => '10',
         ]]));
 
-        self::assertSame([40, 4.5, 25, 90], [$umbrales->diaFlojoOcupacionMaxima, $umbrales->repetirPromedioMinimo, $umbrales->pedidoVotosMinimos, $umbrales->repetirOcupacionMinima]);
+        self::assertSame([40, 4.5, 25, 90, 10], [$umbrales->diaFlojoOcupacionMaxima, $umbrales->repetirPromedioMinimo, $umbrales->pedidoVotosMinimos, $umbrales->repetirOcupacionMinima, $umbrales->votaronSinReservarMinimos]);
     }
 
     /**
@@ -52,6 +57,10 @@ final class UmbralesTest extends TestCase
         yield 'un porcentaje con decimales' => [['repetir_ocupacion_minima' => '90.5']];
         yield 'más de 100 %' => [['dia_flojo_ocupacion_maxima' => 120]];
         yield 'ninguna función' => [['dia_flojo_funciones_minimas' => 0]];
+        yield 'ninguna función de cada tipo' => [['gorra_funciones_minimas' => 0]];
+        yield 'ninguna persona sin reservar' => [['votaron_sin_reservar_minimos' => 0]];
+        yield 'una diferencia de más de 100' => [['gorra_diferencia_minima' => 120]];
+        yield 'agotada con más del 100 %' => [['agotada_ocupacion_minima' => 101]];
         yield 'un promedio de 6' => [['repetir_promedio_minimo' => 6]];
         yield 'un promedio que no es un número' => [['repetir_promedio_minimo' => 'alto']];
     }

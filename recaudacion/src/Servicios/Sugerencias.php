@@ -7,10 +7,13 @@ namespace IndieCinema\Recaudacion\Servicios;
 use IndieCinema\Recaudacion\Modelo\DatosDelReporte;
 use IndieCinema\Recaudacion\Modelo\DiaFlojo;
 use IndieCinema\Recaudacion\Modelo\FuncionFinalizada;
+use IndieCinema\Recaudacion\Modelo\ObraAgotada;
 use IndieCinema\Recaudacion\Modelo\PedidoDelPublico;
+use IndieCinema\Recaudacion\Modelo\PrecioDeLaEntrada;
 use IndieCinema\Recaudacion\Modelo\RendimientoDeSala;
 use IndieCinema\Recaudacion\Modelo\TituloParaRepetir;
 use IndieCinema\Recaudacion\Modelo\Umbrales;
+use IndieCinema\Recaudacion\Modelo\VotantesSinReserva;
 
 /**
  * Lo que el reporte sugiere hacer a partir del cruce (EF-09.1): no sólo cuánto se vendió, sino
@@ -31,6 +34,10 @@ final class Sugerencias
      * Los días de la semana en que cada sala vende poco, comparados con los demás: ahí conviene
      * una promoción (el ejemplo del profe: «el miércoles no va nadie»). Un día cuenta si tuvo
      * varias funciones, vendió hasta el umbral y vendió menos que el resto de la semana.
+     *
+     * Con cada día dice también qué dar (EF-09.5): la obra que el público de esa misma sala más
+     * votó sin que ganara. Es de la sala y no de todas porque el que tiene que venir el miércoles
+     * es su público, no el de otra.
      *
      * @return list<DiaFlojo> de la ocupación más baja a la más alta
      */
@@ -80,6 +87,7 @@ final class Sugerencias
                     $esteDia['funciones'],
                     self::porcentaje($esteDia['vendidas'], $esteDia['cupo']),
                     $restoCupo > 0 ? self::porcentaje($restoVendidas, $restoCupo) : null,
+                    $this->pedidos($datos, (string) $salaId)[0] ?? null,
                 );
             }
         }
@@ -152,9 +160,22 @@ final class Sugerencias
      */
     public function pedidosDelPublico(DatosDelReporte $datos): array
     {
+        return $this->pedidos($datos, null);
+    }
+
+    /**
+     * @param ?string $salaId sólo lo que se votó y se proyectó en esa sala, o null para todas
+     *
+     * @return list<PedidoDelPublico>
+     */
+    private function pedidos(DatosDelReporte $datos, ?string $salaId): array
+    {
         $proyectadas = [];
         $porObra = [];
         foreach ($datos->funciones as $funcion) {
+            if ($salaId !== null && $funcion->salaId !== $salaId) {
+                continue;
+            }
             foreach ($funcion->elegidas() as $obra) {
                 $proyectadas[$obra->id] = true;
             }
@@ -185,6 +206,135 @@ final class Sugerencias
         usort($pedidos, static fn (PedidoDelPublico $a, PedidoDelPublico $b): int => [$b->votos, $b->votaciones, $a->titulo] <=> [$a->votos, $a->votaciones, $b->titulo]);
 
         return $pedidos;
+    }
+
+    /**
+     * Las salas con gente que votó y no reservó nada (EF-09.5): personas, no porcentajes, porque
+     * una promoción apunta a gente. Se cuenta en todo el período y no por función: quien votó una
+     * y reservó otra de la misma sala ya vino.
+     *
+     * @return list<VotantesSinReserva> de la que más gente tiene sin reservar a la que menos
+     */
+    public function votaronSinReservar(DatosDelReporte $datos): array
+    {
+        $porSala = [];
+        foreach ($datos->funciones as $funcion) {
+            $ventas = $datos->ventasDe($funcion->id);
+            if ($ventas === null) {
+                continue;
+            }
+            $sala = $porSala[$funcion->salaId] ?? ['nombre' => $funcion->salaNombre, 'votantes' => [], 'compradores' => []];
+            foreach ($funcion->votantesIds as $id) {
+                $sala['votantes'][$id] = true;
+            }
+            foreach ($ventas->compradoresIds as $id) {
+                $sala['compradores'][$id] = true;
+            }
+            $porSala[$funcion->salaId] = $sala;
+        }
+
+        $salas = [];
+        foreach ($porSala as $salaId => $sala) {
+            $sinReserva = count(array_diff_key($sala['votantes'], $sala['compradores']));
+            if ($sinReserva >= $this->umbrales->votaronSinReservarMinimos) {
+                $salas[] = new VotantesSinReserva((string) $salaId, $sala['nombre'], count($sala['votantes']), $sinReserva);
+            }
+        }
+        usort($salas, static fn (VotantesSinReserva $a, VotantesSinReserva $b): int => [$b->sinReserva, $a->salaNombre] <=> [$a->sinReserva, $b->salaNombre]);
+
+        return $salas;
+    }
+
+    /**
+     * Las salas que dieron funciones a la gorra y con precio, cuando la diferencia dice algo
+     * (EF-09.5): si a la gorra llena bastante más, un descuento puede traer gente; si con precio
+     * llena lo mismo o más, se puede cobrar. En el medio no se sugiere nada.
+     *
+     * @return list<PrecioDeLaEntrada> de la mayor diferencia a la menor
+     */
+    public function precioDeLaEntrada(DatosDelReporte $datos): array
+    {
+        /** @var array<string, array{nombre: string, gorra: array{int, int, int}, pagas: array{int, int, int}}> $porSala */
+        $porSala = [];
+        foreach ($datos->funciones as $funcion) {
+            $ventas = $datos->ventasDe($funcion->id);
+            if ($ventas === null) {
+                continue;
+            }
+            $sala = $porSala[$funcion->salaId] ?? ['nombre' => $funcion->salaNombre, 'gorra' => [0, 0, 0], 'pagas' => [0, 0, 0]];
+            $tipo = $funcion->esALaGorra() ? 'gorra' : 'pagas';
+            [$funciones, $vendidas, $cupo] = $sala[$tipo];
+            $sala[$tipo] = [$funciones + 1, $vendidas + $ventas->vendidas, $cupo + $funcion->cupo];
+            $porSala[$funcion->salaId] = $sala;
+        }
+
+        $salas = [];
+        foreach ($porSala as $salaId => $sala) {
+            [$funcionesGorra, $vendidasGorra, $cupoGorra] = $sala['gorra'];
+            [$funcionesPagas, $vendidasPagas, $cupoPagas] = $sala['pagas'];
+            if ($funcionesGorra < $this->umbrales->gorraFuncionesMinimas || $funcionesPagas < $this->umbrales->gorraFuncionesMinimas) {
+                continue;
+            }
+            $gorra = self::porcentaje($vendidasGorra, $cupoGorra);
+            $pagas = self::porcentaje($vendidasPagas, $cupoPagas);
+            $sensible = $gorra - $pagas >= $this->umbrales->gorraDiferenciaMinima;
+            if (!$sensible && $pagas < $gorra) {
+                continue;
+            }
+            $salas[] = new PrecioDeLaEntrada((string) $salaId, $sala['nombre'], $funcionesGorra, $gorra, $funcionesPagas, $pagas, $sensible);
+        }
+        usort($salas, static fn (PrecioDeLaEntrada $a, PrecioDeLaEntrada $b): int => [abs($b->ocupacionGorra - $b->ocupacionPagas), $a->salaNombre]
+            <=> [abs($a->ocupacionGorra - $a->ocupacionPagas), $b->salaNombre]);
+
+        return $salas;
+    }
+
+    /**
+     * Las obras que agotaron funciones en una sala (EF-09.5): la demanda llegó al cupo y conviene
+     * sumar otra función. Por sala, porque lo que se agota es el lugar de esa sala.
+     *
+     * @return list<ObraAgotada> de la que más funciones agotó a la que menos
+     */
+    public function obrasAgotadas(DatosDelReporte $datos): array
+    {
+        $porObra = [];
+        foreach ($datos->funciones as $funcion) {
+            $ventas = $datos->ventasDe($funcion->id);
+            if ($ventas === null) {
+                continue;
+            }
+            $agotada = $ventas->vendidas * 100 >= $this->umbrales->agotadaOcupacionMinima * $funcion->cupo;
+            foreach ($funcion->elegidas() as $obra) {
+                $clave = "{$funcion->salaId} {$obra->id}";
+                $acumulado = $porObra[$clave] ?? ['obra' => $obra, 'funcion' => $funcion, 'funciones' => 0, 'agotadas' => 0, 'vendidas' => 0, 'cupo' => 0];
+                $porObra[$clave] = [
+                    ...$acumulado,
+                    'funciones' => $acumulado['funciones'] + 1,
+                    'agotadas' => $acumulado['agotadas'] + ($agotada ? 1 : 0),
+                    'vendidas' => $acumulado['vendidas'] + $ventas->vendidas,
+                    'cupo' => $acumulado['cupo'] + $funcion->cupo,
+                ];
+            }
+        }
+
+        $obras = [];
+        foreach ($porObra as $obra) {
+            if ($obra['agotadas'] > 0) {
+                $obras[] = new ObraAgotada(
+                    $obra['obra']->id,
+                    $obra['obra']->titulo,
+                    $obra['funcion']->salaId,
+                    $obra['funcion']->salaNombre,
+                    $obra['funciones'],
+                    $obra['agotadas'],
+                    self::porcentaje($obra['vendidas'], $obra['cupo']),
+                );
+            }
+        }
+        usort($obras, static fn (ObraAgotada $a, ObraAgotada $b): int => [$b->agotadas, $b->ocupacion, $a->titulo, $a->salaNombre]
+            <=> [$a->agotadas, $a->ocupacion, $b->titulo, $b->salaNombre]);
+
+        return $obras;
     }
 
     /**

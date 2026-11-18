@@ -49,6 +49,7 @@ final class SugerenciasTest extends TestCase
         ?CalificacionDeFuncion $calificacion = null,
         array $votantes = [],
         array $compradores = [],
+        string $precio = '3500.00',
     ): void {
         $id = 'funcion-' . (count($this->funciones) + 1);
         $this->funciones[] = new FuncionFinalizada(
@@ -56,7 +57,7 @@ final class SugerenciasTest extends TestCase
             new DateTimeImmutable($fecha),
             new DateTimeImmutable($fecha),
             40,
-            '3500.00',
+            $precio,
             $sala,
             $sala === self::GALPON ? 'El Galpón' : 'Cineclub Norte',
             'organizadora',
@@ -102,6 +103,21 @@ final class SugerenciasTest extends TestCase
 
         self::assertCount(1, $flojos);
         self::assertSame([self::GALPON, 3, 2, 50, 93], [$flojos[0]->salaId, $flojos[0]->dia, $flojos[0]->funciones, $flojos[0]->ocupacion, $flojos[0]->ocupacionResto]);
+        // Nadie votó nada que perdiera: no hay qué sugerir para ese día.
+        self::assertNull($flojos[0]->paraDar);
+    }
+
+    public function testElDiaFlojoSugiereLoQueElPublicoDeEsaSalaVotoYNoVio(): void
+    {
+        $this->funcion('2026-11-04 21:00', 10);
+        $this->funcion('2026-11-11 21:00', 10);
+        $this->funcion('2026-11-07 21:00', 38, obras: [self::obra('Zama', true, 6), self::obra('La ciénaga', false, 4)]);
+        // En el Norte perdió una con más votos, pero ése es otro público.
+        $this->funcion('2026-11-07 21:00', 38, obras: [self::obra('Zama', true, 5), self::obra('Rojo', false, 5)], sala: self::NORTE);
+
+        $flojos = self::sugerencias()->diasFlojos($this->datos());
+
+        self::assertSame(['La ciénaga', 1, 4, 40], [$flojos[0]->paraDar?->titulo, $flojos[0]->paraDar?->votaciones, $flojos[0]->paraDar?->votos, $flojos[0]->paraDar?->porcentaje]);
     }
 
     public function testUnLugarMasQueLaMitadYaNoEsFlojo(): void
@@ -239,6 +255,93 @@ final class SugerenciasTest extends TestCase
         self::assertSame([], self::sugerencias()->titulosParaRepetir($datos));
         self::assertSame([], self::sugerencias()->salasQueRinden($datos));
         self::assertNull(self::sugerencias()->total($datos));
+    }
+
+    // Votaron y no reservaron: 5 personas o más, contadas en todo el período de la sala.
+
+    public function testCuentaLasPersonasQueVotaronYNoReservaronNingunaFuncionDeLaSala(): void
+    {
+        $this->funcion('2026-11-04 21:00', 3, votantes: ['ana', 'beto', 'carla', 'dani', 'eva', 'fede', 'gala'], compradores: ['ana']);
+        // Beto votó la otra y reservó ésta: ya vino.
+        $this->funcion('2026-11-11 21:00', 3, compradores: ['beto']);
+        // En el Norte sólo son cuatro: no llega.
+        $this->funcion('2026-11-04 21:00', 3, sala: self::NORTE, votantes: ['ana', 'beto', 'carla', 'dani']);
+
+        $salas = self::sugerencias()->votaronSinReservar($this->datos());
+
+        self::assertCount(1, $salas);
+        self::assertSame([self::GALPON, 7, 5], [$salas[0]->salaId, $salas[0]->votantes, $salas[0]->sinReserva]);
+    }
+
+    // A la gorra o con precio: 20 puntos de diferencia y 2 funciones de cada tipo.
+
+    public function testSiALaGorraLlenaMuchoMasElPublicoEsSensibleAlPrecio(): void
+    {
+        $this->funcion('2026-11-04 21:00', 36, precio: '0.00');
+        $this->funcion('2026-11-11 21:00', 36, precio: '0.00');
+        $this->funcion('2026-11-07 21:00', 28);
+        $this->funcion('2026-11-14 21:00', 28);
+
+        $precios = self::sugerencias()->precioDeLaEntrada($this->datos());
+
+        self::assertCount(1, $precios);
+        self::assertSame([2, 90, 2, 70, true], [$precios[0]->funcionesGorra, $precios[0]->ocupacionGorra, $precios[0]->funcionesPagas, $precios[0]->ocupacionPagas, $precios[0]->sensible]);
+    }
+
+    public function testConMenosDe20PuntosDeDiferenciaNoSeSugiereNada(): void
+    {
+        $this->funcion('2026-11-04 21:00', 36, precio: '0.00');
+        $this->funcion('2026-11-11 21:00', 36, precio: '0.00');
+        $this->funcion('2026-11-07 21:00', 29);
+        $this->funcion('2026-11-14 21:00', 29);
+
+        self::assertSame([], self::sugerencias()->precioDeLaEntrada($this->datos()));
+    }
+
+    public function testSiConPrecioLlenaIgualSePuedeCobrar(): void
+    {
+        $this->funcion('2026-11-04 21:00', 20, precio: '0.00');
+        $this->funcion('2026-11-11 21:00', 20, precio: '0.00');
+        $this->funcion('2026-11-07 21:00', 20);
+        $this->funcion('2026-11-14 21:00', 21);
+
+        $precios = self::sugerencias()->precioDeLaEntrada($this->datos());
+
+        self::assertSame([50, 51, false], [$precios[0]->ocupacionGorra, $precios[0]->ocupacionPagas, $precios[0]->sensible]);
+    }
+
+    public function testConUnaSolaFuncionALaGorraNoSeCompara(): void
+    {
+        $this->funcion('2026-11-04 21:00', 40, precio: '0.00');
+        $this->funcion('2026-11-07 21:00', 10);
+        $this->funcion('2026-11-14 21:00', 10);
+
+        self::assertSame([], self::sugerencias()->precioDeLaEntrada($this->datos()));
+    }
+
+    // Sumá una función: una función con el 95 % o más vendido se agotó.
+
+    public function testUnaObraQueAgotoUnaFuncionEnUnaSalaPideOtra(): void
+    {
+        $this->funcion('2026-11-07 21:00', 38, obras: [self::obra('Rojo')]);
+        $this->funcion('2026-11-14 21:00', 30, obras: [self::obra('Rojo')]);
+        // 37 de 40 es el 92,5 %: no se agotó.
+        $this->funcion('2026-11-07 21:00', 37, obras: [self::obra('Zama')], sala: self::NORTE);
+
+        $obras = self::sugerencias()->obrasAgotadas($this->datos());
+
+        self::assertCount(1, $obras);
+        self::assertSame(['Rojo', self::GALPON, 2, 1, 85], [$obras[0]->titulo, $obras[0]->salaId, $obras[0]->funciones, $obras[0]->agotadas, $obras[0]->ocupacion]);
+    }
+
+    public function testSinVentasNoHayPrecioNiVotantesNiAgotadas(): void
+    {
+        $this->funcion('2026-11-04 21:00', 40, votantes: ['ana', 'beto', 'carla', 'dani', 'eva'], precio: '0.00');
+        $datos = $this->datos(conVentas: false);
+
+        self::assertSame([], self::sugerencias()->votaronSinReservar($datos));
+        self::assertSame([], self::sugerencias()->precioDeLaEntrada($datos));
+        self::assertSame([], self::sugerencias()->obrasAgotadas($datos));
     }
 
     // Salas que más rinden.

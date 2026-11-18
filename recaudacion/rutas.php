@@ -9,6 +9,7 @@ use IndieCinema\Recaudacion\Controladores\Comercios;
 use IndieCinema\Recaudacion\Controladores\Liquidaciones;
 use IndieCinema\Recaudacion\Controladores\LiquidacionesDelAdministrador;
 use IndieCinema\Recaudacion\Controladores\ParametrosDeReparto;
+use IndieCinema\Recaudacion\Controladores\Puntos;
 use IndieCinema\Recaudacion\Controladores\Reportes;
 
 /*
@@ -50,6 +51,12 @@ return static function (Router $router): void {
     $router->get('/administracion/comercios/{id}', [Comercios::class, 'editar'], Rol::Administrador);
     $router->post('/administracion/comercios/{id}', [Comercios::class, 'guardar'], Rol::Administrador);
     $router->post('/administracion/comercios/{id}/activo', [Comercios::class, 'cambiarActivo'], Rol::Administrador);
+
+    // Los puntos del espectador y el canje por un cupón de descuento (EF-17.1). El cupón lo
+    // consulta funciones al reservar.
+    $router->get('/puntos', [Puntos::class, 'mostrar'], Rol::Espectador);
+    $router->post('/puntos/canjear', [Puntos::class, 'canjear'], Rol::Espectador);
+    $router->interna('GET', '/interno/cupones/{codigo}', [Puntos::class, 'interno'], ['funciones']);
 
     // Para comprobar que los otros subsistemas llegan hasta acá con su token.
     $router->interna('GET', '/interno/estado', [EstadoInterno::class, 'mostrar'], ['cuentas', 'programacion', 'funciones', 'moderacion']);

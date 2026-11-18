@@ -99,6 +99,28 @@ if ($ruta === '/interno/calificaciones/resumen') {
 
     return;
 }
+// Los puntos (EF-17.1): la espectadora con doce asistencias y el espectador con tres; los demás,
+// ninguna. De los cupones, están «en uso» los que empiezan con USAD.
+if (preg_match('#^/interno/usuarios/([0-9a-f-]{36})/asistencias$#', $ruta, $partes) === 1) {
+    $cuantas = match ($partes[1]) {
+        '77777777-7777-4777-8777-777777777777' => 12,
+        '88888888-8888-4888-8888-888888888888' => 3,
+        default => 0,
+    };
+    $asistencias = [];
+    for ($n = 1; $n <= $cuantas; ++$n) {
+        $asistencias[] = ['reserva_id' => sprintf('a0000000-0000-4000-8000-%012d', $n), 'codigo' => sprintf('ASIS%04d', $n), 'creada_en' => sprintf('2026-10-%02dT20:00:00+00:00', $n)];
+    }
+    echo json_encode(['asistencias' => array_reverse($asistencias)]);
+
+    return;
+}
+if ($ruta === '/interno/cupones/en-uso') {
+    $pedidos = explode(',', (string) ($_GET['codigos'] ?? ''));
+    echo json_encode(['en_uso' => array_values(array_filter($pedidos, static fn (string $codigo): bool => str_starts_with($codigo, 'USAD')))]);
+
+    return;
+}
 if ($ruta === '/interno/cobros') {
     $ids = explode(',', (string) ($_GET['funciones'] ?? ''));
     echo json_encode(['cobros' => (object) array_combine($ids, array_map($cobros, $ids))]);

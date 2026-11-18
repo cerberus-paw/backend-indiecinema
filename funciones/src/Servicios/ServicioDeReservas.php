@@ -44,6 +44,7 @@ final class ServicioDeReservas
         private readonly ?PagosDeReservas $pagos = null,
         private readonly ?ServicioDeReembolsos $reembolsos = null,
         private readonly ?ServicioDeConducta $conducta = null,
+        private readonly ?CuponesDeRecaudacion $cupones = null,
     ) {
     }
 
@@ -251,9 +252,14 @@ final class ServicioDeReservas
         string $funcionId,
         int $cantidad,
         DateTimeImmutable $ahora = new DateTimeImmutable(),
+        ?string $cupon = null,
     ): Reserva {
         $funcion = $this->funcion($funcionId, $espectador->id);
         $reserva = Reserva::nueva($funcion, $espectador->id, $cantidad, $ahora, $this->pagos?->minutosParaPagar());
+        // Sin cupón, la reserva sigue exactamente el camino de siempre (EF-17.1).
+        if ($cupon !== null) {
+            $reserva = $this->aplicarCupon($reserva, $funcion, $cupon, $espectador->id, $ahora);
+        }
         $reserva = $this->agregar($funcion, $reserva, $ahora);
         if ($reserva->estado !== EstadoReserva::PendientePago || $this->pagos === null) {
             return $reserva;
@@ -273,6 +279,31 @@ final class ServicioDeReservas
         }
 
         return $conPreferencia;
+    }
+
+    /**
+     * La reserva con el descuento del cupón (EF-17.1), si el cupón es del espectador y no venció.
+     * Que no esté en otra reserva lo controla agregar(), con la función bloqueada, y al final el
+     * índice único de la base.
+     *
+     * @throws ReglaIncumplida si la función no se paga, o el cupón no existe, es de otro o venció
+     * @throws ExcepcionHttp   503 si recaudación no responde
+     */
+    private function aplicarCupon(Reserva $reserva, FuncionDeProgramacion $funcion, string $codigo, string $usuarioId, DateTimeImmutable $ahora): Reserva
+    {
+        if ($reserva->total === '0.00') {
+            throw new ReglaIncumplida('Esta función no se paga: no hace falta un cupón.');
+        }
+        $cupon = $this->cupones?->buscar($codigo);
+        // Uno ajeno se rechaza igual que uno que no existe: no se dice que el código es de otro.
+        if ($cupon === null || $cupon['usuario_id'] !== $usuarioId) {
+            throw new ReglaIncumplida('Ese cupón no existe. Revisá el código en «Mis puntos».');
+        }
+        if ($cupon['vence_en'] <= $ahora) {
+            throw new ReglaIncumplida('Ese cupón ya venció.');
+        }
+
+        return $reserva->conCupon($codigo, $cupon['porcentaje'], $funcion->precioBase);
     }
 
     /**
@@ -298,6 +329,9 @@ final class ServicioDeReservas
             $topeConducta = $this->conducta?->topeSimultaneoPara($reserva->usuarioId, $ahora);
             if ($topeConducta !== null && $this->reservas->activasDelUsuario($reserva->usuarioId, $ahora) >= $topeConducta) {
                 throw new ReglaIncumplida(Conducta::mensajeDeTopeBajoUmbral($topeConducta));
+            }
+            if ($reserva->cupon !== null && $this->reservas->cuponEnUso($reserva->cupon)) {
+                throw new ReglaIncumplida(RepositorioDeReservas::CUPON_EN_USO);
             }
             $yaReservados = $this->reservas->lugaresOcupadosPorUsuario($funcion->id, $reserva->usuarioId, $ahora);
             $maximo = self::maximoPorPersona($funcion);

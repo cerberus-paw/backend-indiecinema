@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace IndieCinema\Cuentas\Controladores;
 
 use IndieCinema\Cuentas\Modelo\UsuarioEnListado;
+use IndieCinema\Cuentas\Repositorios\RepositorioDeSeguimientos;
+use IndieCinema\Cuentas\Servicios\SalasDeProgramacion;
 use IndieCinema\Cuentas\Servicios\ServicioDeUsuarios;
 use IndieCinema\Cuentas\Servicios\SolicitudesDeModeracion;
 use IndieCinema\Nucleo\Controlador;
@@ -30,6 +32,8 @@ final class Inicio extends Controlador
     public function __construct(
         private readonly ServicioDeUsuarios $usuarios,
         private readonly SolicitudesDeModeracion $solicitudes,
+        private readonly RepositorioDeSeguimientos $seguimientos,
+        private readonly SalasDeProgramacion $salas,
     ) {
     }
 
@@ -56,7 +60,41 @@ final class Inicio extends Controlador
             ];
         }
 
+        $datos['seguidos'] = $this->seguidos($cuenta->id);
+
         return $this->vista('mi_cuenta.html.twig', $datos);
+    }
+
+    /**
+     * «Lo que seguís» (EF-15.4): las salas, con su nombre y localidad desde programación, y los
+     * organizadores, con el nombre de su cuenta. Lo que ya no existe no se muestra. Si
+     * programación no responde, las salas no se listan y la página lo avisa.
+     *
+     * @return array{salas: list<array{id: string, nombre: string, localidad: string}>, organizadores: list<array{id: string, nombre: string}>, salas_sin_datos: bool}
+     */
+    private function seguidos(string $usuarioId): array
+    {
+        $ids = $this->seguimientos->deUsuario($usuarioId);
+        $datosDeSalas = $this->salas->deVarias($ids['sala']);
+        $salas = [];
+        foreach ($ids['sala'] as $id) {
+            if (isset($datosDeSalas[$id])) {
+                $salas[] = ['id' => $id] + $datosDeSalas[$id];
+            }
+        }
+        $cuentas = $this->usuarios->buscarVarios($ids['organizador']);
+        $organizadores = [];
+        foreach ($ids['organizador'] as $id) {
+            if (isset($cuentas[$id])) {
+                $organizadores[] = ['id' => $id, 'nombre' => $cuentas[$id]->nombre];
+            }
+        }
+
+        return [
+            'salas' => $salas,
+            'organizadores' => $organizadores,
+            'salas_sin_datos' => $datosDeSalas === null && $ids['sala'] !== [],
+        ];
     }
 
     /**

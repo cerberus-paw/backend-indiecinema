@@ -73,6 +73,10 @@ final class Salas extends Controlador
                 'tiempo_entre_funciones' => $ficha->sala->datos->tiempoEntreFunciones,
                 // EF-07.8: se denuncia publicada, y no la denuncia su organizador.
                 'denunciable' => $ficha->sala->habilitada && $ficha->sala->organizadorId !== $peticion->usuario()?->id,
+                // EF-15.4: para el botón «Seguir» de la ficha. El estado lo pregunta el front a
+                // cuentas; el organizador no se sigue a sí mismo.
+                'organizador_id' => $ficha->sala->organizadorId,
+                'es_propia' => $ficha->sala->organizadorId === $peticion->usuario()?->id,
             ],
             'funciones' => FilaDeFuncion::todas(
                 $ficha->funciones,

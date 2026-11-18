@@ -49,7 +49,10 @@ jobs:
           MYSQL_ROOT_PASSWORD: pruebas
           MYSQL_DATABASE: pruebas
         ports: ["3306:3306"]
+        # Los datos en memoria (tmpfs): la base se tira al terminar, y crear tablas sin esperar al
+        # disco es lo que más tarda, porque cada prueba las rehace con las migraciones (IC-663).
         options: >-
+          --tmpfs /var/lib/mysql:rw
           --health-cmd="mysqladmin ping -h 127.0.0.1 -ppruebas"
           --health-interval=5s --health-timeout=5s --health-retries=24
     env:
@@ -57,6 +60,11 @@ jobs:
       PRUEBAS_MYSQL_PUERTO: 3306
       PRUEBAS_MYSQL_CLAVE: pruebas
     steps:
+      # Que MySQL no confirme cada escritura en el disco (IC-663): un service no acepta argumentos
+      # de mysqld, pero estas dos variables se cambian en caliente. Sólo para las pruebas, que no
+      # necesitan sobrevivir a un corte.
+      - name: MySQL sin esperar al disco
+        run: docker exec "${{ job.services.mysql.id }}" mysql -uroot -ppruebas -e "SET GLOBAL innodb_flush_log_at_trx_commit = 0; SET GLOBAL sync_binlog = 0;"
       # Los dos repositorios uno al lado del otro, como en la máquina de cada uno: los subsistemas
       # instalan el front desde ../../frontend-indiecinema.
       # La rama del front con el mismo nombre que ésta, si existe; si no, la rama a la que apunta

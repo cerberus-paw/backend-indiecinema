@@ -201,7 +201,8 @@ final class SalasDeLosDatosDePruebaTest extends TestCase
         $cuerpo = $respuesta->cuerpo();
         self::assertStringContainsString('<h1 class="ficha-sala-nombre">' . htmlspecialchars($sala['nombre']) . '</h1>', $cuerpo);
         self::assertStringContainsString(htmlspecialchars("{$sala['direccion']} · {$sala['localidad']}"), $cuerpo);
-        self::assertStringContainsString(htmlspecialchars($sala['descripcion']), $cuerpo);
+        // Como la muestra la ficha, con nl2br: el crédito de la foto va en un párrafo aparte.
+        self::assertStringContainsString(nl2br(htmlspecialchars($sala['descripcion'])), $cuerpo);
         self::assertStringContainsString("src=\"/salas/{$sala['id']}/imagen\"", $cuerpo);
         self::assertStringNotContainsString('Todavía no está publicada', $cuerpo);
         // Una fila por cada función de la sala, y cada una enlaza a su ficha con «Ver».

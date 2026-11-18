@@ -8,6 +8,7 @@ use IndieCinema\Nucleo\Controlador;
 use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Seguridad\Usuario;
+use IndieCinema\Programacion\Modelo\EstadoObra;
 use IndieCinema\Programacion\Modelo\Obra;
 use IndieCinema\Programacion\Modelo\PedidoDeTitulo;
 use IndieCinema\Programacion\Modelo\ReglaIncumplida;
@@ -72,7 +73,11 @@ final class PedidosDelOrganizador extends Controlador
         int $estado = 200,
     ): Respuesta {
         $disponibles = $this->pedidos->paraProgramar($organizador);
-        $obras = $this->obras->delOrganizador($organizador);
+        // Sólo las aprobadas sirven para tomar un pedido (EF-07.7); las pendientes se nombran aparte,
+        // para que sepa por qué la que acaba de cargar todavía no aparece.
+        $todas = $this->obras->delOrganizador($organizador);
+        $obras = array_values(array_filter($todas, static fn (Obra $obra): bool => $obra->estaAprobada()));
+        $pendientes = array_values(array_filter($todas, static fn (Obra $obra): bool => $obra->estado === EstadoObra::Pendiente));
 
         return $this->vista(self::PLANTILLA, [
             'pedidos' => array_map(
@@ -94,6 +99,7 @@ final class PedidosDelOrganizador extends Controlador
                 ],
                 $obras,
             ),
+            'obras_pendientes' => array_map(static fn (Obra $obra): string => $obra->titulo, $pendientes),
             'tomado' => $tomado,
             'error_general' => $errorGeneral,
         ], $estado);

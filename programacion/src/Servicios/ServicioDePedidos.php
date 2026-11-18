@@ -27,6 +27,9 @@ use Throwable;
  */
 final class ServicioDePedidos
 {
+    /** Para tomar un pedido con una obra que la moderación todavía no aprobó (EF-07.7). */
+    public const MENSAJE_OBRA_SIN_APROBAR = '«%s» todavía no la aprobó la moderación: vas a poder tomar el pedido con ella cuando esté en el catálogo.';
+
     public const UMBRAL_POR_OMISION = 5;
     public const POR_PAGINA_POR_OMISION = 12;
     public const PROMEDIO_PRIORIDAD = 4.0;
@@ -217,13 +220,19 @@ final class ServicioDePedidos
      * Vincula una obra del organizador al pedido activo, lo pasa a «tomado» y avisa por correo a
      * quienes se sumaron (EF-11.3).
      *
+     * Sólo con una obra aprobada (EF-07.7): una pendiente o rechazada no está en el catálogo, así
+     * que el correo llevaría a quienes se sumaron a una ficha que da 404.
+     *
      * @throws ExcepcionHttp   404 si el pedido no existe o la obra no es del organizador
-     * @throws ReglaIncumplida si no cumple estado activo o prioridad de 48 horas
+     * @throws ReglaIncumplida si la obra no está aprobada, o no cumple estado activo o prioridad de 48 horas
      */
     public function tomarConObra(Usuario $organizador, string $pedidoId, Obra $obra, ?DateTimeImmutable $ahora = null): PedidoDeTitulo
     {
         if (!Uuid::esValido($pedidoId) || $obra->duenoId !== $organizador->id) {
             throw ExcepcionHttp::noEncontrada();
+        }
+        if (!$obra->estaAprobada()) {
+            throw new ReglaIncumplida(sprintf(self::MENSAJE_OBRA_SIN_APROBAR, $obra->titulo));
         }
 
         $tienePrioridad = $this->tienePrioridad($organizador);

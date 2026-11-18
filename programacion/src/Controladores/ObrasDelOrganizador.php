@@ -61,6 +61,8 @@ final class ObrasDelOrganizador extends Controlador
         return $this->vista(self::PLANTILLA_LISTADO, [
             'obras' => $datosObras,
             'creada' => $peticion->consulta('creada') === '1',
+            // La cargó para un pedido: el pedido se toma cuando la aprueben.
+            'para_pedido' => $peticion->consulta('pedido') === '1',
             'guardada' => $peticion->consulta('guardada') === '1',
             'dada_de_baja' => $peticion->consulta('dada_de_baja') === '1',
             'error_baja' => $peticion->consulta('error_baja') === '1' ? self::BAJA_RECHAZADA : null,
@@ -132,10 +134,10 @@ final class ObrasDelOrganizador extends Controlador
         }
 
         try {
-            $obra = $this->servicio->crear($organizador, $datos, $formulario->imagen);
-            if ($pedidoId !== '') {
-                $this->pedidos->tomarConObra($organizador, $pedidoId, $obra);
-            }
+            // Desde un pedido, la obra nace pendiente como cualquier otra (EF-07.7): el pedido no se
+            // toma acá, porque el aviso llevaría a una ficha que no existe. Se toma desde «Pedidos
+            // para programar» cuando la moderación la aprueba.
+            $this->servicio->crear($organizador, $datos, $formulario->imagen);
         } catch (ReglaIncumplida $regla) {
             return $this->formulario([
                 'formulario' => $formulario,
@@ -144,7 +146,7 @@ final class ObrasDelOrganizador extends Controlador
             ], esEdicion: false, estado: 422);
         }
 
-        return $this->redirigir('/organizador/obras?creada=1');
+        return $this->redirigir('/organizador/obras?creada=1' . ($pedidoId !== '' ? '&pedido=1' : ''));
     }
 
     public function editar(Peticion $peticion): Respuesta

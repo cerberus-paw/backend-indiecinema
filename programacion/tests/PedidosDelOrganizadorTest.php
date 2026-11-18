@@ -323,6 +323,28 @@ final class PedidosDelOrganizadorTest extends TestCase
         self::assertSame(422, $this->pedir('POST', "/organizador/pedidos/{$segundoPedido}/tomar", self::ORGANIZADOR, cuerpo: ['obra_id' => ''])->estado());
     }
 
+    public function testNoSeTomaUnPedidoConUnaObraQueLaModeracionNoAprobo(): void
+    {
+        $this->crearSala(self::ORGANIZADOR, 'Sala Norte');
+        $aprobada = $this->crearObra(self::ORGANIZADOR, 'Obra Aprobada', 2019);
+        $pendiente = $this->crearObra(self::ORGANIZADOR, 'Amanecer', 1927);
+        $this->base->ejecutar("UPDATE obra SET estado = 'pendiente' WHERE id = ?", [$pendiente->id]);
+        $pedidoId = $this->crearPedidoActivo('Amanecer', 1927, 'F. W. Murnau', '-50 hours');
+
+        // El formulario sólo ofrece la aprobada y nombra la que espera a la moderación.
+        $panel = $this->pedir('GET', '/organizador/pedidos', self::ORGANIZADOR)->cuerpo();
+        self::assertStringContainsString("value=\"{$aprobada->id}\"", $panel);
+        self::assertStringNotContainsString("value=\"{$pendiente->id}\"", $panel);
+        self::assertStringContainsString('«Amanecer»', $panel);
+
+        // Aunque la mande igual, no la toma ni avisa: el correo llevaría a una ficha que da 404.
+        $toma = $this->pedir('POST', "/organizador/pedidos/{$pedidoId}/tomar", self::ORGANIZADOR, cuerpo: ['obra_id' => $pendiente->id]);
+        self::assertSame(422, $toma->estado());
+        self::assertStringContainsString('todavía no la aprobó la moderación', $toma->cuerpo());
+        self::assertSame('activo', $this->base->valor('SELECT estado FROM pedido_titulo WHERE id = ?', [$pedidoId]));
+        self::assertCount(0, self::$correo->correos());
+    }
+
     public function testTomaPedidoCargandoUnaObraNuevaPrecargada(): void
     {
         $sala = $this->crearSala(self::ORGANIZADOR, 'Sala Atlas');
@@ -354,7 +376,8 @@ final class PedidosDelOrganizadorTest extends TestCase
         self::assertSame(422, $invalido->estado());
         self::assertStringContainsString("name=\"pedido_id\" value=\"{$pedidoId}\"", $invalido->cuerpo());
 
-        // Al completar y guardar la obra, el pedido pasa a «tomado» y salen los avisos por correo.
+        // Al guardarla, la obra queda pendiente (EF-07.7) y el pedido sigue activo, sin avisos: el
+        // correo llevaría a una ficha que todavía no existe.
         $guardada = $this->pedir('POST', '/organizador/obras/nueva', self::ORGANIZADOR, cuerpo: [
             'pedido_id' => $pedidoId,
             'titulo' => 'El escarabajo de oro',
@@ -368,9 +391,17 @@ final class PedidosDelOrganizadorTest extends TestCase
         ], archivos: ['afiche' => Imagenes::subida('sala.png')]);
 
         self::assertSame(303, $guardada->estado());
-        self::assertSame('/organizador/obras?creada=1', $guardada->cabecera('Location'));
+        self::assertSame('/organizador/obras?creada=1&pedido=1', $guardada->cabecera('Location'));
 
         $obraId = (string) $this->base->valor("SELECT id FROM obra WHERE titulo = 'El escarabajo de oro'");
+        self::assertSame('pendiente', $this->base->valor('SELECT estado FROM obra WHERE id = ?', [$obraId]));
+        self::assertSame('activo', $this->base->valor('SELECT estado FROM pedido_titulo WHERE id = ?', [$pedidoId]));
+        self::assertCount(0, self::$correo->correos());
+
+        // Cuando la moderación la aprueba, se toma el pedido con ella y ahí salen los avisos.
+        $this->base->ejecutar("UPDATE obra SET estado = 'aprobada' WHERE id = ?", [$obraId]);
+        $toma = $this->pedir('POST', "/organizador/pedidos/{$pedidoId}/tomar", self::ORGANIZADOR, cuerpo: ['obra_id' => $obraId]);
+        self::assertSame(303, $toma->estado());
         $fila = $this->base->fila('SELECT estado, obra_id, tomado_por FROM pedido_titulo WHERE id = ?', [$pedidoId]);
         self::assertSame(['estado' => 'tomado', 'obra_id' => $obraId, 'tomado_por' => self::ORGANIZADOR], $fila);
         self::assertCount(2, self::$correo->correos());

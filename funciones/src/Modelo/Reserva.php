@@ -30,7 +30,14 @@ final readonly class Reserva
     private const LARGO_DEL_CODIGO = 8;
 
     /**
-     * @param string $total con dos decimales, como lo guarda la base: sin pasar por float
+     * @param string             $total         con dos decimales, como lo guarda la base: sin pasar por float
+     * @param ?DateTimeImmutable $venceEn       hasta cuándo se puede pagar, en UTC; sólo las pendientes de pago
+     * @param ?string            $preferenciaId la preferencia de Checkout Pro, una vez creada
+     * @param ?string            $enlaceDePago  adónde va el espectador a pagarla (su init_point)
+     * @param ?string            $pagoId        el pago de Mercado Pago que la confirmó
+     * @param ?string            $reembolsoId   el reembolso de ese pago, si la cancelación ya lo
+     *                                          devolvió (EF-06.4)
+     * @param ?DateTimeImmutable $reembolsadaEn cuándo se devolvió, en UTC
      */
     public function __construct(
         public string $id,
@@ -41,12 +48,24 @@ final readonly class Reserva
         public string $total,
         public EstadoReserva $estado,
         public DateTimeImmutable $creadaEn,
+        public ?DateTimeImmutable $venceEn = null,
+        public ?string $preferenciaId = null,
+        public ?string $enlaceDePago = null,
+        public ?string $pagoId = null,
+        public ?string $reembolsoId = null,
+        public ?DateTimeImmutable $reembolsadaEn = null,
+        // El cupón de descuento de recaudación con el que se reservó (EF-17.1), o null.
+        public ?string $cupon = null,
     ) {
     }
 
     /**
-     * Una reserva confirmada, si la función todavía admite reservas. El total queda fijo con el
-     * precio de ahora: si el organizador lo cambia después, la reserva no cambia.
+     * Una reserva nueva, si la función todavía admite reservas. El total queda fijo con el precio
+     * de ahora: si el organizador lo cambia después, la reserva no cambia.
+     *
+     * Con $minutosParaPagar (el cobro con Mercado Pago prendido), la de una función paga nace
+     * pendiente de pago y vence en esos minutos; la de una a la gorra no tiene nada que pagar y
+     * nace confirmada, como todas con el cobro apagado.
      *
      * @throws ReglaIncumplida si la cantidad no es positiva, o la función se canceló o ya empezó
      */
@@ -55,6 +74,7 @@ final readonly class Reserva
         string $usuarioId,
         int $cantidad,
         DateTimeImmutable $ahora = new DateTimeImmutable(),
+        ?int $minutosParaPagar = null,
     ): self {
         if ($cantidad < 1) {
             throw new ReglaIncumplida('Reservá al menos un lugar.');
@@ -64,24 +84,60 @@ final readonly class Reserva
             throw new ReglaIncumplida($motivo);
         }
 
+        $total = number_format(round($funcion->precioBase * $cantidad, 2), 2, '.', '');
+        // La base guarda las fechas en UTC (ver la migración).
+        $creadaEn = $ahora->setTimezone(new DateTimeZone('UTC'));
+        $sePaga = $minutosParaPagar !== null && $total !== '0.00';
+
         return new self(
             Uuid::nuevo(),
             $funcion->id,
             $usuarioId,
             self::nuevoCodigo(),
             $cantidad,
-            number_format(round($funcion->precioBase * $cantidad, 2), 2, '.', ''),
-            EstadoReserva::Confirmada,
-            // La base guarda las fechas en UTC (ver la migración).
-            $ahora->setTimezone(new DateTimeZone('UTC')),
+            $total,
+            $sePaga ? EstadoReserva::PendientePago : EstadoReserva::Confirmada,
+            $creadaEn,
+            $sePaga ? $creadaEn->modify("+{$minutosParaPagar} minutes") : null,
         );
+    }
+
+    /**
+     * La misma reserva nueva con un cupón de descuento de recaudación (EF-17.1): el precio de cada
+     * lugar baja el porcentaje del cupón, redondeado al centavo, y el total es ese precio por la
+     * cantidad. Así el total se divide justo por la cantidad, que es como lo cobra Mercado Pago
+     * (unit_price × quantity), y lo pagado coincide con el total al centavo.
+     */
+    public function conCupon(string $codigo, int $porcentaje, float $precioBase): self
+    {
+        $porLugar = round($precioBase * (100 - $porcentaje) / 100, 2);
+        $total = number_format(round($porLugar * $this->cantidad, 2), 2, '.', '');
+
+        return new self($this->id, $this->funcionId, $this->usuarioId, $this->codigo, $this->cantidad, $total, $this->estado, $this->creadaEn, $this->venceEn, $this->preferenciaId, $this->enlaceDePago, $this->pagoId, $this->reembolsoId, $this->reembolsadaEn, $codigo);
+    }
+
+    /**
+     * Si el plazo para pagarla ya pasó: entonces ya no retiene sus lugares, aunque todavía no se
+     * haya marcado como cancelada.
+     */
+    public function vencida(DateTimeImmutable $ahora = new DateTimeImmutable()): bool
+    {
+        return $this->estado === EstadoReserva::PendientePago && $this->venceEn !== null && $this->venceEn <= $ahora;
+    }
+
+    /**
+     * La misma reserva con la preferencia de Checkout Pro que la cobra.
+     */
+    public function conPreferencia(string $preferenciaId, string $enlaceDePago): self
+    {
+        return new self($this->id, $this->funcionId, $this->usuarioId, $this->codigo, $this->cantidad, $this->total, $this->estado, $this->creadaEn, $this->venceEn, $preferenciaId, $enlaceDePago, $this->pagoId, $this->reembolsoId, $this->reembolsadaEn, $this->cupon);
     }
 
     /**
      * La reserva cancelada, que suelta sus lugares. La entidad no cambia: el repositorio guarda el
      * cambio sólo si nadie la cambió antes (RepositorioDeReservas::guardarEstado()).
      *
-     * @throws ReglaIncumplida si no está confirmada
+     * @throws ReglaIncumplida si no está confirmada ni pendiente de pago
      */
     public function cancelar(): self
     {
@@ -89,9 +145,26 @@ final readonly class Reserva
     }
 
     /**
-     * La reserva de quien ya entró: el organizador la registra con el código en la puerta.
+     * La reserva pagada (X-01.4): la confirma el pago aprobado que avisó Mercado Pago, y queda
+     * anotado cuál, para no procesarlo dos veces.
      *
-     * @throws ReglaIncumplida si no está confirmada
+     * @throws ReglaIncumplida si no está pendiente de pago
+     */
+    public function confirmarPago(string $pagoId): self
+    {
+        if ($this->estado !== EstadoReserva::PendientePago) {
+            throw new ReglaIncumplida("Una reserva {$this->estado->etiqueta()} no espera ningún pago.");
+        }
+        $confirmada = $this->pasarA(EstadoReserva::Confirmada);
+
+        return new self($confirmada->id, $confirmada->funcionId, $confirmada->usuarioId, $confirmada->codigo, $confirmada->cantidad, $confirmada->total, $confirmada->estado, $confirmada->creadaEn, $confirmada->venceEn, $confirmada->preferenciaId, $confirmada->enlaceDePago, $pagoId, $confirmada->reembolsoId, $confirmada->reembolsadaEn, $confirmada->cupon);
+    }
+
+    /**
+     * La reserva de quien ya entró: el organizador la registra con el código en la puerta, o
+     * después, si la función ya terminó y la reserva quedó ausente.
+     *
+     * @throws ReglaIncumplida si no está confirmada ni ausente
      */
     public function registrarAsistencia(): self
     {
@@ -99,11 +172,64 @@ final readonly class Reserva
     }
 
     /**
+     * La reserva de quien no fue: la función terminó y nadie registró su asistencia (EF-04.1).
+     *
+     * @throws ReglaIncumplida si no está confirmada
+     */
+    public function marcarAusente(): self
+    {
+        return $this->pasarA(EstadoReserva::Ausente);
+    }
+
+    /**
      * La misma reserva con otro código, por si el sorteado ya era de otra.
      */
     public function conOtroCodigo(): self
     {
-        return new self($this->id, $this->funcionId, $this->usuarioId, self::nuevoCodigo(), $this->cantidad, $this->total, $this->estado, $this->creadaEn);
+        return new self($this->id, $this->funcionId, $this->usuarioId, self::nuevoCodigo(), $this->cantidad, $this->total, $this->estado, $this->creadaEn, $this->venceEn, $this->preferenciaId, $this->enlaceDePago, $this->pagoId, $this->reembolsoId, $this->reembolsadaEn, $this->cupon);
+    }
+
+    /**
+     * Si su plata está en la cuenta: se cobró con Mercado Pago y no se devolvió. Es lo que suman el
+     * total del panel del organizador (EF-06.5) y el neto que reparte recaudación (EF-02.5). Una a
+     * la gorra, una confirmada con el cobro apagado y una que venció sin pagar no tienen pago, así
+     * que no suman nada aunque su total diga otra cosa.
+     *
+     * No mira el estado: una cancelada que todavía no se reembolsó sigue contando, porque la plata
+     * sigue estando, y deja de contar en el momento en que vuelve.
+     */
+    public function cobrada(): bool
+    {
+        return $this->pagoId !== null && $this->reembolsoId === null;
+    }
+
+    /**
+     * Si hay plata que devolverle al espectador (EF-06.4): es exactamente la que está en la cuenta,
+     * la que cobrada() cuenta. Una a la gorra, una confirmada con el cobro apagado y una que venció
+     * sin pagar no tienen pago; y una ya reembolsada no se devuelve de nuevo.
+     */
+    public function seReembolsa(): bool
+    {
+        return $this->cobrada();
+    }
+
+    /**
+     * Si el reembolso quedó pendiente: estaba pagada, se canceló y Mercado Pago no lo tomó. El
+     * panel del administrador la marca así, para reintentarlo.
+     */
+    public function reembolsoPendiente(): bool
+    {
+        return $this->estado === EstadoReserva::Cancelada && $this->seReembolsa();
+    }
+
+    /**
+     * La misma reserva con el reembolso que Mercado Pago le hizo a su pago. La entidad no cambia:
+     * el repositorio lo guarda sólo si todavía no tenía ninguno
+     * (RepositorioDeReservas::guardarReembolso()).
+     */
+    public function conReembolso(string $reembolsoId, DateTimeImmutable $ahora = new DateTimeImmutable()): self
+    {
+        return new self($this->id, $this->funcionId, $this->usuarioId, $this->codigo, $this->cantidad, $this->total, $this->estado, $this->creadaEn, $this->venceEn, $this->preferenciaId, $this->enlaceDePago, $this->pagoId, $reembolsoId, $ahora->setTimezone(new DateTimeZone('UTC')), $this->cupon);
     }
 
     /**
@@ -115,7 +241,7 @@ final readonly class Reserva
             throw new ReglaIncumplida("Una reserva {$this->estado->etiqueta()} no puede quedar {$siguiente->etiqueta()}.");
         }
 
-        return new self($this->id, $this->funcionId, $this->usuarioId, $this->codigo, $this->cantidad, $this->total, $siguiente, $this->creadaEn);
+        return new self($this->id, $this->funcionId, $this->usuarioId, $this->codigo, $this->cantidad, $this->total, $siguiente, $this->creadaEn, $this->venceEn, $this->preferenciaId, $this->enlaceDePago, $this->pagoId, $this->reembolsoId, $this->reembolsadaEn, $this->cupon);
     }
 
     /**

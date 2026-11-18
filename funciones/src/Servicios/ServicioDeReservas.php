@@ -6,6 +6,7 @@ namespace IndieCinema\Funciones\Servicios;
 
 use DateTimeImmutable;
 use IndieCinema\Funciones\Modelo\AutorDelCambio;
+use IndieCinema\Funciones\Modelo\Conducta;
 use IndieCinema\Funciones\Modelo\EstadoReserva;
 use IndieCinema\Funciones\Modelo\FuncionDeProgramacion;
 use IndieCinema\Funciones\Modelo\ReglaIncumplida;
@@ -17,6 +18,7 @@ use IndieCinema\Nucleo\Seguridad\Usuario;
 use IndieCinema\Nucleo\Uuid;
 use LogicException;
 use RuntimeException;
+use Throwable;
 
 /**
  * Las reservas de los espectadores (E4-01): que nunca se confirmen más lugares que el cupo,
@@ -30,10 +32,25 @@ final class ServicioDeReservas
     /** Las reservas por página de «Mis reservas»: las funciones de una página van en un pedido. */
     public const POR_PAGINA = 20;
 
+    /**
+     * @param ?PagosDeReservas      $pagos      el cobro con Mercado Pago; sin él, como con el cobro
+     *                                          apagado, toda reserva nace confirmada
+     * @param ?ServicioDeReembolsos $reembolsos la devolución del pago al cancelar (EF-06.4); sin
+     *                                          él, la reserva se cancela y no se devuelve nada
+     */
     public function __construct(
         private readonly FuncionesDeProgramacion $funciones,
         private readonly RepositorioDeReservas $reservas,
+        private readonly ?PagosDeReservas $pagos = null,
+        private readonly ?ServicioDeReembolsos $reembolsos = null,
+        private readonly ?ServicioDeConducta $conducta = null,
+        private readonly ?CuponesDeRecaudacion $cupones = null,
     ) {
+    }
+
+    public function activasDelUsuario(string $usuarioId, DateTimeImmutable $ahora = new DateTimeImmutable()): int
+    {
+        return $this->reservas->activasDelUsuario($usuarioId, $ahora);
     }
 
     /**
@@ -42,9 +59,9 @@ final class ServicioDeReservas
      * @throws ExcepcionHttp 404 si no existe o su sala no está publicada; 503 si programación no
      *                       responde
      */
-    public function funcion(string $funcionId): FuncionDeProgramacion
+    public function funcion(string $funcionId, ?string $usuarioId = null): FuncionDeProgramacion
     {
-        $funcion = $this->funciones->buscar($funcionId);
+        $funcion = $this->funciones->buscar($funcionId, $usuarioId);
         // Una sala sin publicar no muestra sus funciones: es lo mismo que si no existiera.
         if ($funcion === null || !$funcion->salaHabilitada) {
             throw ExcepcionHttp::noEncontrada();
@@ -102,6 +119,23 @@ final class ServicioDeReservas
     }
 
     /**
+     * Por qué se canceló cada una de esas reservas (EF-06.3), para que «Mis reservas» y el
+     * comprobante lo digan en lugar de dejar un «Cancelada» sin explicación. Sólo pregunta por las
+     * canceladas: las demás no tienen nada que explicar, y si no hay ninguna no consulta la base.
+     *
+     * @param list<Reserva> $reservas
+     *
+     * @return array<string, string> reserva_id => motivo; sólo las que tienen uno
+     */
+    public function motivosDeCancelacion(array $reservas): array
+    {
+        return $this->reservas->motivosDeCancelacion(array_values(array_map(
+            static fn (Reserva $reserva): string => $reserva->id,
+            array_filter($reservas, static fn (Reserva $reserva): bool => $reserva->estado === EstadoReserva::Cancelada),
+        )));
+    }
+
+    /**
      * Si el espectador todavía puede cancelar la reserva: confirmada, y antes de que empiece la
      * función. Después ya no tiene sentido soltar los lugares, y quien entró ya usó la entrada.
      * Si programación ya no muestra la función (su sala se dio de baja), se puede.
@@ -116,6 +150,10 @@ final class ServicioDeReservas
      * Cancela la reserva del espectador: sus lugares vuelven a quedar libres para otros. No
      * bloquea la función como reservar(): soltar lugares nunca pasa el cupo.
      *
+     * Si la había pagado, se le devuelve la plata (EF-06.4). Si Mercado Pago no la devuelve, la
+     * reserva queda cancelada igual: el espectador no se come un error por algo que se arregla del
+     * otro lado, y el reembolso queda pendiente para el administrador.
+     *
      * @throws ExcepcionHttp   404 si no es suya
      * @throws ReglaIncumplida si ya no está confirmada, la función ya empezó, o cambió mientras
      *                         tanto (el organizador registró la asistencia)
@@ -127,7 +165,9 @@ final class ServicioDeReservas
         match ($reserva->estado) {
             EstadoReserva::Cancelada => throw new ReglaIncumplida('La reserva ya está cancelada.'),
             EstadoReserva::Asistio => throw new ReglaIncumplida('Ya registraron tu asistencia: la reserva no se puede cancelar.'),
-            EstadoReserva::Confirmada => null,
+            EstadoReserva::Ausente => throw new ReglaIncumplida('La función ya terminó: la reserva ya no se puede cancelar.'),
+            // Una pendiente se cancela igual: suelta los lugares sin esperar a que venza.
+            EstadoReserva::Confirmada, EstadoReserva::PendientePago => null,
         };
         if (!self::seCancela($reserva, $funcion, $ahora)) {
             throw new ReglaIncumplida('La función ya empezó: la reserva ya no se puede cancelar.');
@@ -137,7 +177,8 @@ final class ServicioDeReservas
             throw new ReglaIncumplida('La reserva cambió mientras tanto. Volvé a cargarla para ver en qué quedó.');
         }
 
-        return $cancelada;
+        // Después de guardarla: sólo se devuelve el pago de una cancelación que de verdad quedó.
+        return $this->reembolsos?->reembolsar($cancelada, $ahora) ?? $cancelada;
     }
 
     /**
@@ -147,9 +188,9 @@ final class ServicioDeReservas
      * Es lo que funciones sabe de la función; si está «agotada» para mostrar lo decide
      * programación, que es la que conoce el estado y la fecha.
      */
-    public function lugaresLibres(FuncionDeProgramacion $funcion): int
+    public function lugaresLibres(FuncionDeProgramacion $funcion, DateTimeImmutable $ahora = new DateTimeImmutable()): int
     {
-        return max(0, $funcion->cupo - $this->reservas->lugaresOcupados($funcion->id));
+        return max(0, $funcion->cupo - $this->reservas->lugaresOcupados($funcion->id, $ahora));
     }
 
     /**
@@ -194,22 +235,90 @@ final class ServicioDeReservas
      * El cupo se pide a programación antes de bloquear: así la espera por la API interna no
      * frena a las otras reservas de la función.
      *
-     * @throws ExcepcionHttp   404 si la función no existe o su sala no está publicada; 503 si
-     *                         programación no responde o la función queda bloqueada demasiado
-     * @throws ReglaIncumplida si la cantidad no es válida, la función ya no admite reservas o no
-     *                         quedan tantos lugares
+     * Si es paga y el cobro está prendido, la reserva queda pendiente de pago con su preferencia de
+     * Checkout Pro (X-01.2), que se crea después de soltar la función: la espera por Mercado Pago
+     * tampoco frena a las otras. Si Mercado Pago no la crea, la reserva se cancela, para que no
+     * retenga lugares que nadie puede pagar.
+     *
+     * @throws ExcepcionHttp    404 si la función no existe o su sala no está publicada; 503 si
+     *                          programación o Mercado Pago no responden, o la función queda
+     *                          bloqueada demasiado
+     * @throws ReglaIncumplida  si la cantidad no es válida, la función ya no admite reservas o no
+     *                          quedan tantos lugares
+     * @throws RuntimeException si Mercado Pago rechaza la preferencia: es un error nuestro
      */
     public function reservar(
         Usuario $espectador,
         string $funcionId,
         int $cantidad,
         DateTimeImmutable $ahora = new DateTimeImmutable(),
+        ?string $cupon = null,
     ): Reserva {
-        $funcion = $this->funcion($funcionId);
-        $reserva = Reserva::nueva($funcion, $espectador->id, $cantidad, $ahora);
+        $funcion = $this->funcion($funcionId, $espectador->id);
+        $reserva = Reserva::nueva($funcion, $espectador->id, $cantidad, $ahora, $this->pagos?->minutosParaPagar());
+        // Sin cupón, la reserva sigue exactamente el camino de siempre (EF-17.1).
+        if ($cupon !== null) {
+            $reserva = $this->aplicarCupon($reserva, $funcion, $cupon, $espectador->id, $ahora);
+        }
+        $reserva = $this->agregar($funcion, $reserva, $ahora);
+        if ($reserva->estado !== EstadoReserva::PendientePago || $this->pagos === null) {
+            return $reserva;
+        }
 
-        return $this->reservas->conLaFuncionBloqueada($funcion->id, function () use ($funcion, $reserva): Reserva {
-            $libres = $this->lugaresLibres($funcion);
+        try {
+            $conPreferencia = $this->pagos->crearPreferencia($reserva, $funcion);
+        } catch (Throwable $error) {
+            $this->reservas->guardarEstado($reserva->cancelar(), $reserva->estado, AutorDelCambio::de($espectador, Rol::Espectador, 'No se pudo iniciar el pago.'), $ahora);
+
+            throw $error;
+        }
+        // Si el espectador ya la canceló desde otra pestaña, no hay nada que cobrar: queda como
+        // la dejó, y el comprobante lo muestra.
+        if (!$this->reservas->guardarPreferencia($conPreferencia)) {
+            return $this->reservas->buscar($reserva->id) ?? $reserva;
+        }
+
+        return $conPreferencia;
+    }
+
+    /**
+     * La reserva con el descuento del cupón (EF-17.1), si el cupón es del espectador y no venció.
+     * Que no esté en otra reserva lo controla agregar(), con la función bloqueada, y al final el
+     * índice único de la base.
+     *
+     * @throws ReglaIncumplida si la función no se paga, o el cupón no existe, es de otro o venció
+     * @throws ExcepcionHttp   503 si recaudación no responde
+     */
+    private function aplicarCupon(Reserva $reserva, FuncionDeProgramacion $funcion, string $codigo, string $usuarioId, DateTimeImmutable $ahora): Reserva
+    {
+        if ($reserva->total === '0.00') {
+            throw new ReglaIncumplida('Esta función no se paga: no hace falta un cupón.');
+        }
+        $cupon = $this->cupones?->buscar($codigo);
+        // Uno ajeno se rechaza igual que uno que no existe: no se dice que el código es de otro.
+        if ($cupon === null || $cupon['usuario_id'] !== $usuarioId) {
+            throw new ReglaIncumplida('Ese cupón no existe. Revisá el código en «Mis puntos».');
+        }
+        if ($cupon['vence_en'] <= $ahora) {
+            throw new ReglaIncumplida('Ese cupón ya venció.');
+        }
+
+        return $reserva->conCupon($codigo, $cupon['porcentaje'], $funcion->precioBase);
+    }
+
+    /**
+     * Guarda la reserva si quedan lugares, con la función bloqueada. Si no quedan tantos, el
+     * trabajo bloqueado lanza la ReglaIncumplida con cuántos quedan.
+     *
+     * @throws ExcepcionHttp 503 si la función queda bloqueada demasiado
+     */
+    private function agregar(FuncionDeProgramacion $funcion, Reserva $reserva, DateTimeImmutable $ahora): Reserva
+    {
+        return $this->reservas->conLaFuncionBloqueada($funcion->id, function () use ($funcion, $reserva, $ahora): Reserva {
+            if ($funcion->usuarioBloqueado) {
+                throw new ReglaIncumplida(FuncionDeProgramacion::MENSAJE_USUARIO_BLOQUEADO);
+            }
+            $libres = $this->lugaresLibres($funcion, $ahora);
             if ($reserva->cantidad > $libres) {
                 throw new ReglaIncumplida(match ($libres) {
                     0 => 'La función está agotada.',
@@ -217,7 +326,14 @@ final class ServicioDeReservas
                     default => "Quedan {$libres} lugares.",
                 });
             }
-            $yaReservados = $this->reservas->lugaresOcupadosPorUsuario($funcion->id, $reserva->usuarioId);
+            $topeConducta = $this->conducta?->topeSimultaneoPara($reserva->usuarioId, $ahora);
+            if ($topeConducta !== null && $this->reservas->activasDelUsuario($reserva->usuarioId, $ahora) >= $topeConducta) {
+                throw new ReglaIncumplida(Conducta::mensajeDeTopeBajoUmbral($topeConducta));
+            }
+            if ($reserva->cupon !== null && $this->reservas->cuponEnUso($reserva->cupon)) {
+                throw new ReglaIncumplida(RepositorioDeReservas::CUPON_EN_USO);
+            }
+            $yaReservados = $this->reservas->lugaresOcupadosPorUsuario($funcion->id, $reserva->usuarioId, $ahora);
             $maximo = self::maximoPorPersona($funcion);
             $restantes = max(0, $maximo - $yaReservados);
             if ($reserva->cantidad > $restantes) {

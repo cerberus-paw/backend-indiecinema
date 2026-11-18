@@ -3,11 +3,19 @@
 declare(strict_types=1);
 
 use IndieCinema\Funciones\Controladores\AcuerdosInternos;
+use IndieCinema\Funciones\Controladores\AvisosDePago;
+use IndieCinema\Funciones\Controladores\Calificaciones;
+use IndieCinema\Funciones\Controladores\CalificacionesInternas;
+use IndieCinema\Funciones\Controladores\CancelacionDeAcuerdos;
+use IndieCinema\Funciones\Controladores\CobrosInternos;
+use IndieCinema\Funciones\Controladores\ConductaInterna;
 use IndieCinema\Funciones\Controladores\OcupacionInterna;
+use IndieCinema\Funciones\Controladores\PuntosInternos;
 use IndieCinema\Funciones\Controladores\Reservas;
 use IndieCinema\Funciones\Controladores\ReservasDeLaFuncion;
 use IndieCinema\Funciones\Controladores\ReservasDelAdministrador;
 use IndieCinema\Funciones\Controladores\ReservasInternas;
+use IndieCinema\Funciones\Servicios\PagosDeReservas;
 use IndieCinema\Nucleo\Http\EstadoInterno;
 use IndieCinema\Nucleo\Ruteo\Router;
 use IndieCinema\Nucleo\Seguridad\Rol;
@@ -27,28 +35,59 @@ return static function (Router $router): void {
     // «Mis reservas» (E4-04.1): las del espectador, con el enlace a cada comprobante.
     $router->get('/reservas', [Reservas::class, 'mias'], Rol::Espectador);
     $router->get('/reservas/{id}', [Reservas::class, 'confirmada'], Rol::Espectador);
+    // Adónde vuelve el espectador desde Mercado Pago (X-01.3): sólo muestra en qué quedó.
+    $router->get('/reservas/{id}/regreso', [Reservas::class, 'regreso'], Rol::Espectador);
+    // El aviso de Mercado Pago cuando se acredita un pago (X-01.4): lo único que confirma una
+    // reserva paga. Sin sesión ni CSRF: lo autentica su firma, en el controlador.
+    $router->webhook(PagosDeReservas::RUTA_DEL_AVISO, [AvisosDePago::class, 'recibir']);
     // La cancelación del espectador, con una pantalla que la confirma antes (E4-01.5).
     $router->get('/reservas/{id}/cancelar', [Reservas::class, 'confirmarCancelacion'], Rol::Espectador);
     $router->post('/reservas/{id}/cancelar', [Reservas::class, 'cancelar'], Rol::Espectador);
+    // Calificar la función a la que asistió (EF-04.2): las reglas las controla el servicio.
+    $router->get('/reservas/{id}/calificar', [Calificaciones::class, 'formulario'], Rol::Espectador);
+    $router->post('/reservas/{id}/calificar', [Calificaciones::class, 'calificar'], Rol::Espectador);
 
     // El seguimiento de las reservas (E4-03). El organizador, las de sus funciones: que la función
     // sea suya lo controla el servicio, con el id del que pide.
     $router->get('/organizador/funciones/{id}/reservas', [ReservasDeLaFuncion::class, 'listar'], Rol::Organizador);
     $router->post('/organizador/funciones/{id}/asistencia', [ReservasDeLaFuncion::class, 'registrarAsistencia'], Rol::Organizador);
+    $router->post('/organizador/funciones/{id}/conducta', [ReservasDeLaFuncion::class, 'calificarConducta'], Rol::Organizador);
     $router->get('/organizador/funciones/{id}/reservas.csv', [ReservasDeLaFuncion::class, 'descargar'], Rol::Organizador);
     // El administrador, todas, y anula la que haga falta.
     $router->get('/administracion/reservas', [ReservasDelAdministrador::class, 'listar'], Rol::Administrador);
     $router->post('/administracion/reservas/{id}/anular', [ReservasDelAdministrador::class, 'anular'], Rol::Administrador);
     // Programación canceló una función: se cancelan sus reservas y se avisa a los espectadores.
     $router->interna('POST', '/interno/funciones/{id}/cancelar-reservas', [ReservasInternas::class, 'cancelarDeLaFuncion'], ['programacion']);
+    // Programación finalizó una función (EF-04.1): las confirmadas sin asistencia quedan ausentes.
+    $router->interna('POST', '/interno/funciones/{id}/finalizada', [ReservasInternas::class, 'finalizada'], ['programacion']);
 
     // Los lugares ocupados, para que programación muestre los libres (E4-02): de una función en
     // su ficha, y de una página entera de tarjetas en un solo pedido.
     $router->interna('GET', '/interno/funciones/{id}/ocupacion', [OcupacionInterna::class, 'deUna'], ['programacion']);
     $router->interna('GET', '/interno/ocupacion', [OcupacionInterna::class, 'deVarias'], ['programacion']);
 
+    // Los promedios y las últimas calificaciones, para las fichas de programación (EF-04.3). Los
+    // promedios, también para la reportería de recaudación (EF-09).
+    $router->interna('GET', '/interno/calificaciones/resumen', [CalificacionesInternas::class, 'resumen'], ['programacion', 'recaudacion']);
+    $router->interna('GET', '/interno/calificaciones', [CalificacionesInternas::class, 'ultimas'], ['programacion']);
+    // El comentario denunciado, para moderación, que lo oculta (EF-07.8).
+    $router->interna('GET', '/interno/calificaciones/{id}', [CalificacionesInternas::class, 'mostrar'], ['moderacion']);
+    $router->interna('POST', '/interno/calificaciones/{id}/ocultar', [CalificacionesInternas::class, 'ocultar'], ['moderacion']);
+
+    // Lo cobrado de cada función, para el reparto de recaudación (EF-02.5).
+    $router->interna('GET', '/interno/funciones/{id}/cobros', [CobrosInternos::class, 'deUna'], ['recaudacion']);
+    $router->interna('GET', '/interno/cobros', [CobrosInternos::class, 'deVarias'], ['recaudacion']);
+
+    // Puntaje de conducta en lote, para «Usuarios y roles» del administrador en cuentas (EF-13.3).
+    $router->interna('GET', '/interno/usuarios/conducta', [ConductaInterna::class, 'deVarios'], ['cuentas']);
+
+    // Los puntos y los cupones de recaudación (EF-17.1): las asistencias de un espectador, que
+    // suman puntos, y cuáles de sus cupones están en una reserva.
+    $router->interna('GET', '/interno/usuarios/{id}/asistencias', [PuntosInternos::class, 'asistencias'], ['recaudacion']);
+    $router->interna('GET', '/interno/cupones/en-uso', [PuntosInternos::class, 'cuponesEnUso'], ['recaudacion']);
+
     // Para comprobar que los otros subsistemas llegan hasta acá con su token.
-    $router->interna('GET', '/interno/estado', [EstadoInterno::class, 'mostrar'], ['cuentas', 'programacion']);
+    $router->interna('GET', '/interno/estado', [EstadoInterno::class, 'mostrar'], ['cuentas', 'programacion', 'moderacion', 'recaudacion']);
 
     // API interna de acuerdos de fecha (E3-13 / IC-154, IC-155, IC-156, IC-157, IC-158).
     $router->interna('POST', '/interno/acuerdos', [AcuerdosInternos::class, 'proponer'], ['programacion']);
@@ -57,4 +96,6 @@ return static function (Router $router): void {
     $router->interna('POST', '/interno/acuerdos/{id}/quitar-voto', [AcuerdosInternos::class, 'quitarVoto'], ['programacion']);
     $router->interna('POST', '/interno/acuerdos/{id}/confirmar', [AcuerdosInternos::class, 'confirmar'], ['programacion']);
     $router->interna('POST', '/interno/acuerdos/{id}/cerrar-sin-minimo', [AcuerdosInternos::class, 'cerrarSinMinimo'], ['programacion']);
+    // Programación canceló la función porque el acuerdo venció sin mínimo: avisa a los que marcaron (EF-03.2).
+    $router->interna('POST', '/interno/acuerdos/{id}/avisar-cancelacion', [CancelacionDeAcuerdos::class, 'avisar'], ['programacion']);
 };

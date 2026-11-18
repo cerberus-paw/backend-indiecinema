@@ -54,6 +54,8 @@ final class FuncionesDelOrganizadorTest extends TestCase
     private const ORGANIZADORA = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
     private const OTRO_ORGANIZADOR = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 
+    /** @var array<string, array<string, mixed>> la configuración, para el pedido en otro proceso */
+    private array $secciones;
     private Configuracion $configuracion;
     private BaseDeDatos $base;
     private RepositorioDeSalas $salas;
@@ -68,10 +70,11 @@ final class FuncionesDelOrganizadorTest extends TestCase
     protected function setUp(): void
     {
         @unlink(sys_get_temp_dir() . '/acuerdo_estado_global.txt');
+        @unlink(sys_get_temp_dir() . '/acuerdo_confirmado.txt');
         // Funciones contesta la ocupación: ninguna función tiene reservas salvo que la prueba las
         // ponga con ocupados() (F-01.1).
         file_put_contents(sys_get_temp_dir() . '/ocupacion_de_prueba.json', '{}');
-        $this->configuracion = new Configuracion([
+        $this->secciones = [
             'app' => ['subsistema' => 'programacion', 'entorno' => 'desarrollo'],
             'base' => self::baseDePruebas(),
             'nginx' => ['secreto' => self::SECRETO],
@@ -80,7 +83,8 @@ final class FuncionesDelOrganizadorTest extends TestCase
                 'funciones' => self::$urlFunciones,
             ],
             'interno' => ['token' => 'token-de-programacion'],
-        ]);
+        ];
+        $this->configuracion = new Configuracion($this->secciones);
         $this->base = self::baseConTablasNuevas($this->configuracion);
         $this->salas = new RepositorioDeSalas($this->base);
         $this->funciones = new RepositorioDeFunciones($this->base);
@@ -99,6 +103,7 @@ final class FuncionesDelOrganizadorTest extends TestCase
     protected function tearDown(): void
     {
         @unlink(sys_get_temp_dir() . '/acuerdo_estado_global.txt');
+        @unlink(sys_get_temp_dir() . '/acuerdo_confirmado.txt');
         @unlink(sys_get_temp_dir() . '/ocupacion_de_prueba.json');
     }
 
@@ -169,9 +174,9 @@ final class FuncionesDelOrganizadorTest extends TestCase
      * habilitada se crean funciones: la prueba que la necesita sin habilitar la deshabilita
      * después.
      */
-    private function sala(string $organizador, string $nombre, int $capacidad = 60): Sala
+    private function sala(string $organizador, string $nombre, int $capacidad = 60, int $peliculasPorFuncion = 2, int $duracionFuncion = 120): Sala
     {
-        $sala = Sala::nueva($organizador, new DatosDeSala($nombre, 'Un galpón.', 'Av. San Martín 450', 'Luján', $capacidad, 2, 120, 15), 'sala.jpg');
+        $sala = Sala::nueva($organizador, new DatosDeSala($nombre, 'Un galpón.', 'Av. San Martín 450', 'Luján', $capacidad, $peliculasPorFuncion, $duracionFuncion, 15), 'sala.jpg');
         $this->salas->agregar($sala);
         $this->base->ejecutar('UPDATE sala SET habilitada = TRUE WHERE id = ?', [$sala->id]);
 
@@ -179,26 +184,62 @@ final class FuncionesDelOrganizadorTest extends TestCase
     }
 
     /**
-     * Una función en votación de títulos, con las dos obras como candidatas.
+     * Una función en votación de títulos, con las dos obras como candidatas si no se dicen otras.
+     *
+     * @param ?list<string> $candidatas
      */
-    private function funcion(Sala $sala): Funcion
+    private function funcion(Sala $sala, ?array $candidatas = null, ?RepositorioDeFunciones $funciones = null): Funcion
     {
-        $funcion = $sala->crearFuncion(array_values($this->obras), 40, 3500.0);
-        $this->funciones->agregar($funcion);
+        $funcion = $sala->crearFuncion($candidatas ?? array_values($this->obras), 40, 3500.0);
+        ($funciones ?? $this->funciones)->agregar($funcion);
 
         return $funcion;
     }
 
     /**
-     * Una ya programada para esa fecha.
+     * Una obra más de la organizadora, para las votaciones de más de dos candidatas.
      */
-    private function programada(Sala $sala, string $fecha, string $titulo = 'Zama', string $programadaEl = 'now'): Funcion
+    private function obra(string $titulo, int $duracion = 103): string
     {
-        $funcion = $this->funcion($sala);
+        $generoId = (string) $this->base->valor('SELECT id FROM genero LIMIT 1');
+        $obra = Obra::nueva(self::ORGANIZADORA, $titulo, 'Sinopsis.', 2001, 'Lucrecia Martel', $duracion, TipoObra::Pelicula, OrigenCopia::LicenciaAdquirida, [$generoId]);
+        (new RepositorioDeObras($this->base))->agregar($obra);
+
+        return $obra->id;
+    }
+
+    /**
+     * Las candidatas en el orden en que las lee la base, que es el del desempate.
+     *
+     * @return list<string>
+     */
+    private function candidatas(Funcion $funcion): array
+    {
+        return ($this->funciones->buscar($funcion->id) ?? self::fail('No se encontró la función.'))->obrasIds;
+    }
+
+    /**
+     * Tantos votos de espectadores distintos para esa obra.
+     */
+    private function votar(Funcion $funcion, string $obraId, int $votos): void
+    {
+        for ($i = 0; $i < $votos; ++$i) {
+            $this->base->ejecutar('INSERT INTO voto (funcion_id, usuario_id, obra_id) VALUES (?, ?, ?)', [$funcion->id, Uuid::nuevo(), $obraId]);
+        }
+    }
+
+    /**
+     * Una ya programada para esa fecha. Con $funciones, desde esa conexión: la que tiene tomada la
+     * sala (EF-05.6).
+     */
+    private function programada(Sala $sala, string $fecha, string $titulo = 'Zama', string $programadaEl = 'now', ?RepositorioDeFunciones $funciones = null): Funcion
+    {
+        $funciones ??= $this->funciones;
+        $funcion = $this->funcion($sala, funciones: $funciones);
         $funcion->cerrarVotacionTitulos([$this->obras[$titulo]]);
-        $this->funciones->guardar($funcion);
+        $funciones->guardar($funcion);
         $funcion->fijarFechaHora(new DateTimeImmutable($fecha), new DateTimeImmutable($programadaEl));
-        $this->funciones->guardar($funcion);
+        $funciones->guardar($funcion);
 
         return $funcion;
     }
@@ -452,6 +493,8 @@ final class FuncionesDelOrganizadorTest extends TestCase
             'modo' => FormularioDeFuncion::MODO_EN_VOTACION_TITULOS,
             'sala_id' => $sala->id,
             'obras' => $obrasIds,
+            'cierre_fecha' => '2030-10-20',
+            'cierre_hora' => '23:00',
             'precio' => '2500',
             'cupo' => '60',
         ]);
@@ -460,12 +503,13 @@ final class FuncionesDelOrganizadorTest extends TestCase
         self::assertSame('/organizador/funciones', $respuesta->cabecera('Location'));
 
         $funcionFila = $this->base->fila(
-            'SELECT id, estado, fecha_hora, precio_base, cupo FROM funcion WHERE sala_id = ?',
+            'SELECT id, estado, fecha_hora, votacion_cierra_en, precio_base, cupo FROM funcion WHERE sala_id = ?',
             [$sala->id],
         );
         self::assertNotNull($funcionFila);
         self::assertSame(EstadoFuncion::EnVotacionTitulos->value, $funcionFila['estado']);
         self::assertNull($funcionFila['fecha_hora']);
+        self::assertSame('2030-10-20 23:00:00', $funcionFila['votacion_cierra_en']);
         self::assertSame('2500.00', $funcionFila['precio_base']);
         self::assertSame(60, (int) $funcionFila['cupo']);
 
@@ -650,6 +694,8 @@ final class FuncionesDelOrganizadorTest extends TestCase
             'modo' => FormularioDeFuncion::MODO_EN_VOTACION_TITULOS,
             'sala_id' => $sala->id,
             'obras' => $obrasIds,
+            'cierre_fecha' => '2030-10-20',
+            'cierre_hora' => '23:00',
             'precio' => '2000',
             'cupo' => '30',
         ]);
@@ -677,6 +723,8 @@ final class FuncionesDelOrganizadorTest extends TestCase
             'modo' => FormularioDeFuncion::MODO_EN_VOTACION_TITULOS,
             'sala_id' => $sala->id,
             'obras' => [$this->obras['Zama']],
+            'cierre_fecha' => '2030-10-20',
+            'cierre_hora' => '23:00',
             'precio' => '2500',
             'cupo' => '40',
         ]);
@@ -684,6 +732,91 @@ final class FuncionesDelOrganizadorTest extends TestCase
         self::assertSame(422, $respuesta->estado());
         self::assertStringContainsString('Para abrir una votación elegí al menos dos obras candidatas.', $respuesta->cuerpo());
         self::assertSame(0, (int) $this->base->valor('SELECT COUNT(*) FROM funcion WHERE sala_id = ?', [$sala->id]));
+    }
+
+    /**
+     * EF-05.4: cada candidata, sola, tiene que entrar en la duración de la función de la sala; si
+     * no, ganaría una obra que no se puede proyectar. Juntas pueden pasarse: al cerrar quedan las
+     * que entran.
+     */
+    public function testUnaCandidataMasLargaQueLaSalaNoAbreLaVotacion(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+
+        $respuesta = $this->enviar('/organizador/funciones/nueva', [
+            'modo' => FormularioDeFuncion::MODO_EN_VOTACION_TITULOS,
+            'sala_id' => $sala->id,
+            'obras' => [$this->obras['Zama'], $this->obra('Rojo', 130)],
+            'cierre_fecha' => '2030-10-20',
+            'cierre_hora' => '23:00',
+            'precio' => '2500',
+            'cupo' => '40',
+        ]);
+
+        self::assertSame(422, $respuesta->estado());
+        self::assertStringContainsString('Rojo dura 130 minutos y en esta sala una función puede durar hasta 120.', $respuesta->cuerpo());
+        self::assertSame(0, (int) $this->base->valor('SELECT COUNT(*) FROM funcion WHERE sala_id = ?', [$sala->id]));
+    }
+
+    /**
+     * EF-03.1: la votación cierra sola en su fecha, así que abrirla sin decir cuándo cierra, o con
+     * un cierre que ya pasó, vuelve al formulario con el motivo y no crea nada.
+     *
+     * @param array<string, string> $cierre
+     */
+    #[DataProvider('cierresQueNoSirven')]
+    public function testUnaVotacionNecesitaUnCierreFuturo(array $cierre, string $motivo): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+
+        $respuesta = $this->enviar('/organizador/funciones/nueva', [
+            'modo' => FormularioDeFuncion::MODO_EN_VOTACION_TITULOS,
+            'sala_id' => $sala->id,
+            'obras' => array_values($this->obras),
+            ...$cierre,
+            'precio' => '2500',
+            'cupo' => '40',
+        ]);
+
+        self::assertSame(422, $respuesta->estado());
+        self::assertStringContainsString($motivo, $respuesta->cuerpo());
+        self::assertSame(0, (int) $this->base->valor('SELECT COUNT(*) FROM funcion WHERE sala_id = ?', [$sala->id]));
+    }
+
+    /**
+     * @return array<string, array{array<string, string>, string}>
+     */
+    public static function cierresQueNoSirven(): array
+    {
+        return [
+            'sin día' => [['cierre_hora' => '23:00'], 'Falta el día en que cierra la votación.'],
+            'sin hora' => [['cierre_fecha' => '2030-10-20'], 'Falta la hora en que cierra la votación.'],
+            'pasado' => [['cierre_fecha' => '2020-01-01', 'cierre_hora' => '10:00'], 'El cierre de la votación tiene que ser futuro.'],
+            'día que no existe' => [['cierre_fecha' => '2030-04-31', 'cierre_hora' => '10:00'], 'El día y la hora del cierre no tienen un formato válido.'],
+        ];
+    }
+
+    /**
+     * Una función programada no tiene votación: el cierre que llegue, por ejemplo porque sin
+     * JavaScript se ven los dos bloques, no se pide ni se guarda.
+     */
+    public function testUnaFuncionProgramadaNoGuardaCierreDeVotacion(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+
+        $respuesta = $this->enviar('/organizador/funciones/nueva', [
+            'modo' => FormularioDeFuncion::MODO_PROGRAMADA,
+            'sala_id' => $sala->id,
+            'obras' => [$this->obras['Zama']],
+            'fecha' => '2030-10-25',
+            'hora' => '20:30',
+            'cierre_fecha' => '2020-01-01',
+            'precio' => '2500',
+            'cupo' => '40',
+        ]);
+
+        self::assertSame(303, $respuesta->estado());
+        self::assertNull($this->base->valor('SELECT votacion_cierra_en FROM funcion WHERE sala_id = ?', [$sala->id]));
     }
 
     /**
@@ -1523,6 +1656,43 @@ final class FuncionesDelOrganizadorTest extends TestCase
         self::assertSame(0, $this->cuantasFunciones($sala));
     }
 
+    /**
+     * EF-07.7: una obra pendiente o rechazada no está en el catálogo para armar una función, ni
+     * escribiendo su id.
+     */
+    public function testUnaObraPendienteORechazadaNoEntraEnUnaFuncion(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $this->base->ejecutar("UPDATE obra SET estado = 'pendiente' WHERE id = ?", [$this->obras['Zama']]);
+        $this->base->ejecutar("UPDATE obra SET estado = 'rechazada', motivo = 'No.' WHERE id = ?", [$this->obras['La ciénaga']]);
+
+        self::assertStringNotContainsString($this->obras['Zama'], $this->pedir('GET', '/organizador/funciones/nueva')->cuerpo());
+        foreach ($this->obras as $obra) {
+            $programar = $this->programar($sala, ['obras' => [$obra]]);
+            self::assertSame(422, $programar->estado());
+            self::assertStringContainsString('Una de las obras seleccionadas no existe en el catálogo.', $programar->cuerpo());
+        }
+        $votacion = $this->programar($sala, ['modo' => FormularioDeFuncion::MODO_EN_VOTACION_TITULOS, 'obras' => array_values($this->obras), 'cierre_fecha' => '2030-10-20', 'cierre_hora' => '23:00']);
+        self::assertSame(422, $votacion->estado());
+        self::assertSame(0, $this->cuantasFunciones($sala));
+    }
+
+    /**
+     * Q3: rechazar una obra después no toca lo programado, y la función se sigue editando con ella.
+     */
+    public function testUnaFuncionSeEditaConUnaObraQueRechazaronDespues(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $funcion = $this->programada($sala, '2030-10-25 20:30:00');
+        $this->base->ejecutar("UPDATE obra SET estado = 'rechazada', motivo = 'No.' WHERE id = ?", [$this->obras['Zama']]);
+
+        self::assertStringContainsString($this->obras['Zama'], $this->pedir('GET', "/organizador/funciones/{$funcion->id}/editar")->cuerpo());
+        $respuesta = $this->actualizar($funcion->id, $sala, ['fecha' => '2030-10-25', 'hora' => '20:30', 'precio' => '4900', 'cupo' => '45']);
+
+        self::assertSame(303, $respuesta->estado(), $respuesta->cuerpo());
+        self::assertSame('4900.00', $this->base->valor('SELECT precio_base FROM funcion WHERE id = ?', [$funcion->id]));
+    }
+
     public function testRechazaUnaObraQueNoEstaEnElCatalogo(): void
     {
         $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
@@ -1761,83 +1931,137 @@ final class FuncionesDelOrganizadorTest extends TestCase
     }
 
     // =========================================================================
-    // Cierre de la votación con la obra más votada (E3-12.4)
+    // Cierre de la votación con las más votadas (E3-12.4, EF-05.1)
     // =========================================================================
 
     /**
      * Criterio E3-12.4: «Listo cuando: La función queda con el título ganador y cambia de estado».
+     * Desde EF-05.1 quedan tantos títulos como películas por función tiene la sala: en una de 2,
+     * con 1, 3 y 5 votos, las de 5 y 3. La sala dura 360 minutos para que entren (EF-05.4).
      */
-    public function testCerrarVotacionConObraMasVotada(): void
+    public function testCerrarVotacionDejaLasMasVotadasHastaLasPeliculasPorFuncion(): void
     {
-        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
-        $funcion = $this->funcion($sala);
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón', duracionFuncion: 360, peliculasPorFuncion: 2);
+        $tercera = $this->obra('Rojo');
+        $funcion = $this->funcion($sala, [$this->obras['Zama'], $this->obras['La ciénaga'], $tercera]);
+        $this->votar($funcion, $this->obras['Zama'], 1);
+        $this->votar($funcion, $this->obras['La ciénaga'], 3);
+        $this->votar($funcion, $tercera, 5);
 
-        // Votos: 2 para La ciénaga, 1 para Zama
-        $u1 = Uuid::nuevo();
-        $u2 = Uuid::nuevo();
-        $u3 = Uuid::nuevo();
-        $this->base->ejecutar('INSERT INTO voto (funcion_id, usuario_id, obra_id) VALUES (?, ?, ?)', [$funcion->id, $u1, $this->obras['La ciénaga']]);
-        $this->base->ejecutar('INSERT INTO voto (funcion_id, usuario_id, obra_id) VALUES (?, ?, ?)', [$funcion->id, $u2, $this->obras['La ciénaga']]);
-        $this->base->ejecutar('INSERT INTO voto (funcion_id, usuario_id, obra_id) VALUES (?, ?, ?)', [$funcion->id, $u3, $this->obras['Zama']]);
-
-        // Cierra la votación
         $respuesta = $this->enviar("/organizador/funciones/{$funcion->id}/cerrar-votacion", []);
         self::assertSame(303, $respuesta->estado());
         self::assertSame("/organizador/funciones/{$funcion->id}/proponer-franjas?votacion_cerrada=1", $respuesta->cabecera('Location'));
 
-        // Estado en base: en_acuerdo_fecha y obra elegida
-        $fila = $this->base->fila('SELECT estado FROM funcion WHERE id = ?', [$funcion->id]);
-        self::assertSame(EstadoFuncion::EnAcuerdoFecha->value, $fila['estado']);
-
-        $elegidas = $this->base->filas("SELECT obra_id FROM funcion_obra WHERE funcion_id = ? AND estado = 'elegida'", [$funcion->id]);
-        self::assertCount(1, $elegidas);
-        self::assertSame($this->obras['La ciénaga'], (string) $elegidas[0]['obra_id']);
-
-        // El modelo de la función ahora tiene sólo la obra ganadora
         $leida = $this->funciones->buscar($funcion->id) ?? self::fail('No se encontró la función.');
         self::assertSame(EstadoFuncion::EnAcuerdoFecha, $leida->estado);
-        self::assertSame([$this->obras['La ciénaga']], $leida->obrasIds);
+        self::assertEqualsCanonicalizing([$tercera, $this->obras['La ciénaga']], $leida->obrasIds);
 
-        // En el panel se muestra sólo el título ganador
+        // Las que no salieron siguen como candidatas, para el historial de la votación.
+        $elegidas = $this->base->filas("SELECT obra_id FROM funcion_obra WHERE funcion_id = ? AND estado = 'elegida'", [$funcion->id]);
+        self::assertCount(2, $elegidas);
+
         $panel = $this->pedir('GET', '/organizador/funciones')->cuerpo();
-        self::assertStringContainsString('La ciénaga', $panel);
+        self::assertStringContainsString('Rojo', $panel);
         self::assertStringContainsStringIgnoringCase('en acuerdo de fecha', $panel);
         self::assertStringNotContainsString("/organizador/funciones/{$funcion->id}/cerrar-votacion", $panel);
     }
 
-    public function testCerrarVotacionConEmpateODesempataDeterminista(): void
+    public function testEnUnaSalaDeUnaPeliculaQuedaSoloLaMasVotada(): void
     {
-        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón', peliculasPorFuncion: 1);
         $funcion = $this->funcion($sala);
+        $this->votar($funcion, $this->obras['La ciénaga'], 2);
+        $this->votar($funcion, $this->obras['Zama'], 1);
 
-        // 1 voto para cada una
-        $u1 = Uuid::nuevo();
-        $u2 = Uuid::nuevo();
-        $this->base->ejecutar('INSERT INTO voto (funcion_id, usuario_id, obra_id) VALUES (?, ?, ?)', [$funcion->id, $u1, $this->obras['Zama']]);
-        $this->base->ejecutar('INSERT INTO voto (funcion_id, usuario_id, obra_id) VALUES (?, ?, ?)', [$funcion->id, $u2, $this->obras['La ciénaga']]);
+        self::assertSame(303, $this->enviar("/organizador/funciones/{$funcion->id}/cerrar-votacion", [])->estado());
 
-        $respuesta = $this->enviar("/organizador/funciones/{$funcion->id}/cerrar-votacion", []);
-        self::assertSame(303, $respuesta->estado());
-
-        // Con empate, elige determinísticamente la primera candidata según el orden de candidatas
-        $candidatas = ($this->funciones->buscar($funcion->id) ?? self::fail('No se encontró la función.'))->obrasIds;
         $leida = $this->funciones->buscar($funcion->id) ?? self::fail('No se encontró la función.');
-        self::assertSame(EstadoFuncion::EnAcuerdoFecha, $leida->estado);
-        self::assertSame([$candidatas[0]], $leida->obrasIds);
+        self::assertSame([$this->obras['La ciénaga']], $leida->obrasIds);
     }
 
-    public function testCerrarVotacionSinVotosEligePrimeraCandidata(): void
+    /**
+     * El empate en el corte lo gana la que va primero entre las candidatas, como se leen de la
+     * base, así que el resultado es siempre el mismo.
+     */
+    public function testCerrarVotacionConEmpateEnElCorteDesempataPorElOrdenDeLasCandidatas(): void
     {
-        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
-        $funcion = $this->funcion($sala);
-        $candidatas = ($this->funciones->buscar($funcion->id) ?? self::fail('No se encontró la función.'))->obrasIds;
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón', duracionFuncion: 360, peliculasPorFuncion: 2);
+        $tercera = $this->obra('Rojo');
+        $funcion = $this->funcion($sala, [$this->obras['Zama'], $this->obras['La ciénaga'], $tercera]);
+        [$primera, $segunda] = array_values(array_diff($this->candidatas($funcion), [$tercera]));
+        $this->votar($funcion, $tercera, 3);
+        $this->votar($funcion, $segunda, 1);
+        $this->votar($funcion, $primera, 1);
 
-        $respuesta = $this->enviar("/organizador/funciones/{$funcion->id}/cerrar-votacion", []);
-        self::assertSame(303, $respuesta->estado());
+        self::assertSame(303, $this->enviar("/organizador/funciones/{$funcion->id}/cerrar-votacion", [])->estado());
+
+        $leida = $this->funciones->buscar($funcion->id) ?? self::fail('No se encontró la función.');
+        self::assertEqualsCanonicalizing([$tercera, $primera], $leida->obrasIds);
+    }
+
+    public function testCerrarVotacionSinVotosDejaLasPrimerasCandidatas(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón', duracionFuncion: 360, peliculasPorFuncion: 2);
+        $funcion = $this->funcion($sala, [$this->obra('Rojo'), $this->obras['Zama'], $this->obras['La ciénaga']]);
+        $candidatas = $this->candidatas($funcion);
+
+        self::assertSame(303, $this->enviar("/organizador/funciones/{$funcion->id}/cerrar-votacion", [])->estado());
 
         $leida = $this->funciones->buscar($funcion->id) ?? self::fail('No se encontró la función.');
         self::assertSame(EstadoFuncion::EnAcuerdoFecha, $leida->estado);
-        self::assertSame([$candidatas[0]], $leida->obrasIds);
+        self::assertEqualsCanonicalizing(array_slice($candidatas, 0, 2), $leida->obrasIds);
+    }
+
+    /**
+     * EF-05.4: quedan las más votadas que entran juntas en la duración de la sala. En una de 2
+     * películas y 180 minutos, A (5 votos, 120 min) entra; B (3, 100) ya no; C (1, 50) sí.
+     */
+    public function testAlCerrarSeSalteaLaQueNoEntraEnLaDuracion(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón', peliculasPorFuncion: 2, duracionFuncion: 180);
+        [$a, $b, $c] = [$this->obra('A', 120), $this->obra('B', 100), $this->obra('C', 50)];
+        $funcion = $this->funcion($sala, [$a, $b, $c]);
+        $this->votar($funcion, $a, 5);
+        $this->votar($funcion, $b, 3);
+        $this->votar($funcion, $c, 1);
+
+        self::assertSame(303, $this->enviar("/organizador/funciones/{$funcion->id}/cerrar-votacion", [])->estado());
+
+        $leida = $this->funciones->buscar($funcion->id) ?? self::fail('No se encontró la función.');
+        self::assertEqualsCanonicalizing([$a, $c], $leida->obrasIds);
+    }
+
+    /**
+     * Si la sala achicó la duración después de abrir la votación y ya no entra ninguna, queda la
+     * más votada sola, para no trabar la función, y el log lo avisa.
+     */
+    public function testSiNoEntraNingunaQuedaLaMasVotadaYElLogLoAvisa(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $funcion = $this->funcion($sala);
+        $this->votar($funcion, $this->obras['La ciénaga'], 2);
+        $this->base->ejecutar('UPDATE sala SET duracion_funcion = 90 WHERE id = ?', [$sala->id]);
+
+        self::assertSame(303, $this->enviar("/organizador/funciones/{$funcion->id}/cerrar-votacion", [])->estado());
+
+        $leida = $this->funciones->buscar($funcion->id) ?? self::fail('No se encontró la función.');
+        self::assertSame([$this->obras['La ciénaga']], $leida->obrasIds);
+        rewind($this->salidaDelLog);
+        $log = (string) stream_get_contents($this->salidaDelLog);
+        self::assertStringContainsString('ninguna candidata entra en la duración', $log);
+        self::assertStringContainsString($funcion->id, $log);
+    }
+
+    public function testConMenosCandidatasQuePeliculasPorFuncionQuedanTodas(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón', duracionFuncion: 360, peliculasPorFuncion: 3);
+        $funcion = $this->funcion($sala);
+        $this->votar($funcion, $this->obras['Zama'], 1);
+
+        self::assertSame(303, $this->enviar("/organizador/funciones/{$funcion->id}/cerrar-votacion", [])->estado());
+
+        $leida = $this->funciones->buscar($funcion->id) ?? self::fail('No se encontró la función.');
+        self::assertEqualsCanonicalizing(array_values($this->obras), $leida->obrasIds);
     }
 
     public function testCerrarVotacionDesdeLaFichaTambienLlevaAProponerLasFranjas(): void
@@ -2037,6 +2261,35 @@ final class FuncionesDelOrganizadorTest extends TestCase
         self::assertStringContainsString('ya tiene un acuerdo de fecha abierto', $respuesta->cuerpo());
     }
 
+    /**
+     * EF-05.5: una franja no puede pisarse con otra función programada de la sala ni dejar menos que
+     * el tiempo entre funciones (15). La otra va de 20:00 a 21:43 (Zama dura 103), y la función en
+     * acuerdo dura 103 con su elegida: a las 21:50 se pisa; a las 21:58, justo después de la pausa,
+     * entra.
+     */
+    public function testProponerUnaFranjaQueSePisaConOtraFuncionRechazaLaPropuesta(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $this->programada($sala, self::dentroDe(12, '20:00:00'));
+        $funcion = $this->funcion($sala);
+        $this->enviar("/organizador/funciones/{$funcion->id}/cerrar-votacion", []);
+        self::acuerdoEnFunciones('ninguno');
+
+        $pisada = $this->enviar("/organizador/funciones/{$funcion->id}/acuerdo", [
+            'minimo_asistentes' => '5',
+            'franja_inicio' => [self::dentroDe(10, '20:00:00'), self::dentroDe(12, '21:50:00')],
+        ]);
+
+        self::assertSame(422, $pisada->estado());
+        self::assertStringContainsString('La opción 2 se pisa con otra función de la sala, que va de 20:00 a 21:43: entre una y otra tienen que quedar 15 minutos.', $pisada->cuerpo());
+
+        $justa = $this->enviar("/organizador/funciones/{$funcion->id}/acuerdo", [
+            'minimo_asistentes' => '5',
+            'franja_inicio' => [self::dentroDe(10, '20:00:00'), self::dentroDe(12, '21:58:00')],
+        ]);
+        self::assertSame(303, $justa->estado());
+    }
+
     public function testProponerAcuerdoRechazaFuncionEnOtroEstado(): void
     {
         $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
@@ -2048,6 +2301,28 @@ final class FuncionesDelOrganizadorTest extends TestCase
         ]);
 
         self::assertSame(404, $respuesta->estado());
+    }
+
+    /**
+     * EF-05.5: entre la propuesta y la confirmación se programó otra función que se pisa con la
+     * franja ganadora (la del doble de funciones, en diez días a las 20:00): no se programa, y la
+     * función sigue en acuerdo para cerrarlo y proponer otras.
+     */
+    public function testConfirmarUnaFranjaGanadoraQueSePisaNoProgramaLaFuncion(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $funcion = $this->funcion($sala);
+        $this->enviar("/organizador/funciones/{$funcion->id}/cerrar-votacion", []);
+        $this->programada($sala, self::dentroDe(10, '19:00:00'));
+        self::acuerdoEnFunciones('abierto');
+
+        $motivo = 'La franja ganadora se pisa con otra función de la sala, que va de 19:00 a 20:43: entre una y otra tienen que quedar 15 minutos. Cerrá el acuerdo sin mínimo y proponé franjas nuevas.';
+
+        // Como la que ya empezó: vuelve a la ficha, que se lo muestra al organizador.
+        $respuesta = $this->enviar("/organizador/funciones/{$funcion->id}/confirmar-acuerdo", ['volver' => 'ficha']);
+        self::assertSame(303, $respuesta->estado());
+        self::assertStringContainsString($motivo, $this->pedir('GET', (string) $respuesta->cabecera('Location'))->cuerpo());
+        self::assertSame(EstadoFuncion::EnAcuerdoFecha, ($this->funciones->buscar($funcion->id) ?? self::fail('No se encontró la función.'))->estado);
     }
 
     /**
@@ -2323,5 +2598,173 @@ final class FuncionesDelOrganizadorTest extends TestCase
         $respuesta = $this->enviar("/organizador/funciones/{$funcion->id}/cerrar-sin-minimo", []);
         self::assertSame(404, $respuesta->estado());
     }
-}
 
+    /**
+     * EF-05.6: dos programaciones a la vez en la misma sala van de a una. Otra conexión tiene
+     * tomada la sala y está programando una a las 20:30, sin confirmar todavía: la que se programa
+     * a las 21:00 en otro proceso espera, y cuando la otra se guarda ve que se pisa.
+     */
+    public function testProgramarEsperaALaOtraDeLaSalaYVeQueSePisa(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+
+        $respuesta = $this->mientrasOtraTieneLaSala($sala, '2030-10-25 20:30:00', '/organizador/funciones/nueva', [
+            'sala_id' => $sala->id,
+            'obras' => [$this->obras['La ciénaga']],
+            'fecha' => '2030-10-25',
+            'hora' => '21:00',
+            'precio' => '2500',
+            'cupo' => '40',
+        ]);
+
+        self::assertSame(422, $respuesta['estado']);
+        self::assertStringContainsString('Se pisa con otra función de la sala, que va de 20:30 a 22:13', $respuesta['cuerpo']);
+        self::assertSame(1, $this->cuantasFunciones($sala));
+    }
+
+    /**
+     * EF-05.6: si la sala no se suelta en 5 segundos, el formulario vuelve con lo cargado y le pide
+     * que pruebe de nuevo, en vez de un error del servidor.
+     */
+    public function testProgramarConLaSalaTomadaDemasiadoPideProbarDeNuevo(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $otra = BaseDeDatos::conectar($this->configuracion);
+
+        $respuesta = $otra->enTransaccion(function (BaseDeDatos $otra) use ($sala): array {
+            $otra->valor('SELECT id FROM sala WHERE id = ? FOR UPDATE', [$sala->id]);
+
+            return $this->resultado($this->enOtroProceso('/organizador/funciones/nueva', [
+                'sala_id' => $sala->id,
+                'obras' => [$this->obras['Zama']],
+                'fecha' => '2030-10-25',
+                'hora' => '20:30',
+                'precio' => '2500',
+                'cupo' => '40',
+            ]));
+        });
+
+        self::assertSame(422, $respuesta['estado']);
+        self::assertStringContainsString('Otra programación de esta sala se está guardando: probá de nuevo en unos segundos.', $respuesta['cuerpo']);
+        self::assertStringContainsString('value="2030-10-25"', $respuesta['cuerpo']);
+        self::assertSame(0, $this->cuantasFunciones($sala));
+    }
+
+    /**
+     * EF-05.6: editar también va de a uno. La función está a las 23:00 y se la pasa a las 21:00
+     * mientras otra conexión, con la sala tomada, programa una a las 20:30: la edición espera, ve
+     * que se pisa y la función conserva su fecha.
+     */
+    public function testEditarEsperaALaOtraDeLaSalaYVeQueSePisa(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $funcion = $this->programada($sala, '2030-10-25 23:00:00');
+
+        $respuesta = $this->mientrasOtraTieneLaSala($sala, '2030-10-25 20:30:00', "/organizador/funciones/{$funcion->id}/editar", [
+            'sala_id' => $sala->id,
+            'obras' => [$this->obras['Zama']],
+            'fecha' => '2030-10-25',
+            'hora' => '21:00',
+            'precio' => '2500',
+            'cupo' => '40',
+        ]);
+
+        self::assertSame(422, $respuesta['estado']);
+        self::assertStringContainsString('Se pisa con otra función de la sala, que va de 20:30 a 22:13', $respuesta['cuerpo']);
+        self::assertSame('2030-10-25 23:00:00', $this->base->valor('SELECT fecha_hora FROM funcion WHERE id = ?', [$funcion->id]));
+    }
+
+    /**
+     * EF-05.6: confirmar el acuerdo también va de a uno. Mientras se confirma, otra conexión con la
+     * sala tomada programa una función a las 19:00 del día de la franja ganadora (las 20:00): la
+     * confirmación espera, ve que se pisa y no le pide a funciones que confirme; la función sigue
+     * en acuerdo.
+     */
+    public function testConfirmarElAcuerdoEsperaALaOtraDeLaSalaYVeQueSePisa(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $funcion = $this->funcion($sala);
+        $this->enviar("/organizador/funciones/{$funcion->id}/cerrar-votacion", []);
+        self::acuerdoEnFunciones('abierto');
+
+        $respuesta = $this->mientrasOtraTieneLaSala($sala, self::dentroDe(10, '19:00:00'), "/organizador/funciones/{$funcion->id}/confirmar-acuerdo", ['volver' => 'ficha']);
+
+        self::assertSame(303, $respuesta['estado']);
+        self::assertStringContainsString(
+            'La franja ganadora se pisa con otra función de la sala, que va de 19:00 a 20:43: entre una y otra tienen que quedar 15 minutos. Cerrá el acuerdo sin mínimo y proponé franjas nuevas.',
+            $this->pedir('GET', (string) $respuesta['location'])->cuerpo(),
+        );
+        self::assertFileDoesNotExist(sys_get_temp_dir() . '/acuerdo_confirmado.txt', 'Se le pidió a funciones que confirme.');
+        self::assertSame(EstadoFuncion::EnAcuerdoFecha, ($this->funciones->buscar($funcion->id) ?? self::fail('No se encontró la función.'))->estado);
+    }
+
+    /**
+     * Otra conexión toma la sala y programa una función a $otraA sin confirmar; mientras tanto
+     * manda el pedido en otro proceso y comprueba que espera. Cuando la otra se confirma, devuelve
+     * lo que respondió el pedido (EF-05.6).
+     *
+     * @param array<string, mixed> $cuerpo
+     *
+     * @return array{estado: int, location: ?string, cuerpo: string}
+     */
+    private function mientrasOtraTieneLaSala(Sala $sala, string $otraA, string $ruta, array $cuerpo): array
+    {
+        $otra = BaseDeDatos::conectar($this->configuracion);
+        $proceso = $otra->enTransaccion(function (BaseDeDatos $otra) use ($sala, $otraA, $ruta, $cuerpo): array {
+            $otra->valor('SELECT id FROM sala WHERE id = ? FOR UPDATE', [$sala->id]);
+            $this->programada($sala, $otraA, funciones: new RepositorioDeFunciones($otra));
+            $proceso = $this->enOtroProceso($ruta, $cuerpo);
+            usleep(800_000);
+            self::assertTrue(proc_get_status($proceso['proceso'])['running'], 'El pedido no esperó a que se soltara la sala.');
+
+            return $proceso;
+        });
+
+        return $this->resultado($proceso);
+    }
+
+    /**
+     * El pedido de la organizadora, atendido por otro proceso con su propia conexión.
+     *
+     * @param array<string, mixed> $cuerpo
+     *
+     * @return array{proceso: resource, salida: resource, errores: resource}
+     */
+    private function enOtroProceso(string $ruta, array $cuerpo): array
+    {
+        $proceso = proc_open(
+            [
+                PHP_BINARY,
+                __DIR__ . '/Dobles/pedir.php',
+                (string) json_encode($this->secciones),
+                'POST',
+                $ruta,
+                (string) json_encode(['_csrf' => self::CSRF, ...$cuerpo]),
+                (string) json_encode(['X-Nginx-Secreto' => self::SECRETO, 'X-Usuario-Id' => self::ORGANIZADORA, 'X-Rol' => 'organizador']),
+                self::CSRF,
+            ],
+            [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']],
+            $tuberias,
+        );
+        self::assertNotFalse($proceso);
+
+        return ['proceso' => $proceso, 'salida' => $tuberias[1], 'errores' => $tuberias[2]];
+    }
+
+    /**
+     * @param array{proceso: resource, salida: resource, errores: resource} $lanzado
+     *
+     * @return array{estado: int, location: ?string, cuerpo: string}
+     */
+    private function resultado(array $lanzado): array
+    {
+        $salida = (string) stream_get_contents($lanzado['salida']);
+        $errores = (string) stream_get_contents($lanzado['errores']);
+        proc_close($lanzado['proceso']);
+        self::assertSame('', $errores);
+        $respuesta = json_decode($salida, true);
+        self::assertIsArray($respuesta, $salida);
+
+        return ['estado' => (int) $respuesta['estado'], 'location' => $respuesta['location'] ?? null, 'cuerpo' => (string) $respuesta['cuerpo']];
+    }
+}

@@ -11,8 +11,9 @@ use IndieCinema\Nucleo\Uuid;
  * Una función de una sala: las obras que proyecta, el precio, el cupo y en qué parte de su ciclo
  * de vida está (EstadoFuncion).
  *
- * Nace con varias obras candidatas, que los espectadores votan; al cerrar la votación se queda
- * con las elegidas. La fecha es null hasta que se cierra el acuerdo de fecha, que corre en el
+ * Nace con varias obras candidatas, que los espectadores votan hasta la fecha de cierre que puso
+ * el organizador; al cerrar la votación, a mano o sola al vencer (EF-03.1), se queda con las
+ * elegidas. La fecha es null hasta que se cierra el acuerdo de fecha, que corre en el
  * subsistema funciones. Cada cambio de estado es un método, y el que no corresponde al estado
  * actual lanza ReglaIncumplida.
  *
@@ -24,8 +25,11 @@ final class Funcion
     public const PRECIO_MAXIMO = 99_999_999.99;
 
     /**
-     * @param non-empty-list<string> $obrasIds las candidatas mientras está en votación; después,
-     *                                         las que se proyectan
+     * @param non-empty-list<string> $obrasIds     las candidatas mientras está en votación; después,
+     *                                             las que se proyectan
+     * @param ?DateTimeImmutable     $finalizadaEn cuándo pasó a finalizada, no cuándo se dio: es el
+     *                                             cursor de la tarea del reparto (EF-08.2). Nula
+     *                                             mientras no esté finalizada
      */
     public function __construct(
         public readonly string $id,
@@ -35,6 +39,8 @@ final class Funcion
         public private(set) int $cupo,
         public private(set) EstadoFuncion $estado = EstadoFuncion::EnVotacionTitulos,
         public private(set) ?DateTimeImmutable $fechaHora = null,
+        public readonly ?DateTimeImmutable $votacionCierraEn = null,
+        public private(set) ?DateTimeImmutable $finalizadaEn = null,
     ) {
     }
 
@@ -42,13 +48,22 @@ final class Funcion
      * Se crea desde Sala::crearFuncion(), que además controla que la sala esté habilitada y que el
      * cupo entre en ella.
      *
-     * @param list<string> $obrasIds las candidatas
+     * @param list<string>           $obrasIds        las candidatas
+     * @param DateTimeImmutable|null $votacionCierraEn hasta cuándo se vota (EF-03.1); null es que
+     *                                                 sólo la cierra el organizador, como las que
+     *                                                 se abrieron antes de que existiera
      *
-     * @throws ReglaIncumplida sin obras, con obras repetidas, con un cupo que no es positivo o con
-     *                         un precio negativo
+     * @throws ReglaIncumplida sin obras, con obras repetidas, con un cupo que no es positivo, con
+     *                         un precio negativo o con un cierre que no es futuro
      */
-    public static function nueva(string $salaId, array $obrasIds, int $cupo, float $precioBase): self
-    {
+    public static function nueva(
+        string $salaId,
+        array $obrasIds,
+        int $cupo,
+        float $precioBase,
+        ?DateTimeImmutable $votacionCierraEn = null,
+        DateTimeImmutable $ahora = new DateTimeImmutable(),
+    ): self {
         if ($obrasIds === []) {
             throw new ReglaIncumplida('La función necesita al menos una obra.');
         }
@@ -61,8 +76,24 @@ final class Funcion
         if ($precioBase < 0) {
             throw new ReglaIncumplida('El precio no puede ser negativo.');
         }
+        if ($votacionCierraEn !== null && $votacionCierraEn <= $ahora) {
+            throw new ReglaIncumplida('El cierre de la votación tiene que ser futuro.');
+        }
 
-        return new self(Uuid::nuevo(), $salaId, $obrasIds, $precioBase, $cupo);
+        return new self(Uuid::nuevo(), $salaId, $obrasIds, $precioBase, $cupo, votacionCierraEn: $votacionCierraEn);
+    }
+
+    /**
+     * Si la votación de títulos ya pasó su fecha de cierre (EF-03.1): desde ahí no se vota más, y
+     * la tarea la cierra en la próxima pasada. Es estático para que lo use también la ficha, que
+     * no lee la entidad, como seEdita().
+     */
+    public static function votacionVencida(
+        EstadoFuncion $estado,
+        ?DateTimeImmutable $votacionCierraEn,
+        DateTimeImmutable $ahora = new DateTimeImmutable(),
+    ): bool {
+        return $estado === EstadoFuncion::EnVotacionTitulos && $votacionCierraEn !== null && $votacionCierraEn <= $ahora;
     }
 
     /**
@@ -89,7 +120,8 @@ final class Funcion
      * Si el organizador puede editar la función (E3-11.3): sólo una programada que todavía no se
      * dio. En votación las obras son las candidatas que se están votando y la fecha sale del
      * acuerdo; cancelada y finalizada ya terminaron. Y una programada cuya fecha ya pasó ya se
-     * proyectó: nada la pasa a finalizada sola, y con otra fecha volvería a la cartelera.
+     * proyectó, aunque la tarea todavía no la haya finalizado (EF-04.1): con otra fecha volvería
+     * a la cartelera.
      *
      * Es estático para que lo usen también la ficha y el panel, que no leen la entidad.
      */
@@ -118,8 +150,8 @@ final class Funcion
 
     /**
      * Si el organizador puede cancelar la función (E3-11.4): en votación o programada, mientras
-     * todavía no se dio. Una programada cuya fecha ya pasó ya se proyectó, aunque nada la haya
-     * pasado a finalizada.
+     * todavía no se dio. Una programada cuya fecha ya pasó ya se proyectó, aunque la tarea todavía
+     * no la haya finalizado (EF-04.1).
      *
      * cancelar() controla sólo el ciclo de vida; la fecha la mira quien ofrece cancelar. Es
      * estático por lo mismo que seEdita().
@@ -250,7 +282,12 @@ final class Funcion
     }
 
     /**
-     * Una función programada termina cuando ya se proyectó: no antes de su fecha.
+     * Una función programada termina cuando ya se proyectó: no antes de su fecha. La finaliza
+     * FinalizacionDeFunciones, cuando pasó también la duración de las funciones de la sala.
+     *
+     * Queda anotado el momento, que no es el de la función: la tarea corre cada cuarto de hora y,
+     * si no corrió, finaliza más tarde lo que ya se dio. El reparto de recaudación (EF-08.2) pide
+     * las finalizadas desde su última pasada, así que necesita esta fecha y no la de la función.
      *
      * @throws ReglaIncumplida si no está programada, o si su fecha todavía no llegó
      */
@@ -262,6 +299,7 @@ final class Funcion
         }
 
         $this->estado = EstadoFuncion::Finalizada;
+        $this->finalizadaEn = $ahora;
     }
 
     /**

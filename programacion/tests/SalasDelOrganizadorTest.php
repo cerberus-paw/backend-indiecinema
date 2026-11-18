@@ -144,12 +144,58 @@ final class SalasDelOrganizadorTest extends TestCase
     {
         $id = $this->crearSala(self::ORGANIZADORA);
 
-        $respuesta = $this->enviar("/organizador/salas/{$id}/editar", self::ORGANIZADORA, ['nombre' => 'El Galpón Nuevo', 'capacidad' => '80']);
+        $respuesta = $this->enviar("/organizador/salas/{$id}/editar", self::ORGANIZADORA, ['nombre' => 'El Galpón Nuevo', 'capacidad' => '50']);
 
         self::assertSame(303, $respuesta->estado());
         self::assertSame("/organizador/salas/{$id}/editar?guardada=1", $respuesta->cabecera('Location'));
         self::assertSame('El Galpón Nuevo', $this->fila($id)['nombre'] ?? null);
-        self::assertSame(80, $this->fila($id)['capacidad'] ?? null);
+        self::assertSame(50, $this->fila($id)['capacidad'] ?? null);
+    }
+
+    /**
+     * EF-07.6: la dirección la revisó la moderación con el seguro y la habilitación. Lo que llegue
+     * en esos campos se ignora, aunque venga vacío; se cambia con un pedido a la moderación.
+     */
+    public function testLaDireccionYLaLocalidadNoSeEditan(): void
+    {
+        $id = $this->crearSala(self::ORGANIZADORA);
+
+        self::assertSame(303, $this->enviar("/organizador/salas/{$id}/editar", self::ORGANIZADORA, ['nombre' => 'Otro nombre', 'direccion' => 'Mitre 1200', 'localidad' => 'Mercedes'])->estado());
+        self::assertSame(303, $this->enviar("/organizador/salas/{$id}/editar", self::ORGANIZADORA, ['direccion' => '', 'localidad' => ''])->estado());
+
+        self::assertSame(
+            ['nombre' => 'Cine Club El Galpón', 'direccion' => 'Av. San Martín 450', 'localidad' => 'Luján'],
+            $this->base->fila('SELECT nombre, direccion, localidad FROM sala WHERE id = ?', [$id]),
+        );
+    }
+
+    /**
+     * Bajar la capacidad no se pide (se sacan butacas); subirla, sí, porque la revisa la
+     * moderación.
+     */
+    public function testLaCapacidadSoloBaja(): void
+    {
+        $id = $this->crearSala(self::ORGANIZADORA);
+
+        $respuesta = $this->enviar("/organizador/salas/{$id}/editar", self::ORGANIZADORA, ['capacidad' => '61']);
+
+        self::assertSame(422, $respuesta->estado());
+        self::assertStringContainsString('Para subir la capacidad, pedí el cambio a la moderación.', $respuesta->cuerpo());
+        self::assertSame(60, $this->fila($id)['capacidad'] ?? null);
+        self::assertMatchesRegularExpression('/name="capacidad"[^>]*max="60"/', $respuesta->cuerpo());
+    }
+
+    public function testElFormularioMuestraLaDireccionSinEditarYLlevaAlPedidoDeCambio(): void
+    {
+        $id = $this->crearSala(self::ORGANIZADORA);
+        $this->base->ejecutar('UPDATE sala SET habilitada = TRUE WHERE id = ?', [$id]);
+
+        $pantalla = $this->pedir('GET', "/organizador/salas/{$id}/editar", self::ORGANIZADORA)->cuerpo();
+
+        self::assertMatchesRegularExpression('/name="direccion"[^>]*disabled/', $pantalla);
+        self::assertMatchesRegularExpression('/name="localidad"[^>]*disabled/', $pantalla);
+        self::assertStringContainsString('value="Av. San Martín 450"', $pantalla);
+        self::assertMatchesRegularExpression('#<a href="/solicitar-sala\?sala=' . $id . '"[^>]*>Pedir el cambio de dirección</a>#', $pantalla);
     }
 
     /**
@@ -188,13 +234,14 @@ final class SalasDelOrganizadorTest extends TestCase
         self::assertSame([$segunda], $this->imagenesGuardadas());
     }
 
-    public function testLaFotoDeUnaSalaSinHabilitarSoloLaVenSuOrganizadorYElAdministrador(): void
+    public function testLaFotoDeUnaSalaSinHabilitarSoloLaVenSuOrganizadorElModeradorYElAdministrador(): void
     {
         $id = $this->crearSala(self::ORGANIZADORA);
 
         self::assertSame(404, $this->pedir('GET', "/salas/{$id}/imagen", null)->estado());
         self::assertSame(404, $this->pedir('GET', "/salas/{$id}/imagen", self::OTRO_ORGANIZADOR)->estado());
-        // El administrador la mira en su bandeja antes de habilitarla.
+        // El moderador y el administrador la miran en la bandeja antes de habilitarla.
+        self::assertSame(200, $this->pedir('GET', "/salas/{$id}/imagen", self::OTRO_ORGANIZADOR, 'moderador')->estado());
         self::assertSame(200, $this->pedir('GET', "/salas/{$id}/imagen", self::OTRO_ORGANIZADOR, 'administrador')->estado());
 
         $propia = $this->pedir('GET', "/salas/{$id}/imagen", self::ORGANIZADORA);
@@ -255,6 +302,8 @@ final class SalasDelOrganizadorTest extends TestCase
         foreach ($propias as $id) {
             self::assertStringContainsString("/organizador/salas/{$id}/editar", $respuesta->cuerpo());
             self::assertStringContainsString("/salas/{$id}/imagen", $respuesta->cuerpo());
+            // EF-07.5: la documentación de la sala y sus suspensiones, en moderación.
+            self::assertStringContainsString("href=\"/moderacion/salas/{$id}/documentacion\"", $respuesta->cuerpo());
         }
         self::assertStringContainsString('La Terraza', $respuesta->cuerpo());
         self::assertStringContainsString('PUBLICADA', $respuesta->cuerpo());

@@ -40,37 +40,86 @@ final class AdministracionDeUsuariosTest extends TestCase
     /** @var resource */
     private $salidaDelLog;
 
+    /** @var resource|null */
+    private static $servidorFunciones = null;
+    private static string $urlFunciones = '';
+    private static string $archivoConducta = '';
+
+    public static function setUpBeforeClass(): void
+    {
+        self::$archivoConducta = (string) tempnam(sys_get_temp_dir(), 'conducta-');
+        file_put_contents(self::$archivoConducta, '{}');
+        $socket = stream_socket_server('tcp://127.0.0.1:0');
+        $puerto = (int) substr((string) strrchr((string) stream_socket_get_name($socket, false), ':'), 1);
+        fclose($socket);
+        self::$urlFunciones = "http://127.0.0.1:{$puerto}";
+
+        $proceso = proc_open(
+            [PHP_BINARY, '-S', "127.0.0.1:{$puerto}", __DIR__ . '/Dobles/funciones.php'],
+            [['pipe', 'r'], ['file', '/dev/null', 'w'], ['file', '/dev/null', 'w']],
+            $tuberias,
+            null,
+            [...getenv(), 'CONDUCTA' => self::$archivoConducta],
+        );
+        self::$servidorFunciones = $proceso === false ? null : $proceso;
+        for ($intento = 0; $intento < 100; ++$intento) {
+            $conexion = @fsockopen('127.0.0.1', $puerto, $codigo, $mensaje, 0.05);
+            if ($conexion !== false) {
+                fclose($conexion);
+
+                return;
+            }
+            usleep(20_000);
+        }
+        self::fail('No arrancó el doble de funciones.');
+    }
+
+    public static function tearDownAfterClass(): void
+    {
+        if (self::$servidorFunciones !== null) {
+            proc_terminate(self::$servidorFunciones);
+            proc_close(self::$servidorFunciones);
+        }
+        if (self::$archivoConducta !== '') {
+            @unlink(self::$archivoConducta);
+        }
+    }
+
     protected function setUp(): void
     {
         $this->configuracion = $this->configuracion();
         $this->base = self::baseConTablasNuevas($this->configuracion);
         $this->usuarios = new RepositorioDeUsuarios($this->base);
         $this->salidaDelLog = fopen('php://memory', 'w+');
+        file_put_contents(self::$archivoConducta, '{}');
     }
 
     /**
-     * @param array<string, mixed> $usuarios la sección [usuarios] de config.ini
+     * @param array<string, mixed>               $usuarios la sección [usuarios] de config.ini
+     * @param array<string, array<string, mixed>> $extra    secciones adicionales para la petición
      */
-    private function configuracion(array $usuarios = []): Configuracion
+    private function configuracion(array $usuarios = [], array $extra = []): Configuracion
     {
         return new Configuracion([
             'app' => ['subsistema' => 'cuentas', 'prefijo' => '/cuenta', 'entorno' => 'desarrollo'],
             'base' => self::baseDePruebas(),
             'nginx' => ['secreto' => self::SECRETO],
             'usuarios' => $usuarios,
+            ...$extra,
         ]);
     }
 
     /**
      * Como llega de nginx: sin el prefijo y, con un rol, con las cabeceras de la sesión.
      *
-     * @param array<string, mixed> $usuarios la sección [usuarios] de config.ini
+     * @param array<string, mixed>               $usuarios la sección [usuarios] de config.ini
+     * @param array<string, array<string, mixed>> $extra    secciones adicionales de configuración
      */
-    private function pedir(string $url = self::URL, ?string $rol = 'administrador', array $usuarios = [], string $metodo = 'GET', array $cuerpo = []): Respuesta
+    private function pedir(string $url = self::URL, ?string $rol = 'administrador', array $usuarios = [], string $metodo = 'GET', array $cuerpo = [], array $extra = []): Respuesta
     {
         parse_str((string) parse_url($url, PHP_URL_QUERY), $consulta);
         $cabeceras = $rol === null ? [] : ['X-Nginx-Secreto' => self::SECRETO, 'X-Usuario-Id' => self::ADMINISTRADOR, 'X-Rol' => $rol];
-        $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion($usuarios), new Log('cuentas', $this->salidaDelLog));
+        $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion($usuarios, $extra), new Log('cuentas', $this->salidaDelLog));
 
         return PaginasParaValidar::anotar($metodo, $url, $aplicacion->atender(new Peticion($metodo, (string) parse_url($url, PHP_URL_PATH), $consulta, $cuerpo, $cabeceras, ['csrf' => self::CSRF])));
     }
@@ -480,6 +529,7 @@ final class AdministracionDeUsuariosTest extends TestCase
         $espectadora = $this->agregar('Eva Espectadora', 'eva@ejemplo.com');
         $organizador = $this->agregar('Omar Organizador', 'omar@ejemplo.com', [Rol::Organizador]);
         $moderadora = $this->agregar('Mora Moderadora', 'mora@ejemplo.com', [Rol::Moderador]);
+        $administradora = $this->agregar('Ada Administradora', 'ada@ejemplo.com', [Rol::Administrador]);
 
         $cuerpo = $this->pedir(self::URL . '?q=ejemplo')->cuerpo();
 
@@ -490,18 +540,21 @@ final class AdministracionDeUsuariosTest extends TestCase
         self::assertStringContainsString('<input type="hidden" name="q" value="ejemplo">', $formulario[0]);
         self::assertStringContainsString('>Guardar cambios</button>', $formulario[0]);
         self::assertStringContainsString('<button type="reset"', $formulario[0]);
-        foreach ([$espectadora => 'espectador', $organizador => 'organizador'] as $id => $rol) {
+        foreach ([$espectadora => 'espectador', $organizador => 'organizador', $moderadora => 'moderador'] as $id => $rol) {
             preg_match("#<tr data-usuario=\"{$id}\">.*?</tr>#s", $formulario[0], $fila);
             self::assertStringContainsString("<select name=\"roles[{$id}]\"", $fila[0] ?? '');
+            // EF-07.3: el administrador da y quita el de moderador.
+            preg_match_all('#<option value="([^"]*)"#', $fila[0] ?? '', $opciones);
+            self::assertSame(['espectador', 'organizador', 'moderador'], $opciones[1]);
             self::assertStringContainsString("<option value=\"{$rol}\" selected>", $fila[0] ?? '');
             // El rol con el que se mostró, para cambiar sólo el que se tocó.
             self::assertStringContainsString("<input type=\"hidden\" name=\"antes[{$id}]\" value=\"{$rol}\">", $fila[0] ?? '');
         }
-        // El moderador y el administrador no se cambian desde la web: el desplegable, deshabilitado
-        // y sin nombre, no se manda.
-        preg_match("#<tr data-usuario=\"{$moderadora}\">.*?</tr>#s", $formulario[0], $fila);
+        // El administrador no se cambia desde la web: el desplegable, deshabilitado y sin nombre,
+        // no se manda.
+        preg_match("#<tr data-usuario=\"{$administradora}\">.*?</tr>#s", $formulario[0], $fila);
         self::assertStringNotContainsString('name="roles[', $fila[0] ?? '');
-        self::assertMatchesRegularExpression('#<select[^>]* disabled[^>]*>\s*<option>Moderador</option>#', $fila[0] ?? '');
+        self::assertMatchesRegularExpression('#<select[^>]* disabled[^>]*>\s*<option>Administrador</option>#', $fila[0] ?? '');
     }
 
     public function testLasTarjetasCuentanTodasLasCuentas(): void
@@ -554,6 +607,81 @@ final class AdministracionDeUsuariosTest extends TestCase
         self::assertStringContainsString(
             'Le quitaste el rol de organizador a «Omar Organizador»',
             $this->pedir(self::URL . "?organizador_quitado={$id}")->cuerpo(),
+        );
+    }
+
+    /**
+     * @return iterable<string, array{list<Rol>, list<string>}>
+     */
+    public static function quienesPasanAModerador(): iterable
+    {
+        yield 'un espectador' => [[], ['espectador', 'moderador']];
+        // Conserva el de organizador: si después le quitan el de moderador, no pierde «Mis salas».
+        yield 'un organizador' => [[Rol::Organizador], ['espectador', 'organizador', 'moderador']];
+    }
+
+    /**
+     * EF-07.3: el administrador da el rol de moderador, como el de organizador.
+     *
+     * @param list<Rol>    $roles
+     * @param list<string> $quedan
+     */
+    #[DataProvider('quienesPasanAModerador')]
+    public function testDarElRolDeModeradorCierraSusSesionesYQuedaEnElLog(array $roles, array $quedan): void
+    {
+        $id = $this->agregar('Mora Moderadora', 'mora@ejemplo.com', $roles);
+        $this->abrirSesion($id);
+
+        $respuesta = $this->guardar([$id => 'moderador'], [$id => $roles === [] ? 'espectador' : 'organizador']);
+
+        self::assertSame(303, $respuesta->estado(), $respuesta->cuerpo());
+        self::assertSame("/cuenta/administracion/usuarios?moderador_dado={$id}", $respuesta->cabecera('Location'));
+        self::assertSame($quedan, $this->roles($id));
+        self::assertSame(0, $this->sesiones($id));
+        self::assertStringContainsString(self::ADMINISTRADOR . " le dio el rol de moderador a {$id}.", $this->log());
+        self::assertStringContainsString(
+            'Le diste el rol de moderador a «Mora Moderadora»',
+            $this->pedir(self::URL . "?moderador_dado={$id}")->cuerpo(),
+        );
+    }
+
+    /**
+     * @return iterable<string, array{list<Rol>, string, list<string>, list<string>}>
+     */
+    public static function quienesDejanDeSerModerador(): iterable
+    {
+        yield 'a organizador, sin el rol guardado' => [[Rol::Moderador], 'organizador', ['espectador', 'organizador'], ['le quitó el rol de moderador', 'le dio el rol de organizador']];
+        yield 'a organizador, con el rol guardado' => [[Rol::Organizador, Rol::Moderador], 'organizador', ['espectador', 'organizador'], ['le quitó el rol de moderador']];
+        yield 'a espectador' => [[Rol::Organizador, Rol::Moderador], 'espectador', ['espectador'], ['le quitó el rol de moderador', 'le quitó el rol de organizador']];
+    }
+
+    /**
+     * Quitarle el de moderador lo deja en el rol que eligió el administrador: organizador, sin
+     * perder «Mis salas», o espectador, sin ninguno de los dos. Todo junto, cerrando sus sesiones.
+     *
+     * @param list<Rol>    $roles
+     * @param list<string> $quedan
+     * @param list<string> $registros
+     */
+    #[DataProvider('quienesDejanDeSerModerador')]
+    public function testQuitarElRolDeModeradorLoDejaEnElQueSeEligio(array $roles, string $rol, array $quedan, array $registros): void
+    {
+        $id = $this->agregar('Mora Moderadora', 'mora@ejemplo.com', $roles);
+        $this->abrirSesion($id);
+
+        $respuesta = $this->guardar([$id => $rol], [$id => 'moderador']);
+
+        self::assertSame(303, $respuesta->estado(), $respuesta->cuerpo());
+        self::assertSame("/cuenta/administracion/usuarios?moderador_quitado={$id}", $respuesta->cabecera('Location'));
+        self::assertSame($quedan, $this->roles($id));
+        self::assertSame(0, $this->sesiones($id));
+        foreach ($registros as $registro) {
+            self::assertStringContainsString(self::ADMINISTRADOR . " {$registro} a {$id}.", $this->log());
+        }
+        self::assertSame(count($registros), substr_count($this->log(), " a {$id}."));
+        self::assertStringContainsString(
+            'Le quitaste el rol de moderador a «Mora Moderadora»',
+            $this->pedir(self::URL . "?moderador_quitado={$id}")->cuerpo(),
         );
     }
 
@@ -615,6 +743,7 @@ final class AdministracionDeUsuariosTest extends TestCase
     {
         yield 'organizador a quien ya lo es' => [[Rol::Organizador], 'organizador', ['espectador', 'organizador']];
         yield 'espectador a quien ya lo es' => [[], 'espectador', ['espectador']];
+        yield 'moderador a quien ya lo es' => [[Rol::Moderador], 'moderador', ['espectador', 'moderador']];
     }
 
     /**
@@ -638,7 +767,7 @@ final class AdministracionDeUsuariosTest extends TestCase
         }
         self::assertSame($quedan, $this->roles($id));
         self::assertSame(1, $this->sesiones($id));
-        self::assertStringNotContainsString('rol de organizador', $this->log());
+        self::assertStringNotContainsString(' el rol de ', $this->log());
     }
 
     /**
@@ -646,13 +775,13 @@ final class AdministracionDeUsuariosTest extends TestCase
      */
     public static function cambiosQueNoSePuedenHacer(): iterable
     {
-        // Esos roles no se cambian desde la web, ni para sumarles el de organizador.
+        // El administrador no se cambia desde la web, ni para sumarle otro rol.
         yield 'un administrador a organizador' => [[Rol::Administrador], 'organizador'];
         yield 'un administrador a espectador' => [[Rol::Administrador], 'espectador'];
-        yield 'un moderador a espectador' => [[Rol::Moderador], 'espectador'];
-        // Desde la web no se da otro rol que el de organizador.
+        yield 'un administrador a moderador' => [[Rol::Administrador], 'moderador'];
+        // Desde la web no se da el de administrador.
         yield 'un espectador a administrador' => [[], 'administrador'];
-        yield 'un espectador a moderador' => [[], 'moderador'];
+        yield 'un moderador a administrador' => [[Rol::Moderador], 'administrador'];
         yield 'un espectador a visitante' => [[], 'visitante'];
         yield 'un rol que no existe' => [[], 'productor'];
         yield 'el rol como arreglo' => [[], ['organizador']];
@@ -722,5 +851,39 @@ final class AdministracionDeUsuariosTest extends TestCase
 
         self::assertSame(['espectador'], $this->roles($espectadora));
         self::assertSame(['espectador', 'organizador'], $this->roles($organizador));
+    }
+
+    public function testMuestraLaColumnaDeConductaDesdeFuncionesYSinFuncionesSigueConGuion(): void
+    {
+        $eva = $this->agregar('Eva Espectadora', 'eva@ejemplo.com');
+        $penalizado = $this->agregar('Paco Penalizado', 'paco@ejemplo.com');
+        file_put_contents(self::$archivoConducta, json_encode([
+            $penalizado => ['puntaje' => 60, 'bajo_umbral' => true, 'negativas' => 2, 'ausencias' => 4],
+        ]));
+
+        $respuesta = $this->pedir(extra: [
+            'subsistemas' => ['funciones' => self::$urlFunciones],
+            'interno' => ['token' => 'token-de-cuentas'],
+        ]);
+        $cuerpo = $respuesta->cuerpo();
+        self::assertSame(200, $respuesta->estado(), $cuerpo);
+        self::assertSame(['Eva Espectadora', 'Paco Penalizado'], self::nombres($respuesta));
+        self::assertStringContainsString('<th scope="col" class="tabla-admin-columna-conducta">Conducta</th>', $cuerpo);
+
+        preg_match("#<tr data-usuario=\"{$eva}\">.*?</tr>#s", $cuerpo, $filaEva);
+        self::assertStringContainsString('<span class="tabla-admin-conducta">100 pts</span>', $filaEva[0] ?? '');
+
+        preg_match("#<tr data-usuario=\"{$penalizado}\">.*?</tr>#s", $cuerpo, $filaPaco);
+        self::assertStringContainsString('conducta-bajo-umbral', $filaPaco[0] ?? '');
+        self::assertStringContainsString('60 pts', $filaPaco[0] ?? '');
+        self::assertStringContainsString('2 neg. · 4 aus.', $filaPaco[0] ?? '');
+
+        $sinFunciones = $this->pedir(extra: [
+            'subsistemas' => ['funciones' => 'http://127.0.0.1:9'],
+            'interno' => ['token' => 'token-de-cuentas'],
+        ]);
+        self::assertSame(200, $sinFunciones->estado());
+        self::assertSame(['Eva Espectadora', 'Paco Penalizado'], self::nombres($sinFunciones));
+        self::assertStringContainsString('>—</span>', $sinFunciones->cuerpo());
     }
 }

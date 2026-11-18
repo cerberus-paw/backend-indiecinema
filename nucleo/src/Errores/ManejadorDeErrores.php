@@ -65,7 +65,7 @@ final class ManejadorDeErrores
 
         $respuesta = $peticion->aceptaJson() || $peticion->rutaResuelta()?->esInterna()
             ? Respuesta::json(array_filter(['error' => $mensaje, 'detalle' => $detalle]), $estado)
-            : $this->pagina($vista, $estado, $mensaje, $detalle);
+            : $this->pagina($vista, $estado, $mensaje, $detalle, $peticion);
 
         foreach ($cabeceras as $nombre => $valor) {
             $respuesta = $respuesta->conCabecera($nombre, $valor);
@@ -74,13 +74,16 @@ final class ManejadorDeErrores
         return $respuesta;
     }
 
-    private function pagina(Vista $vista, int $estado, string $mensaje, ?string $detalle): Respuesta
+    private function pagina(Vista $vista, int $estado, string $mensaje, ?string $detalle, Peticion $peticion): Respuesta
     {
         try {
             $html = $vista->renderizar('error.html.twig', [
                 'estado' => $estado,
                 'mensaje' => $mensaje,
                 'detalle' => $detalle,
+                // Para que el 401 vuelva a la página después de ingresar (EF-07.8). La plantilla
+                // le suma el prefijo del subsistema.
+                'ruta_pedida' => $peticion->rutaConConsulta(),
             ]);
 
             return Respuesta::html($html, $estado);

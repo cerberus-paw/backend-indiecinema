@@ -9,11 +9,13 @@ use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Seguridad\Usuario;
 use IndieCinema\Programacion\Modelo\Genero;
+use IndieCinema\Programacion\Modelo\EstadoObra;
 use IndieCinema\Programacion\Modelo\Obra;
 use IndieCinema\Programacion\Modelo\OrigenCopia;
 use IndieCinema\Programacion\Modelo\ReglaIncumplida;
 use IndieCinema\Programacion\Modelo\TipoObra;
 use IndieCinema\Programacion\Servicios\ServicioDeObras;
+use IndieCinema\Programacion\Servicios\ServicioDePedidos;
 use LogicException;
 
 /**
@@ -30,8 +32,10 @@ final class ObrasDelOrganizador extends Controlador
      */
     private const BAJA_RECHAZADA = 'No se puede dar de baja una obra que tiene funciones futuras o en votación.';
 
-    public function __construct(private readonly ServicioDeObras $servicio)
-    {
+    public function __construct(
+        private readonly ServicioDeObras $servicio,
+        private readonly ServicioDePedidos $pedidos,
+    ) {
     }
 
     public function listar(Peticion $peticion): Respuesta
@@ -46,6 +50,10 @@ final class ObrasDelOrganizador extends Controlador
                 'url_editar' => "/organizador/obras/{$obra->id}/editar",
                 'url_baja' => "/organizador/obras/{$obra->id}/baja",
                 'tiene_funciones_futuras' => $this->servicio->tieneFuncionesFuturas($obra->id),
+                // EF-07.7: pendiente, aprobada o rechazada; sólo la aprobada tiene ficha pública.
+                'estado' => $obra->estado->value,
+                // Por qué la rechazaron, para corregirla.
+                'motivo' => $obra->estado === EstadoObra::Rechazada ? $obra->motivo : null,
             ],
             $obras,
         );
@@ -53,6 +61,8 @@ final class ObrasDelOrganizador extends Controlador
         return $this->vista(self::PLANTILLA_LISTADO, [
             'obras' => $datosObras,
             'creada' => $peticion->consulta('creada') === '1',
+            // La cargó para un pedido: el pedido se toma cuando la aprueben.
+            'para_pedido' => $peticion->consulta('pedido') === '1',
             'guardada' => $peticion->consulta('guardada') === '1',
             'dada_de_baja' => $peticion->consulta('dada_de_baja') === '1',
             'error_baja' => $peticion->consulta('error_baja') === '1' ? self::BAJA_RECHAZADA : null,
@@ -61,7 +71,29 @@ final class ObrasDelOrganizador extends Controlador
 
     public function nueva(Peticion $peticion): Respuesta
     {
-        self::organizador($peticion);
+        $organizador = self::organizador($peticion);
+        $pedidoQuery = $peticion->consulta('pedido');
+        if (is_string($pedidoQuery) && trim($pedidoQuery) !== '') {
+            try {
+                $pedido = $this->pedidos->paraTomar($organizador, trim($pedidoQuery));
+
+                return $this->formulario([
+                    'valores' => [
+                        'titulo' => $pedido->titulo,
+                        'anio' => (string) $pedido->anio,
+                        'director' => $pedido->director,
+                    ],
+                    'pedido' => [
+                        'id' => $pedido->id,
+                        'titulo' => $pedido->titulo,
+                        'anio' => $pedido->anio,
+                        'director' => $pedido->director,
+                    ],
+                ], esEdicion: false);
+            } catch (ReglaIncumplida $regla) {
+                return $this->formulario(['error_general' => $regla->getMessage()], esEdicion: false, estado: 422);
+            }
+        }
 
         return $this->formulario([], esEdicion: false);
     }
@@ -69,6 +101,26 @@ final class ObrasDelOrganizador extends Controlador
     public function crear(Peticion $peticion): Respuesta
     {
         $organizador = self::organizador($peticion);
+        $pedidoIdCrudo = $peticion->campo('pedido_id');
+        $pedidoId = is_string($pedidoIdCrudo) ? trim($pedidoIdCrudo) : '';
+        $pedidoDatos = null;
+
+        if ($pedidoId !== '') {
+            try {
+                $pedidoObj = $this->pedidos->paraTomar($organizador, $pedidoId);
+                $pedidoDatos = [
+                    'id' => $pedidoObj->id,
+                    'titulo' => $pedidoObj->titulo,
+                    'anio' => $pedidoObj->anio,
+                    'director' => $pedidoObj->director,
+                ];
+            } catch (ReglaIncumplida $regla) {
+                return $this->formulario([
+                    'valores' => $peticion->cuerpo(),
+                    'error_general' => $regla->getMessage(),
+                ], esEdicion: false, estado: 422);
+            }
+        }
 
         $formulario = FormularioDeObra::desdeCampos(
             $peticion->cuerpo(),
@@ -78,16 +130,23 @@ final class ObrasDelOrganizador extends Controlador
         );
         $datos = $formulario->datos();
         if ($datos === null) {
-            return $this->formulario(['formulario' => $formulario], esEdicion: false, estado: 422);
+            return $this->formulario(['formulario' => $formulario, 'pedido' => $pedidoDatos], esEdicion: false, estado: 422);
         }
 
         try {
+            // Desde un pedido, la obra nace pendiente como cualquier otra (EF-07.7): el pedido no se
+            // toma acá, porque el aviso llevaría a una ficha que no existe. Se toma desde «Pedidos
+            // para programar» cuando la moderación la aprueba.
             $this->servicio->crear($organizador, $datos, $formulario->imagen);
         } catch (ReglaIncumplida $regla) {
-            return $this->formulario(['formulario' => $formulario, 'error_general' => $regla->getMessage()], esEdicion: false, estado: 422);
+            return $this->formulario([
+                'formulario' => $formulario,
+                'pedido' => $pedidoDatos,
+                'error_general' => $regla->getMessage(),
+            ], esEdicion: false, estado: 422);
         }
 
-        return $this->redirigir('/organizador/obras?creada=1');
+        return $this->redirigir('/organizador/obras?creada=1' . ($pedidoId !== '' ? '&pedido=1' : ''));
     }
 
     public function editar(Peticion $peticion): Respuesta
@@ -98,7 +157,11 @@ final class ObrasDelOrganizador extends Controlador
 
         return $this->formulario([
             'formulario' => FormularioDeObra::desdeDatos($obra->datos()),
-            'mensaje_exito' => $peticion->consulta('guardada') === '1' ? 'Los cambios ya se ven en el catálogo.' : null,
+            'mensaje_exito' => $peticion->consulta('guardada') === '1' ? match ($obra->estado) {
+                EstadoObra::Aprobada => 'Los cambios ya se ven en el catálogo.',
+                // EF-07.7: la rechazada que se corrigió volvió a pendiente.
+                default => 'La mandaste de nuevo a revisión: entra en el catálogo cuando la apruebe la moderación.',
+            } : null,
         ], esEdicion: true, obra: $obra);
     }
 
@@ -152,7 +215,7 @@ final class ObrasDelOrganizador extends Controlador
     }
 
     /**
-     * @param array{formulario?: FormularioDeObra, mensaje_exito?: ?string, error_general?: ?string} $extra
+     * @param array{formulario?: FormularioDeObra, valores?: array<string, mixed>, pedido?: ?array{id: string, titulo: string, anio: int, director: string}, mensaje_exito?: ?string, error_general?: ?string} $extra
      */
     private function formulario(
         array $extra,
@@ -168,8 +231,9 @@ final class ObrasDelOrganizador extends Controlador
         return $this->vista(self::PLANTILLA_ALTA, [
             'es_edicion' => $esEdicion,
             'accion' => $esEdicion && $obra !== null ? "/organizador/obras/{$obra->id}/editar" : '/organizador/obras/nueva',
-            'valores' => $formulario === null ? [] : $formulario->valores,
+            'valores' => $formulario !== null ? $formulario->valores : ($extra['valores'] ?? []),
             'errores' => $formulario === null ? [] : $formulario->errores,
+            'pedido' => $extra['pedido'] ?? null,
             'error_general' => $errorGeneral,
             'mensaje_exito' => $mensajeExito,
             'reglas' => FormularioDeObra::reglas(!$esEdicion),

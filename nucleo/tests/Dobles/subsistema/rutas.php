@@ -16,10 +16,12 @@ return static function (Router $router): void {
     $router->get('/esqueleto', [ControladorDePrueba::class, 'esqueleto']);
     $router->get('/organizador', [ControladorDePrueba::class, 'hola'], Rol::Organizador);
     $router->post('/formulario', [ControladorDePrueba::class, 'hola']);
+    $router->webhook('/aviso', [ControladorDePrueba::class, 'hola']);
     $router->interna('POST', '/interno/prueba', [ControladorDePrueba::class, 'hola'], ['programacion']);
     $router->interna('GET', '/interno/estado', [EstadoInterno::class, 'mostrar'], ['programacion', 'funciones']);
     $router->interna('GET', '/interno/eco', [ControladorDePrueba::class, 'eco'], ['programacion']);
     $router->interna('POST', '/interno/eco', [ControladorDePrueba::class, 'eco'], ['programacion']);
     $router->interna('GET', '/interno/lento', [ControladorDePrueba::class, 'lento'], ['programacion']);
     $router->interna('GET', '/interno/falla', [ControladorDePrueba::class, 'falla'], ['programacion']);
+    $router->interna('POST', '/interno/falla', [ControladorDePrueba::class, 'falla'], ['programacion']);
 };

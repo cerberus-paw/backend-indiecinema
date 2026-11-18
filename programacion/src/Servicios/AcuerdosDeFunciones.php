@@ -174,4 +174,18 @@ class AcuerdosDeFunciones
 
         return $respuesta;
     }
+
+    /**
+     * Le pide a funciones que avise a los que marcaron «Me sirve» que la función se canceló porque
+     * el acuerdo venció sin mínimo (EF-03.2) o, con $motivo «horario_ocupado», porque la franja
+     * ganadora se pisaba con otra función de la sala (EF-05.5). Pedirlo dos veces no repite los
+     * correos.
+     *
+     * @throws ExcepcionHttp    503 si funciones no responde a tiempo
+     * @throws RuntimeException si funciones responde un error
+     */
+    public function avisarCancelacion(string $acuerdoId, string $titulo, string $motivo = 'sin_minimo'): void
+    {
+        $this->cliente->post('funciones', "/interno/acuerdos/{$acuerdoId}/avisar-cancelacion", ['titulo' => $titulo, 'motivo' => $motivo]);
+    }
 }

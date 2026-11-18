@@ -90,7 +90,7 @@ final class ClienteInternoTest extends TestCase
     {
         $respuesta = $this->cliente()->get('prueba', '/interno/eco', ['q' => 'ñandú y más']);
 
-        self::assertSame(['llamador' => 'programacion', 'q' => 'ñandú y más', 'cuerpo' => []], $respuesta);
+        self::assertSame(['llamador' => 'programacion', 'q' => 'ñandú y más', 'cuerpo' => [], 'archivos' => []], $respuesta);
     }
 
     public function testPostMandaLosDatosComoJson(): void
@@ -100,6 +100,37 @@ final class ClienteInternoTest extends TestCase
         $respuesta = $this->cliente()->post('prueba', '/interno/eco', $datos);
 
         self::assertSame($datos, $respuesta['cuerpo']);
+    }
+
+    /**
+     * EF-07.1: la foto de una sala va como archivo, no en base64 dentro del JSON, que no entra en el
+     * post_max_size de PHP. Al otro lado llega como un archivo subido, con los campos y quién llama.
+     */
+    public function testPostConArchivoMandaElArchivoComoSubido(): void
+    {
+        $archivo = tempnam(sys_get_temp_dir(), 'foto');
+        file_put_contents($archivo, random_bytes(300_000));
+
+        $respuesta = $this->cliente()->postConArchivo('prueba', '/interno/eco', ['nombre' => 'El Galpón', 'capacidad' => '60'], 'imagen', $archivo);
+
+        self::assertSame('programacion', $respuesta['llamador']);
+        self::assertSame(['nombre' => 'El Galpón', 'capacidad' => '60'], $respuesta['cuerpo']);
+        self::assertSame(['imagen' => ['nombre' => basename($archivo), 'sha1' => sha1_file($archivo)]], $respuesta['archivos']);
+        unlink($archivo);
+    }
+
+    public function testPostConArchivoTrataLosErroresComoLosDemas(): void
+    {
+        $archivo = tempnam(sys_get_temp_dir(), 'foto');
+
+        try {
+            $this->cliente()->postConArchivo('prueba', '/interno/falla', [], 'imagen', $archivo);
+            self::fail('Tenía que cortar con un 503.');
+        } catch (ExcepcionHttp $error) {
+            self::assertSame(503, $error->estado);
+        } finally {
+            unlink($archivo);
+        }
     }
 
     public function testUnRecursoQueNoExisteDevuelveNull(): void

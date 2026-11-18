@@ -4,7 +4,7 @@
 # Corre adentro del contenedor de MySQL, con el usuario de migraciones, que es el único con
 # permiso para crear y alterar tablas y no existe en ningún contenedor de la aplicación:
 #
-#   docker compose exec mysql bash /herramientas/migrar.sh                # los tres subsistemas
+#   docker compose exec mysql bash /herramientas/migrar.sh                # todos los subsistemas
 #   docker compose exec mysql bash /herramientas/migrar.sh programacion   # uno solo
 #
 # Cada subsistema guarda las suyas en <subsistema>/migraciones/, con nombres como
@@ -23,12 +23,12 @@ sql() {
 }
 
 if [ $# -eq 0 ]; then
-	set -- cuentas programacion funciones
+	set -- cuentas programacion funciones moderacion recaudacion
 fi
 
 for subsistema in "$@"; do
 	case $subsistema in
-		cuentas | programacion | funciones) ;;
+		cuentas | programacion | funciones | moderacion | recaudacion) ;;
 		*) echo "No existe el subsistema «${subsistema}»." >&2; exit 1 ;;
 	esac
 

@@ -10,12 +10,15 @@ use IndieCinema\Nucleo\Uuid;
 use IndieCinema\Programacion\Modelo\CupoDeFuncion;
 use IndieCinema\Programacion\Modelo\DetalleDeFuncion;
 use IndieCinema\Programacion\Modelo\EstadoFuncion;
+use IndieCinema\Programacion\Modelo\Funcion;
 use IndieCinema\Programacion\Modelo\FiltrosDeCartelera;
 use IndieCinema\Programacion\Modelo\FuncionEnCartelera;
 use IndieCinema\Programacion\Modelo\Genero;
 use IndieCinema\Programacion\Modelo\ObraEnDetalle;
+use IndieCinema\Programacion\Modelo\OrdenDeCartelera;
 use IndieCinema\Programacion\Modelo\PaginaDeCartelera;
 use IndieCinema\Programacion\Modelo\ReglaIncumplida;
+use IndieCinema\Programacion\Repositorios\RepositorioDeBloqueos;
 use IndieCinema\Programacion\Repositorios\RepositorioDeCartelera;
 use IndieCinema\Programacion\Repositorios\RepositorioDeGeneros;
 use IndieCinema\Programacion\Repositorios\RepositorioDeVotos;
@@ -34,6 +37,9 @@ final class ServicioDeCartelera
     /** Cuántas búsquedas recientes guarda la cartelera en el navegador: al entrar una sexta se borra la más vieja (E4-06.4). */
     public const ULTIMAS_BUSQUEDAS = 5;
 
+    /** Mensaje genérico para el espectador bloqueado en la sala, sin revelar el motivo (EF-12.2). */
+    public const MENSAJE_USUARIO_BLOQUEADO = 'No podés votar en esta sala.';
+
     private readonly int $porPagina;
 
     /**
@@ -45,6 +51,9 @@ final class ServicioDeCartelera
         private readonly RepositorioDeVotos $votos,
         Configuracion $configuracion,
         private readonly ?AcuerdosDeFunciones $acuerdos = null,
+        // Para ordenar por reputación (EF-04.4): los promedios viven en funciones.
+        private readonly ?CalificacionesDeFunciones $calificaciones = null,
+        private readonly ?RepositorioDeBloqueos $bloqueos = null,
     ) {
         $porPagina = $configuracion->obtener('cartelera.por_pagina', self::POR_PAGINA);
         if (!is_int($porPagina) || $porPagina < 1 || $porPagina > self::MAXIMO_POR_PAGINA) {
@@ -62,7 +71,7 @@ final class ServicioDeCartelera
      */
     public function pagina(FiltrosDeCartelera $filtros, int $numero): PaginaDeCartelera
     {
-        $pagina = $this->cartelera->pagina($filtros, $numero, $this->porPagina);
+        $pagina = $this->cartelera->pagina($filtros, $numero, $this->porPagina, reputacion: $this->reputacion($filtros));
         if (!$pagina->existe()) {
             throw ExcepcionHttp::noEncontrada();
         }
@@ -88,7 +97,33 @@ final class ServicioDeCartelera
      */
     public function todas(FiltrosDeCartelera $filtros): array
     {
-        return $this->cartelera->todas($filtros);
+        return $this->cartelera->todas($filtros, reputacion: $this->reputacion($filtros));
+    }
+
+    /**
+     * Las salas de las funciones filtradas, de la mejor calificada a la peor, si se pidió ordenar
+     * por reputación (EF-04.4): por promedio y, si empatan, por cuántas calificaciones tienen. Las
+     * que no tienen ninguna no están, y van al final. Si funciones no responde, la lista queda
+     * vacía y la cartelera sale por fecha.
+     *
+     * @return list<string>
+     */
+    private function reputacion(FiltrosDeCartelera $filtros): array
+    {
+        if ($filtros->orden !== OrdenDeCartelera::MejorCalificadas || $this->calificaciones === null) {
+            return [];
+        }
+        $promedios = [];
+        foreach (array_chunk($this->cartelera->salasDe($filtros), CalificacionesDeFunciones::MAXIMO_POR_PEDIDO) as $tanda) {
+            $resumen = $this->calificaciones->resumen(['salas' => $tanda]);
+            if ($resumen === null) {
+                return [];
+            }
+            $promedios += $resumen['salas'];
+        }
+        uasort($promedios, static fn (array $una, array $otra): int => [$otra['promedio'], $otra['cantidad']] <=> [$una['promedio'], $una['cantidad']]);
+
+        return array_map(strval(...), array_keys($promedios));
     }
 
     /**
@@ -168,17 +203,35 @@ final class ServicioDeCartelera
         return $this->votos->conteoPorObra($funcionId);
     }
 
+    public function usuarioBloqueadoEnSala(string $salaId, ?string $usuarioId): bool
+    {
+        return $this->bloqueos !== null
+            && $usuarioId !== null
+            && Uuid::esValido($usuarioId)
+            && $this->bloqueos->estaBloqueado($salaId, $usuarioId);
+    }
+
     /**
      * Registra o cambia el voto de un espectador por una obra candidata en una función en votación de títulos (E3-12.3).
      *
-     * @throws ReglaIncumplida si la función no está en votación de títulos o si la obra no es una candidata
+     * @throws ReglaIncumplida si la función no está en votación de títulos, el usuario está
+     *                         bloqueado en la sala o si la obra no es una candidata
      */
     public function votar(string $funcionId, string $usuarioId, string $obraId): void
     {
         $detalle = $this->detalle($funcionId);
 
+        if ($this->usuarioBloqueadoEnSala($detalle->sala->id, $usuarioId)) {
+            throw new ReglaIncumplida(self::MENSAJE_USUARIO_BLOQUEADO);
+        }
+
         if ($detalle->estado !== EstadoFuncion::EnVotacionTitulos) {
             throw new ReglaIncumplida('La votación de títulos para esta función no está abierta.');
+        }
+        // Pasada la fecha de cierre ya no se vota, aunque la tarea todavía no la haya cerrado
+        // (corre cada quince minutos): un voto de último momento podía cambiar la ganadora (EF-03.1).
+        if (Funcion::votacionVencida($detalle->estado, $detalle->votacionCierraEn)) {
+            throw new ReglaIncumplida('La votación de títulos ya cerró: en unos minutos se ve la obra elegida.');
         }
 
         $candidatasIds = array_map(static fn (ObraEnDetalle $o): string => $o->id, $detalle->obras);
@@ -240,6 +293,10 @@ final class ServicioDeCartelera
     public function votarFranjaAcuerdo(string $funcionId, string $usuarioId, string $franjaId, bool $marcar = true): void
     {
         $detalle = $this->detalle($funcionId);
+
+        if ($this->usuarioBloqueadoEnSala($detalle->sala->id, $usuarioId)) {
+            throw new ReglaIncumplida(self::MENSAJE_USUARIO_BLOQUEADO);
+        }
 
         if ($detalle->estado !== EstadoFuncion::EnAcuerdoFecha) {
             throw new ReglaIncumplida('El acuerdo de fecha para esta función no está abierto.');

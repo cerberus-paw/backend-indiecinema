@@ -18,6 +18,7 @@ use IndieCinema\Programacion\Repositorios\RepositorioDeObras;
 use IndieCinema\Programacion\Repositorios\RepositorioDeSalas;
 use IndieCinema\Programacion\Servicios\DatosDePrueba;
 use PHPUnit\Framework\Attributes\DataProvider;
+use IndieCinema\Nucleo\Uuid;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -73,7 +74,7 @@ final class FichaDeLaFuncionTest extends TestCase
      *
      * @param bool $conSesion si la mira un espectador que ingresó; si no, un visitante
      */
-    private function ficha(string $id, bool $conSesion = false): DOMXPath
+    private function ficha(string $id, bool $conSesion = false, bool $correoVerificado = true): DOMXPath
     {
         $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion(), new Log('programacion', fopen('php://memory', 'w')));
         $cabeceras = $conSesion ? [
@@ -81,6 +82,7 @@ final class FichaDeLaFuncionTest extends TestCase
             'X-Usuario-Id' => 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
             'X-Rol' => 'espectador',
             'X-Usuario-Nombre' => rawurlencode('Ana Prueba'),
+            'X-Correo-Verificado' => $correoVerificado ? '1' : '0',
         ] : [];
         $respuesta = $aplicacion->atender(new Peticion('GET', "/cartelera/{$id}", [], [], $cabeceras, [], []));
         self::assertSame(200, $respuesta->estado());
@@ -189,6 +191,16 @@ final class FichaDeLaFuncionTest extends TestCase
         self::assertSame(0, $ficha->query('//main//form[@data-formulario-reserva]')->length);
     }
 
+    public function testConSesionSinCorreoVerificadoMuestraAvisoEnLugarDelFormulario(): void
+    {
+        $ficha = $this->ficha($this->programadaConocida(), conSesion: true, correoVerificado: false);
+
+        self::assertSame(0, $ficha->query('//main//form[@data-formulario-reserva]')->length);
+        self::assertSame(1, $ficha->query("//main//aside//p[normalize-space() = 'Verificá tu correo para reservar.']")->length);
+        self::assertSame(1, $ficha->query("//main//aside//strong[normalize-space() = 'Todavía no verificaste tu correo']")->length);
+        self::assertSame(1, $ficha->query("//main//aside//form[@action = '/cuenta/verificar/reenviar']//button[contains(normalize-space(), 'Mandarme el enlace otra vez')]")->length);
+    }
+
     /**
      * @return iterable<string, array{string}>
      */
@@ -207,5 +219,40 @@ final class FichaDeLaFuncionTest extends TestCase
         // El detalle es el mismo.
         self::assertSame('Sáb 18 sep', self::recuadro($ficha, 'Fecha'));
         self::assertSame('20:30 a 23:30', self::recuadro($ficha, 'Horario'));
+    }
+
+    /**
+     * La ficha como HTML, con la sesión de ese usuario (o sin sesión).
+     */
+    private function fichaComo(string $id, ?string $usuario = null, string $rol = 'espectador'): string
+    {
+        $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion(), new Log('programacion', fopen('php://memory', 'w')));
+        $cabeceras = $usuario === null ? [] : ['X-Nginx-Secreto' => 'secreto-de-nginx', 'X-Usuario-Id' => $usuario, 'X-Rol' => $rol];
+
+        return $aplicacion->atender(new Peticion('GET', "/cartelera/{$id}", [], [], $cabeceras, [], []))->cuerpo();
+    }
+
+    /**
+     * EF-07.8: se denuncia la función de la cartelera (en votación, en acuerdo o programada a
+     * futuro), salvo su organizador.
+     */
+    public function testLaFichaLlevaADenunciarLaFuncionDeLaCarteleraSalvoASuOrganizador(): void
+    {
+        $programada = $this->programadaConocida();
+        $link = "href=\"/moderacion/denuncias/nueva?tipo=funcion&amp;id={$programada}\"";
+        $organizador = (string) $this->base->valor('SELECT s.organizador_id FROM funcion f JOIN sala s ON s.id = f.sala_id WHERE f.id = ?', [$programada]);
+
+        self::assertStringContainsString($link, $this->fichaComo($programada));
+        self::assertStringContainsString($link, $this->fichaComo($programada, Uuid::nuevo()));
+        self::assertStringNotContainsString($link, $this->fichaComo($programada, $organizador, 'organizador'));
+
+        $enVotacion = $this->enVotacionConocida();
+        self::assertStringContainsString("tipo=funcion&amp;id={$enVotacion}", $this->fichaComo($enVotacion));
+    }
+
+    #[DataProvider('sinReserva')]
+    public function testUnaFinalizadaOCanceladaNoSeDenuncia(string $estado): void
+    {
+        self::assertStringNotContainsString('/moderacion/denuncias/nueva', $this->fichaComo($this->programadaConocida($estado)));
     }
 }

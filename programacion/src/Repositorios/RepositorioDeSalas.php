@@ -6,7 +6,9 @@ namespace IndieCinema\Programacion\Repositorios;
 
 use IndieCinema\Nucleo\BaseDeDatos;
 use IndieCinema\Programacion\Modelo\DatosDeSala;
+use IndieCinema\Programacion\Modelo\ReglaIncumplida;
 use IndieCinema\Programacion\Modelo\Sala;
+use PDOException;
 
 /**
  * Las salas en el esquema de programación. Las dadas de baja no se ven desde acá: para la
@@ -14,6 +16,12 @@ use IndieCinema\Programacion\Modelo\Sala;
  */
 final class RepositorioDeSalas
 {
+    /** Cuántos segundos espera a que otro suelte la sala, como el bloqueo de las reservas. */
+    private const ESPERA_DEL_BLOQUEO = 5;
+
+    /** El error de MySQL cuando se vence la espera de un bloqueo. */
+    private const ESPERA_VENCIDA = 1205;
+
     private const COLUMNAS = 'id, organizador_id, nombre, descripcion, direccion, localidad, capacidad,
         peliculas_por_funcion, duracion_funcion, tiempo_entre_funciones, imagen, habilitada';
 
@@ -29,6 +37,93 @@ final class RepositorioDeSalas
         );
 
         return $fila === null ? null : self::sala($fila);
+    }
+
+    /**
+     * Si hay una fila con ese id, aunque la sala se haya dado de baja: un id así no se puede volver
+     * a usar (EF-07.1).
+     */
+    public function idUsado(string $id): bool
+    {
+        return $this->base->valor('SELECT COUNT(*) FROM sala WHERE id = ?', [$id]) > 0;
+    }
+
+    /**
+     * Las que existen de esos ids, con el id como clave; las dadas de baja no vienen, como en
+     * buscar(). Es lo que lee moderación para su bandeja (EF-07.1).
+     *
+     * @param list<string> $ids
+     *
+     * @return array<string, Sala>
+     */
+    public function varias(array $ids): array
+    {
+        if ($ids === []) {
+            return [];
+        }
+        $salas = array_map(self::sala(...), $this->base->filas(
+            'SELECT ' . self::COLUMNAS . ' FROM sala
+             WHERE id IN (' . implode(', ', array_fill(0, count($ids), '?')) . ') AND dada_de_baja_en IS NULL',
+            $ids,
+        ));
+
+        return array_column($salas, null, 'id');
+    }
+
+    /**
+     * Las habilitadas que no se dieron de baja, con el id como clave.
+     *
+     * @return array<string, Sala>
+     */
+    public function habilitadas(): array
+    {
+        $salas = array_map(self::sala(...), $this->base->filas(
+            'SELECT ' . self::COLUMNAS . ' FROM sala WHERE habilitada = TRUE AND dada_de_baja_en IS NULL ORDER BY nombre',
+        ));
+
+        return array_column($salas, null, 'id');
+    }
+
+    /**
+     * Corre $trabajo en una transacción con la sala bloqueada (EF-05.6): programar en una sala es
+     * de a uno. Todo lo que deja una función programada (programar y editar a mano, confirmar el
+     * acuerdo, la tarea que cierra los vencidos) lee la ocupación, controla que no se pise y guarda
+     * dentro del trabajo; el segundo que llega espera, y al entrar ya ve la función del primero.
+     * Salas distintas no se esperan entre sí.
+     *
+     * Es un SELECT … FOR UPDATE: la sala tiene fila, y el bloqueo se suelta solo con la
+     * transacción. Al trabajo le llega la sala leída con el bloqueo, con los parámetros de ese
+     * momento, o null si no existe o se dio de baja.
+     *
+     * @template T
+     *
+     * @param callable(?Sala): T $trabajo
+     *
+     * @return T
+     *
+     * @throws ReglaIncumplida si otro no suelta la sala en 5 segundos. Es una regla y no un 503 para
+     *                         que el organizador vuelva al formulario con lo cargado; la tarea la
+     *                         deja pasar y la próxima pasada lo vuelve a intentar.
+     */
+    public function conLaSalaBloqueada(string $id, callable $trabajo): mixed
+    {
+        try {
+            return $this->base->enTransaccion(function (BaseDeDatos $base) use ($id, $trabajo): mixed {
+                // MySQL espera 50 segundos por omisión: demasiado para un formulario.
+                $base->ejecutar('SET SESSION innodb_lock_wait_timeout = ' . self::ESPERA_DEL_BLOQUEO);
+                $fila = $base->fila(
+                    'SELECT ' . self::COLUMNAS . ' FROM sala WHERE id = ? AND dada_de_baja_en IS NULL FOR UPDATE',
+                    [$id],
+                );
+
+                return $trabajo($fila === null ? null : self::sala($fila));
+            });
+        } catch (PDOException $error) {
+            if ((int) ($error->errorInfo[1] ?? 0) !== self::ESPERA_VENCIDA) {
+                throw $error;
+            }
+            throw new ReglaIncumplida('Otra programación de esta sala se está guardando: probá de nuevo en unos segundos.', previous: $error);
+        }
     }
 
     /**
@@ -111,6 +206,24 @@ final class RepositorioDeSalas
     }
 
     /**
+     * La última solicitud de moderación que se le aplicó (EF-07.6), o null.
+     */
+    public function solicitudAplicada(string $id): ?string
+    {
+        $solicitud = $this->base->valor('SELECT solicitud_id FROM sala WHERE id = ?', [$id]);
+
+        return $solicitud === null ? null : (string) $solicitud;
+    }
+
+    /**
+     * Anota la solicitud que se le acaba de aplicar.
+     */
+    public function anotarSolicitud(string $id, string $solicitudId): void
+    {
+        $this->base->ejecutar('UPDATE sala SET solicitud_id = ? WHERE id = ?', [$solicitudId, $id]);
+    }
+
+    /**
      * Guarda sólo el flag de habilitada, que cambia el administrador: los datos de la sala son
      * del organizador y no se pisan con lo que se leyó antes.
      */
@@ -120,8 +233,7 @@ final class RepositorioDeSalas
     }
 
     /**
-     * La sala de una fila con las columnas de COLUMNAS. Pública para el repositorio de solicitudes,
-     * que trae cada solicitud con su sala en la misma consulta.
+     * La sala de una fila con las columnas de COLUMNAS.
      *
      * @param array<string, mixed> $fila
      */

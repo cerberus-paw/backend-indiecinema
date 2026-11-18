@@ -28,6 +28,9 @@ final class ReservasDelAdministrador extends Controlador
 {
     private const ZONA = 'America/Argentina/Buenos_Aires';
 
+    /** Cuántas páginas se muestran a cada lado de la actual en el paginado, como «Usuarios y roles». */
+    private const PAGINAS_ALREDEDOR = 2;
+
     public function __construct(
         private readonly ServicioDePanelDeReservas $servicio,
         private readonly FuncionesDeProgramacion $funciones,
@@ -72,11 +75,11 @@ final class ReservasDelAdministrador extends Controlador
     }
 
     /**
-     * Lo único que cambia de la fila al anular: su estado y si todavía se puede anular. La función
-     * va aparte en fila(), y pedírsela de nuevo a programación por una anulación sería un pedido
-     * al pedo: esa celda queda como está.
+     * Lo único que cambia de la fila al anular: su estado, qué pasó con el reembolso y si todavía
+     * se puede anular. La función va aparte en fila(), y pedírsela de nuevo a programación por una
+     * anulación sería un pedido al pedo: esa celda queda como está.
      *
-     * @return array{id: string, codigo: string, estado: string, estado_etiqueta: string, anulable: bool}
+     * @return array{id: string, codigo: string, estado: string, estado_etiqueta: string, reembolso: ?string, anulable: bool}
      */
     private static function estadoDeLaFila(Reserva $reserva): array
     {
@@ -85,8 +88,25 @@ final class ReservasDelAdministrador extends Controlador
             'codigo' => $reserva->codigo,
             'estado' => $reserva->estado->value,
             'estado_etiqueta' => $reserva->estado->etiqueta(),
+            'reembolso' => self::reembolso($reserva),
             'anulable' => $reserva->estado === EstadoReserva::Confirmada,
         ];
+    }
+
+    /**
+     * Qué pasó con la plata de la reserva (EF-06.4): «hecho» si se devolvió, «pendiente» si se
+     * canceló estando pagada y la devolución no salió —Mercado Pago no respondió o la rechazó—, y
+     * null si no había nada que devolver: a la gorra, con el cobro apagado, o nunca pagada.
+     *
+     * Pendiente es el único que el administrador tiene que atender: la plata sigue en la cuenta.
+     */
+    private static function reembolso(Reserva $reserva): ?string
+    {
+        if ($reserva->reembolsoId !== null) {
+            return 'hecho';
+        }
+
+        return $reserva->reembolsoPendiente() ? 'pendiente' : null;
     }
 
     private function pantalla(Peticion $peticion, ?string $anulada = null, ?string $error = null, int $estado = 200): Respuesta
@@ -113,10 +133,7 @@ final class ReservasDelAdministrador extends Controlador
                 'total' => $total,
                 'anterior' => $numero > 1 ? $this->urlDePagina($filtro, $numero - 1) : null,
                 'siguiente' => $numero < $paginas ? $this->urlDePagina($filtro, $numero + 1) : null,
-                'paginas' => array_map(
-                    fn (int $n): array => ['numero' => $n, 'url' => $this->urlDePagina($filtro, $n), 'actual' => $n === $numero],
-                    range(1, $paginas),
-                ),
+                'paginas' => $this->paginas($numero, $paginas, $filtro),
             ],
             'anulada' => $anulada !== null && preg_match('/^[A-Z0-9]{8}$/', $anulada) === 1 ? $anulada : null,
         ];
@@ -130,13 +147,42 @@ final class ReservasDelAdministrador extends Controlador
     /**
      * Relativa a la página: así no depende del prefijo de funciones, que pone nginx.
      */
+    /**
+     * Los números del paginado: la primera, la última y las de alrededor de la actual, con null
+     * donde se saltean páginas («…»). Con 32 páginas, en la 1: 1 2 3 4 5 … 32; en la 10: 1 … 8 9
+     * 10 11 12 … 32. Antes iban todas, y con cientos de reservas la barra eran decenas de números.
+     * Es la misma ventana que la de «Usuarios y roles» (AdministracionDeUsuarios de cuentas).
+     *
+     * @return list<?array{numero: int, url: string, actual: bool}>
+     */
+    private function paginas(int $actual, int $total, ?EstadoReserva $filtro): array
+    {
+        // La ventana tiene siempre el mismo ancho, también cerca de los extremos.
+        $ancho = 2 * self::PAGINAS_ALREDEDOR + 1;
+        $desde = max(1, min($actual - self::PAGINAS_ALREDEDOR, $total - $ancho + 1));
+        $hasta = min($total, $desde + $ancho - 1);
+        $numeros = array_values(array_unique([1, ...range($desde, $hasta), $total]));
+
+        $paginas = [];
+        $anterior = 0;
+        foreach ($numeros as $numero) {
+            if ($numero > $anterior + 1) {
+                $paginas[] = null;
+            }
+            $paginas[] = ['numero' => $numero, 'url' => $this->urlDePagina($filtro, $numero), 'actual' => $numero === $actual];
+            $anterior = $numero;
+        }
+
+        return $paginas;
+    }
+
     private function urlDePagina(?EstadoReserva $filtro, int $numero): string
     {
         return '?' . http_build_query(array_filter(['estado' => $filtro?->value, 'pagina' => $numero > 1 ? $numero : null]));
     }
 
     /**
-     * @return array{id: string, codigo: string, cantidad: int, total: string, estado: string, estado_etiqueta: string, creada: string, anulable: bool, funcion: ?array{titulo: string, url: string, fecha: ?string}}
+     * @return array{id: string, codigo: string, cantidad: int, total: string, estado: string, estado_etiqueta: string, reembolso: ?string, creada: string, anulable: bool, funcion: ?array{titulo: string, url: string, fecha: ?string}}
      */
     private static function fila(Reserva $reserva, ?FuncionDeProgramacion $funcion): array
     {
@@ -147,6 +193,7 @@ final class ReservasDelAdministrador extends Controlador
             'total' => TextoParaMostrar::monto((float) $reserva->total),
             'estado' => $reserva->estado->value,
             'estado_etiqueta' => $reserva->estado->etiqueta(),
+            'reembolso' => self::reembolso($reserva),
             'creada' => TextoParaMostrar::fecha($reserva->creadaEn->setTimezone(new DateTimeZone(self::ZONA))),
             'anulable' => $reserva->estado === EstadoReserva::Confirmada,
             'funcion' => $funcion === null ? null : [

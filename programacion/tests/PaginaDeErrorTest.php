@@ -84,6 +84,7 @@ final class PaginaDeErrorTest extends TestCase
         $error = $this->pedir('/organizador/salas');
 
         self::assertSame(401, $error->estado());
-        self::assertSame([['/cuenta/ingresar', 'Ingresar'], ['/', 'Volver al inicio']], self::botones($error));
+        // Después de ingresar, vuelve a la página que pidió (EF-07.8).
+        self::assertSame([['/cuenta/ingresar?volver=%2Forganizador%2Fsalas', 'Ingresar'], ['/', 'Volver al inicio']], self::botones($error));
     }
 }

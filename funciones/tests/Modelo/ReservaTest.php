@@ -153,10 +153,114 @@ final class ReservaTest extends TestCase
         }
     }
 
+    /**
+     * Con el cobro prendido (X-01.2): la de una función paga espera el pago, y vence en los
+     * minutos que tiene para pagar.
+     */
+    public function testConElCobroPrendidoUnaFuncionPagaNacePendienteYVence(): void
+    {
+        $reserva = Reserva::nueva($this->funcion(), self::ESPECTADOR, 2, $this->antes(), 15);
+
+        self::assertSame(EstadoReserva::PendientePago, $reserva->estado);
+        self::assertSame('7000.00', $reserva->total);
+        self::assertEquals(new DateTimeImmutable('2026-10-20 12:15:00'), $reserva->venceEn);
+        self::assertSame('UTC', $reserva->venceEn?->getTimezone()->getName());
+        self::assertNull($reserva->preferenciaId);
+    }
+
+    public function testALaGorraNoHayNadaQuePagarYNaceConfirmada(): void
+    {
+        $reserva = Reserva::nueva($this->funcion(precio: 0), self::ESPECTADOR, 2, $this->antes(), 15);
+
+        self::assertSame(EstadoReserva::Confirmada, $reserva->estado);
+        self::assertNull($reserva->venceEn);
+    }
+
+    public function testConElCobroApagadoNoVence(): void
+    {
+        self::assertNull(Reserva::nueva($this->funcion(), self::ESPECTADOR, 2, $this->antes())->venceEn);
+    }
+
+    public function testVenceCuandoPasaElPlazoParaPagar(): void
+    {
+        $reserva = Reserva::nueva($this->funcion(), self::ESPECTADOR, 1, $this->antes(), 15);
+
+        self::assertFalse($reserva->vencida(new DateTimeImmutable('2026-10-20 12:14:59')));
+        self::assertTrue($reserva->vencida(new DateTimeImmutable('2026-10-20 12:15:00')));
+        // Una confirmada ya no espera nada.
+        self::assertFalse(Reserva::nueva($this->funcion(), self::ESPECTADOR, 1, $this->antes())->vencida(new DateTimeImmutable('2030-01-01')));
+    }
+
+    public function testUnaPendienteSeCancelaPeroNoDaEntrada(): void
+    {
+        $reserva = Reserva::nueva($this->funcion(), self::ESPECTADOR, 1, $this->antes(), 15);
+
+        self::assertSame(EstadoReserva::Cancelada, $reserva->cancelar()->estado);
+        $this->expectException(ReglaIncumplida::class);
+        $this->expectExceptionMessage('Una reserva pendiente de pago no puede quedar con asistencia.');
+        $reserva->registrarAsistencia();
+    }
+
+    /**
+     * La preferencia y el vencimiento siguen con la reserva en cada cambio.
+     */
+    public function testLaPreferenciaYElVencimientoNoSePierdenAlCambiar(): void
+    {
+        $reserva = Reserva::nueva($this->funcion(), self::ESPECTADOR, 1, $this->antes(), 15)->conPreferencia('pref-1', 'https://mp.test/pagar');
+
+        foreach ([$reserva->cancelar(), $reserva->conOtroCodigo()] as $otra) {
+            self::assertSame(['pref-1', 'https://mp.test/pagar'], [$otra->preferenciaId, $otra->enlaceDePago]);
+            self::assertEquals($reserva->venceEn, $otra->venceEn);
+        }
+    }
+
+    /**
+     * La confirma el pago aprobado (X-01.4), que queda anotado.
+     */
+    public function testElPagoConfirmaUnaPendienteYQuedaAnotado(): void
+    {
+        $reserva = Reserva::nueva($this->funcion(), self::ESPECTADOR, 1, $this->antes(), 15)->conPreferencia('pref-1', 'https://mp.test/pagar');
+
+        $pagada = $reserva->confirmarPago('1324567890');
+
+        self::assertSame(EstadoReserva::Confirmada, $pagada->estado);
+        self::assertSame('1324567890', $pagada->pagoId);
+        self::assertSame([$reserva->id, $reserva->codigo, 'pref-1'], [$pagada->id, $pagada->codigo, $pagada->preferenciaId]);
+        self::assertSame('1324567890', $pagada->cancelar()->pagoId);
+    }
+
+    public function testUnaQueNoEsperaElPagoNoSeConfirmaConUno(): void
+    {
+        $this->expectException(ReglaIncumplida::class);
+        $this->expectExceptionMessage('Una reserva confirmada no espera ningún pago.');
+
+        Reserva::nueva($this->funcion(), self::ESPECTADOR, 1, $this->antes())->confirmarPago('1324567890');
+    }
+
     public function testLaCanceladaEsLaUnicaQueNoOcupaLugares(): void
     {
+        self::assertTrue(EstadoReserva::PendientePago->ocupaLugares());
         self::assertTrue(EstadoReserva::Confirmada->ocupaLugares());
         self::assertTrue(EstadoReserva::Asistio->ocupaLugares());
         self::assertFalse(EstadoReserva::Cancelada->ocupaLugares());
+    }
+
+    /**
+     * Lo que suman el total del panel del organizador (EF-06.5) y el neto que reparte recaudación
+     * (EF-02.5): la plata que entró por Mercado Pago y todavía no volvió.
+     */
+    public function testSoloEstaCobradaLaQueTieneSuPlataEnLaCuenta(): void
+    {
+        $sinCobro = Reserva::nueva($this->funcion(), self::ESPECTADOR, 1, $this->antes());
+        $pagada = Reserva::nueva($this->funcion(), self::ESPECTADOR, 1, $this->antes(), 15)
+            ->conPreferencia('pref-1', 'https://mp.test/pagar')
+            ->confirmarPago('1324567890');
+
+        // Confirmada con el cobro apagado: su total dice 3500 y nunca entró nada.
+        self::assertFalse($sinCobro->cobrada());
+        self::assertTrue($pagada->cobrada());
+        // Cancelarla no mueve la plata: sigue en la cuenta hasta que el reembolso sale.
+        self::assertTrue($pagada->cancelar()->cobrada());
+        self::assertFalse($pagada->cancelar()->conReembolso('reembolso-1')->cobrada());
     }
 }

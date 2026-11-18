@@ -24,9 +24,14 @@ map $request_method $ip_si_es_post {
 }
 limit_req_zone $ip_si_es_post zone=ingresar:10m rate=5r/m;
 limit_req_zone $ip_si_es_post zone=registro:10m rate=5r/m;
+limit_req_zone $ip_si_es_post zone=recuperar:10m rate=5r/m;
 # La solicitud de sala le manda un correo al equipo: pasan menos, para que no sirva para
 # llenarle el buzón.
 limit_req_zone $ip_si_es_post zone=solicitud:10m rate=2r/m;
+limit_req_zone $ip_si_es_post zone=pedido:10m rate=2r/m;
+# La denuncia de lo publicado (EF-07.8): llega a la bandeja de moderación, y un script que denuncia
+# sin parar la llenaría.
+limit_req_zone $ip_si_es_post zone=denuncia:10m rate=2r/m;
 # La reserva de una función: nadie reserva diez veces por minuto, y un script que reserva sin parar
 # le pega a funciones y a programación en cada una.
 limit_req_zone $ip_si_es_post zone=reserva:10m rate=10r/m;

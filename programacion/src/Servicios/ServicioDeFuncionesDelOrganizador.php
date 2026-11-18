@@ -19,6 +19,7 @@ use IndieCinema\Programacion\Repositorios\RepositorioDeFunciones;
 use IndieCinema\Programacion\Repositorios\RepositorioDeObras;
 use IndieCinema\Programacion\Repositorios\RepositorioDeSalas;
 use IndieCinema\Programacion\Repositorios\RepositorioDeVotos;
+use Psr\Log\LoggerInterface;
 
 /**
  * El panel de funciones del organizador: lo que ve de las funciones de sus salas y el alta
@@ -36,6 +37,8 @@ final class ServicioDeFuncionesDelOrganizador
         private readonly RepositorioDeVotos $votos,
         private readonly ?AcuerdosDeFunciones $acuerdos = null,
         private readonly ?OcupacionDeFunciones $ocupacion = null,
+        /** Para avisar una votación que se cerró con una obra que no entra en la sala (EF-05.4). */
+        private readonly ?LoggerInterface $log = null,
     ) {
     }
 
@@ -92,13 +95,24 @@ final class ServicioDeFuncionesDelOrganizador
     }
 
     /**
-     * El catálogo de obras disponibles para proyectar.
+     * El catálogo de obras disponibles para proyectar: las aprobadas (EF-07.7). Al editar una
+     * función, también las que ya tenía, aunque después las hayan rechazado: rechazar una obra no
+     * toca lo programado (grilling de EF-07, Q3).
      *
      * @return list<Obra>
      */
-    public function catalogoDeObras(): array
+    public function catalogoDeObras(?Funcion $funcion = null): array
     {
-        return $this->obras->todas();
+        $catalogo = $this->obras->todas();
+        $ids = array_column($catalogo, 'id');
+        foreach ($funcion === null ? [] : array_diff($funcion->obrasIds, $ids) as $obraId) {
+            $obra = $this->obras->buscar($obraId);
+            if ($obra !== null) {
+                $catalogo[] = $obra;
+            }
+        }
+
+        return $catalogo;
     }
 
     /**
@@ -129,18 +143,25 @@ final class ServicioDeFuncionesDelOrganizador
             $duracion += $duraciones[$obraId] ?? throw new ReglaIncumplida('Una de las obras no está en el catálogo.');
         }
 
-        $funcion = $sala->programarFuncion($obrasIds, $cupo, $precioBase, $fechaHora, $duracion, $this->funciones->ocupadoEnLaSala($sala->id));
-        $this->funciones->agregar($funcion);
+        // Con la sala bloqueada, para que otra programación a la vez no pase el control antes de
+        // que se guarde esta (EF-05.6).
+        return $this->salas->conLaSalaBloqueada($sala->id, function (?Sala $sala) use ($obrasIds, $cupo, $precioBase, $fechaHora, $duracion): Funcion {
+            $sala ?? throw new ReglaIncumplida('La sala no existe o no pertenece a tu cuenta.');
+            $funcion = $sala->programarFuncion($obrasIds, $cupo, $precioBase, $fechaHora, $duracion, $this->funciones->ocupadoEnLaSala($sala->id));
+            $this->funciones->agregar($funcion);
 
-        return $funcion;
+            return $funcion;
+        });
     }
 
     /**
-     * Da de alta una nueva función en votación de títulos (E3-12.1), sin fecha todavía.
+     * Da de alta una nueva función en votación de títulos (E3-12.1), sin fecha todavía. La
+     * votación cierra sola en $votacionCierraEn (EF-03.1), o antes si la cierra el organizador.
      *
      * @param list<string> $obrasIds
      *
-     * @throws ReglaIncumplida si la sala no es suya o una obra no está en el catálogo
+     * @throws ReglaIncumplida si la sala no es suya, una obra no está en el catálogo o el cierre
+     *                         no es futuro
      */
     public function crearEnVotacionDeTitulos(
         Usuario $organizador,
@@ -148,18 +169,20 @@ final class ServicioDeFuncionesDelOrganizador
         array $obrasIds,
         int $cupo,
         float $precioBase,
+        ?DateTimeImmutable $votacionCierraEn = null,
     ): Funcion {
         $sala = $this->salas->buscar($salaId);
         if ($sala === null || !$sala->esDe($organizador->id)) {
             throw new ReglaIncumplida('La sala no existe o no pertenece a tu cuenta.');
         }
 
-        $idsCatalogo = array_column($this->obras->todas(), 'id');
-        if (array_diff($obrasIds, $idsCatalogo) !== []) {
+        $catalogo = $this->obras->todas();
+        if (array_diff($obrasIds, array_column($catalogo, 'id')) !== []) {
             throw new ReglaIncumplida('Una de las obras no está en el catálogo.');
         }
+        $sala->controlarCandidatas(array_values(array_filter($catalogo, static fn (Obra $obra): bool => in_array($obra->id, $obrasIds, true))));
 
-        $funcion = $sala->crearFuncion($obrasIds, $cupo, $precioBase);
+        $funcion = $sala->crearFuncion($obrasIds, $cupo, $precioBase, $votacionCierraEn);
         $this->funciones->agregar($funcion);
 
         return $funcion;
@@ -209,17 +232,22 @@ final class ServicioDeFuncionesDelOrganizador
             throw new ReglaIncumplida('La sala no existe o no pertenece a tu cuenta.');
         }
 
-        $duraciones = array_column($this->obras->todas(), 'duracionMinutos', 'id');
+        $duraciones = array_column($this->catalogoDeObras($funcion), 'duracionMinutos', 'id');
         $duracion = 0;
         foreach ($obrasIds as $obraId) {
             $duracion += $duraciones[$obraId] ?? throw new ReglaIncumplida('Una de las obras no está en el catálogo.');
         }
 
-        $ocupado = $this->funciones->ocupadoEnLaSala($sala->id, $funcion->id);
-        $sala->actualizarFuncion($funcion, $obrasIds, $cupo, $precioBase, $fechaHora, $duracion, $ocupado);
-        $this->funciones->actualizar($funcion);
+        // Con la sala de destino bloqueada, como al programar (EF-05.6): la de origen pierde una
+        // función, ahí no puede quedar ninguna encimada.
+        return $this->salas->conLaSalaBloqueada($sala->id, function (?Sala $sala) use ($funcion, $obrasIds, $cupo, $precioBase, $fechaHora, $duracion): Funcion {
+            $sala ?? throw new ReglaIncumplida('La sala no existe o no pertenece a tu cuenta.');
+            $ocupado = $this->funciones->ocupadoEnLaSala($sala->id, $funcion->id);
+            $sala->actualizarFuncion($funcion, $obrasIds, $cupo, $precioBase, $fechaHora, $duracion, $ocupado);
+            $this->funciones->actualizar($funcion);
 
-        return $funcion;
+            return $funcion;
+        });
     }
 
     /**
@@ -309,8 +337,9 @@ final class ServicioDeFuncionesDelOrganizador
     }
 
     /**
-     * Cierra la votación de títulos de una función propia con la obra más votada (E3-12.4).
-     * La función pasa a estado «en acuerdo de fecha» y conserva únicamente la obra ganadora.
+     * Cierra la votación de títulos de una función propia con las obras más votadas (E3-12.4,
+     * EF-05.1), antes de su fecha de cierre o en una que no tiene. La función pasa a estado «en
+     * acuerdo de fecha» y conserva las ganadoras, como cuando la cierra la tarea (CierresPorFecha).
      *
      * @throws ExcepcionHttp 404 si la función no existe, es de otro organizador o no está en votación de títulos
      */
@@ -321,9 +350,7 @@ final class ServicioDeFuncionesDelOrganizador
             throw ExcepcionHttp::noEncontrada();
         }
 
-        $obraGanadora = $this->votos->obraMasVotada($funcion->id, $funcion->obrasIds);
-        $funcion->cerrarVotacionTitulos([$obraGanadora]);
-        $this->funciones->guardar($funcion);
+        $this->cierres()->cerrarVotacion($funcion);
 
         return $funcion;
     }
@@ -367,6 +394,14 @@ final class ServicioDeFuncionesDelOrganizador
         if (($this->acuerdos->obtenerPorFuncion($funcion->id)['estado'] ?? null) === 'abierto') {
             throw new ReglaIncumplida('Esta función ya tiene un acuerdo de fecha abierto. Para proponer otras franjas, primero cerralo sin mínimo desde la ficha.');
         }
+        // Que ninguna se pise con otra función de la sala (EF-05.5): sólo cuentan las programadas,
+        // no las franjas de otros acuerdos abiertos, que todavía no se sabe si se usan.
+        foreach ($franjas as $indice => $franja) {
+            $pisada = $this->cierres()->motivoParaPisarse($funcion, self::fechaHora($franja['fecha_hora_inicio']));
+            if ($pisada !== null) {
+                throw new ReglaIncumplida('La opción ' . ($indice + 1) . " {$pisada}");
+            }
+        }
 
         return $this->acuerdos->proponer($funcion->id, $minimoAsistentes, $franjas);
     }
@@ -402,12 +437,24 @@ final class ServicioDeFuncionesDelOrganizador
         if ($fechaHora <= new DateTimeImmutable()) {
             throw new ReglaIncumplida('La franja ganadora ya empezó: la función no se puede programar en esa fecha. Cerrá el acuerdo sin mínimo y proponé franjas nuevas.');
         }
+        $acuerdos = $this->acuerdos;
 
-        $this->acuerdos->confirmar((string) $acuerdo['id']);
-        $funcion->fijarFechaHora($fechaHora);
-        $this->funciones->guardar($funcion);
+        // Con la sala bloqueada, como al programar (EF-05.6): el pedido a funciones va adentro, así
+        // nadie programa en ese horario entre el control y el guardado. Traba sólo esta sala, y
+        // funciones contesta en 2 segundos o falla.
+        return $this->salas->conLaSalaBloqueada($funcion->salaId, function () use ($funcion, $fechaHora, $acuerdo, $acuerdos): Funcion {
+            // Entre la propuesta y ahora se pudo programar otra en ese horario (EF-05.5).
+            $pisada = $this->cierres()->motivoParaPisarse($funcion, $fechaHora);
+            if ($pisada !== null) {
+                throw new ReglaIncumplida("La franja ganadora {$pisada} Cerrá el acuerdo sin mínimo y proponé franjas nuevas.");
+            }
 
-        return $funcion;
+            $acuerdos->confirmar((string) $acuerdo['id']);
+            $funcion->fijarFechaHora($fechaHora);
+            $this->funciones->guardar($funcion);
+
+            return $funcion;
+        });
     }
 
     /**
@@ -457,6 +504,14 @@ final class ServicioDeFuncionesDelOrganizador
         }
 
         return $acuerdo;
+    }
+
+    /**
+     * Los cierres que comparten el organizador y la tarea: así eligen y controlan igual.
+     */
+    private function cierres(): CierresPorFecha
+    {
+        return new CierresPorFecha($this->funciones, $this->votos, $this->salas, $this->obras, log: $this->log);
     }
 
     private static function fechaHora(string $texto): DateTimeImmutable

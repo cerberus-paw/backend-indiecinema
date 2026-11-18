@@ -5,11 +5,14 @@ declare(strict_types=1);
 namespace IndieCinema\Funciones\Pruebas\Servicios;
 
 use DateTimeImmutable;
+use DateTimeZone;
 use IndieCinema\Funciones\Modelo\ReglaIncumplida;
 use IndieCinema\Funciones\Modelo\Reserva;
 use IndieCinema\Funciones\Pruebas\ConBaseDePruebas;
 use IndieCinema\Funciones\Pruebas\ConProgramacionDePrueba;
+use IndieCinema\Funciones\Repositorios\RepositorioDeConducta;
 use IndieCinema\Funciones\Repositorios\RepositorioDeReservas;
+use IndieCinema\Funciones\Servicios\ServicioDeConducta;
 use IndieCinema\Funciones\Servicios\ServicioDeReservas;
 use IndieCinema\Nucleo\BaseDeDatos;
 use IndieCinema\Nucleo\Configuracion;
@@ -47,6 +50,35 @@ final class ServicioDeReservasTest extends TestCase
     private function reservar(int $cantidad, string $funcionId = self::PROGRAMADA): Reserva
     {
         return $this->servicio()->reservar(new Usuario(Uuid::nuevo(), Rol::Espectador), $funcionId, $cantidad, new DateTimeImmutable('2026-10-20 12:00:00'));
+    }
+
+    /**
+     * Mientras el que reservó paga, sus lugares son suyos; cuando vence el plazo, quedan libres en
+     * el momento, sin esperar a que la tarea la cancele (X-01.5).
+     */
+    public function testLosLugaresDeUnaPendienteVencidaQuedanLibresSinEsperarALaTarea(): void
+    {
+        // Reservó los 40 a las 12:00 (15:00 en UTC, como guarda la base) y tenía 15 minutos.
+        $this->base->ejecutar(
+            "INSERT INTO reserva (id, funcion_id, usuario_id, codigo, cantidad, total, estado, creada_en, vence_en) VALUES (?, ?, ?, 'VENC2345', ?, '140000.00', 'pendiente_pago', '2026-10-20 15:00:00', '2026-10-20 15:15:00')",
+            [Uuid::nuevo(), self::PROGRAMADA, Uuid::nuevo(), self::CUPO],
+        );
+        $espectador = new Usuario(Uuid::nuevo(), Rol::Espectador);
+        // Con la zona explícita: la CI corre PHP en UTC, y el contenedor, en la hora de acá.
+        $argentina = new DateTimeZone('America/Argentina/Buenos_Aires');
+
+        try {
+            $this->servicio()->reservar($espectador, self::PROGRAMADA, 1, new DateTimeImmutable('2026-10-20 12:14:00', $argentina));
+            self::fail('Reservó un lugar que todavía se estaba pagando.');
+        } catch (ReglaIncumplida $error) {
+            self::assertSame('La función está agotada.', $error->getMessage());
+        }
+        // Lo más que puede pedir una persona (IC-463): con los 40 ocupados, no habría ni uno.
+        $reserva = $this->servicio()->reservar($espectador, self::PROGRAMADA, Reserva::MAXIMO_POR_PERSONA, new DateTimeImmutable('2026-10-20 12:15:00', $argentina));
+
+        self::assertSame(Reserva::MAXIMO_POR_PERSONA, $reserva->cantidad);
+        // La vencida sigue pendiente hasta que pase la tarea: lo que cambió es que ya no cuenta.
+        self::assertSame(1, $this->base->valor("SELECT COUNT(*) FROM reserva WHERE estado = 'pendiente_pago'"));
     }
 
     /**
@@ -268,5 +300,77 @@ final class ServicioDeReservasTest extends TestCase
         self::assertSame('', $errores);
 
         return $salida;
+    }
+
+    public function testUnUsuarioBloqueadoEnLaSalaNoPuedeReservarPeroSiEnOtra(): void
+    {
+        $bloqueado = new Usuario('66666666-6666-4666-8666-666666666666', Rol::Espectador);
+        $ahora = new DateTimeImmutable('2026-10-20 12:00:00');
+
+        try {
+            $this->servicio()->reservar($bloqueado, self::PROGRAMADA, 1, $ahora);
+            self::fail('Tenía que rechazar la reserva de un usuario bloqueado en la sala.');
+        } catch (ReglaIncumplida $error) {
+            self::assertSame('No podés reservar en esta sala.', $error->getMessage());
+        }
+        self::assertSame(0, $this->confirmadas());
+
+        $enOtra = $this->servicio()->reservar($bloqueado, '67676767-6767-4767-8767-676767676767', 2, $ahora);
+        self::assertSame(2, $enOtra->cantidad);
+    }
+
+    public function testBajoElUmbralLimitaADosReservasSimultaneas(): void
+    {
+        $configuracion = new Configuracion(['base' => self::baseDePruebas()]);
+        $servicio = new ServicioDeReservas(
+            self::funcionesDeProgramacion(),
+            new RepositorioDeReservas($this->base),
+            conducta: new ServicioDeConducta(new RepositorioDeConducta($this->base), $configuracion),
+        );
+        $espectador = new Usuario(Uuid::nuevo(), Rol::Espectador);
+        $ahora = new DateTimeImmutable('2026-10-20 12:00:00', new DateTimeZone('UTC'));
+
+        // Dos negativas recientes (-20) y cuatro ausencias (-20) en funciones pasadas dejan el puntaje en 60 (en el umbral).
+        $funcionPasada = Uuid::nuevo();
+        foreach (['2026-04-21 12:00:00', '2026-10-10 12:00:00'] as $fecha) {
+            $id = Uuid::nuevo();
+            $this->base->ejecutar(
+                "INSERT INTO reserva (id, funcion_id, usuario_id, codigo, cantidad, total, estado, creada_en) VALUES (?, ?, ?, ?, 1, '0.00', 'asistio', ?)",
+                [$id, $funcionPasada, $espectador->id, strtoupper(substr(bin2hex(random_bytes(4)), 0, 8)), $fecha],
+            );
+            $this->base->ejecutar(
+                'INSERT INTO conducta (reserva_id, usuario_id, organizador_id, positiva, motivo, creada_en) VALUES (?, ?, ?, 0, ?, ?)',
+                [$id, $espectador->id, Uuid::nuevo(), 'Mala conducta', $fecha],
+            );
+        }
+        for ($i = 0; $i < 4; ++$i) {
+            $this->base->ejecutar(
+                "INSERT INTO reserva (id, funcion_id, usuario_id, codigo, cantidad, total, estado, creada_en) VALUES (?, ?, ?, ?, 1, '0.00', 'ausente', '2026-10-01 12:00:00')",
+                [Uuid::nuevo(), $funcionPasada, $espectador->id, strtoupper(substr(bin2hex(random_bytes(4)), 0, 8))],
+            );
+        }
+
+        // Primera y segunda reserva simultánea pasan (en funciones distintas); la tercera se rechaza.
+        $primera = $servicio->reservar($espectador, self::PROGRAMADA, 1, $ahora);
+        $segunda = $servicio->reservar($espectador, '67676767-6767-4767-8767-676767676767', 1, $ahora);
+        self::assertSame(1, $primera->cantidad);
+        self::assertSame(1, $segunda->cantidad);
+
+        try {
+            $servicio->reservar($espectador, self::PROGRAMADA, 1, $ahora);
+            self::fail('Permitió una tercera reserva simultánea bajo el umbral.');
+        } catch (ReglaIncumplida $error) {
+            self::assertSame('Por tu historial de conducta podés tener hasta 2 reservas a la vez.', $error->getMessage());
+        }
+
+        // Cancelar una libera cupo de reservas simultáneas para volver a reservar.
+        $servicio->cancelar($espectador, $primera->id, $ahora);
+        $reemplazo = $servicio->reservar($espectador, self::PROGRAMADA, 1, $ahora);
+        self::assertSame(1, $reemplazo->cantidad);
+
+        // Cuando vence una negativa a los 6 meses el puntaje sube a 70 y vuelve el tope normal.
+        $despuesDeSeisMeses = new DateTimeImmutable('2026-10-22 12:00:00', new DateTimeZone('UTC'));
+        $tercera = $servicio->reservar($espectador, self::PROGRAMADA, 1, $despuesDeSeisMeses);
+        self::assertSame(1, $tercera->cantidad);
     }
 }

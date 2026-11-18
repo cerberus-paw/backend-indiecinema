@@ -5,9 +5,13 @@ declare(strict_types=1);
 use IndieCinema\Cuentas\Controladores\AdministracionDeUsuarios;
 use IndieCinema\Cuentas\Controladores\Ingreso;
 use IndieCinema\Cuentas\Controladores\Inicio;
+use IndieCinema\Cuentas\Controladores\Perfil;
+use IndieCinema\Cuentas\Controladores\RecuperacionDeContrasena;
 use IndieCinema\Cuentas\Controladores\Registro;
+use IndieCinema\Cuentas\Controladores\Seguimientos;
 use IndieCinema\Cuentas\Controladores\SesionInterna;
 use IndieCinema\Cuentas\Controladores\UsuariosInternos;
+use IndieCinema\Cuentas\Controladores\VerificacionDeCorreo;
 use IndieCinema\Nucleo\Http\EstadoInterno;
 use IndieCinema\Nucleo\Ruteo\Router;
 use IndieCinema\Nucleo\Seguridad\Rol;
@@ -17,14 +21,28 @@ use IndieCinema\Nucleo\Seguridad\Rol;
  * middleware del núcleo lo controla antes de llegar al controlador.
  */
 return static function (Router $router): void {
-    // «Mi cuenta»: los datos de quien está en sesión.
+    // «Mi cuenta»: los datos de quien está en sesión y su edición (EF-15.1).
     $router->get('/', [Inicio::class, 'mostrar'], Rol::Espectador);
+    $router->get('/datos', [Perfil::class, 'mostrarDatos'], Rol::Espectador);
+    $router->post('/datos', [Perfil::class, 'guardarDatos'], Rol::Espectador);
+    $router->get('/contrasena', [Perfil::class, 'mostrarContrasena'], Rol::Espectador);
+    $router->post('/contrasena', [Perfil::class, 'guardarContrasena'], Rol::Espectador);
+    // Seguir una sala o a su organizador (EF-15.4): el botón de la ficha consulta y cambia el
+    // estado por fetch; sin JavaScript, el POST vuelve a la ficha.
+    $router->get('/seguimientos', [Seguimientos::class, 'estado'], Rol::Espectador);
+    $router->post('/seguimientos', [Seguimientos::class, 'cambiar'], Rol::Espectador);
 
     // Sin sesión: es para el visitante que todavía no tiene cuenta.
     $router->get('/registro', [Registro::class, 'mostrar']);
     $router->post('/registro', [Registro::class, 'registrar']);
+    $router->get('/verificar', [VerificacionDeCorreo::class, 'verificar']);
+    $router->post('/verificar/reenviar', [VerificacionDeCorreo::class, 'reenviar'], Rol::Espectador);
     $router->get('/ingresar', [Ingreso::class, 'mostrar']);
     $router->post('/ingresar', [Ingreso::class, 'ingresar']);
+    $router->get('/recuperar', [RecuperacionDeContrasena::class, 'mostrarSolicitud']);
+    $router->post('/recuperar', [RecuperacionDeContrasena::class, 'solicitar']);
+    $router->get('/recuperar/nueva', [RecuperacionDeContrasena::class, 'mostrarNueva']);
+    $router->post('/recuperar/nueva', [RecuperacionDeContrasena::class, 'restablecer']);
     // Sin rol mínimo: trabaja con la cookie, y sin sesión válida igual la borra.
     $router->post('/salir', [Ingreso::class, 'salir']);
 
@@ -36,15 +54,18 @@ return static function (Router $router): void {
     // El auth_request de nginx, en cada pedido del sitio: quién es el de la cookie.
     $router->interna('GET', '/interno/sesion', [SesionInterna::class, 'validar'], ['nginx']);
 
-    // Para la bandeja de solicitudes de sala de programación: quién la mandó y, al aprobarla, el
-    // rol de organizador (pedir ser organizador es pedir una sala, como en la E2). Funciones lee
+    // Para la bandeja de solicitudes de sala, que es de moderación desde EF-07.2: quién la mandó y,
+    // al aprobarla, el rol de organizador (pedir ser organizador es pedir una sala, como en la E2).
+    // Funciones lee
     // el usuario para avisarle por correo que se canceló la función que reservó (E4-03.4), pero
     // no da roles.
     // Varios usuarios en un solo pedido, para el listado y el CSV de reservas de funciones (IC-464).
-    $router->interna('GET', '/interno/usuarios', [UsuariosInternos::class, 'varios'], ['programacion', 'funciones']);
-    $router->interna('GET', '/interno/usuarios/{id}', [UsuariosInternos::class, 'mostrar'], ['programacion', 'funciones']);
-    $router->interna('POST', '/interno/usuarios/{id}/roles', [UsuariosInternos::class, 'darRol'], ['programacion']);
+    // Recaudación, para los nombres de las liquidaciones (EF-08).
+    $router->interna('GET', '/interno/usuarios', [UsuariosInternos::class, 'varios'], ['programacion', 'funciones', 'recaudacion']);
+    // Moderación, para el nombre y el correo de quien manda una solicitud de sala (EF-07).
+    $router->interna('GET', '/interno/usuarios/{id}', [UsuariosInternos::class, 'mostrar'], ['programacion', 'funciones', 'moderacion']);
+    $router->interna('POST', '/interno/usuarios/{id}/roles', [UsuariosInternos::class, 'darRol'], ['moderacion']);
 
     // Para comprobar que los otros subsistemas llegan hasta acá con su token.
-    $router->interna('GET', '/interno/estado', [EstadoInterno::class, 'mostrar'], ['programacion', 'funciones']);
+    $router->interna('GET', '/interno/estado', [EstadoInterno::class, 'mostrar'], ['programacion', 'funciones', 'moderacion', 'recaudacion']);
 };

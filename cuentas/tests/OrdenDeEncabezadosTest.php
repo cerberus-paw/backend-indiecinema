@@ -41,6 +41,10 @@ final class OrdenDeEncabezadosTest extends TestCase
             'app' => ['subsistema' => 'cuentas', 'prefijo' => '/cuenta', 'entorno' => 'desarrollo'],
             'base' => self::baseDePruebas(),
             'nginx' => ['secreto' => self::SECRETO],
+            // «Mi cuenta» le pide la solicitud de sala a moderación (EF-07.6): en el puerto 1 no
+            // escucha nadie, y la página se ve sin ese bloque.
+            'subsistemas' => ['moderacion' => 'http://127.0.0.1:1'],
+            'interno' => ['token' => 'token-de-cuentas'],
         ]);
     }
 
@@ -54,9 +58,17 @@ final class OrdenDeEncabezadosTest extends TestCase
     {
         yield 'ingresar' => ['/ingresar', null, 'GET', [], 200];
         yield 'ingresar con errores' => ['/ingresar', null, 'POST', ['email' => 'nadie@indiecinema.test', 'password' => 'otra'], 422];
+        yield 'recuperar' => ['/recuperar', null, 'GET', [], 200];
+        yield 'recuperar con errores' => ['/recuperar', null, 'POST', [], 422];
+        yield 'recuperar nueva sin token' => ['/recuperar/nueva', null, 'GET', [], 400];
         yield 'registro' => ['/registro', null, 'GET', [], 200];
         yield 'registro con errores' => ['/registro', null, 'POST', [], 422];
+        yield 'verificar correo' => ['/verificar', null, 'GET', [], 400];
         yield 'mi cuenta' => ['/', 'espectador', 'GET', [], 200];
+        yield 'editar datos' => ['/datos', 'espectador', 'GET', [], 200];
+        yield 'editar datos con errores' => ['/datos', 'espectador', 'POST', ['nombre' => '', 'email' => ''], 422];
+        yield 'cambiar contraseña' => ['/contrasena', 'espectador', 'GET', [], 200];
+        yield 'cambiar contraseña con errores' => ['/contrasena', 'espectador', 'POST', [], 422];
         yield 'usuarios del administrador' => ['/administracion/usuarios', 'administrador', 'GET', [], 200];
         yield 'página que no existe' => ['/no-existe', null, 'GET', [], 404];
         yield 'sin permiso' => ['/administracion/usuarios', 'espectador', 'GET', [], 403];

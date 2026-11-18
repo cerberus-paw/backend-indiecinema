@@ -18,7 +18,7 @@
 
 declare(strict_types=1);
 
-const PREFIJOS = ['/cuenta' => 'cuentas', '/funcion' => 'funciones'];
+const PREFIJOS = ['/cuenta' => 'cuentas', '/funcion' => 'funciones', '/moderacion' => 'moderacion', '/recaudacion' => 'recaudacion'];
 const TIPOS = [
     'css' => 'text/css; charset=utf-8',
     'js' => 'text/javascript; charset=utf-8',

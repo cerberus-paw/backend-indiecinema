@@ -8,20 +8,20 @@ use IndieCinema\Nucleo\Controlador;
 use IndieCinema\Nucleo\Http\ExcepcionHttp;
 use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
-use IndieCinema\Nucleo\Uuid;
-use IndieCinema\Programacion\Repositorios\RepositorioDeObras;
 use IndieCinema\Programacion\Servicios\AfichesDeObras;
 use IndieCinema\Programacion\Servicios\ArchivosDeSalas;
+use IndieCinema\Programacion\Servicios\ServicioDeObras;
 use Psr\Log\LoggerInterface;
 
 /**
- * GET /obras/{id}/afiche: el afiche de una obra, para la tarjeta de sus funciones. Es público: el
- * catálogo de obras no tiene nada que esconder, a diferencia de una sala sin habilitar.
+ * GET /obras/{id}/afiche: el afiche de una obra, para la tarjeta de sus funciones. Es público como
+ * el catálogo, salvo el de una obra pendiente, que ven su dueño y la moderación (EF-07.7), como la
+ * foto de una sala sin habilitar.
  */
 final class AficheDeObra extends Controlador
 {
     public function __construct(
-        private readonly RepositorioDeObras $obras,
+        private readonly ServicioDeObras $obras,
         private readonly AfichesDeObras $afiches,
         private readonly LoggerInterface $log,
     ) {
@@ -30,8 +30,7 @@ final class AficheDeObra extends Controlador
     public function mostrar(Peticion $peticion): Respuesta
     {
         $id = (string) $peticion->parametro('id');
-        $afiche = (Uuid::esValido($id) ? $this->obras->buscar($id) : null)->afiche
-            ?? throw ExcepcionHttp::noEncontrada();
+        $afiche = $this->obras->imagenParaMostrar($id, $peticion->usuario());
 
         $contenido = $this->afiches->contenido($afiche);
         if ($contenido === null) {

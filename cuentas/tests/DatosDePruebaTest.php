@@ -46,7 +46,7 @@ final class DatosDePruebaTest extends TestCase
         return DatosDePrueba::para($this->configuracion, $this->usuarios)->cargar();
     }
 
-    public function testCargaLosCuatroUsuariosConSusRoles(): void
+    public function testCargaLosCincoUsuariosConSusRoles(): void
     {
         $this->assertSame(array_fill_keys(array_column(DatosDePrueba::USUARIOS, 'correo'), true), $this->cargar());
 
@@ -58,8 +58,10 @@ final class DatosDePruebaTest extends TestCase
             ['correo' => 'administrador@indiecinema.test', 'roles' => 'espectador,administrador', 'estado' => 'activa'],
             ['correo' => 'elias@indiecinema.test', 'roles' => 'espectador', 'estado' => 'activa'],
             ['correo' => 'eva@indiecinema.test', 'roles' => 'espectador', 'estado' => 'activa'],
+            ['correo' => 'moderador@indiecinema.test', 'roles' => 'espectador,moderador', 'estado' => 'activa'],
             ['correo' => 'organizador@indiecinema.test', 'roles' => 'espectador,organizador', 'estado' => 'activa'],
         ], $roles);
+        $this->assertSame(0, (int) $this->base->valor('SELECT COUNT(*) FROM usuario WHERE correo_verificado_en IS NULL'));
     }
 
     public function testCadaUsuarioQuedaConSuIdFijo(): void
@@ -108,8 +110,9 @@ final class DatosDePruebaTest extends TestCase
             'organizador@indiecinema.test' => false,
             'eva@indiecinema.test' => false,
             'elias@indiecinema.test' => true,
+            'moderador@indiecinema.test' => false,
         ], $resultado);
-        $this->assertSame(4, (int) $this->base->valor('SELECT COUNT(*) FROM usuario'));
+        $this->assertSame(5, (int) $this->base->valor('SELECT COUNT(*) FROM usuario'));
         $this->assertSame('Cambiado a mano', $this->base->valor("SELECT nombre FROM usuario WHERE correo = 'eva@indiecinema.test'"));
     }
 

@@ -23,6 +23,7 @@ final class MigracionesTest extends TestCase
     private const RESTRICCION_CHECK = 3819;
     private const CAMPO_OBLIGATORIO = 1364;
     private const REPETIDO = 1062;
+    private const REFERENCIA_INEXISTENTE = 1452;
 
     private BaseDeDatos $base;
 
@@ -81,6 +82,7 @@ final class MigracionesTest extends TestCase
         self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM acuerdo_fecha'));
         self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM acuerdo_franja'));
         self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM voto_acuerdo'));
+        self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM conducta'));
     }
 
     public function testLaReservaQuedaGuardadaConfirmadaYConSusValores(): void
@@ -149,7 +151,7 @@ final class MigracionesTest extends TestCase
         $datos = $this->reservaValida();
         $this->insertarReserva($datos);
 
-        foreach (['asistio', 'cancelada'] as $estado) {
+        foreach (['asistio', 'ausente', 'cancelada'] as $estado) {
             $this->base->ejecutar('UPDATE reserva SET estado = ? WHERE id = ?', [$estado, $datos['id']]);
             self::assertSame($estado, $this->base->valor('SELECT estado FROM reserva WHERE id = ?', [$datos['id']]));
         }
@@ -160,11 +162,62 @@ final class MigracionesTest extends TestCase
         $datos = $this->reservaValida();
         $this->insertarReserva($datos);
 
-        // pendiente_pago llega con el extra de Mercado Pago, en una migración nueva.
         $this->assertRechaza(self::VALOR_INVALIDO, fn () => $this->base->ejecutar(
+            'UPDATE reserva SET estado = ? WHERE id = ?',
+            ['reembolsada', $datos['id']],
+        ));
+    }
+
+    /**
+     * La que espera el pago (X-01.2) tiene hasta cuándo pagar: sin vencimiento, retendría sus
+     * lugares para siempre.
+     */
+    public function testUnaPendienteDePagoNecesitaSuVencimiento(): void
+    {
+        $datos = $this->reservaValida();
+        $this->insertarReserva($datos);
+
+        $this->assertRechaza(self::RESTRICCION_CHECK, fn () => $this->base->ejecutar(
             'UPDATE reserva SET estado = ? WHERE id = ?',
             ['pendiente_pago', $datos['id']],
         ));
+        $this->base->ejecutar(
+            'UPDATE reserva SET estado = ?, vence_en = ?, preferencia_id = ?, enlace_de_pago = ? WHERE id = ?',
+            ['pendiente_pago', '2026-10-21 18:45:00', '123-abc', 'https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=123-abc', $datos['id']],
+        );
+        self::assertSame('pendiente_pago', $this->base->valor('SELECT estado FROM reserva WHERE id = ?', [$datos['id']]));
+    }
+
+    /**
+     * Un pago confirma una sola reserva (X-01.4); las que no se cobraron lo tienen en NULL, y esas
+     * sí se repiten.
+     */
+    public function testUnMismoPagoNoConfirmaDosReservas(): void
+    {
+        $una = $this->reservaValida();
+        $otra = ['id' => Uuid::nuevo(), 'codigo' => 'P9QX2M7K'] + $una;
+        $sinPago = ['id' => Uuid::nuevo(), 'codigo' => 'H4J6N8R2'] + $una;
+        foreach ([$una, $otra, $sinPago] as $datos) {
+            $this->insertarReserva($datos);
+        }
+
+        $this->base->ejecutar('UPDATE reserva SET pago_id = ? WHERE id = ?', ['1324567890', $una['id']]);
+        $this->assertRechaza(self::REPETIDO, fn () => $this->base->ejecutar('UPDATE reserva SET pago_id = ? WHERE id = ?', ['1324567890', $otra['id']]));
+        self::assertSame(2, $this->base->valor('SELECT COUNT(*) FROM reserva WHERE pago_id IS NULL'));
+    }
+
+    public function testElHistorialAnotaLosCambiosDeUnaPendienteDePago(): void
+    {
+        $datos = $this->reservaValida();
+        $this->insertarReserva($datos);
+
+        foreach ([['pendiente_pago', 'confirmada'], ['pendiente_pago', 'cancelada']] as [$anterior, $nuevo]) {
+            $this->base->ejecutar(
+                'INSERT INTO cambio_reserva (reserva_id, estado_anterior, estado_nuevo, autor_id, autor_rol, hecho_en) VALUES (?, ?, ?, ?, ?, ?)',
+                [$datos['id'], $anterior, $nuevo, $datos['usuario_id'], 'espectador', '2026-10-21 18:40:00'],
+            );
+        }
+        self::assertSame(2, $this->base->valor('SELECT COUNT(*) FROM cambio_reserva WHERE reserva_id = ?', [$datos['id']]));
     }
 
     public function testLaBaseRechazaLaFaltaDeCamposObligatorios(): void
@@ -292,6 +345,39 @@ final class MigracionesTest extends TestCase
         $this->assertRechaza(self::VALOR_INVALIDO, fn () => $this->base->ejecutar(
             'UPDATE acuerdo_fecha SET estado = ? WHERE id = ?',
             ['estado_invalido', $acuerdoId],
+        ));
+    }
+
+    public function testLaConductaEsUnaPorReservaYExigeMotivoSiEsNegativa(): void
+    {
+        $reserva = $this->reservaValida();
+        $this->insertarReserva($reserva);
+        $organizador = Uuid::nuevo();
+
+        $this->base->ejecutar(
+            'INSERT INTO conducta (reserva_id, usuario_id, organizador_id, positiva, motivo, creada_en) VALUES (?, ?, ?, 1, NULL, ?)',
+            [$reserva['id'], $reserva['usuario_id'], $organizador, '2026-10-22 10:00:00'],
+        );
+        self::assertSame(1, (int) $this->base->valor('SELECT COUNT(*) FROM conducta'));
+
+        // A lo sumo una calificación de conducta por reserva.
+        $this->assertRechaza(self::REPETIDO, fn () => $this->base->ejecutar(
+            'INSERT INTO conducta (reserva_id, usuario_id, organizador_id, positiva, motivo, creada_en) VALUES (?, ?, ?, 0, ?, ?)',
+            [$reserva['id'], $reserva['usuario_id'], $organizador, 'Otro', '2026-10-22 10:05:00'],
+        ));
+
+        // Negativa sin motivo o sólo espacios se rechaza.
+        $otra = ['id' => Uuid::nuevo(), 'codigo' => 'B8N4P7M2'] + $reserva;
+        $this->insertarReserva($otra);
+        $this->assertRechaza(self::RESTRICCION_CHECK, fn () => $this->base->ejecutar(
+            'INSERT INTO conducta (reserva_id, usuario_id, organizador_id, positiva, motivo, creada_en) VALUES (?, ?, ?, 0, ?, ?)',
+            [$otra['id'], $otra['usuario_id'], $organizador, '   ', '2026-10-22 10:05:00'],
+        ));
+
+        // FK a reserva existente.
+        $this->assertRechaza(self::REFERENCIA_INEXISTENTE, fn () => $this->base->ejecutar(
+            'INSERT INTO conducta (reserva_id, usuario_id, organizador_id, positiva, motivo, creada_en) VALUES (?, ?, ?, 1, NULL, ?)',
+            [Uuid::nuevo(), $reserva['usuario_id'], $organizador, '2026-10-22 10:05:00'],
         ));
     }
 }

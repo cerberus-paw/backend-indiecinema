@@ -17,7 +17,12 @@ final class EstadoReservaTest extends TestCase
      */
     public static function pasos(): iterable
     {
-        $validos = ['confirmada→cancelada', 'confirmada→asistio'];
+        $validos = [
+            'pendiente_pago→confirmada', 'pendiente_pago→cancelada',
+            'confirmada→cancelada', 'confirmada→asistio', 'confirmada→ausente',
+            // El organizador registra tarde la asistencia de quien la tarea dejó ausente (EF-04.1).
+            'ausente→asistio',
+        ];
         foreach (EstadoReserva::cases() as $desde) {
             foreach (EstadoReserva::cases() as $hacia) {
                 $paso = "{$desde->value}→{$hacia->value}";
@@ -27,14 +32,16 @@ final class EstadoReservaTest extends TestCase
     }
 
     #[DataProvider('pasos')]
-    public function testSoloSePasaDeConfirmadaACanceladaOAsistio(EstadoReserva $desde, EstadoReserva $hacia, bool $valido): void
+    public function testUnaPendienteSeConfirmaOSeCancelaYUnaConfirmadaSeCancelaOAsistio(EstadoReserva $desde, EstadoReserva $hacia, bool $valido): void
     {
         self::assertSame($valido, $desde->puedePasarA($hacia));
     }
 
     public function testCanceladaYAsistioSonFinales(): void
     {
+        self::assertFalse(EstadoReserva::PendientePago->esFinal());
         self::assertFalse(EstadoReserva::Confirmada->esFinal());
+        self::assertFalse(EstadoReserva::Ausente->esFinal());
         self::assertTrue(EstadoReserva::Cancelada->esFinal());
         self::assertTrue(EstadoReserva::Asistio->esFinal());
     }

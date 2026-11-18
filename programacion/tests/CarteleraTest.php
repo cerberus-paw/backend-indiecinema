@@ -126,10 +126,16 @@ final class CarteleraTest extends TestCase
         ?string $usuario = null,
         string $rol = 'espectador',
         array $cabecerasExtra = [],
+        bool $correoVerificado = true,
     ): Respuesta {
         $cabeceras = ($usuario === null
             ? []
-            : ['X-Nginx-Secreto' => self::SECRETO, 'X-Usuario-Id' => $usuario, 'X-Rol' => $rol]) + $cabecerasExtra;
+            : [
+                'X-Nginx-Secreto' => self::SECRETO,
+                'X-Usuario-Id' => $usuario,
+                'X-Rol' => $rol,
+                'X-Correo-Verificado' => $correoVerificado ? '1' : '0',
+            ]) + $cabecerasExtra;
         parse_str((string) parse_url($ruta, PHP_URL_QUERY), $consulta);
         $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion(), new Log('programacion', $this->salidaDelLog));
 
@@ -1071,6 +1077,7 @@ final class CarteleraTest extends TestCase
             'X-Nginx-Secreto' => 'secreto-de-nginx',
             'X-Usuario-Id' => 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
             'X-Rol' => 'espectador',
+            'X-Correo-Verificado' => '1',
         ])->cuerpo();
 
         // Al subsistema funciones, que sí lleva el prefijo: la ficha es de programación.
@@ -1205,6 +1212,7 @@ final class CarteleraTest extends TestCase
             'X-Nginx-Secreto' => self::SECRETO,
             'X-Usuario-Id' => $espectadorId,
             'X-Rol' => 'espectador',
+            'X-Correo-Verificado' => '1',
         ]);
         self::assertSame(200, $conSesion->estado());
         self::assertStringContainsString('Votar por este título', $conSesion->cuerpo());
@@ -1223,6 +1231,7 @@ final class CarteleraTest extends TestCase
             'X-Nginx-Secreto' => self::SECRETO,
             'X-Usuario-Id' => $espectadorId,
             'X-Rol' => 'espectador',
+            'X-Correo-Verificado' => '1',
         ]);
         self::assertSame(200, $despuesDeVotar->estado());
         self::assertStringContainsString('Tu voto actual', $despuesDeVotar->cuerpo());
@@ -1276,6 +1285,59 @@ final class CarteleraTest extends TestCase
         self::assertSame(303, $respuesta->estado());
         self::assertStringContainsString('error_voto', $respuesta->cabecera('Location'));
         self::assertSame(0, (int) $this->base->valor("SELECT COUNT(*) FROM voto WHERE funcion_id = ?", [$funcionId]));
+    }
+
+    /**
+     * EF-03.1: una votación con su cierre. Las obras son las dos primeras del catálogo.
+     *
+     * @return array{string, list<array<string, mixed>>} el id y las obras
+     */
+    private function votacionQueCierra(string $cuando): array
+    {
+        $this->cargarDatosDePrueba();
+        $salaId = (string) $this->base->valor("SELECT id FROM sala WHERE habilitada = TRUE AND dada_de_baja_en IS NULL LIMIT 1");
+        $obras = $this->base->filas("SELECT id, titulo FROM obra ORDER BY id LIMIT 2");
+        $funcionId = Uuid::nuevo();
+        $this->base->ejecutar(
+            "INSERT INTO funcion (id, sala_id, estado, votacion_cierra_en, precio_base, cupo) VALUES (?, ?, 'en_votacion_titulos', ?, 2000, 50)",
+            [$funcionId, $salaId, new DateTimeImmutable($cuando)],
+        );
+        foreach ($obras as $obra) {
+            $this->base->ejecutar("INSERT INTO funcion_obra (funcion_id, obra_id, estado) VALUES (?, ?, 'candidata')", [$funcionId, $obra['id']]);
+        }
+
+        return [$funcionId, $obras];
+    }
+
+    public function testLaFichaDiceCuandoCierraLaVotacion(): void
+    {
+        [$funcionId] = $this->votacionQueCierra('2030-11-15 20:00:00');
+
+        $ficha = $this->pedir("/cartelera/{$funcionId}");
+
+        self::assertSame(200, $ficha->estado());
+        self::assertStringContainsString('La votación cierra el <strong>15 nov 20:00</strong>', $ficha->cuerpo());
+    }
+
+    /**
+     * Pasado el cierre no se vota más, aunque la tarea todavía no haya cerrado la votación: corre
+     * cada quince minutos, y un voto en ese rato podía cambiar la ganadora.
+     */
+    public function testNoSeVotaDespuesDelCierreAunqueLaTareaNoHayaPasado(): void
+    {
+        [$funcionId, $obras] = $this->votacionQueCierra('-5 minutes');
+
+        $respuesta = $this->post("/cartelera/{$funcionId}/votar", ['obra_id' => $obras[0]['id']], Uuid::nuevo());
+
+        self::assertSame(303, $respuesta->estado());
+        self::assertStringContainsString('error_voto', $respuesta->cabecera('Location'));
+        self::assertSame(0, (int) $this->base->valor("SELECT COUNT(*) FROM voto WHERE funcion_id = ?", [$funcionId]));
+        $ficha = $this->pedir("/cartelera/{$funcionId}", cabeceras: [
+            'X-Nginx-Secreto' => self::SECRETO,
+            'X-Usuario-Id' => Uuid::nuevo(),
+            'X-Rol' => 'espectador',
+        ]);
+        self::assertStringContainsString('La votación ya cerró', $ficha->cuerpo());
     }
 
     public function testNoSePuedeVotarPorObraQueNoEsCandidata(): void
@@ -1552,7 +1614,7 @@ final class CarteleraTest extends TestCase
 
         self::assertSame(303, $respuesta->estado());
         self::assertStringContainsString(rawurlencode('Ya pasó la fecha límite'), $respuesta->cabecera('Location') ?? '');
-        $ficha = $this->pedir("/cartelera/{$funcionId}", [], ['X-Nginx-Secreto' => self::SECRETO, 'X-Usuario-Id' => $espectador, 'X-Rol' => 'espectador']);
+        $ficha = $this->pedir("/cartelera/{$funcionId}", [], ['X-Nginx-Secreto' => self::SECRETO, 'X-Usuario-Id' => $espectador, 'X-Rol' => 'espectador', 'X-Correo-Verificado' => '1']);
         self::assertStringNotContainsString('data-formulario-votar-franja', $ficha->cuerpo());
     }
 
@@ -1673,6 +1735,40 @@ final class CarteleraTest extends TestCase
     }
 
     /**
+     * F-02.1: en el acuerdo de fecha, el título ya elegido muestra su afiche, como las candidatas
+     * de la votación; sin afiche cargado, el marcador. Antes salía siempre el marcador.
+     */
+    public function testLaFichaEnAcuerdoMuestraElAficheDelTituloElegido(): void
+    {
+        [$funcionId] = $this->funcionEnAcuerdo();
+        $obraId = (string) $this->base->valor('SELECT obra_id FROM funcion_obra WHERE funcion_id = ?', [$funcionId]);
+        self::assertNotNull($this->base->valor('SELECT afiche FROM obra WHERE id = ?', [$obraId]), 'La obra de los datos de prueba tiene afiche.');
+
+        $elegido = $this->tituloElegido($this->pedir("/cartelera/{$funcionId}")->cuerpo());
+        self::assertStringContainsString("src=\"/obras/{$obraId}/afiche\"", $elegido);
+        self::assertStringNotContainsString('ficha-titulo-afiche-vacio', $elegido);
+
+        $this->base->ejecutar('UPDATE obra SET afiche = NULL WHERE id = ?', [$obraId]);
+        $elegido = $this->tituloElegido($this->pedir("/cartelera/{$funcionId}")->cuerpo());
+        self::assertStringContainsString('ficha-titulo-afiche-vacio', $elegido);
+        self::assertStringNotContainsString('<img', $elegido);
+    }
+
+    /**
+     * El bloque «Título ya elegido» de la ficha en acuerdo, para mirar sólo ese afiche y no el de
+     * la sala ni el del resto de la página.
+     */
+    private function tituloElegido(string $ficha): string
+    {
+        $desde = strpos($ficha, 'id="ficha-titulos-rotulo"');
+        self::assertNotFalse($desde, 'La ficha en acuerdo tiene el bloque «Título ya elegido».');
+        $hasta = strpos($ficha, '</ul>', $desde);
+        self::assertNotFalse($hasta);
+
+        return substr($ficha, $desde, $hasta - $desde);
+    }
+
+    /**
      * Criterio E3-13.6: La ficha muestra las franjas, los votos y el estado del acuerdo.
      */
     public function testFichaDeFuncionEnAcuerdoMuestraFranjasVotosYEstado(): void
@@ -1708,7 +1804,7 @@ final class CarteleraTest extends TestCase
             "/cartelera/{$funcionId}",
             [],
             [],
-            ['X-Nginx-Secreto' => self::SECRETO, 'X-Usuario-Id' => $espectadorId, 'X-Rol' => 'espectador'],
+            ['X-Nginx-Secreto' => self::SECRETO, 'X-Usuario-Id' => $espectadorId, 'X-Rol' => 'espectador', 'X-Correo-Verificado' => '1'],
         ));
         self::assertSame(200, $respuestaUsuario->estado());
         if (str_contains($respuestaUsuario->cuerpo(), 'Marcaste «Me sirve»')) {
@@ -1726,6 +1822,121 @@ final class CarteleraTest extends TestCase
         self::assertSame(2, $datos['funcion']['franjas'][0]['votos']);
         self::assertSame('franja-mock-1', $datos['funcion']['franjas'][1]['id']);
         self::assertSame(0, $datos['funcion']['franjas'][1]['votos']);
+    }
+
+    public function testUnUsuarioBloqueadoNoVotaEnTitulosNiEnAcuerdoPeroSiEnOtraSala(): void
+    {
+        $this->cargarDatosDePrueba();
+        $salaBloqueada = (string) $this->base->valor("SELECT id FROM sala WHERE habilitada = TRUE AND dada_de_baja_en IS NULL LIMIT 1");
+        $otraSala = Uuid::nuevo();
+        $this->base->ejecutar(
+            'INSERT INTO sala (id, organizador_id, nombre, descripcion, direccion, localidad, capacidad, peliculas_por_funcion, duracion_funcion, tiempo_entre_funciones, habilitada) VALUES (?, ?, ?, ?, ?, ?, 40, 2, 120, 15, TRUE)',
+            [$otraSala, Uuid::nuevo(), 'Sala Paralela', 'Otra sala independiente.', 'Rivadavia 100', 'Morón'],
+        );
+        $obras = $this->base->filas('SELECT id FROM obra ORDER BY id LIMIT 2');
+
+        $votacionBloqueada = Uuid::nuevo();
+        $acuerdoBloqueada = Uuid::nuevo();
+        $votacionOtraSala = Uuid::nuevo();
+        foreach ([[$votacionBloqueada, $salaBloqueada, 'en_votacion_titulos'], [$acuerdoBloqueada, $salaBloqueada, 'en_acuerdo_fecha'], [$votacionOtraSala, $otraSala, 'en_votacion_titulos']] as [$fid, $sid, $estado]) {
+            $this->base->ejecutar("INSERT INTO funcion (id, sala_id, estado, precio_base, cupo) VALUES (?, ?, ?, 2000, 50)", [$fid, $sid, $estado]);
+            $this->base->ejecutar("INSERT INTO funcion_obra (funcion_id, obra_id, estado) VALUES (?, ?, ?)", [$fid, $obras[0]['id'], $estado === 'en_acuerdo_fecha' ? 'elegida' : 'candidata']);
+            if ($estado !== 'en_acuerdo_fecha') {
+                $this->base->ejecutar("INSERT INTO funcion_obra (funcion_id, obra_id, estado) VALUES (?, ?, 'candidata')", [$fid, $obras[1]['id']]);
+            }
+        }
+
+        $bloqueado = Uuid::nuevo();
+        $motivoPrivado = 'Motivo privado que el espectador no debe ver';
+        $this->base->ejecutar(
+            'INSERT INTO bloqueo (sala_id, usuario_id, motivo, bloqueado_por) VALUES (?, ?, ?, ?)',
+            [$salaBloqueada, $bloqueado, $motivoPrivado, Uuid::nuevo()],
+        );
+
+        // 1. Votación de títulos (HTML + JSON): rechaza sin revelar el motivo.
+        $votoHtml = $this->post("/cartelera/{$votacionBloqueada}/votar", ['obra_id' => $obras[0]['id']], $bloqueado);
+        self::assertSame(303, $votoHtml->estado());
+        $fichaVoto = $this->pedir($votoHtml->cabecera('Location') ?? self::fail());
+        self::assertStringContainsString('No podés votar en esta sala.', $fichaVoto->cuerpo());
+        self::assertStringNotContainsString($motivoPrivado, $fichaVoto->cuerpo());
+
+        $votoJson = $this->post("/cartelera/{$votacionBloqueada}/votar", ['obra_id' => $obras[0]['id']], $bloqueado, cabecerasExtra: ['Accept' => 'application/json']);
+        self::assertSame(403, $votoJson->estado());
+        self::assertSame(['error' => 'No podés votar en esta sala.'], self::json($votoJson));
+        self::assertSame(0, (int) $this->base->valor('SELECT COUNT(*) FROM voto WHERE funcion_id = ?', [$votacionBloqueada]));
+
+        // 2. Acuerdo de fecha (HTML + JSON): rechaza sin revelar el motivo.
+        $acuerdoHtml = $this->post("/cartelera/{$acuerdoBloqueada}/votar", ['franja_id' => 'franja-mock-0'], $bloqueado);
+        self::assertSame(303, $acuerdoHtml->estado());
+        $fichaAcuerdo = $this->pedir($acuerdoHtml->cabecera('Location') ?? self::fail());
+        self::assertStringContainsString('No podés votar en esta sala.', $fichaAcuerdo->cuerpo());
+        self::assertStringNotContainsString($motivoPrivado, $fichaAcuerdo->cuerpo());
+
+        $acuerdoJson = $this->post("/cartelera/{$acuerdoBloqueada}/acuerdo/votar", ['franja_id' => 'franja-mock-0'], $bloqueado, cabecerasExtra: ['Accept' => 'application/json']);
+        self::assertSame(403, $acuerdoJson->estado());
+        self::assertSame(['error' => 'No podés votar en esta sala.'], self::json($acuerdoJson));
+
+        // 3. En otra sala vota normalmente.
+        $enOtra = $this->post("/cartelera/{$votacionOtraSala}/votar", ['obra_id' => $obras[0]['id']], $bloqueado);
+        self::assertSame(303, $enOtra->estado());
+        self::assertSame("/cartelera/{$votacionOtraSala}?votado=1", $enOtra->cabecera('Location'));
+        self::assertSame(1, (int) $this->base->valor('SELECT COUNT(*) FROM voto WHERE funcion_id = ? AND usuario_id = ?', [$votacionOtraSala, $bloqueado]));
+    }
+
+    public function testSinCorreoVerificadoNoPuedeVotarEnTitulosNiEnAcuerdoYLaFichaMuestraAviso(): void
+    {
+        $this->cargarDatosDePrueba();
+        $salaId = (string) $this->base->valor('SELECT id FROM sala WHERE habilitada = TRUE AND dada_de_baja_en IS NULL LIMIT 1');
+        $obras = $this->base->filas('SELECT id FROM obra ORDER BY id LIMIT 2');
+        $votacionId = Uuid::nuevo();
+        $acuerdoId = Uuid::nuevo();
+
+        $this->base->ejecutar("INSERT INTO funcion (id, sala_id, estado, precio_base, cupo) VALUES (?, ?, 'en_votacion_titulos', 2000, 50)", [$votacionId, $salaId]);
+        $this->base->ejecutar("INSERT INTO funcion_obra (funcion_id, obra_id, estado) VALUES (?, ?, 'candidata')", [$votacionId, $obras[0]['id']]);
+        $this->base->ejecutar("INSERT INTO funcion_obra (funcion_id, obra_id, estado) VALUES (?, ?, 'candidata')", [$votacionId, $obras[1]['id']]);
+
+        $this->base->ejecutar("INSERT INTO funcion (id, sala_id, estado, precio_base, cupo) VALUES (?, ?, 'en_acuerdo_fecha', 2000, 50)", [$acuerdoId, $salaId]);
+        $this->base->ejecutar("INSERT INTO funcion_obra (funcion_id, obra_id, estado) VALUES (?, ?, 'elegida')", [$acuerdoId, $obras[0]['id']]);
+
+        $espectador = Uuid::nuevo();
+        $sinVerificar = [
+            'X-Nginx-Secreto' => self::SECRETO,
+            'X-Usuario-Id' => $espectador,
+            'X-Rol' => 'espectador',
+            'X-Correo-Verificado' => '0',
+        ];
+
+        $fichaVotacion = $this->pedir("/cartelera/{$votacionId}", cabeceras: $sinVerificar);
+        self::assertSame(200, $fichaVotacion->estado());
+        self::assertStringContainsString('Todavía no verificaste tu correo', $fichaVotacion->cuerpo());
+        self::assertStringContainsString('Verificá tu correo para votar.', $fichaVotacion->cuerpo());
+        self::assertStringContainsString('Mandarme el enlace otra vez', $fichaVotacion->cuerpo());
+        self::assertStringNotContainsString('data-formulario-voto', $fichaVotacion->cuerpo());
+
+        $fichaConReenvio = $this->pedir("/cartelera/{$votacionId}?reenviado=1", cabeceras: $sinVerificar);
+        self::assertStringContainsString('Te mandamos un enlace nuevo a tu correo.', $fichaConReenvio->cuerpo());
+
+        $votoHtml = $this->post("/cartelera/{$votacionId}/votar", ['obra_id' => $obras[0]['id']], $espectador, correoVerificado: false);
+        self::assertSame(403, $votoHtml->estado());
+        self::assertStringContainsString('Verificá tu correo para votar.', $votoHtml->cuerpo());
+
+        $votoJson = $this->post("/cartelera/{$votacionId}/votar", ['obra_id' => $obras[0]['id']], $espectador, cabecerasExtra: ['Accept' => 'application/json'], correoVerificado: false);
+        self::assertSame(403, $votoJson->estado());
+        self::assertSame(['error' => 'Verificá tu correo para votar.'], self::json($votoJson));
+        self::assertSame(0, (int) $this->base->valor('SELECT COUNT(*) FROM voto WHERE funcion_id = ?', [$votacionId]));
+
+        $fichaAcuerdo = $this->pedir("/cartelera/{$acuerdoId}", cabeceras: $sinVerificar);
+        self::assertSame(200, $fichaAcuerdo->estado());
+        self::assertStringContainsString('Verificá tu correo para votar', $fichaAcuerdo->cuerpo());
+        self::assertStringNotContainsString('data-formulario-votar-franja', $fichaAcuerdo->cuerpo());
+
+        $acuerdoHtml = $this->post("/cartelera/{$acuerdoId}/votar", ['franja_id' => 'franja-mock-0'], $espectador, correoVerificado: false);
+        self::assertSame(403, $acuerdoHtml->estado());
+        self::assertStringContainsString('Verificá tu correo para votar.', $acuerdoHtml->cuerpo());
+
+        $acuerdoJson = $this->post("/cartelera/{$acuerdoId}/acuerdo/votar", ['franja_id' => 'franja-mock-0'], $espectador, cabecerasExtra: ['Accept' => 'application/json'], correoVerificado: false);
+        self::assertSame(403, $acuerdoJson->estado());
+        self::assertSame(['error' => 'Verificá tu correo para votar.'], self::json($acuerdoJson));
     }
 }
 

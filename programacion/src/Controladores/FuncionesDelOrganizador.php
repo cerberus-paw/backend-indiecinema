@@ -81,6 +81,7 @@ final class FuncionesDelOrganizador extends Controlador
             || $formulario->cupo === null
             || $formulario->precio === null
             || ($formulario->esProgramada() && $formulario->fechaHora === null)
+            || (!$formulario->esProgramada() && $formulario->votacionCierraEn === null)
         ) {
             // Sin mensaje general: la plantilla resume los errores de los campos (E4-10.5).
             return $this->formularioAlta($salas, $obras, ['formulario' => $formulario], 422);
@@ -105,6 +106,7 @@ final class FuncionesDelOrganizador extends Controlador
                     $formulario->obrasIds,
                     $formulario->cupo,
                     $formulario->precio,
+                    $formulario->votacionCierraEn,
                 );
             }
         } catch (ReglaIncumplida $regla) {
@@ -129,7 +131,8 @@ final class FuncionesDelOrganizador extends Controlador
 
         $funcion = $this->servicio->paraEditar($organizador, $id);
         $salas = $this->servicio->salasHabilitadas($organizador);
-        $obras = $this->servicio->catalogoDeObras();
+        // Con las que ya tenía, aunque ya no estén aprobadas (EF-07.7).
+        $obras = $this->servicio->catalogoDeObras($funcion);
 
         $valores = [
             'sala_id' => $funcion->salaId,
@@ -159,10 +162,10 @@ final class FuncionesDelOrganizador extends Controlador
         }
 
         // Si la función no existe o no es del organizador, corta con 404
-        $this->servicio->paraEditar($organizador, $id);
+        $funcion = $this->servicio->paraEditar($organizador, $id);
 
         $salas = $this->servicio->salasHabilitadas($organizador);
-        $obras = $this->servicio->catalogoDeObras();
+        $obras = $this->servicio->catalogoDeObras($funcion);
 
         $formulario = FormularioDeFuncion::desdeCampos($peticion->cuerpo(), $salas, $obras);
         if (!$formulario->esValido() || $formulario->salaId === null || $formulario->fechaHora === null || $formulario->cupo === null || $formulario->precio === null) {

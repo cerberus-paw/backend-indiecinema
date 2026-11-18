@@ -126,6 +126,14 @@ final class Peticion
         return $this->ruta;
     }
 
+    /**
+     * La ruta con su consulta, como se pidió (sin el prefijo del subsistema).
+     */
+    public function rutaConConsulta(): string
+    {
+        return $this->consulta === [] ? $this->ruta : $this->ruta . '?' . http_build_query($this->consulta, '', '&', PHP_QUERY_RFC3986);
+    }
+
     public function consulta(string $clave, mixed $porDefecto = null): mixed
     {
         return $this->consulta[$clave] ?? $porDefecto;

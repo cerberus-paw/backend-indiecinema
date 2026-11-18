@@ -189,6 +189,18 @@ final class AplicacionTest extends TestCase
         self::assertStringContainsString('Tenés que ingresar', $respuesta->cuerpo());
     }
 
+    /**
+     * EF-07.8: después de ingresar, vuelve a la página que pidió, con el prefijo del subsistema y
+     * su consulta.
+     */
+    public function testElLinkDeIngresarDelErrorVuelveALaPaginaPedida(): void
+    {
+        $respuesta = $this->aplicacion()->atender(new Peticion('GET', '/organizador', ['tipo' => 'obra', 'id' => 'abc']));
+
+        self::assertSame(401, $respuesta->estado());
+        self::assertStringContainsString('href="/cuenta/ingresar?volver=' . rawurlencode('/cuenta/organizador?tipo=obra&id=abc') . '"', $respuesta->cuerpo());
+    }
+
     public function testUnaRutaDeOrganizadorRechazaAUnEspectador(): void
     {
         $respuesta = $this->pedir('GET', '/organizador', self::sesion('espectador'));
@@ -290,6 +302,25 @@ final class AplicacionTest extends TestCase
 
         self::assertSame(200, $respuesta->estado());
         self::assertSame([], $respuesta->cookies());
+    }
+
+    /**
+     * El aviso de un servicio de afuera no trae la cookie ni el token: lo autentica el controlador
+     * con su firma (X-01.4).
+     */
+    public function testUnWebhookNoPideTokenCsrf(): void
+    {
+        $respuesta = $this->pedir('POST', '/aviso', ['Content-Type' => 'application/json'], cuerpo: ['type' => 'payment']);
+
+        self::assertSame(200, $respuesta->estado(), $respuesta->cuerpo());
+    }
+
+    /**
+     * Que el webhook no lo pida no afloja las demás: el mismo POST a un formulario sigue siendo 403.
+     */
+    public function testElMismoPostAUnFormularioSigueSinPasar(): void
+    {
+        self::assertSame(403, $this->pedir('POST', '/formulario', ['Content-Type' => 'application/json'], cuerpo: ['type' => 'payment'])->estado());
     }
 
     public function testUnaRutaInternaSinTokenDa403YQuedaEnElLog(): void

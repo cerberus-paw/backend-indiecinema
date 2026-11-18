@@ -13,7 +13,7 @@ use RuntimeException;
 /**
  * Las reservas de una función, que son del subsistema funciones: al cancelarse una función, se le
  * pide por su API interna que cancele sus reservas y les avise por correo a los espectadores
- * (E4-03.4).
+ * (E4-03.4); al terminar, que deje ausentes a los que no fueron (EF-04.1).
  */
 final class ReservasDeFunciones
 {
@@ -53,6 +53,34 @@ final class ReservasDeFunciones
             return true;
         } catch (ExcepcionHttp | RuntimeException $error) {
             $this->log->error('Se canceló la función {funcion}, pero no sus reservas: {motivo}', [
+                'funcion' => $funcionId,
+                'motivo' => $error->getMessage(),
+            ]);
+
+            return false;
+        }
+    }
+
+    /**
+     * Le avisa a funciones que la función terminó, para que las reservas confirmadas sin asistencia
+     * queden ausentes. Se llama antes de guardarla como finalizada: si funciones no responde,
+     * queda en el log, la función sigue programada y la próxima pasada lo vuelve a intentar.
+     * Repetirlo no cambia nada, porque sólo toca las confirmadas.
+     *
+     * @return bool si funciones lo recibió
+     */
+    public function avisarFinalizada(string $funcionId, string $organizadorId): bool
+    {
+        // Como en cancelarDeLaFuncion(): sin funciones en config.ini no hay a quién avisar.
+        if ($this->configuracion->obtener('subsistemas.funciones') === null) {
+            return true;
+        }
+        try {
+            $this->cliente()->post('funciones', "/interno/funciones/{$funcionId}/finalizada", ['organizador_id' => $organizadorId]);
+
+            return true;
+        } catch (ExcepcionHttp | RuntimeException $error) {
+            $this->log->error('La función {funcion} terminó, pero funciones no marcó las ausencias: {motivo}', [
                 'funcion' => $funcionId,
                 'motivo' => $error->getMessage(),
             ]);

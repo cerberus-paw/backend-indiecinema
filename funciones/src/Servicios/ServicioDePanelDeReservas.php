@@ -6,15 +6,18 @@ namespace IndieCinema\Funciones\Servicios;
 
 use DateTimeImmutable;
 use IndieCinema\Funciones\Modelo\AutorDelCambio;
+use IndieCinema\Funciones\Modelo\Conducta;
 use IndieCinema\Funciones\Modelo\EstadoReserva;
 use IndieCinema\Funciones\Modelo\FuncionDeProgramacion;
 use IndieCinema\Funciones\Modelo\ReglaIncumplida;
 use IndieCinema\Funciones\Modelo\Reserva;
+use IndieCinema\Funciones\Repositorios\RepositorioDeConducta;
 use IndieCinema\Funciones\Repositorios\RepositorioDeReservas;
 use IndieCinema\Nucleo\Http\ExcepcionHttp;
 use IndieCinema\Nucleo\Seguridad\Rol;
 use IndieCinema\Nucleo\Seguridad\Usuario;
 use IndieCinema\Nucleo\Uuid;
+use LogicException;
 
 /**
  * El seguimiento de las reservas (E4-03): el organizador ve las de sus funciones y registra la
@@ -26,9 +29,16 @@ final class ServicioDePanelDeReservas
     /** Las reservas que ve el administrador por página. */
     public const POR_PAGINA = 20;
 
+    /**
+     * @param ?ServicioDeReembolsos $reembolsos la devolución del pago al anular y al cancelarse la
+     *                                          función (EF-06.4); sin él, la reserva se cancela y
+     *                                          no se devuelve nada
+     */
     public function __construct(
         private readonly FuncionesDeProgramacion $funciones,
         private readonly RepositorioDeReservas $reservas,
+        private readonly ?ServicioDeReembolsos $reembolsos = null,
+        private readonly ?RepositorioDeConducta $conductas = null,
     ) {
     }
 
@@ -65,16 +75,23 @@ final class ServicioDePanelDeReservas
     /**
      * Registra en la puerta que entró quien reservó: la reserva pasa a «asistió», una sola vez.
      * El código se acepta como lo dicte el espectador: en minúsculas o con espacios y guiones.
+     * Sólo desde una hora antes de la función hasta que termina (EF-05.2): después ya quedó
+     * ausente, y semanas antes es un error.
      *
      * @throws ExcepcionHttp   404 si la función no existe o es de otro
-     * @throws ReglaIncumplida si la función se canceló, no hay una reserva con ese código para esta
-     *                         función, ya está registrada, está cancelada, o cambió mientras tanto
+     * @throws ReglaIncumplida si la función se canceló, está fuera de la ventana de asistencia, no
+     *                         hay una reserva con ese código para esta función, ya está
+     *                         registrada, está cancelada, o cambió mientras tanto
      */
     public function registrarAsistencia(Usuario $organizador, string $funcionId, string $codigo, DateTimeImmutable $ahora = new DateTimeImmutable()): Reserva
     {
         $funcion = $this->funcionPropia($organizador, $funcionId);
         if ($funcion->estado === 'cancelada') {
             throw new ReglaIncumplida('La función está cancelada: no hay asistencia que registrar.');
+        }
+        $fueraDeHora = $funcion->motivoParaNoRegistrarAsistencia($ahora);
+        if ($fueraDeHora !== null) {
+            throw new ReglaIncumplida($fueraDeHora);
         }
         $codigo = self::codigo($codigo);
         if ($codigo === '') {
@@ -85,7 +102,10 @@ final class ServicioDePanelDeReservas
         match ($reserva->estado) {
             EstadoReserva::Asistio => throw new ReglaIncumplida("La reserva {$codigo} ya tiene la asistencia registrada."),
             EstadoReserva::Cancelada => throw new ReglaIncumplida("La reserva {$codigo} está cancelada: sus lugares se liberaron."),
-            EstadoReserva::Confirmada => null,
+            // Sin el pago acreditado no hay entrada: el espectador todavía la puede pagar.
+            EstadoReserva::PendientePago => throw new ReglaIncumplida("La reserva {$codigo} todavía no se pagó."),
+            // La función ya terminó y la tarea la dejó ausente, pero entró: se registra tarde.
+            EstadoReserva::Confirmada, EstadoReserva::Ausente => null,
         };
         $conAsistencia = $reserva->registrarAsistencia();
         if (!$this->reservas->guardarEstado($conAsistencia, $reserva->estado, AutorDelCambio::de($organizador, Rol::Organizador), $ahora)) {
@@ -93,6 +113,51 @@ final class ServicioDePanelDeReservas
         }
 
         return $conAsistencia;
+    }
+
+    /**
+     * Calificaciones de conducta ya cargadas para esa función, indexadas por reserva_id.
+     *
+     * @return array<string, Conducta>
+     */
+    public function conductasDeLaFuncion(string $funcionId): array
+    {
+        return $this->conductas?->deLaFuncion($funcionId) ?? [];
+    }
+
+    /**
+     * El organizador califica la conducta de una reserva con asistencia, dentro de los 7 días de
+     * la función (EF-13.1). Que la función sea suya lo controla funcionPropia() (404 si es de otro).
+     *
+     * @return array{Reserva, Conducta}
+     *
+     * @throws ExcepcionHttp   404 si la función no existe o no es del organizador
+     * @throws ReglaIncumplida si la reserva no es de esta función, no asistió, venció el plazo,
+     *                         falta el motivo en negativa o ya fue calificada
+     */
+    public function calificarConducta(
+        Usuario $organizador,
+        string $funcionId,
+        string $reservaId,
+        bool $positiva,
+        ?string $motivo,
+        DateTimeImmutable $ahora = new DateTimeImmutable(),
+    ): array {
+        if ($this->conductas === null) {
+            throw new LogicException('Falta RepositorioDeConducta para calificar conducta.');
+        }
+        $funcion = $this->funcionPropia($organizador, $funcionId);
+        $reserva = Uuid::esValido($reservaId) ? $this->reservas->buscar($reservaId) : null;
+        if ($reserva === null || $reserva->funcionId !== $funcion->id) {
+            throw new ReglaIncumplida('No hay ninguna reserva con ese identificador para esta función.');
+        }
+
+        $conducta = Conducta::nueva($reserva, $funcion, $organizador->id, $positiva, $motivo, $ahora);
+        if (!$this->conductas->agregar($conducta)) {
+            throw new ReglaIncumplida("La conducta de la reserva {$reserva->codigo} ya fue calificada.");
+        }
+
+        return [$reserva, $conducta];
     }
 
     /**
@@ -108,7 +173,9 @@ final class ServicioDePanelDeReservas
     }
 
     /**
-     * El administrador anula una reserva confirmada: queda cancelada y sus lugares se liberan.
+     * El administrador anula una reserva confirmada: queda cancelada y sus lugares se liberan, y
+     * si estaba pagada se le devuelve la plata al espectador (EF-06.4). Si el reembolso no sale, la
+     * anulación queda igual y el panel la muestra con el reembolso pendiente.
      *
      * @throws ExcepcionHttp   404 si no existe
      * @throws ReglaIncumplida si no está confirmada, o cambió mientras tanto
@@ -125,13 +192,17 @@ final class ServicioDePanelDeReservas
             throw new ReglaIncumplida("La reserva {$reserva->codigo} cambió mientras tanto. Volvé a cargar la página para ver en qué quedó.");
         }
 
-        return $anulada;
+        return $this->reembolsos?->reembolsar($anulada, $ahora) ?? $anulada;
     }
 
     /**
-     * Cancela las reservas confirmadas de una función que se canceló (E4-03.4). Las que ya tienen
-     * la asistencia o ya estaban canceladas quedan como están. Llamarla dos veces no cambia nada:
-     * la segunda no encuentra confirmadas.
+     * Cancela las reservas confirmadas de una función que se canceló (E4-03.4), y las que esperaban
+     * el pago, que ya no tienen para qué pagarse. Las que ya tienen la asistencia o ya estaban
+     * canceladas quedan como están. Llamarla dos veces no cambia nada: la segunda no encuentra
+     * ninguna que cancelar, y una reembolsada no se vuelve a reembolsar (EF-06.4).
+     *
+     * A cada una que estaba pagada se le devuelve la plata, una por una: si Mercado Pago se cae en
+     * la tercera, las dos primeras ya están devueltas y las demás quedan pendientes.
      *
      * @param string $organizadorId quién canceló la función, para el historial
      *
@@ -142,13 +213,14 @@ final class ServicioDePanelDeReservas
         $autor = new AutorDelCambio($organizadorId, Rol::Organizador, 'Se canceló la función.');
         $canceladas = [];
         foreach ($this->reservas->deLaFuncion($funcionId) as $reserva) {
-            if ($reserva->estado !== EstadoReserva::Confirmada) {
+            if (!in_array($reserva->estado, [EstadoReserva::Confirmada, EstadoReserva::PendientePago], true)) {
                 continue;
             }
             $cancelada = $reserva->cancelar();
-            // Si el espectador la canceló justo antes, ya no está confirmada y no se toca.
+            // Si el espectador la canceló justo antes (o se acreditó el pago), ya no está como se
+            // leyó y no se toca.
             if ($this->reservas->guardarEstado($cancelada, $reserva->estado, $autor, $ahora)) {
-                $canceladas[] = $cancelada;
+                $canceladas[] = $this->reembolsos?->reembolsar($cancelada, $ahora) ?? $cancelada;
             }
         }
 
@@ -156,16 +228,51 @@ final class ServicioDePanelDeReservas
     }
 
     /**
+     * La función terminó (EF-04.1): las reservas confirmadas que no tienen la asistencia quedan
+     * ausentes, y las que ya entraron, las canceladas y las que esperan el pago quedan como están
+     * (una pendiente vence sola, X-01.5). Como cancelarDeLaFuncion(), repetirla no cambia nada:
+     * programación la vuelve a pedir si no recibió la respuesta.
+     *
+     * @param string $organizadorId el de la función, autor del cambio en el historial
+     *
+     * @return int cuántas quedaron ausentes ahora
+     */
+    public function marcarAusentes(string $funcionId, string $organizadorId, DateTimeImmutable $ahora = new DateTimeImmutable()): int
+    {
+        $autor = new AutorDelCambio($organizadorId, Rol::Organizador, 'La función terminó sin la asistencia registrada.');
+        $ausentes = 0;
+        foreach ($this->reservas->deLaFuncion($funcionId) as $reserva) {
+            if ($reserva->estado !== EstadoReserva::Confirmada) {
+                continue;
+            }
+            // Si el organizador registró la asistencia justo antes, ya no está confirmada y no se toca.
+            if ($this->reservas->guardarEstado($reserva->marcarAusente(), $reserva->estado, $autor, $ahora)) {
+                ++$ausentes;
+            }
+        }
+
+        return $ausentes;
+    }
+
+    /**
      * Los números del panel del organizador: cuántos lugares están reservados y cuántos quedan,
-     * cuántos ya entraron y cuánto suman las reservas que siguen en pie.
+     * cuántos ya entraron y cuánta plata entró.
+     *
+     * Lo recaudado es sólo lo que de verdad se cobró (EF-06.5): las reservas con pago de Mercado
+     * Pago que no se devolvió, el mismo criterio que el neto que reparte recaudación. Una
+     * pendiente todavía no pagó, y una confirmada con el cobro apagado —o a la gorra— no pagó
+     * nunca, aunque su total diga 3500. Por eso no se suma sobre las que ocupan lugares: una
+     * cancelada que todavía no se reembolsó tiene la plata en la cuenta y sigue contando, y el
+     * total baja en el momento en que vuelve.
      *
      * @param list<Reserva> $reservas las de la función
      *
      * @return array{reservados: int, libres: int, asistentes: int, recaudado: float, reservas: int}
      */
-    public static function resumen(FuncionDeProgramacion $funcion, array $reservas): array
+    public static function resumen(FuncionDeProgramacion $funcion, array $reservas, DateTimeImmutable $ahora = new DateTimeImmutable()): array
     {
-        $enPie = array_values(array_filter($reservas, static fn (Reserva $reserva): bool => $reserva->estado->ocupaLugares()));
+        // Una pendiente que venció ya no retiene sus lugares, aunque la tarea no la haya cancelado.
+        $enPie = array_values(array_filter($reservas, static fn (Reserva $reserva): bool => $reserva->estado->ocupaLugares() && !$reserva->vencida($ahora)));
         $reservados = array_sum(array_map(static fn (Reserva $reserva): int => $reserva->cantidad, $enPie));
 
         return [
@@ -175,7 +282,10 @@ final class ServicioDePanelDeReservas
                 static fn (Reserva $reserva): int => $reserva->estado === EstadoReserva::Asistio ? $reserva->cantidad : 0,
                 $reservas,
             )),
-            'recaudado' => array_sum(array_map(static fn (Reserva $reserva): float => (float) $reserva->total, $enPie)),
+            'recaudado' => array_sum(array_map(
+                static fn (Reserva $reserva): float => $reserva->cobrada() ? (float) $reserva->total : 0.0,
+                $reservas,
+            )),
             'reservas' => count($enPie),
         ];
     }

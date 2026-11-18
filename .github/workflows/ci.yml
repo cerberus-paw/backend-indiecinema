@@ -40,7 +40,7 @@ jobs:
       # Que falle uno no corta los otros: se ve de una vez todo lo que está roto.
       fail-fast: false
       matrix:
-        paquete: [nucleo, cuentas, programacion, funciones]
+        paquete: [nucleo, cuentas, programacion, funciones, moderacion, recaudacion]
     # Las pruebas que tocan la base corren contra un MySQL de verdad, como en el README.
     services:
       mysql:
@@ -49,7 +49,10 @@ jobs:
           MYSQL_ROOT_PASSWORD: pruebas
           MYSQL_DATABASE: pruebas
         ports: ["3306:3306"]
+        # Los datos en memoria (tmpfs): la base se tira al terminar, y crear tablas sin esperar al
+        # disco es lo que más tarda, porque cada prueba las rehace con las migraciones (IC-663).
         options: >-
+          --tmpfs /var/lib/mysql:rw
           --health-cmd="mysqladmin ping -h 127.0.0.1 -ppruebas"
           --health-interval=5s --health-timeout=5s --health-retries=24
     env:
@@ -57,10 +60,16 @@ jobs:
       PRUEBAS_MYSQL_PUERTO: 3306
       PRUEBAS_MYSQL_CLAVE: pruebas
     steps:
+      # Que MySQL no confirme cada escritura en el disco (IC-663): un service no acepta argumentos
+      # de mysqld, pero estas dos variables se cambian en caliente. Sólo para las pruebas, que no
+      # necesitan sobrevivir a un corte.
+      - name: MySQL sin esperar al disco
+        run: docker exec "${{ job.services.mysql.id }}" mysql -uroot -ppruebas -e "SET GLOBAL innodb_flush_log_at_trx_commit = 0; SET GLOBAL sync_binlog = 0;"
       # Los dos repositorios uno al lado del otro, como en la máquina de cada uno: los subsistemas
       # instalan el front desde ../../frontend-indiecinema.
       # La rama del front con el mismo nombre que ésta, si existe; si no, la rama a la que apunta
-      # el PR (dev o main), y si tampoco existe, main. Así un cambio que toca los dos
+      # el PR, y si tampoco existe, dev y después main (F-02.2): al mergear una cadena, las ramas del
+      # front ya mergeadas se borran, y lo suyo está en dev, no en main. Así un cambio que toca los dos
       # repositorios (las ramas IC-… se llaman igual en los dos) se prueba entero antes de mergear
       # ninguno. Las ramas van por env y no en el script, por si traen algo raro.
       - name: Elegir la rama del front
@@ -69,7 +78,7 @@ jobs:
           RAMA: ${{ github.head_ref || github.ref_name }}
           BASE: ${{ github.base_ref || github.ref_name }}
         run: |
-          for ref in "$RAMA" "$BASE" main; do
+          for ref in "$RAMA" "$BASE" dev main; do
             if git ls-remote --exit-code --heads https://github.com/cerberus-paw/frontend-indiecinema.git "refs/heads/$ref" >/dev/null; then
               echo "ref=$ref" >> "$GITHUB_OUTPUT"
               break
@@ -109,7 +118,7 @@ jobs:
         run: composer pruebas
       # El validador del W3C (E4-10.7) sobre esas páginas: un error de HTML no pasa; los avisos, sí.
       # Fijado por digest, como gitleaks, para que una versión nueva no rompa el CI sin aviso. El
-      # núcleo no dibuja páginas; en los otros tres, que no haya ninguna también es un error.
+      # núcleo no dibuja páginas; en los subsistemas, que no haya ninguna también es un error.
       - name: Validar el HTML (W3C)
         if: matrix.paquete != 'nucleo'
         run: |
@@ -124,7 +133,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        paquete: [nucleo, cuentas, programacion, funciones]
+        paquete: [nucleo, cuentas, programacion, funciones, moderacion, recaudacion]
     steps:
       - uses: actions/checkout@v7
       - uses: shivammathur/setup-php@v2

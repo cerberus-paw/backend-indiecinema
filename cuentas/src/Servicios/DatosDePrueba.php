@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace IndieCinema\Cuentas\Servicios;
 
+use DateTimeImmutable;
+use DateTimeZone;
 use IndieCinema\Cuentas\Modelo\EstadoCuenta;
 use IndieCinema\Cuentas\Modelo\Usuario;
 use IndieCinema\Cuentas\Repositorios\RepositorioDeUsuarios;
@@ -47,6 +49,8 @@ final class DatosDePrueba
         ['id' => '00000000-0000-4000-8000-000000000003', 'nombre' => 'Eva Espectadora', 'correo' => 'eva@indiecinema.test', 'contrasena' => 'espectador2026', 'roles' => [Rol::Espectador], 'produccion' => 'espectador'],
         // Con tilde: el nombre viaja en la cabecera X-Usuario-Nombre, y así se ve que llega bien.
         ['id' => '00000000-0000-4000-8000-000000000004', 'nombre' => 'Elías Espectador', 'correo' => 'elias@indiecinema.test', 'contrasena' => 'espectador2026', 'roles' => [Rol::Espectador], 'produccion' => null],
+        // Atiende la bandeja de moderación (EF-07.3); el moderador también alcanza a organizador.
+        ['id' => '00000000-0000-4000-8000-000000000005', 'nombre' => 'Mora Moderadora', 'correo' => 'moderador@indiecinema.test', 'contrasena' => 'moderador2026', 'roles' => [Rol::Espectador, Rol::Moderador], 'produccion' => null],
     ];
 
     /**
@@ -99,6 +103,7 @@ final class DatosDePrueba
      */
     public function cargar(): array
     {
+        $ahora = new DateTimeImmutable('now', new DateTimeZone('UTC'));
         $resultado = [];
         foreach ($this->aCargar as $datos) {
             if ($this->usuarios->buscarPorCorreo($datos['correo']) !== null) {
@@ -112,6 +117,7 @@ final class DatosDePrueba
                 password_hash($datos['contrasena'], PASSWORD_ARGON2ID),
                 EstadoCuenta::Activa,
                 $datos['roles'],
+                $ahora,
             ));
             $resultado[$datos['correo']] = true;
         }

@@ -17,10 +17,10 @@ use PHPUnit\Framework\TestCase;
  * /acerca-de, que es estática y no necesita la base; el encabezado y el pie son los de todas las
  * páginas.
  *
- * Los roles son acumulativos, como las rutas (Rol::alcanza()): lo del organizador lo ve también el
- * moderador, que puede entrar a esas pantallas. La solicitud de sala la ven los dos: el
- * espectador como «Abrir una sala» y el organizador como «Publicar una sala», que es el mismo
- * trámite. El administrador no usa el sitio público,
+ * Los roles son acumulativos en las rutas (Rol::alcanza()), pero no en los menús: el moderador
+ * puede entrar a las pantallas del organizador, pero no le sirven, así que ve sólo lo suyo, la
+ * moderación (IC-662). La solicitud de sala la ven el espectador como «Abrir una sala» y el
+ * organizador como «Publicar una sala», que es el mismo trámite. El administrador no usa el sitio público,
  * como el wireframe de su panel: ve sólo el logo y sus secciones, sin la cartelera, las salas ni
  * «Mi cuenta». Se comparan los enlaces completos, así una opción de más (o una que lleva a una
  * pantalla que no existe) rompe la prueba.
@@ -33,14 +33,15 @@ final class MenuSegunElRolTest extends TestCase
     private const SECRETO = 'secreto-de-nginx';
 
     /** En el encabezado, con o sin sesión: el logo, la barra y el buscador (que va por action). */
-    private const ENCABEZADO_PUBLICO = ['/', '/cartelera', '/obras', '/salas', '/acerca-de#como-funciona', '/acerca-de'];
+    private const ENCABEZADO_PUBLICO = ['/', '/cartelera', '/obras', '/salas', '/como-funciona', '/acerca-de'];
     /** En el pie, con o sin sesión: «Explorar» y «Comunidad». */
-    private const PIE_PUBLICO = ['/cartelera', '/obras', '/salas', '/acerca-de#quienes-somos', '/acerca-de#como-funciona'];
+    private const PIE_PUBLICO = ['/cartelera', '/obras', '/salas', '/acerca-de#quienes-somos', '/como-funciona', '/recaudacion/beneficios'];
     private const SIN_SESION = ['/cuenta/ingresar', '/cuenta/registro'];
     private const CON_SESION = ['/cuenta/', '/funcion/reservas'];
     private const DEL_ESPECTADOR = ['/solicitar-sala'];
-    private const DEL_ORGANIZADOR = ['/organizador/salas', '/organizador/obras', '/organizador/obras/nueva', '/organizador/funciones', '/organizador/funciones/nueva', '/solicitar-sala'];
-    private const DEL_ADMINISTRADOR = ['/cuenta/administracion/usuarios', '/administracion/solicitudes'];
+    private const DEL_ORGANIZADOR = ['/organizador/salas', '/organizador/obras', '/organizador/obras/nueva', '/organizador/funciones', '/organizador/funciones/nueva', '/recaudacion/reportes', '/solicitar-sala'];
+    private const DEL_MODERADOR = ['/moderacion/solicitudes', '/moderacion/documentos', '/moderacion/obras', '/moderacion/denuncias'];
+    private const DEL_ADMINISTRADOR = ['/cuenta/administracion/usuarios', '/recaudacion/reportes', '/moderacion/solicitudes'];
 
     /**
      * El encabezado y el pie de /acerca-de, por separado.
@@ -105,7 +106,7 @@ final class MenuSegunElRolTest extends TestCase
         yield 'sin sesión' => [null, self::SIN_SESION];
         yield 'espectador' => ['espectador', [...self::CON_SESION, ...self::DEL_ESPECTADOR]];
         yield 'organizador' => ['organizador', [...self::CON_SESION, ...self::DEL_ORGANIZADOR]];
-        yield 'moderador' => ['moderador', [...self::CON_SESION, ...self::DEL_ORGANIZADOR]];
+        yield 'moderador' => ['moderador', [...self::CON_SESION, ...self::DEL_MODERADOR]];
         yield 'administrador' => ['administrador', self::DEL_ADMINISTRADOR];
     }
 
@@ -200,12 +201,12 @@ final class MenuSegunElRolTest extends TestCase
     {
         $organizador = [
             'Mi cuenta' => ['/cuenta/', '/funcion/reservas'],
-            'Panel del Organizador' => ['/organizador/salas', '/organizador/obras', '/organizador/obras/nueva', '/organizador/funciones', '/organizador/funciones/nueva', '/solicitar-sala'],
+            'Panel del Organizador' => ['/organizador/salas', '/organizador/obras', '/organizador/obras/nueva', '/organizador/funciones', '/organizador/funciones/nueva', '/recaudacion/reportes', '/solicitar-sala'],
         ];
         yield 'espectador' => ['espectador', ['Mi cuenta' => ['/cuenta/', '/funcion/reservas', '/solicitar-sala']]];
         yield 'organizador' => ['organizador', $organizador];
-        yield 'moderador' => ['moderador', $organizador];
-        yield 'administrador' => ['administrador', ['Administración' => ['/cuenta/administracion/usuarios', '/administracion/solicitudes']]];
+        yield 'moderador' => ['moderador', ['Mi cuenta' => ['/cuenta/', '/funcion/reservas'], 'Moderación' => self::DEL_MODERADOR]];
+        yield 'administrador' => ['administrador', ['Administración' => ['/cuenta/administracion/usuarios', '/recaudacion/reportes', '/moderacion/solicitudes']]];
     }
 
     /**
@@ -233,6 +234,17 @@ final class MenuSegunElRolTest extends TestCase
         // Lo último que se recorre con Tab es la salida (el texto trae adelante el ícono decorativo).
         $controles = $menu->querySelectorAll('a, button');
         self::assertStringEndsWith('Cerrar sesión', trim((string) $controles->item($controles->length - 1)?->textContent));
+    }
+
+    /**
+     * El moderador tiene en la barra el acceso a su bandeja, en lugar de «Mis salas».
+     */
+    public function testElModeradorTieneModeracionEnLaBarra(): void
+    {
+        preg_match('#<nav class="navegacion-principal".*?</nav>#s', $this->pedir('moderador')['encabezado'], $barra);
+
+        self::assertStringContainsString('href="/moderacion/solicitudes"', $barra[0] ?? '');
+        self::assertStringNotContainsString('href="/organizador/salas"', $barra[0] ?? '');
     }
 
     /**

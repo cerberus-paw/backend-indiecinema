@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace IndieCinema\Cuentas\Controladores;
 
 use IndieCinema\Cuentas\Modelo\UsuarioEnListado;
+use IndieCinema\Cuentas\Servicios\ConductaDeFunciones;
 use IndieCinema\Cuentas\Servicios\ServicioDeUsuarios;
 use IndieCinema\Nucleo\Controlador;
 use IndieCinema\Nucleo\Http\ExcepcionHttp;
@@ -27,8 +28,10 @@ final class AdministracionDeUsuarios extends Controlador
     /** Cuántas páginas se numeran a cada lado de la actual, además de la primera y la última. */
     private const PAGINAS_ALREDEDOR = 2;
 
-    public function __construct(private readonly ServicioDeUsuarios $servicio)
-    {
+    public function __construct(
+        private readonly ServicioDeUsuarios $servicio,
+        private readonly ?ConductaDeFunciones $conductas = null,
+    ) {
     }
 
     /**
@@ -50,10 +53,17 @@ final class AdministracionDeUsuarios extends Controlador
         $total = $pagina->totalDePaginas();
 
         $resumen = $this->servicio->resumen();
+        $conductas = $this->conductas?->deVarios(array_map(
+            static fn (UsuarioEnListado $usuario): string => $usuario->id,
+            $pagina->usuarios,
+        ));
 
         return $this->vista('administracion_usuarios.html.twig', [
             'resumen' => ['usuarios' => $resumen->usuarios, 'nuevos' => $resumen->nuevos, 'organizadores' => $resumen->organizadores],
-            'usuarios' => array_map(self::datos(...), $pagina->usuarios),
+            'usuarios' => array_map(
+                static fn (UsuarioEnListado $usuario): array => self::datos($usuario, $conductas[$usuario->id] ?? null),
+                $pagina->usuarios,
+            ),
             'filtros' => $parametros->valores,
             'anios_de_alta' => self::aniosDeAlta($this->servicio->aniosDeAlta(), $parametros->filtros->alta),
             'avisos' => $parametros->avisos,
@@ -88,7 +98,7 @@ final class AdministracionDeUsuarios extends Controlador
         foreach ($roles as $id => $valor) {
             $rol = is_string($valor) ? Rol::tryFrom($valor) : null;
             if ($rol === null) {
-                throw ExcepcionHttp::solicitudInvalida('Elegí espectador u organizador.');
+                throw ExcepcionHttp::solicitudInvalida('Elegí espectador, organizador o moderador.');
             }
             if (!is_array($antes) || ($antes[$id] ?? null) !== $valor) {
                 $cambios[(string) $id] = $rol;
@@ -102,7 +112,9 @@ final class AdministracionDeUsuarios extends Controlador
         return self::volverAlListado($peticion, match (true) {
             $hechos === [] => [],
             count($hechos) > 1 => ['roles_cambiados' => (string) count($hechos)],
-            $hechos[$id] === Rol::Organizador => ['organizador_dado' => $id],
+            $hechos[$id]['despues'] === Rol::Moderador => ['moderador_dado' => $id],
+            $hechos[$id]['antes'] === Rol::Moderador => ['moderador_quitado' => $id],
+            $hechos[$id]['despues'] === Rol::Organizador => ['organizador_dado' => $id],
             default => ['organizador_quitado' => $id],
         });
     }
@@ -141,6 +153,8 @@ final class AdministracionDeUsuarios extends Controlador
         $avisos = [
             'organizador_dado' => 'Le diste el rol de organizador a «%s». Lo va a tener la próxima vez que ingrese.',
             'organizador_quitado' => 'Le quitaste el rol de organizador a «%s».',
+            'moderador_dado' => 'Le diste el rol de moderador a «%s». Lo va a tener la próxima vez que ingrese.',
+            'moderador_quitado' => 'Le quitaste el rol de moderador a «%s».',
         ];
         foreach ($avisos as $clave => $texto) {
             $id = $peticion->consulta($clave);
@@ -163,9 +177,11 @@ final class AdministracionDeUsuarios extends Controlador
      * El rol es el mayor, como en el wireframe: los roles se acumulan, y el organizador también es
      * espectador.
      *
-     * @return array{id: string, nombre: string, correo: string, rol: string, estado: string}
+     * @param ?array{puntaje: int, bajo_umbral: bool, negativas: int, ausencias: int} $conducta
+     *
+     * @return array{id: string, nombre: string, correo: string, rol: string, estado: string, conducta: ?array{puntaje: int, bajo_umbral: bool, negativas: int, ausencias: int}}
      */
-    private static function datos(UsuarioEnListado $usuario): array
+    private static function datos(UsuarioEnListado $usuario, ?array $conducta = null): array
     {
         return [
             'id' => $usuario->id,
@@ -173,6 +189,7 @@ final class AdministracionDeUsuarios extends Controlador
             'correo' => $usuario->correo,
             'rol' => $usuario->mayorRol()->value,
             'estado' => $usuario->estado->value,
+            'conducta' => $conducta,
         ];
     }
 

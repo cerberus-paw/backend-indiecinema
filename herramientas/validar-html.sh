@@ -16,9 +16,11 @@ set -euo pipefail
 readonly VALIDADOR=ghcr.io/validator/validator@sha256:0af71abb9e40083cc0e8b3fcbe51a55a45889c662a3f507fbf1f9f013a109842
 # Las pruebas que dibujan cada página, por subsistema.
 readonly -A PRUEBAS=(
-	[programacion]='InicioTest|CarteleraTest|FichaDeLaFuncionTest|ObrasTest|SalasDelOrganizadorTest|ObrasDelOrganizadorTest|FuncionesDelOrganizadorTest|SolicitudDeSalaTest|AdministracionDeSolicitudesTest'
-	[cuentas]='IngresoTest|RegistroTest|MiCuentaTest|AdministracionDeUsuariosTest'
-	[funciones]='ReservasTest|PanelDeReservasTest'
+	[programacion]='CalificacionesEnLasFichasTest|InicioTest|CarteleraTest|FichaDeLaFuncionTest|ObrasTest|SalasDelOrganizadorTest|ObrasDelOrganizadorTest|FuncionesDelOrganizadorTest|AcercaDeTest'
+	[cuentas]='IngresoTest|RegistroTest|MiCuentaTest|AdministracionDeUsuariosTest|VerificacionDeCorreoTest|RecuperacionDeContrasenaTest'
+	[funciones]='ReservasTest|PanelDeReservasTest|CalificacionesTest'
+	[moderacion]='ArranqueTest|SolicitudDeSalaTest|AdministracionDeSolicitudesTest'
+	[recaudacion]='ArranqueTest|ReportesTest'
 )
 
 main() {
@@ -28,7 +30,7 @@ main() {
 	mkdir -p "$carpeta"
 
 	# Adentro del contenedor el back está en /src/backend-indiecinema (herramientas/pruebas.sh).
-	for paquete in programacion cuentas funciones; do
+	for paquete in programacion cuentas funciones moderacion recaudacion; do
 		PAGINAS_PARA_VALIDAR=/src/backend-indiecinema/.paginas-para-validar \
 			herramientas/pruebas.sh "$paquete" --filter "${PRUEBAS[$paquete]}"
 	done

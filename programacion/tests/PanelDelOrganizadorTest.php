@@ -18,8 +18,8 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * El control de acceso del panel del organizador, ruta por ruta, como PanelDeAdministracionTest
- * con el del administrador: todas las de /organizador/ piden ese rol, y un espectador o alguien
- * sin sesión no llega al controlador. Que no toque lo de otro organizador lo prueban
+ * de cuentas con el del administrador: todas las de /organizador/ piden ese rol, y un espectador o
+ * alguien sin sesión no llega al controlador. Que no toque lo de otro organizador lo prueban
  * SalasDelOrganizadorTest y FuncionesDelOrganizadorTest, porque eso sí necesita la base.
  *
  * También fija cuáles son las rutas públicas: una ruta nueva que se olvide del rol hace fallar la
@@ -36,11 +36,13 @@ final class PanelDelOrganizadorTest extends TestCase
     private const PUBLICAS = [
         'GET /',
         'GET /acerca-de',
+        'GET /como-funciona',
         'GET /cartelera',
         'GET /cartelera.csv',
         'GET /cartelera/{id}',
         // Los lugares libres de la ficha, que también es pública, y no dicen nada que ella no muestre.
         'GET /cartelera/{id}/lugares',
+        'GET /pedidos',
         'GET /salas',
         'GET /salas/{id}',
         'GET /salas/{id}/imagen',

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace IndieCinema\Funciones\Pruebas;
 
+use IndieCinema\Funciones\Servicios\LiberacionDeVencidas;
 use IndieCinema\Nucleo\Aplicacion;
 use IndieCinema\Nucleo\BaseDeDatos;
 use IndieCinema\Nucleo\Configuracion;
@@ -93,9 +94,20 @@ final class ReservasTest extends TestCase
      * @param array<string, string> $cuerpo
      * @param ?string               $acepta el Accept del pedido; null, el de un navegador
      */
-    private function pedir(string $metodo, string $ruta, ?string $usuario = self::EVA, array $cuerpo = [], ?string $acepta = null): Respuesta
-    {
-        $cabeceras = $usuario === null ? [] : ['X-Nginx-Secreto' => self::SECRETO, 'X-Usuario-Id' => $usuario, 'X-Rol' => 'espectador'];
+    private function pedir(
+        string $metodo,
+        string $ruta,
+        ?string $usuario = self::EVA,
+        array $cuerpo = [],
+        ?string $acepta = null,
+        bool $correoVerificado = true,
+    ): Respuesta {
+        $cabeceras = $usuario === null ? [] : [
+            'X-Nginx-Secreto' => self::SECRETO,
+            'X-Usuario-Id' => $usuario,
+            'X-Rol' => 'espectador',
+            'X-Correo-Verificado' => $correoVerificado ? '1' : '0',
+        ];
         if ($acepta !== null) {
             $cabeceras['Accept'] = $acepta;
         }
@@ -849,5 +861,261 @@ final class ReservasTest extends TestCase
                 self::assertStringNotContainsString($interno, $respuesta->cuerpo());
             }
         }
+    }
+
+    // ---- Por qué se canceló y si volvió la plata (EF-06.3) -----------------------------------
+
+    private function idDe(string $codigo): string
+    {
+        return (string) $this->base->valor('SELECT id FROM reserva WHERE codigo = ?', [$codigo]);
+    }
+
+    /**
+     * Una cancelada con su línea en el historial, como la dejan la liberación de las vencidas, la
+     * cancelación de la función o el administrador. Con $reembolsadaEn, también con la plata
+     * devuelta: la fecha va en UTC, como la guarda la base.
+     *
+     * @return string su código
+     */
+    private function canceladaCon(
+        ?string $motivo,
+        string $anterior = 'pendiente_pago',
+        ?string $reembolsadaEn = null,
+        string $creada = '2026-10-01 10:00:00',
+    ): string {
+        $codigo = $this->hecha(self::PROXIMA, $creada, 'cancelada');
+        $id = $this->idDe($codigo);
+        if ($reembolsadaEn !== null) {
+            $this->base->ejecutar(
+                'UPDATE reserva SET pago_id = ?, reembolso_id = ?, reembolsada_en = ? WHERE id = ?',
+                ["pago-{$codigo}", "reembolso-{$codigo}", $reembolsadaEn, $id],
+            );
+        }
+        $this->base->ejecutar(
+            'INSERT INTO cambio_reserva (reserva_id, estado_anterior, estado_nuevo, autor_id, autor_rol, motivo, hecho_en)
+             VALUES (?, ?, ?, ?, ?, ?, ?)',
+            [$id, $anterior, 'cancelada', self::EVA, 'espectador', $motivo, $creada],
+        );
+
+        return $codigo;
+    }
+
+    /**
+     * El criterio de la subtarea: una cancelada por vencimiento lo dice, en lugar de un «Cancelada»
+     * pelado que deja al espectador sin saber si tiene que esperar algo.
+     */
+    public function testMisReservasDiceQueVencioElPlazoParaPagar(): void
+    {
+        $codigo = $this->canceladaCon(LiberacionDeVencidas::MOTIVO);
+
+        $cuerpo = $this->pedir('GET', '/reservas')->cuerpo();
+
+        self::assertStringContainsString(self::partido($codigo), $cuerpo);
+        self::assertStringContainsString(LiberacionDeVencidas::MOTIVO, $cuerpo);
+    }
+
+    /**
+     * El otro criterio: una reembolsada dice cuándo. La base guarda UTC y la página lo escribe en
+     * la hora del sitio, tres horas antes.
+     */
+    public function testMisReservasDiceCuandoVolvioLaPlata(): void
+    {
+        $codigo = $this->canceladaCon('Se canceló la función.', 'confirmada', '2026-09-19 23:30:00');
+
+        $cuerpo = $this->pedir('GET', '/reservas')->cuerpo();
+
+        self::assertStringContainsString(self::partido($codigo), $cuerpo);
+        self::assertStringContainsString('Se canceló la función.', $cuerpo);
+        self::assertStringContainsString('Reembolsada el 19 sep · 20:30', $cuerpo);
+    }
+
+    public function testElComprobanteDeUnaCanceladaDiceElMotivoYElReembolso(): void
+    {
+        $codigo = $this->canceladaCon('Anulada por el administrador.', 'confirmada', '2026-09-19 23:30:00');
+
+        $cuerpo = $this->pedir('GET', '/reservas/' . $this->idDe($codigo))->cuerpo();
+
+        self::assertStringContainsString('Reserva cancelada', $cuerpo);
+        self::assertStringContainsString('Anulada por el administrador.', $cuerpo);
+        self::assertStringContainsString('Reembolsada el 19 sep · 20:30', $cuerpo);
+    }
+
+    /**
+     * La que canceló el espectador no tiene motivo: la canceló él y ya sabe por qué.
+     */
+    public function testLaCanceladaPorElEspectadorNoExplicaNada(): void
+    {
+        $codigo = $this->canceladaCon(null, 'confirmada');
+
+        $cuerpo = $this->pedir('GET', '/reservas')->cuerpo();
+
+        self::assertStringContainsString(self::partido($codigo), $cuerpo);
+        self::assertStringNotContainsString('Venció', $cuerpo);
+        self::assertStringNotContainsString('Reembolsada', $cuerpo);
+    }
+
+    /**
+     * Vale el último motivo: una pendiente puede vencer, volver a confirmarse con un pago que
+     * llegó tarde y después anularla el administrador.
+     */
+    public function testValeElMotivoDeLaUltimaCancelacion(): void
+    {
+        $codigo = $this->canceladaCon(LiberacionDeVencidas::MOTIVO);
+        $this->base->ejecutar(
+            'INSERT INTO cambio_reserva (reserva_id, estado_anterior, estado_nuevo, autor_id, autor_rol, motivo, hecho_en)
+             VALUES (?, ?, ?, ?, ?, ?, ?)',
+            [$this->idDe($codigo), 'confirmada', 'cancelada', self::EVA, 'administrador', 'Anulada por el administrador.', '2026-10-02 10:00:00'],
+        );
+
+        $cuerpo = $this->pedir('GET', '/reservas')->cuerpo();
+
+        self::assertStringContainsString('Anulada por el administrador.', $cuerpo);
+        self::assertStringNotContainsString('Venció el plazo', $cuerpo);
+    }
+
+    /**
+     * El motivo es de las canceladas: si el pago llegó tarde y la reserva volvió a confirmarse
+     * (X-01.5), la fila no sigue diciendo que venció.
+     */
+    public function testUnaQueVolvioAConfirmarseNoDiceQueSeCancelo(): void
+    {
+        $codigo = $this->canceladaCon(LiberacionDeVencidas::MOTIVO);
+        $this->base->ejecutar('UPDATE reserva SET estado = ? WHERE codigo = ?', ['confirmada', $codigo]);
+
+        $cuerpo = $this->pedir('GET', '/reservas')->cuerpo();
+
+        self::assertStringContainsString(self::partido($codigo), $cuerpo);
+        self::assertStringNotContainsString('Venció el plazo', $cuerpo);
+    }
+
+    public function testUnUsuarioBloqueadoNoReservaEnEsaSalaPeroSiEnOtra(): void
+    {
+        $bloqueado = '66666666-6666-4666-8666-666666666666';
+        $otraSala = '67676767-6767-4767-8767-676767676767';
+
+        $pagina = $this->pedir('GET', '/reservar/' . self::PROXIMA, $bloqueado);
+        self::assertSame(200, $pagina->estado());
+        self::assertStringContainsString('No podés reservar en esta sala.', $pagina->cuerpo());
+        self::assertStringNotContainsString('name="cantidad"', $pagina->cuerpo());
+
+        $html = $this->reservar('1', self::PROXIMA, $bloqueado);
+        self::assertSame(403, $html->estado());
+        self::assertStringContainsString('No podés reservar en esta sala.', $html->cuerpo());
+
+        $json = $this->reservarEnJson('1', self::PROXIMA, $bloqueado);
+        self::assertSame(403, $json->estado());
+        self::assertSame('No podés reservar en esta sala.', self::json($json)['error']);
+        self::assertSame(0, $this->reservas());
+
+        $enOtra = $this->reservar('1', $otraSala, $bloqueado);
+        self::assertSame(303, $enOtra->estado());
+        self::assertSame(1, $this->reservas());
+    }
+
+    public function testBajoElUmbralDeConductaLimitaADosReservasYMuestraAviso(): void
+    {
+        $reciente = gmdate('Y-m-d H:i:s', strtotime('-5 days'));
+        $funcionPasada = '13131313-1313-4313-8313-131313131313';
+        for ($i = 0; $i < 2; ++$i) {
+            $id = Uuid::nuevo();
+            $this->base->ejecutar(
+                "INSERT INTO reserva (id, funcion_id, usuario_id, codigo, cantidad, total, estado, creada_en) VALUES (?, ?, ?, ?, 1, '0.00', 'asistio', ?)",
+                [$id, $funcionPasada, self::EVA, strtoupper(substr(bin2hex(random_bytes(4)), 0, 8)), $reciente],
+            );
+            $this->base->ejecutar(
+                'INSERT INTO conducta (reserva_id, usuario_id, organizador_id, positiva, motivo, creada_en) VALUES (?, ?, ?, 0, ?, ?)',
+                [$id, self::EVA, Uuid::nuevo(), 'Llegó tarde', $reciente],
+            );
+        }
+        for ($i = 0; $i < 4; ++$i) {
+            $this->hecha($funcionPasada, $reciente, 'ausente');
+        }
+
+        // Con 0 reservas activas todavía puede reservar, pero ya ve la advertencia.
+        $pantallaInicial = $this->pedir('GET', '/reservar/' . self::PROXIMA);
+        self::assertSame(200, $pantallaInicial->estado());
+        self::assertStringContainsString('Por tu historial de conducta podés tener hasta 2 reservas a la vez.', $pantallaInicial->cuerpo());
+        self::assertStringContainsString('name="cantidad"', $pantallaInicial->cuerpo());
+
+        self::assertSame(303, $this->reservar('1', self::PROXIMA)->estado());
+        self::assertSame(303, $this->reservar('1', '78787878-7878-4878-8878-787878787878')->estado());
+
+        // Con 2 reservas activas la pantalla deshabilita el formulario y el servidor rechaza la tercera.
+        $pantallaBloqueada = $this->pedir('GET', '/reservar/' . self::PROXIMA);
+        self::assertSame(200, $pantallaBloqueada->estado());
+        self::assertStringContainsString('Por tu historial de conducta podés tener hasta 2 reservas a la vez.', $pantallaBloqueada->cuerpo());
+        self::assertStringNotContainsString('name="cantidad"', $pantallaBloqueada->cuerpo());
+
+        $terceraHtml = $this->reservar('1', self::PROXIMA);
+        self::assertSame(422, $terceraHtml->estado());
+        self::assertStringContainsString('Por tu historial de conducta podés tener hasta 2 reservas a la vez.', $terceraHtml->cuerpo());
+
+        $terceraJson = $this->reservarEnJson('1', self::PROXIMA);
+        $json = self::json($terceraJson);
+        self::assertSame(422, $terceraJson->estado());
+        self::assertSame('Por tu historial de conducta podés tener hasta 2 reservas a la vez.', $json['error']);
+        self::assertTrue($json['limite_conducta_alcanzado'] ?? false);
+    }
+
+    public function testMisReservasMuestraElPuntajeDeConductaYLaActividad(): void
+    {
+        $reciente = gmdate('Y-m-d H:i:s', strtotime('-4 days'));
+        $asistidaId = Uuid::nuevo();
+        $this->base->ejecutar(
+            "INSERT INTO reserva (id, funcion_id, usuario_id, codigo, cantidad, total, estado, creada_en) VALUES (?, ?, ?, 'ASIS0001', 1, '0.00', 'asistio', ?)",
+            [$asistidaId, self::EMPEZADA, self::EVA, $reciente],
+        );
+        $this->base->ejecutar(
+            'INSERT INTO conducta (reserva_id, usuario_id, organizador_id, positiva, motivo, creada_en) VALUES (?, ?, ?, 1, NULL, ?)',
+            [$asistidaId, self::EVA, Uuid::nuevo(), $reciente],
+        );
+        for ($i = 0; $i < 2; ++$i) {
+            $id = Uuid::nuevo();
+            $this->base->ejecutar(
+                "INSERT INTO reserva (id, funcion_id, usuario_id, codigo, cantidad, total, estado, creada_en) VALUES (?, ?, ?, ?, 1, '0.00', 'asistio', ?)",
+                [$id, '13131313-1313-4313-8313-131313131313', self::EVA, strtoupper(substr(bin2hex(random_bytes(4)), 0, 8)), $reciente],
+            );
+            $this->base->ejecutar(
+                'INSERT INTO conducta (reserva_id, usuario_id, organizador_id, positiva, motivo, creada_en) VALUES (?, ?, ?, 0, ?, ?)',
+                [$id, self::EVA, Uuid::nuevo(), 'Interrumpió', $reciente],
+            );
+        }
+        for ($i = 0; $i < 4; ++$i) {
+            $this->hecha('24242424-2424-4424-8424-242424242424', $reciente, 'ausente');
+        }
+        $this->base->ejecutar(
+            'INSERT INTO calificacion (id, funcion_id, usuario_id, reserva_id, puntaje, comentario, sala_id, organizador_id, creada_en) VALUES (?, ?, ?, ?, 4, NULL, ?, ?, ?)',
+            [Uuid::nuevo(), self::EMPEZADA, self::EVA, $asistidaId, Uuid::nuevo(), Uuid::nuevo(), $reciente],
+        );
+
+        $respuesta = $this->pedir('GET', '/reservas');
+
+        self::assertSame(200, $respuesta->estado());
+        $cuerpo = $respuesta->cuerpo();
+        self::assertStringContainsString('Puntaje de conducta', $cuerpo);
+        self::assertStringContainsString('bajo umbral (hasta 2 reservas a la vez)', $cuerpo);
+        self::assertMatchesRegularExpression('#<dt>Puntaje de conducta</dt>\s*<dd class="panel-dato-valor">60</dd>#', $cuerpo);
+        self::assertMatchesRegularExpression('#<dt>Asistencias</dt>\s*<dd class="panel-dato-valor">3</dd>#', $cuerpo);
+        self::assertMatchesRegularExpression('#<dt>Ausencias</dt>\s*<dd class="panel-dato-valor">4</dd>#', $cuerpo);
+        self::assertMatchesRegularExpression('#<dt>Calificaciones</dt>\s*<dd class="panel-dato-valor">3</dd>\s*<dd class="panel-dato-nota">1 pos · 2 neg \(2 vig\.\) · 1 función calificada</dd>#', $cuerpo);
+    }
+
+    public function testSinCorreoVerificadoNoPuedeReservarPorPaginaNiPorJson(): void
+    {
+        $sinVerificar = Uuid::nuevo();
+
+        $pantalla = $this->pedir('GET', '/reservar/' . self::PROXIMA, $sinVerificar, correoVerificado: false);
+        self::assertSame(200, $pantalla->estado());
+        self::assertStringContainsString('Verificá tu correo para reservar.', $pantalla->cuerpo());
+        self::assertStringNotContainsString('name="cantidad"', $pantalla->cuerpo());
+
+        $html = $this->pedir('POST', '/reservar/' . self::PROXIMA, $sinVerificar, ['_csrf' => self::CSRF, 'cantidad' => '1'], correoVerificado: false);
+        self::assertSame(403, $html->estado());
+        self::assertStringContainsString('Verificá tu correo para reservar.', $html->cuerpo());
+
+        $json = $this->pedir('POST', '/reservar/' . self::PROXIMA, $sinVerificar, ['_csrf' => self::CSRF, 'cantidad' => '1'], self::ACEPTA_JSON, correoVerificado: false);
+        self::assertSame(403, $json->estado());
+        self::assertSame('Verificá tu correo para reservar.', self::json($json)['error'] ?? null);
+        self::assertSame(0, $this->reservas());
     }
 }

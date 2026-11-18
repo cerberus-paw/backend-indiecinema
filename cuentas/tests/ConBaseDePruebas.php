@@ -40,6 +40,9 @@ trait ConBaseDePruebas
     private static function baseConTablasNuevas(Configuracion $configuracion): BaseDeDatos
     {
         $base = BaseDeDatos::conectar($configuracion);
+        // Antes que usuario: tiene una clave foránea a ella (EF-15.4).
+        $base->ejecutar('DROP TABLE IF EXISTS seguimiento');
+        $base->ejecutar('DROP TABLE IF EXISTS token_de_cuenta');
         $base->ejecutar('DROP TABLE IF EXISTS solicitud');
         $base->ejecutar('DROP TABLE IF EXISTS sesion');
         $base->ejecutar('DROP TABLE IF EXISTS rol');

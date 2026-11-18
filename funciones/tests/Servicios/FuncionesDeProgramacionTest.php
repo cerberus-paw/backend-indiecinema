@@ -54,6 +54,7 @@ final class FuncionesDeProgramacionTest extends TestCase
         self::assertNull($funcion->fechaHora);
         self::assertSame(['La ciénaga', 'Zama'], $funcion->titulos);
         self::assertFalse($funcion->titulosElegidos);
+        self::assertSame(['0c0c0c0c-0c0c-40c0-80c0-0c0c0c0c0c0c', '0b0b0b0b-0b0b-40b0-80b0-0b0b0b0b0b0b'], $funcion->obrasIds);
     }
 
     public function testUnaQueNoExisteEsNullYUnIdMalFormadoNiSePide(): void
@@ -129,5 +130,25 @@ final class FuncionesDeProgramacionTest extends TestCase
                 self::assertSame(503, $error->estado);
             }
         }
+    }
+
+    public function testMarcaSiElUsuarioEstaBloqueadoEnLaSalaDeLaFuncion(): void
+    {
+        $bloqueado = '66666666-6666-4666-8666-666666666666';
+        $otro = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+
+        $paraBloqueado = $this->funciones()->buscar(self::PROGRAMADA, $bloqueado);
+        $paraOtro = $this->funciones()->buscar(self::PROGRAMADA, $otro);
+        $sinUsuario = $this->funciones()->buscar(self::PROGRAMADA);
+        $enOtraSala = $this->funciones()->buscar('67676767-6767-4767-8767-676767676767', $bloqueado);
+
+        self::assertNotNull($paraBloqueado);
+        self::assertTrue($paraBloqueado->usuarioBloqueado);
+        self::assertNotNull($paraOtro);
+        self::assertFalse($paraOtro->usuarioBloqueado);
+        self::assertNotNull($sinUsuario);
+        self::assertFalse($sinUsuario->usuarioBloqueado);
+        self::assertNotNull($enOtraSala);
+        self::assertFalse($enOtraSala->usuarioBloqueado);
     }
 }

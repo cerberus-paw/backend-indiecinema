@@ -9,8 +9,10 @@ use IndieCinema\Nucleo\Http\ExcepcionHttp;
 use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Seguridad\Rol;
+use IndieCinema\Programacion\Modelo\FuncionEnCartelera;
 use IndieCinema\Programacion\Modelo\Genero;
 use IndieCinema\Programacion\Modelo\Obra;
+use IndieCinema\Programacion\Servicios\CalificacionesDeFunciones;
 use IndieCinema\Programacion\Servicios\ServicioDeCartelera;
 use IndieCinema\Programacion\Servicios\ServicioDeObras;
 
@@ -26,6 +28,8 @@ final class Obras extends Controlador
     public function __construct(
         private readonly ServicioDeObras $servicio,
         private readonly ServicioDeCartelera $cartelera,
+        // El promedio y las últimas calificaciones de la obra, que viven en funciones (EF-04.3).
+        private readonly CalificacionesDeFunciones $calificaciones,
     ) {
     }
 
@@ -67,32 +71,67 @@ final class Obras extends Controlador
     public function mostrar(Peticion $peticion): Respuesta
     {
         $id = (string) $peticion->parametro('id');
-        $obra = $this->servicio->buscar($id);
+        $obra = $this->servicio->publicada($id);
         $mapaGeneros = $this->servicio->mapaGeneros();
 
         $usuario = $peticion->usuario();
         $esDueno = $usuario !== null && $usuario->alcanza(Rol::Organizador) && $obra->duenoId === $usuario->id;
 
         $funciones = $this->servicio->proximasFunciones($id);
+        // En un pedido, el promedio de la obra y el de las salas donde se da (EF-04.3 y EF-04.4).
+        $resumen = $this->calificaciones->resumen([
+            'obras' => [$obra->id],
+            'salas' => array_values(array_unique(array_map(static fn (FuncionEnCartelera $funcion): string => $funcion->salaId, $funciones))),
+        ]);
+        $funciones = self::porReputacionDeLaSala($funciones, $resumen['salas'] ?? []);
         $tarjetasFunciones = TarjetaDeFuncion::todas($funciones, $this->cartelera->acuerdosDe($funciones));
+
+        $deLaObra = $resumen['obras'][$obra->id] ?? null;
+        $ultimas = $deLaObra === null ? [] : $this->calificaciones->ultimas('obra', $obra->id);
+        $calificaciones = CalificacionesParaMostrar::datos($resumen !== null && $ultimas !== null, $deLaObra, $ultimas);
 
         $datosObra = [
             ...TarjetaDeObra::datos($obra, $mapaGeneros),
             'editable' => $esDueno,
             'url_editar' => "/organizador/obras/{$obra->id}/editar",
             'tiene_funciones_futuras' => $this->servicio->tieneFuncionesFuturas($obra->id),
+            // EF-07.8: su dueño no la denuncia.
+            'denunciable' => $usuario === null || $obra->duenoId !== $usuario->id,
         ];
 
         if ($peticion->aceptaJson()) {
             return $this->json([
                 'obra' => $datosObra,
                 'funciones' => $tarjetasFunciones,
+                'calificaciones' => $calificaciones,
             ]);
         }
 
         return $this->vista(self::PLANTILLA_FICHA, [
             'obra' => $datosObra,
             'funciones' => $tarjetasFunciones,
+            'calificaciones' => $calificaciones,
         ]);
+    }
+
+    /**
+     * Las próximas funciones de la obra, primero las de las salas mejor calificadas (EF-04.4): al
+     * buscar un título, se elige también dónde verlo. Las de salas sin calificaciones van después,
+     * y entre las de una misma reputación sigue el orden por fecha (usort es estable).
+     *
+     * @param list<FuncionEnCartelera>                            $funciones por fecha
+     * @param array<string, array{promedio: float, cantidad: int}> $salas     las calificadas
+     *
+     * @return list<FuncionEnCartelera>
+     */
+    private static function porReputacionDeLaSala(array $funciones, array $salas): array
+    {
+        usort($funciones, static fn (FuncionEnCartelera $una, FuncionEnCartelera $otra): int => [
+            isset($salas[$otra->salaId]), $salas[$otra->salaId]['promedio'] ?? 0.0, $salas[$otra->salaId]['cantidad'] ?? 0,
+        ] <=> [
+            isset($salas[$una->salaId]), $salas[$una->salaId]['promedio'] ?? 0.0, $salas[$una->salaId]['cantidad'] ?? 0,
+        ]);
+
+        return $funciones;
     }
 }

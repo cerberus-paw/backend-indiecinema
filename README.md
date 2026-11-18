@@ -41,15 +41,18 @@ backend-indiecinema/
 │   ├── init/              esquemas, usuarios y permisos; corre una vez, con la base vacía
 │   └── herramientas/      aplicar migraciones y comprobar que cada subsistema sólo ve su esquema
 ├── herramientas/          servidor de desarrollo sin Docker y despliegue en el VPS
-├── docs/seguridad.md      seguridad por capa: qué protege cada una y dónde está configurado
+├── docs/seguridad.md      seguridad por capa: qué protege cada una y dónde está configurado, y
+│                          las amenazas ordenadas por impacto y probabilidad
 ├── docs/guion-de-prueba.md  el recorrido de punta a punta en el sitio publicado, con cada rol
 ├── nucleo/                MVC común: ruteo, middleware, base de datos, vistas y errores
 ├── cuentas/               /cuenta/   registro, ingreso, sesión, roles y usuarios del administrador
-├── programacion/          /          obras, salas, funciones, cartelera, votación de títulos y solicitudes de sala
-└── funciones/             /funcion/  las reservas con el cupo de cada función, sus paneles y el acuerdo de fecha
+├── programacion/          /          obras, salas, funciones, cartelera y votación de títulos
+├── funciones/             /funcion/  las reservas con el cupo de cada función, sus paneles y el acuerdo de fecha
+├── moderacion/            /moderacion/  las solicitudes de sala y su bandeja (EF-07.2); lo demás de EF-07 y los términos llegan con EF-07 y EF-16
+└── recaudacion/           /recaudacion/: los reportes (EF-09), el reparto de lo cobrado (EF-08.1, EF-08.2) y las liquidaciones por mes (EF-08.3)
 ```
 
-Lo que todavía no está (el cobro, la moderación y los beneficios) se suma con la misma forma.
+Lo que todavía no está (los beneficios, dentro de recaudación) se suma con la misma forma.
 
 Cada subsistema tiene la misma estructura por dentro:
 
@@ -64,7 +67,7 @@ Cada subsistema tiene la misma estructura por dentro:
 │   ├── Modelo/            entidades y enumeraciones de estado
 │   └── Repositorios/      todo el SQL del subsistema, con consultas preparadas
 ├── migraciones/           001_*.sql, 002_*.sql… sólo sobre el esquema propio
-├── herramientas/          datos-de-prueba.php, que carga los de la demo (cuentas y programación)
+├── herramientas/          datos-de-prueba.php, que carga los de la demo (cuentas y programación), e historial-de-prueba.php (programación y funciones)
 ├── datos-prueba/          las fotos de las salas y los afiches de la demo (sólo programación)
 ├── tests/
 └── config/
@@ -122,7 +125,7 @@ todo el sitio se vea igual aunque lo sirvan subsistemas distintos.
   etiquetan (`entrega-N`) sobre lo que está publicado desde `main`.
 - **Cada contenedor monta sólo lo suyo**: su carpeta, el núcleo y el front. Ningún subsistema ve
   el `config.ini` de otro, así que si uno queda comprometido no se lleva los secretos de los
-  demás; cuando se sume Mercado Pago, su credencial va a estar sólo en funciones.
+  demás; las credenciales de Mercado Pago (`[mercadopago]`) están sólo en funciones.
 - **Los subsistemas corren sin privilegios.** Una sola imagen para los tres (`php:8.4-apache`,
   la versión mínima que pide `composer.json`) con Apache entero como `www-data`, que por eso
   escucha en el 8080. En el compose, sin ninguna capacidad de root y con el sistema de archivos de
@@ -165,7 +168,8 @@ todo el sitio se vea igual aunque lo sirvan subsistemas distintos.
 - **Límite de intentos en nginx.** Ingresar y registrarse admiten 5 POST por minuto por IP, con un
   margen de 3 seguidos; al pasarse, 429. Es el control contra la fuerza bruta en la capa de red:
   frena antes de llegar a PHP y a Argon2id, que es caro a propósito. Cuentan sólo los POST (abrir
-  el formulario no gasta intentos) y cada ruta tiene su cuenta.
+  el formulario no gasta intentos) y cada ruta tiene su cuenta. La solicitud de sala y la denuncia
+  (EF-07.8) admiten 2 por minuto, con un margen de 2.
 - **CSRF con doble envío:** el token está en la cookie `csrf` y en cada formulario (campo
   `_csrf`, o la cabecera `X-CSRF-Token` desde JavaScript), y un POST pasa sólo si coinciden. Los
   subsistemas no guardan sesión, así que no hay dónde tener el token del lado del servidor.
@@ -197,9 +201,31 @@ todo el sitio se vea igual aunque lo sirvan subsistemas distintos.
   estado, la fecha, el precio, el cupo, los títulos, la sala y el organizador de una función;
   `GET /interno/funciones?ids=…` da lo mismo de hasta 20 juntas, para una página de «Mis
   reservas».
-  Cuentas tiene `GET /interno/usuarios/{id}` (el nombre y el correo, para programación y para los
-  correos de funciones) y `POST /interno/usuarios/{id}/roles`, que llama programación desde la
+  Cuentas tiene `GET /interno/usuarios/{id}` (el nombre y el correo, para moderación y para los
+  correos de funciones) y `POST /interno/usuarios/{id}/roles`, que llama moderación desde la
   bandeja de solicitudes de sala.
+  Programación tiene la API de salas para moderación (EF-07.1): `POST /interno/salas` crea la sala
+  de una solicitud aprobada (o completa la que ya existía), `POST /interno/salas/{id}/habilitacion`
+  la publica o la retira con un motivo, y `GET /interno/salas?ids=…` la lee para la bandeja. Desde
+  EF-07.6 el alta lleva el `solicitud_id`: con otra solicitud que la última que se le aplicó, a una
+  sala habilitada le pone los datos de un cambio de dirección aprobado; con la misma, es un
+  reintento y no la toca.
+  Las obras nuevas (EF-07.7) quedan pendientes hasta que la moderación las revisa con la API de
+  obras de programación: `GET /interno/obras/pendientes` las lista, primero la más vieja;
+  `GET /interno/obras/{id}` lee una en cualquier estado, y `POST /interno/obras/{id}/revision` la
+  aprueba o la rechaza con un motivo. Rechazar una aprobada la saca de las votaciones abiertas y
+  borra sus votos; si era la única candidata, la función se cancela.
+  Las denuncias (EF-07.8) son de moderación, pero lo denunciado es de otro: moderación lee la sala
+  (`GET /interno/salas?ids=…`), la obra (`GET /interno/obras/{id}`) y la función
+  (`GET /interno/funciones/{id}`, que también le responde) de programación, y el comentario de una
+  calificación de funciones (`GET /interno/calificaciones/{id}`). Para resolverlas, suspende la
+  sala (`POST /interno/salas/{id}/habilitacion`, con la suspensión de causa `denuncia`), rechaza la
+  obra (`POST /interno/obras/{id}/revision`) u oculta el comentario
+  (`POST /interno/calificaciones/{id}/ocultar` de funciones: deja de verse y el puntaje sigue
+  contando). Las últimas calificaciones que da funciones llevan su id, para denunciar cada
+  comentario.
+  Moderación tiene `GET /interno/solicitudes/ultima/{usuario}` para cuentas (EF-07.6): el estado
+  y el motivo de la última solicitud de sala, que «Mi cuenta» muestra si moderación responde.
   Funciones tiene `GET /interno/funciones/{id}/ocupacion` y `GET /interno/ocupacion?funciones=…`
   (una página de tarjetas en un solo pedido): los lugares ocupados, con los que programación
   muestra los libres. Si funciones no responde, la cartelera y la ficha se muestran sin ese dato.
@@ -207,19 +233,25 @@ todo el sitio se vea igual aunque lo sirvan subsistemas distintos.
   /interno/funciones/{id}/cancelar-reservas` de funciones, que cancela sus reservas y les avisa por
   correo a los espectadores (la dirección se la pide a cuentas). Cada cambio de estado de una
   reserva queda en la tabla `cambio_reserva`, con quién lo hizo.
+  Recaudación reparte lo cobrado pero no lo mueve: lo pide a `GET /interno/funciones/{id}/cobros`
+  y `GET /interno/cobros?funciones=…` de funciones, la única con la credencial de Mercado Pago.
   El acuerdo de fecha (las franjas, el mínimo y los «Me sirve») se guarda en funciones, que es
   la que después cuenta los lugares, pero sus pantallas están en la ficha y en «Mis funciones»,
   que sirve programación: programación lo maneja con `/interno/acuerdos` de funciones (proponer,
   votar, quitar el voto, confirmar y cerrar sin mínimo). La votación de títulos, en cambio, es
   toda de programación (tabla `voto`).
 - **Pedir ser organizador es pedir una sala**, como el recorrido de la E2 (sección 7): la
-  solicitud de sala (`/solicitar-sala`) guarda la sala sin publicar y le avisa al equipo por
-  correo; aprobarla la publica y programación le pide a cuentas el rol de organizador. Primero el
-  rol: si cuentas no responde no cambia nada, y nunca queda una sala publicada cuyo dueño no
-  puede entrar a «Mis salas». La resuelve el administrador mientras no haya moderación.
+  solicitud de sala (`/solicitar-sala`, de moderación desde EF-07.2) guarda la sala que propone y
+  le avisa al equipo por correo; la sala recién existe en programación cuando se aprueba. Aprobarla
+  le pide a cuentas el rol de organizador, después le pide a programación la sala publicada y
+  recién ahí queda aprobada: si alguno no responde, sigue pendiente y se puede reintentar, y nunca
+  queda una sala publicada cuyo dueño no puede entrar a «Mis salas». La resuelve un moderador
+  (EF-07.3), que no resuelve la suya. Lleva el seguro y la habilitación en PDF con su vencimiento
+  (EF-07.4), en el volumen de moderación; los bajan quien la mandó y la moderación
+  (`/moderacion/documentos/{id}`).
 - **Los correos salen por SMTP con el curl de PHP** (`ClienteSmtp` del núcleo), sin librerías.
   El servidor y el remitente están en `[correo]` del `config.ini` de cada subsistema que manda
-  correos: programación, el aviso de cada solicitud de sala, y funciones, los de los espectadores
+  correos: moderación, el aviso de cada solicitud de sala, y funciones, los de los espectadores
   (la reserva confirmada, con el código y el enlace al comprobante, y la función cancelada). El
   enlace sale de `[sitio] url` de funciones, la dirección pública del sitio sin la barra final:
   si falta o no es http(s), reservar responde 500 y el motivo queda en el log. Si un correo no
@@ -228,10 +260,50 @@ todo el sitio se vea igual aunque lo sirvan subsistemas distintos.
   compose (`COMPOSE_PROFILES=buzon` en `.env`), que en el VPS sólo escucha en la máquina y se ve
   con `ssh -L 8025:127.0.0.1:8025 …`. Con un proveedor de verdad, un servidor con usuario exige
   `smtps://` o STARTTLS para no mandar la clave sin cifrar.
-- **Las tareas programadas, cuando las haya**, las va a disparar el cron del servidor con
+- **Las tareas programadas** las dispara el cron del servidor con
   `docker compose exec -T <subsistema> php bin/<tarea>.php`, en lugar de sumar un contenedor sólo
-  para eso. Por ahora no hace falta ninguna: la votación y el acuerdo los cierra el organizador
-  desde la ficha.
+  para eso. Están en «Tareas programadas»: los cierres por fecha límite de la votación y del
+  acuerdo, el fin de las funciones, el recordatorio del día antes y las reservas que vencieron sin
+  pagar. El organizador puede cerrar la votación y el acuerdo antes desde la ficha.
+- **Los reportes los arma recaudación** (`/recaudacion/reportes`) pidiendo lo que necesita por la
+  API interna: las funciones finalizadas y sus votos a programación, y las ventas y calificaciones
+  a funciones. Si uno no responde, sale lo que hay con un aviso. Desde dónde sugiere una promoción,
+  un título para repetir o lo que el público pidió está en `[reportes]` de su `config.ini`. Los
+  totales van de a un mes por página, y el CSV trae todas las funciones del período. El dueño de
+  una obra ve cómo le fue en cualquier sala, también en las votaciones que perdió.
+- **El reparto de lo cobrado es un parámetro con fecha de vigencia**, no una constante
+  (`/recaudacion/administracion/reparto`, EF-08.1): el administrador carga con cuánto se reparte
+  entre la sala, el dueño de la obra y la plataforma —70/15/15 es lo que deja la migración— y
+  desde cuándo rige. Un parámetro no se corrige ni se borra: cada cambio es una fila nueva, el
+  anterior queda en el historial y cada función se reparte con el vigente en su `fecha_hora`, así
+  un cambio no mueve lo de las funciones que ya pasaron. La vigencia puede ser futura, para
+  anunciarlo antes, pero no anterior a ahora. Los porcentajes van en `DECIMAL(5,2)` y la base
+  controla que sumen 100 exacto; la aplicación los maneja en centésimas de punto (70 % es 7000),
+  porque con `float` un reparto como 33,33 / 33,33 / 33,34 no suma 100 y quedaría plata sin dueño.
+- **El reparto de cada función lo hace una tarea y queda escrito una sola vez** (`repartir`,
+  EF-08.2): la tarea le pide a programación las funciones finalizadas desde la última que repartió
+  —por `funcion.finalizada_en`, no por la fecha de la función, así una que se finalizó tarde no se
+  saltea— y a funciones lo cobrado de cada una, que ya viene neto de reembolsos. Guarda una fila en
+  `reparto` por función, con la clave única de `funcion_id` que hace que correrla de más no duplique
+  nada, y una en `reparto_parte` por beneficiario. Las partes suman exactamente lo cobrado: cada una
+  sale de una división entera y lo que se pierde en los redondeos queda en la parte de la
+  plataforma. Si una función proyectó varias obras, la parte del dueño se divide en partes iguales
+  entre ellas, y dos obras del mismo dueño son una sola parte, que es lo que se le va a liquidar.
+  Las funciones a la gorra, y las pagas que no cobraron un peso, quedan registradas con 0 y sin
+  partes: no reparten, pero así la tarea no las vuelve a mirar en cada pasada. Si una función no se
+  puede repartir, la tarea corta ahí y no sigue con las que vienen después, para no dejarla atrás
+  del cursor sin repartir.
+- **La liquidación es por mes y por beneficiario, y no se vuelve a tocar una vez transferida**
+  (`/recaudacion/liquidaciones` y `/recaudacion/administracion/liquidaciones`, EF-08.3): la tarea
+  del reparto suma las partes de cada organizador y de cada dueño del mes y las deja en
+  `liquidacion`, una fila por beneficiario y período. El mes es el de la finalización de la
+  función, el mismo criterio con el que la tarea recorre los repartos, así una función que se
+  finalizó tarde se liquida en el mes en que se finalizó y no queda afuera de todos. La
+  transferencia se hace fuera del sitio: el administrador la marca con la fecha y una nota, y
+  desde ahí el monto no se mueve aunque después se reparta otra función de ese mes. El detalle por
+  función sale de lo que el reparto guardó (la fecha, la sala y los títulos), no de volver a
+  preguntarle a programación: una liquidación es el comprobante de lo que se pagó y tiene que
+  seguir diciendo de qué función fue aunque la sala se dé de baja.
 - **Las rutas dentro del contenedor copian las del disco** (`/src/backend-indiecinema/<subsistema>`
   y `/src/frontend-indiecinema`), así los repositorios `path` de Composer funcionan igual si se
   instala desde afuera o desde adentro del contenedor.
@@ -254,8 +326,10 @@ cp .env.ejemplo .env
 cp cuentas/config/config.ejemplo.ini cuentas/config/config.ini
 cp programacion/config/config.ejemplo.ini programacion/config/config.ini
 cp funciones/config/config.ejemplo.ini funciones/config/config.ini
+cp moderacion/config/config.ejemplo.ini moderacion/config/config.ini
+cp recaudacion/config/config.ejemplo.ini recaudacion/config/config.ini
 
-composer install -d cuentas && composer install -d programacion && composer install -d funciones
+composer install -d cuentas && composer install -d programacion && composer install -d funciones && composer install -d moderacion && composer install -d recaudacion
 docker compose up -d --build
 
 # La primera vez, MySQL crea los esquemas y aplica las migraciones antes de aceptar conexiones:
@@ -280,6 +354,8 @@ repositorios, porque el núcleo y el front se instalan desde rutas relativas:
 docker run --rm -u "$(id -u):$(id -g)" -v "$PWD/..:/app" -w /app/backend-indiecinema/cuentas composer:2 install
 docker run --rm -u "$(id -u):$(id -g)" -v "$PWD/..:/app" -w /app/backend-indiecinema/programacion composer:2 install
 docker run --rm -u "$(id -u):$(id -g)" -v "$PWD/..:/app" -w /app/backend-indiecinema/funciones composer:2 install
+docker run --rm -u "$(id -u):$(id -g)" -v "$PWD/..:/app" -w /app/backend-indiecinema/moderacion composer:2 install
+docker run --rm -u "$(id -u):$(id -g)" -v "$PWD/..:/app" -w /app/backend-indiecinema/recaudacion composer:2 install
 ```
 
 ### Qué queda andando
@@ -298,10 +374,12 @@ docker run --rm -u "$(id -u):$(id -g)" -v "$PWD/..:/app" -w /app/backend-indieci
 | http://localhost:8080/organizador/obras | las obras del catálogo, con sesión de organizador: el alta y la edición con el afiche, y la baja de una obra sin funciones futuras |
 | http://localhost:8080/organizador/funciones | «Mis funciones»: las de sus salas, en cualquier estado y con su fecha; desde ahí se programa una función o se la abre a votación de títulos, y se proponen las franjas del acuerdo |
 | http://localhost:8080/cuenta/ | «Mi cuenta», con sesión: el nombre, el correo y los roles, y el enlace a «Mis reservas». Sin sesión, `/cuenta/ingresar` y `/cuenta/registro` |
-| http://localhost:8080/solicitar-sala | la solicitud de sala, con sesión: se guarda la sala sin publicar y le llega al equipo por correo |
-| http://localhost:8080/administracion/solicitudes | la bandeja de solicitudes de sala, para aprobarlas (publica la sala y da el rol de organizador) o rechazarlas con un motivo, y el historial; sólo el administrador |
+| http://localhost:8080/solicitar-sala | la solicitud de sala, con sesión: se guarda la sala propuesta con su seguro y su habilitación en PDF, y le llega al equipo por correo |
+| http://localhost:8080/moderacion/solicitudes | la bandeja de solicitudes de sala, para aprobarlas (publica la sala y da el rol de organizador; exige los cuatro puntos del checklist de requisitos) o rechazarlas con un motivo, el historial, y retirar o volver a publicar la sala con un motivo; para el moderador (y el administrador) |
+| http://localhost:8080/moderacion/documentos | la pestaña «Documentos» de la bandeja: el seguro o la habilitación nuevos que suben los organizadores, para aceptarlos (vuelve a publicar la sala si estaba suspendida sólo por ese papel) o rechazarlos con un motivo; para el moderador (y el administrador) |
+| http://localhost:8080/moderacion/salas/{id}/documentacion | la documentación de una sala para su organizador, desde «Mis salas»: por qué está suspendida, sus documentos y la renovación que sube |
 | http://localhost:8025 | el buzón de prueba (Mailpit): los correos que mandan los subsistemas, sin que salgan a nadie |
-| http://localhost:8080/cuenta/administracion/usuarios | usuarios y roles, con los números de las cuentas, buscador por nombre o correo, filtros de rol, estado y año de alta, y el rol de cada uno en un desplegable (espectador u organizador), con «Guardar cambios» para toda la tabla; sólo el administrador |
+| http://localhost:8080/cuenta/administracion/usuarios | usuarios y roles, con los números de las cuentas, buscador por nombre o correo, filtros de rol, estado y año de alta, y el rol de cada uno en un desplegable (espectador, organizador o moderador), con «Guardar cambios» para toda la tabla; sólo el administrador |
 | http://localhost:8080/funcion/reservas | «Mis reservas», con sesión: las del espectador, con su estado, el comprobante (que se imprime) y cancelar mientras se pueda |
 | http://localhost:8080/funcion/organizador/funciones/{id}/reservas | las reservas de una función para su organizador: lugares reservados y libres, asistencia con el código y descarga en CSV |
 | http://localhost:8080/funcion/administracion/reservas | todas las reservas, con filtro por estado y la anulación; sólo el administrador |
@@ -338,7 +416,7 @@ usar esa parte (un correo que no sale, un 500 al reservar).
 ### La base de datos
 
 La primera vez que arranca MySQL, con el volumen vacío, corre `mysql/init/`: crea los esquemas
-`cuentas`, `programacion` y `funciones`, cada uno con un usuario del mismo nombre que sólo puede
+`cuentas`, `programacion`, `funciones`, `moderacion` y `recaudacion`, cada uno con un usuario del mismo nombre que sólo puede
 leer y escribir datos de su esquema (`SELECT`, `INSERT`, `UPDATE`, `DELETE`). Las claves son las
 `MYSQL_CLAVE_*` de `.env`, las mismas que van en `[base] clave` de cada `config.ini`. `root` sólo
 entra desde adentro del contenedor de MySQL, nunca desde la red.
@@ -349,7 +427,7 @@ de MySQL y la aplicación nunca usa. Con la base recién creada se aplican solas
 después, con:
 
 ```
-docker compose exec mysql bash /herramientas/migrar.sh                # los tres subsistemas
+docker compose exec mysql bash /herramientas/migrar.sh                # todos los subsistemas
 docker compose exec mysql bash /herramientas/migrar.sh programacion   # uno solo
 ```
 
@@ -359,6 +437,11 @@ docker compose exec mysql bash /herramientas/migrar.sh programacion   # uno solo
 - Lo aplicado se anota en el esquema `control_migraciones`, que ningún subsistema ve: correr el
   comando de nuevo no hace nada si no hay migraciones nuevas.
 - Una migración aplicada no se edita: el comando lo detecta y frena. El cambio va en una nueva.
+- Un subsistema nuevo en un servidor que ya está andando, donde `mysql/init/` no vuelve a correr:
+  antes de mergearlo, `bash herramientas/sumar-subsistema.sh moderacion` le genera sus secretos y
+  su `config.ini`, y lo suma a los de los demás. Después del despliegue, `docker compose exec mysql
+  bash /herramientas/crear-esquema.sh moderacion` crea su esquema, su usuario y sus permisos. En
+  un servidor nuevo, todo junto: `bash herramientas/generar-secretos.sh`.
 - MySQL no deshace un `CREATE` ni un `ALTER`: si una migración falla a mitad de camino, no se
   anota, y hay que revisar qué quedó antes de correrla de nuevo. Conviene una sola cosa por
   migración.
@@ -383,6 +466,7 @@ docker compose exec cuentas php herramientas/datos-de-prueba.php
 | Rol | Nombre | Correo | Contraseña |
 |---|---|---|---|
 | administrador | Ana Administradora | `administrador@indiecinema.test` | `administrador2026` |
+| moderador | Mora Moderadora | `moderador@indiecinema.test` | `moderador2026` |
 | organizador | Omar Organizador | `organizador@indiecinema.test` | `organizador2026` |
 | espectador | Eva Espectadora | `eva@indiecinema.test` | `espectador2026` |
 | espectador | Elías Espectador | `elias@indiecinema.test` | `espectador2026` |
@@ -426,6 +510,24 @@ La segunda vez, todo sale en «ya estaban». Para comprobar la carga en el naveg
   cuatro como `PUBLICADA`, y cada una se puede editar.
 - http://localhost:8080/cartelera muestra las quince funciones, cada una con su afiche.
 
+Para que los reportes de recaudación tengan qué mostrar, hay además un historial: dos meses de
+funciones que ya terminaron en tres de esas salas, con sus votaciones, sus ventas, la asistencia y
+las calificaciones. Programación carga las funciones y los votos, y funciones, lo que se vendió y
+quiénes fueron. Va después de los datos de prueba y en ese orden:
+
+```
+docker compose exec programacion php herramientas/historial-de-prueba.php
+docker compose exec funciones php herramientas/historial-de-prueba.php
+#   funciones         28 agregadas,  0 ya estaban
+#   reservas        1112 agregadas
+#   calificaciones   620 agregadas
+```
+
+Está armado para que el reporte (`/recaudacion/reportes`, como Omar Organizador) muestre cada
+sugerencia: los miércoles flojos del Alambique, «Metrópolis» y «Nosferatu» para repetir, y
+«El gabinete del Dr. Caligari», que pierde todas sus votaciones y no se proyecta. Las fechas se
+cuentan hacia atrás desde el día en que se carga, y correrlo de nuevo no agrega nada.
+
 En producción (cualquier `entorno` que no sea `"desarrollo"`) no hace nada sin la confirmación
 explícita, para que los datos inventados no lleguen al sitio real por un comando copiado de acá.
 Para cargarlos en el servidor, a propósito:
@@ -434,6 +536,8 @@ Para cargarlos en el servidor, a propósito:
 docker compose exec cuentas php herramientas/datos-de-prueba.php --confirmar-produccion
 docker compose exec programacion php herramientas/datos-de-prueba.php --confirmar-produccion
 ```
+
+El historial, igual: los dos scripts con `--confirmar-produccion`.
 
 En producción, cuentas carga sólo el administrador, el organizador y Eva, con las contraseñas
 de la sección `[datos_de_prueba]` de su `config.ini` (está comentada en el ejemplo). Si falta
@@ -519,6 +623,38 @@ sudo certbot reconfigure --cert-name indiecinema.ejemplo.org --webroot -w /var/w
 sudo certbot renew --dry-run
 ```
 
+### Tareas programadas
+
+Las corre el cron de cada servidor. Están en `herramientas/crontab` y las instala
+`desplegar.sh` en cada despliegue, así un merge a `main` las lleva a producción. Correrlas de más
+no duplica nada:
+
+- `liberar-vencidas`: cancela las reservas que vencieron sin pagar (ver «Mercado Pago»).
+- `cerrar-por-fecha`: cierra las votaciones vencidas con las obras más votadas que entran
+  en la duración de la sala, tantas como películas por función tiene. En los acuerdos
+  vencidos, programa la franja que llegó al mínimo, o cancela la función y avisa a los que
+  marcaron «Me sirve». También la cancela si la franja ganadora se pisa con otra función de la
+  sala, y el correo dice ese motivo.
+- `finalizar-funciones`: pasa a finalizada cada función terminada (su hora más la duración de
+  las funciones de la sala) y deja «ausente» a quien no fue.
+- `recordar-funciones`: manda el recordatorio por correo a las reservas confirmadas de las
+  funciones de las próximas 24 horas.
+- `repartir` (recaudación, una vez por hora, a los veinte): reparte lo cobrado de cada función paga
+  finalizada entre la sala, los dueños de las obras que se proyectaron y la plataforma, con los
+  porcentajes que regían en la fecha de la función (ver «El reparto de lo cobrado»). Le pide a
+  programación las finalizadas desde la última que repartió y a funciones lo cobrado de cada una,
+  que ya viene neto de reembolsos. Las funciones a la gorra no reparten. Con lo que repartió
+  rearma las liquidaciones de esos meses (EF-08.3).
+- `suspender-vencidas` (moderación, una vez por día): suspende las salas con el seguro o la
+  habilitación aceptados vencidos y las apaga en programación, hasta que se acepte uno nuevo. Le
+  avisa por correo al organizador siete días antes y al suspenderla. Con `[documentos]
+  exigible_desde` en el `config.ini` de moderación, a las salas habilitadas que no tienen los dos
+  documentos les da 30 días desde esa fecha (con un aviso al empezar y otro siete días antes del
+  fin) y después las suspende. Al desplegar EF-07.5, poner ahí la fecha del despliegue.
+
+En local no se instalan: se prueban a mano con el `docker compose exec` de cada línea, y los correos
+llegan a Mailpit.
+
 ### Ramas y entornos
 
 Hay dos sitios, cada uno en su EC2, con su base y sus secretos:
@@ -548,6 +684,9 @@ Después de publicar `dev`, el CD corre las pruebas de punta a punta del front c
 sitio (su `e2e/README.md`). Para eso el environment `desarrollo` tiene además la variable `E2E_URL`,
 los secretos `E2E_CORREO` y `E2E_CLAVE` (una cuenta de espectador) y la variable `E2E_FUNCION` (el
 id de una función con lugares), distintas de las del front para que las dos corridas no se pisen.
+Las dos funciones las crea, gratuitas y a un año, `programacion/herramientas/funciones-e2e.php`
+(en el servidor de dev, con `--confirmar-produccion`): en una paga, con Mercado Pago activo, la
+reserva queda pendiente de pago y las pruebas fallan, y las de los datos de prueba van pasando.
 
 ### Sin Docker
 
@@ -568,7 +707,7 @@ compose, y los archivos van al volumen de programación.
 ## Pruebas
 
 ```
-herramientas/pruebas.sh funciones                    # nucleo, cuentas, programacion o funciones
+herramientas/pruebas.sh funciones                    # nucleo, cuentas, programacion, funciones, moderacion o recaudacion
 herramientas/pruebas.sh funciones --filter Reservas  # lo que sigue va a PHPUnit
 herramientas/pruebas.sh                              # los cuatro
 ```
@@ -589,7 +728,7 @@ Corre las pruebas que dibujan esas páginas, que las guardan en `.paginas-para-v
 valida con la imagen del validador (`ghcr.io/validator/validator`, la misma versión que el CI).
 Falla si alguna tiene un error de HTML; los avisos no la hacen fallar.
 
-El núcleo y los tres subsistemas tienen las suyas (las de los subsistemas necesitan el
+El núcleo y los subsistemas tienen las suyas (las de los subsistemas necesitan el
 `composer install` de arriba, que trae PHPUnit):
 
 ```
@@ -598,6 +737,8 @@ composer pruebas -d nucleo
 composer pruebas -d cuentas
 composer pruebas -d programacion
 composer pruebas -d funciones
+composer pruebas -d moderacion
+composer pruebas -d recaudacion
 ```
 
 Las que tocan la base corren contra un MySQL de verdad: sin la variable `PRUEBAS_MYSQL_HOST` se
@@ -608,16 +749,13 @@ paginado e intentos de inyección SQL, y `/cartelera` con los filtros por la URL
 inválidos y el 404, la misma consulta en JSON según la cabecera `Accept`, `/cartelera.csv` con los
 mismos filtros, la ficha de la función en cada estado, con sus 404, la ficha de la sala, con quién
 la ve, sus próximas funciones y el camino de la función a su sala y de vuelta, el buscador del
-listado de salas, la solicitud de sala con las mismas validaciones en el navegador y en el
-servidor, la foto y el correo al equipo, la bandeja del administrador contra una cuentas de
-mentira (aprobar pide el rol y publica la sala, rechazar exige motivo, el historial y retirar la
-sala, y quién entra), la tabla de solicitudes con una pendiente por sala, la votación de títulos
-(votar, cambiar el voto y cerrarla con la más votada), el acuerdo de fecha visto desde
+listado de salas, la API interna de salas para moderación, la votación de títulos
+(votar, cambiar el voto y cerrarla con las más votadas que entran en la sala, hasta las películas por función), el acuerdo de fecha visto desde
 programación, los lugares libres de la ficha y de las tarjetas, la cancelación de una función con
 reservas, la portada con las destacadas y las próximas funciones, «Acerca de», con los enlaces del encabezado y del pie, las opciones del
 menú y del pie que ve cada rol, y la página de error, que vuelve a la portada); en cuentas, el
 registro de punta a punta, la API interna de usuarios (quién es y el rol de organizador, sólo para
-programación), el listado de usuarios del administrador con su buscador, su paginado, dar y quitar
+moderación), el listado de usuarios del administrador con su buscador, su paginado, dar y quitar
 el rol de organizador y quién entra (en cuentas y en programación, una prueba recorre todas las
 rutas del panel y comprueba que sólo entra el administrador; en programación, otra hace lo
 mismo con las del organizador y fija cuáles son públicas), y las restricciones de las tablas
@@ -628,7 +766,12 @@ token CSRF, cantidad inválida, sin lugares, la reserva de otro y la cancelació
 reserva confirmada (también sin cuentas, sin servidor de correo o sin `[sitio] url`), «Mis
 reservas» (el orden, el paginado, sólo las propias y programación caída), los paneles de reservas
 del organizador y del administrador (la asistencia, el CSV y la anulación), la ocupación que lee
-programación y la API interna del acuerdo de fecha. Para correrlas con el PHP
+programación y la API interna del acuerdo de fecha; en moderación, la solicitud de sala con las
+mismas validaciones en el navegador y en el servidor, la foto y el correo al equipo, la bandeja del
+administrador contra una cuentas y una programación de mentira (aprobar pide el rol y crea la
+sala, rechazar exige motivo, el historial, retirar y volver a publicar la sala con motivo, y quién
+entra), la tabla de solicitudes con una pendiente por sala y la migración que mudó las de
+programación. Para correrlas con el PHP
 de la máquina (8.4 o superior, con `pdo_mysql`), contra un MySQL descartable:
 
 ```
@@ -653,6 +796,66 @@ página (el rol se lee en cada pedido):
 docker compose exec mysql mysql -uroot -p cuentas -e "INSERT INTO rol (usuario_id, tipo) SELECT id, 'organizador' FROM usuario WHERE correo = 'vos@ejemplo.com'"
 ```
 
+### Mercado Pago
+
+El cobro de las entradas (X-01) usa Checkout Pro con la cuenta de un vendedor de prueba, y se
+prende con la sección `[mercadopago]` del `config.ini` de funciones. Con `activo = false` (como
+en el ejemplo) o sin la sección, una función paga se confirma sin cobrar, igual que una gratuita.
+
+Para tener las credenciales de prueba:
+
+1. Entrar a https://www.mercadopago.com.ar/developers/panel/app con una cuenta de Mercado Pago y
+   crear una aplicación de **Checkout Pro** (pagos online, sin plataforma de e-commerce).
+2. En la aplicación, «Cuentas de prueba»: crear un **vendedor** y un **comprador**, los dos de
+   Argentina. Con el comprador se paga en el sitio; nunca con una cuenta de verdad.
+3. Ingresar a Mercado Pago **como el vendedor de prueba** (en una ventana privada), crear ahí
+   también una aplicación de Checkout Pro y copiar sus «Credenciales de producción»: el access
+   token empieza con `APP_USR-`, pero es de una cuenta de prueba y no mueve plata de verdad. Va
+   en `access_token`.
+4. En esa misma aplicación, «Webhooks» → «Configurar notificaciones»: la URL de producción es
+   `https://<sitio>/funcion/pagos/aviso`, con el evento «Pagos». Al guardar, Mercado Pago muestra
+   la **clave secreta** con la que firma cada aviso: va en `clave_webhook`.
+5. `activo = true`, y reiniciar funciones (`docker compose restart funciones`).
+
+El aviso de pago necesita una URL pública, así que en `localhost` el pago queda pendiente hasta
+que vence: se prueba de punta a punta en el servidor de desarrollo.
+
+Una reserva pendiente deja de ocupar sus lugares en cuanto vence. Para que además figure como
+cancelada en «Mis reservas» y en los paneles, la cancela `liberar-vencidas` cada cinco minutos
+(ver «Tareas programadas»).
+
+Para pagar con el comprador de prueba, las tarjetas de prueba están en la documentación de
+Checkout Pro («Tarjetas de prueba»), con el titular `APRO` para un pago aprobado y `OTHE` para
+uno rechazado.
+
+Cancelar una reserva pagada le devuelve la plata al espectador (EF-06.4), y las tres cancelaciones
+pasan por lo mismo: la del espectador desde su reserva, la anulación del administrador y la
+cancelación de la función. Se devuelve el pago entero, y una sola vez: la reserva guarda el
+`reembolso_id` que contestó Mercado Pago, y el pedido va con la clave de idempotencia
+`reembolso-<pago>`, así que repetirlo no devuelve dos veces.
+
+Si Mercado Pago no responde o lo rechaza, la cancelación queda igual —el espectador no se come un
+error por algo que se arregla del otro lado— y la reserva queda con el **reembolso pendiente**:
+cancelada, con pago y sin reembolso. El panel del administrador la marca así y el motivo queda en
+el log. Lo que se devolvió no se reparte: el neto de `/interno/cobros` lo descuenta, y lo que quedó
+pendiente sigue contando, porque la plata todavía está en la cuenta.
+
+El total del panel del organizador cuenta lo mismo (EF-06.5): las reservas con pago de Mercado
+Pago que no se devolvió, `Reserva::cobrada()`. Una pendiente todavía no pagó, y una confirmada con
+el cobro apagado —o a la gorra— no pagó nunca, aunque su total diga 3500; una cancelada que espera
+su reembolso sigue contando, y el total baja recién cuando la plata vuelve. Por eso la tarjeta dice
+«Total cobrado» y no «Total de las reservas». Y «A la gorra» es de la función: si cobra entrada y
+todavía no entró nada, el panel muestra `$ 0`.
+
+Al espectador se le dice en qué quedó su reserva (EF-06.3). Una cancelada no se queda en
+«Cancelada»: «Mis reservas» y el comprobante muestran el motivo del historial —«Venció el plazo
+para pagar.», «Se canceló la función.», «Anulada por el administrador.»—, que lo escribe quien
+cancela y ya está redactado para el espectador, y la fecha del reembolso si la plata volvió. La que
+canceló el espectador no muestra ningún motivo: la canceló él. Un reembolso pendiente no se le
+anuncia, que todavía no hay nada que reintentar: lo ve el administrador en su panel.
+
+Las credenciales nunca van al repositorio: gitleaks frena un `APP_USR-…` o un `TEST-…` en el CI.
+
 ### Integración continua
 
 En cada PR y en cada push a `main` o a `dev`, GitHub Actions (`.github/workflows/ci.yml`) corre:
@@ -662,7 +865,7 @@ En cada PR y en cada push a `main` o a `dev`, GitHub Actions (`.github/workflows
 - **El análisis estático** de cada paquete con PHPStan (`composer analisis`, nivel 5): lo que ya
   estaba antes de sumarlo queda en su `phpstan-baseline.neon`, y marca sólo lo nuevo. Al arreglar
   algo de la lista, se regenera con `composer analisis -- --generate-baseline`.
-- **Las pruebas** del núcleo, cuentas, programación y funciones contra un MySQL 8.4, con el front al lado: el
+- **Las pruebas** del núcleo, cuentas, programación, funciones y recaudación contra un MySQL 8.4, con el front al lado: el
   de la rama del mismo nombre si existe en el front, y si no el de la base del PR (`dev` o `main`). Un cambio que toca los
   dos repositorios va en ramas que se llaman igual, y sus dos PR pasan sin esperar al otro.
 - **`composer audit`** sobre el `composer.lock` de cada subsistema y del núcleo.

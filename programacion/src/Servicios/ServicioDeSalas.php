@@ -12,10 +12,12 @@ use IndieCinema\Programacion\Modelo\DatosDeSala;
 use IndieCinema\Programacion\Modelo\FichaDeSala;
 use IndieCinema\Programacion\Modelo\FiltrosDeCartelera;
 use IndieCinema\Programacion\Modelo\ImagenSubida;
+use IndieCinema\Programacion\Modelo\ResumenDeFuncion;
 use IndieCinema\Programacion\Modelo\Sala;
 use IndieCinema\Programacion\Repositorios\RepositorioDeCartelera;
 use IndieCinema\Programacion\Repositorios\RepositorioDeFunciones;
 use IndieCinema\Programacion\Repositorios\RepositorioDeSalas;
+use LogicException;
 use Psr\Log\LoggerInterface;
 use Throwable;
 
@@ -56,6 +58,125 @@ final class ServicioDeSalas
     }
 
     /**
+     * La sala de una solicitud que aprobó moderación (EF-07.1), habilitada, con el id que eligió
+     * moderación: así repetir el pedido no crea otra.
+     *
+     * - Si no hay ninguna con ese id, la crea con la foto.
+     * - Si hay una sin habilitar del mismo organizador (la de una solicitud que se mudó a
+     *   moderación), le pone los datos y la foto corregidos allá y la habilita; la foto anterior se
+     *   borra recién cuando la base apunta a la nueva.
+     * - Si hay una habilitada del mismo organizador y el pedido no trae solicitud, o trae la última
+     *   que se le aplicó, es el reintento de un pedido que ya se hizo: no la toca, porque sus datos
+     *   ya son de su organizador.
+     * - Si trae otra solicitud (un cambio de dirección aprobado, EF-07.6), le pone los datos de esa
+     *   solicitud, y la foto si vino una.
+     *
+     * La solicitud queda anotada en la sala, para reconocer el reintento.
+     *
+     * @param ?ImagenSubida $imagen      obligatoria para una sala nueva; al completar una, sin foto queda
+     *                                   la que tenía
+     * @param ?string       $solicitudId la solicitud de moderación que se aplica; null en las llamadas
+     *                                   de antes de EF-07.6
+     *
+     * @return array{Sala, bool} la sala y si se creó
+     *
+     * @throws ExcepcionHttp 409 si el id es de una sala de otro organizador o de una dada de baja
+     */
+    public function crearParaSolicitud(string $id, string $organizadorId, DatosDeSala $datos, ?ImagenSubida $imagen, ?string $solicitudId = null): array
+    {
+        $existente = $this->salas->buscar($id);
+        if ($existente === null ? $this->salas->idUsado($id) : !$existente->esDe($organizadorId)) {
+            throw new ExcepcionHttp(409, 'Ese id es de otra sala.');
+        }
+        if ($existente?->habilitada && ($solicitudId === null || $solicitudId === $this->salas->solicitudAplicada($id))) {
+            return [$existente, false];
+        }
+        $cambio = $existente?->habilitada === true;
+
+        if ($existente === null && $imagen === null) {
+            throw new LogicException('Una sala nueva necesita su foto: la API la pide.');
+        }
+
+        $foto = $imagen === null ? null : $this->archivos->guardar($imagen);
+        $sala = $existente ?? new Sala($id, $organizadorId, $datos, (string) $foto, habilitada: true);
+        // Sin foto nueva, la sala que ya existía se queda con la suya (EF-07.2).
+        $anterior = $foto === null ? null : $existente?->imagen;
+        try {
+            if ($existente === null) {
+                $this->salas->agregar($sala);
+            } else {
+                $sala->cambiarDatos($datos);
+                if ($foto !== null) {
+                    $sala->cambiarImagen($foto);
+                }
+                $this->salas->guardar($sala);
+            }
+        } catch (Throwable $error) {
+            // Que no quede en el volumen una foto que nadie usa.
+            if ($foto !== null) {
+                $this->archivos->borrar($foto);
+            }
+            throw $error;
+        }
+        // La anterior se borra recién cuando la base apunta a la nueva. Si habilitarla falla, el
+        // reintento la encuentra sin habilitar y la completa otra vez.
+        if ($anterior !== null) {
+            $this->archivos->borrar($anterior);
+        }
+        if ($existente !== null && !$cambio) {
+            $sala->cambiarHabilitacion(true);
+            $this->salas->guardarHabilitacion($sala);
+        }
+        if ($solicitudId !== null) {
+            $this->salas->anotarSolicitud($sala->id, $solicitudId);
+        }
+        if ($cambio) {
+            $this->log->notice('Moderación aplicó la solicitud {solicitud} a la sala {sala} de {organizador}.', [
+                'solicitud' => $solicitudId,
+                'sala' => $sala->id,
+                'organizador' => $organizadorId,
+            ]);
+        } else {
+            $this->log->notice('Moderación habilitó la sala {sala} de {organizador}, de una solicitud aprobada.', [
+                'sala' => $sala->id,
+                'organizador' => $organizadorId,
+            ]);
+        }
+
+        return [$sala, $existente === null];
+    }
+
+    /**
+     * Si hay una sala con ese id, sin contar las dadas de baja.
+     */
+    public function existe(string $id): bool
+    {
+        return $this->salas->buscar($id) !== null;
+    }
+
+    /**
+     * Las que existen de esos ids, con el id como clave, sin las dadas de baja (EF-07.1).
+     *
+     * @param list<string> $ids
+     *
+     * @return array<string, Sala>
+     */
+    public function varias(array $ids): array
+    {
+        return $this->salas->varias($ids);
+    }
+
+    /**
+     * Las habilitadas que no se dieron de baja, con el id como clave (EF-07.5).
+     *
+     * @return array<string, Sala>
+     */
+    public function habilitadas(): array
+    {
+        return $this->salas->habilitadas();
+    }
+
+    /**
      * @return list<Sala>
      */
     public function delOrganizador(Usuario $organizador): array
@@ -64,13 +185,14 @@ final class ServicioDeSalas
     }
 
     /**
-     * Publica la sala en el sitio o la retira. Cada cambio queda en el log, con quién lo hizo: es
-     * el registro de auditoría que pide la historia. Una sala retirada deja de verse en el listado
-     * público y sus funciones, en la cartelera.
+     * Publica la sala en el sitio o la retira. Cada cambio queda en el log, con quién lo hizo (el
+     * administrador desde la bandeja, o el moderador por la API interna, EF-07.1) y, si lo hay, por
+     * qué: es el registro de auditoría que pide la historia. Una sala retirada deja de verse en el
+     * listado público y sus funciones, en la cartelera, y no programa funciones nuevas.
      *
      * @throws ExcepcionHttp 404 si no existe o está dada de baja
      */
-    public function cambiarHabilitacion(string $id, bool $habilitada, Usuario $administrador): Sala
+    public function cambiarHabilitacion(string $id, bool $habilitada, string $quien, ?string $motivo = null): Sala
     {
         $sala = $this->buscar($id);
         if ($sala->habilitada === $habilitada) {
@@ -79,9 +201,11 @@ final class ServicioDeSalas
         }
         $sala->cambiarHabilitacion($habilitada);
         $this->salas->guardarHabilitacion($sala);
-        $this->log->notice($habilitada ? '{administrador} habilitó la sala {sala}.' : '{administrador} deshabilitó la sala {sala}.', [
-            'administrador' => $administrador->id,
+        $accion = $habilitada ? '{quien} habilitó la sala {sala}' : '{quien} deshabilitó la sala {sala}';
+        $this->log->notice($accion . ($motivo === null ? '.' : ': {motivo}'), [
+            'quien' => $quien,
             'sala' => $sala->id,
+            'motivo' => $motivo,
         ]);
 
         return $sala;
@@ -148,8 +272,18 @@ final class ServicioDeSalas
     }
 
     /**
+     * Las últimas funciones que se dieron en la sala, para el historial de su ficha (EF-04.3).
+     *
+     * @return list<ResumenDeFuncion>
+     */
+    public function proyectadas(Sala $sala, int $cuantas = 10): array
+    {
+        return $this->funciones->finalizadasDeLaSala($sala->id, $cuantas);
+    }
+
+    /**
      * El nombre de la imagen de la sala, si quien pide la puede ver: una sala sin habilitar sólo
-     * la ven su organizador y el administrador, que la mira en su bandeja antes de habilitarla.
+     * la ven su organizador y el moderador, que la mira en la bandeja antes de habilitarla.
      * Si no, 404, como si no existiera.
      *
      * @throws ExcepcionHttp 404
@@ -157,8 +291,8 @@ final class ServicioDeSalas
     public function imagenParaMostrar(string $id, ?Usuario $usuario): string
     {
         $sala = $this->buscar($id);
-        $administrador = $usuario?->alcanza(Rol::Administrador) ?? false;
-        if ((!$sala->laPuedeVer($usuario?->id) && !$administrador) || $sala->imagen === null) {
+        $moderador = $usuario?->alcanza(Rol::Moderador) ?? false;
+        if ((!$sala->laPuedeVer($usuario?->id) && !$moderador) || $sala->imagen === null) {
             throw ExcepcionHttp::noEncontrada();
         }
 

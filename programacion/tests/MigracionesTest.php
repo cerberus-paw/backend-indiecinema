@@ -189,6 +189,7 @@ final class MigracionesTest extends TestCase
         self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM funcion_obra'));
         self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM solicitud_sala'));
         self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM voto'));
+        self::assertSame(0, $this->base->valor('SELECT COUNT(*) FROM bloqueo'));
     }
 
     public function testLaObraQuedaGuardadaConSusValoresYTimestamps(): void
@@ -210,6 +211,19 @@ final class MigracionesTest extends TestCase
         self::assertNotNull($guardada['creada_en']);
         self::assertNotNull($guardada['actualizada_en']);
         self::assertNull($guardada['dada_de_baja_en']);
+    }
+
+    /**
+     * EF-07.7: las obras que ya estaban (o que se insertan sin estado) quedan aprobadas; la
+     * aplicación carga las nuevas como pendientes.
+     */
+    public function testUnaObraSinEstadoQuedaAprobadaYElEstadoEsDelEnum(): void
+    {
+        $datos = $this->obraValida();
+        $this->insertarObra($datos);
+
+        self::assertSame(['estado' => 'aprobada', 'motivo' => null], $this->base->fila('SELECT estado, motivo FROM obra WHERE id = ?', [$datos['id']]));
+        $this->assertRechaza(self::VALOR_INVALIDO, fn () => $this->base->ejecutar("UPDATE obra SET estado = 'en_revision' WHERE id = ?", [$datos['id']]));
     }
 
     public function testSePuedeGuardarUnaObraSinAfiche(): void
@@ -699,5 +713,94 @@ final class MigracionesTest extends TestCase
 
         $this->assertRechaza(self::REFERENCIADO, fn () => $this->base->ejecutar('DELETE FROM obra WHERE id = ?', [$obra]));
         self::assertSame(1, (int) $this->base->valor('SELECT COUNT(*) FROM voto'));
+    }
+
+    public function testUnUsuarioSoloTieneUnBloqueoPorSalaYConMotivoNoVacio(): void
+    {
+        $sala1 = $this->insertarSala();
+        $sala2 = $this->insertarSala();
+        $usuario = Uuid::nuevo();
+        $organizador = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+
+        $this->base->ejecutar(
+            'INSERT INTO bloqueo (sala_id, usuario_id, motivo, bloqueado_por) VALUES (?, ?, ?, ?)',
+            [$sala1, $usuario, 'Incumplió las normas de la sala.', $organizador],
+        );
+        $this->base->ejecutar(
+            'INSERT INTO bloqueo (sala_id, usuario_id, motivo, bloqueado_por) VALUES (?, ?, ?, ?)',
+            [$sala2, $usuario, 'Otro motivo en otra sala.', $organizador],
+        );
+
+        self::assertSame(2, (int) $this->base->valor('SELECT COUNT(*) FROM bloqueo WHERE usuario_id = ?', [$usuario]));
+
+        $this->assertRechaza(self::REPETIDO, fn () => $this->base->ejecutar(
+            'INSERT INTO bloqueo (sala_id, usuario_id, motivo, bloqueado_por) VALUES (?, ?, ?, ?)',
+            [$sala1, $usuario, 'Duplicado', $organizador],
+        ));
+        $this->assertRechaza(self::RESTRICCION_CHECK, fn () => $this->base->ejecutar(
+            'INSERT INTO bloqueo (sala_id, usuario_id, motivo, bloqueado_por) VALUES (?, ?, ?, ?)',
+            [$sala1, Uuid::nuevo(), '   ', $organizador],
+        ));
+        $this->assertRechaza(self::REFERENCIA_INEXISTENTE, fn () => $this->base->ejecutar(
+            'INSERT INTO bloqueo (sala_id, usuario_id, motivo, bloqueado_por) VALUES (?, ?, ?, ?)',
+            [Uuid::nuevo(), $usuario, 'Sala que no existe', $organizador],
+        ));
+    }
+
+    public function testUnUsuarioSoloTieneUnaAdhesionPorPedidoYLaBaseValidaLosPedidos(): void
+    {
+        $pedidoId = Uuid::nuevo();
+        $creador = Uuid::nuevo();
+        $otroUsuario = Uuid::nuevo();
+
+        $this->base->ejecutar(
+            'INSERT INTO pedido_titulo (id, titulo, anio, director, creado_por) VALUES (?, ?, ?, ?, ?)',
+            [$pedidoId, 'Pizza, birra, faso', 1998, 'Adrián Caetano y Bruno Stagnaro', $creador],
+        );
+        $this->base->ejecutar(
+            'INSERT INTO adhesion_pedido (pedido_id, usuario_id) VALUES (?, ?)',
+            [$pedidoId, $creador],
+        );
+        $this->base->ejecutar(
+            'INSERT INTO adhesion_pedido (pedido_id, usuario_id) VALUES (?, ?)',
+            [$pedidoId, $otroUsuario],
+        );
+        self::assertSame(2, (int) $this->base->valor('SELECT COUNT(*) FROM adhesion_pedido WHERE pedido_id = ?', [$pedidoId]));
+
+        // La clave única impide sumar dos veces al mismo usuario al mismo pedido.
+        $this->assertRechaza(self::REPETIDO, fn () => $this->base->ejecutar(
+            'INSERT INTO adhesion_pedido (pedido_id, usuario_id) VALUES (?, ?)',
+            [$pedidoId, $creador],
+        ));
+
+        // Restricciones de pedido_titulo: año >= 1888, título/director no vacíos, estado válido y tomado completo.
+        $this->assertRechaza(self::RESTRICCION_CHECK, fn () => $this->base->ejecutar(
+            'INSERT INTO pedido_titulo (id, titulo, anio, director, creado_por) VALUES (?, ?, ?, ?, ?)',
+            [Uuid::nuevo(), 'Muy vieja', 1800, 'Alguien', $creador],
+        ));
+        $this->assertRechaza(self::RESTRICCION_CHECK, fn () => $this->base->ejecutar(
+            'INSERT INTO pedido_titulo (id, titulo, anio, director, creado_por) VALUES (?, ?, ?, ?, ?)',
+            [Uuid::nuevo(), '   ', 2001, 'Alguien', $creador],
+        ));
+        $this->assertRechaza(self::RESTRICCION_CHECK, fn () => $this->base->ejecutar(
+            'INSERT INTO pedido_titulo (id, titulo, anio, director, creado_por) VALUES (?, ?, ?, ?, ?)',
+            [Uuid::nuevo(), 'Sin director', 2001, '   ', $creador],
+        ));
+        $this->assertRechaza(self::VALOR_INVALIDO, fn () => $this->base->ejecutar(
+            'INSERT INTO pedido_titulo (id, titulo, anio, director, creado_por, estado) VALUES (?, ?, ?, ?, ?, ?)',
+            [Uuid::nuevo(), 'Estado raro', 2001, 'Alguien', $creador, 'cerrado'],
+        ));
+        $this->assertRechaza(self::RESTRICCION_CHECK, fn () => $this->base->ejecutar(
+            'INSERT INTO pedido_titulo (id, titulo, anio, director, creado_por, estado) VALUES (?, ?, ?, ?, ?, ?)',
+            [Uuid::nuevo(), 'Tomado sin obra', 2001, 'Alguien', $creador, 'tomado'],
+        ));
+
+        // La adhesión requiere un pedido existente y se borra en cascada si se borra el pedido.
+        $this->assertRechaza(self::REFERENCIA_INEXISTENTE, fn () => $this->base->ejecutar(
+            'INSERT INTO adhesion_pedido (pedido_id, usuario_id) VALUES (?, ?)',
+            [Uuid::nuevo(), $creador],
+        ));
+        $this->base->ejecutar('DELETE FROM pedido_titulo WHERE id = ?', [$pedidoId]);
+        self::assertSame(0, (int) $this->base->valor('SELECT COUNT(*) FROM adhesion_pedido WHERE pedido_id = ?', [$pedidoId]));
     }
 }

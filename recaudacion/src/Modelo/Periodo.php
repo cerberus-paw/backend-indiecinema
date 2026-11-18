@@ -5,46 +5,59 @@ declare(strict_types=1);
 namespace IndieCinema\Recaudacion\Modelo;
 
 use DateTimeImmutable;
+use LogicException;
 
 /**
  * Del primer día al último, los dos incluidos, como los elige el organizador en el filtro.
+ *
+ * Cualquiera de los dos puede quedar vacío: sin el primero entra todo lo anterior al último, y sin
+ * el último, todo desde el primero hasta hoy (lo que todavía no pasó no está finalizado). Sin
+ * ninguno, todo: es lo que muestra el reporte si no se elige nada. Antes eran los últimos noventa
+ * días y un año como mucho, y no se podía ver la historia entera de una sala.
  */
 final readonly class Periodo
 {
-    /** Lo que muestra el reporte si no se elige nada: los últimos tres meses. */
-    public const DIAS_POR_DEFECTO = 90;
-
-    /** Un año y un día, como acepta programación. */
-    public const DIAS_MAXIMOS = 366;
+    /** El primer día cuando no se elige: antes de que existiera el sitio, así no queda nada afuera. */
+    public const PRINCIPIO = '2000-01-01';
 
     private function __construct(
         public DateTimeImmutable $desde,
         public DateTimeImmutable $hasta,
+        /** Si no se eligió el primer día: el filtro lo muestra vacío. */
+        public bool $sinDesde = false,
+        /** Si no se eligió el último día: el filtro lo muestra vacío. */
+        public bool $sinHasta = false,
     ) {
     }
 
-    public static function porDefecto(DateTimeImmutable $hoy): self
+    /** Todo lo que pasó hasta hoy. */
+    public static function todo(DateTimeImmutable $hoy): self
     {
-        $hasta = $hoy->setTime(0, 0);
-
-        return new self($hasta->modify('-' . (self::DIAS_POR_DEFECTO - 1) . ' days'), $hasta);
+        return self::entre('', '', $hoy);
     }
 
     /**
-     * @throws ReglaIncumplida si un día no es una fecha, si están al revés o si son más de un año
+     * @param string $desde AAAA-MM-DD, o vacío para no poner piso
+     * @param string $hasta AAAA-MM-DD, o vacío para llegar hasta hoy
+     *
+     * @throws ReglaIncumplida si un día no es una fecha o si están al revés
      */
-    public static function entre(string $desde, string $hasta): self
+    public static function entre(string $desde, string $hasta, DateTimeImmutable $hoy = new DateTimeImmutable('today')): self
     {
-        $primero = self::dia($desde) ?? throw new ReglaIncumplida('El primer día no es una fecha válida.');
-        $ultimo = self::dia($hasta) ?? throw new ReglaIncumplida('El último día no es una fecha válida.');
+        $sinDesde = trim($desde) === '';
+        $sinHasta = trim($hasta) === '';
+        $primero = $sinDesde
+            ? (self::dia(self::PRINCIPIO) ?? throw new LogicException('PRINCIPIO no es una fecha.'))
+            : (self::dia($desde) ?? throw new ReglaIncumplida('El primer día no es una fecha válida.'));
+        $ultimo = $sinHasta
+            // Si el primero es posterior a hoy, el período es ese día: vacío, pero no al revés.
+            ? max($hoy->setTime(0, 0), $primero)
+            : (self::dia($hasta) ?? throw new ReglaIncumplida('El último día no es una fecha válida.'));
         if ($ultimo < $primero) {
             throw new ReglaIncumplida('El último día no puede ser anterior al primero.');
         }
-        if ($primero->diff($ultimo)->days > self::DIAS_MAXIMOS) {
-            throw new ReglaIncumplida('El período puede ser de un año como mucho.');
-        }
 
-        return new self($primero, $ultimo);
+        return new self($primero, $ultimo, $sinDesde, $sinHasta);
     }
 
     private static function dia(string $texto): ?DateTimeImmutable

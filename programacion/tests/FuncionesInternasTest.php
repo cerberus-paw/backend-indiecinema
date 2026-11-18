@@ -447,7 +447,8 @@ final class FuncionesInternasTest extends TestCase
         self::assertSame(400, $this->pedirFinalizadas([])->estado());
         self::assertSame(400, $this->pedirFinalizadas(['desde' => '2026-11-30', 'hasta' => '2026-11-01'])->estado());
         self::assertSame(400, $this->pedirFinalizadas(['desde' => '2026-02-31', 'hasta' => '2026-03-10'])->estado());
-        self::assertSame(400, $this->pedirFinalizadas(['desde' => '2025-01-01', 'hasta' => '2026-11-30'])->estado());
+        // Más de un año sí sirve: la reportería pide todo cuando no se elige un período (IC-658).
+        self::assertSame(200, $this->pedirFinalizadas(['desde' => '2000-01-01', 'hasta' => '2026-11-30'])->estado());
         self::assertSame(400, $this->pedirFinalizadas(['desde' => '2026-11-01', 'hasta' => '2026-11-30', 'organizador' => 'yo'])->estado());
         self::assertSame(403, $this->pedirFinalizadas(['desde' => '2026-11-01', 'hasta' => '2026-11-30'], 'funciones', self::TOKEN_DE_FUNCIONES)->estado());
     }

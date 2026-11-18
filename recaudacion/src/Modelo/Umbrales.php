@@ -27,14 +27,24 @@ final readonly class Umbrales
         public float $repetirPromedioMinimo = 4.0,
         /** Una obra que perdió con este porcentaje de los votos o más es algo que el público pidió. */
         public int $pedidoVotosMinimos = 30,
+        /** A la gorra tiene que llenar estos puntos más que con precio para sugerir un descuento (EF-09.5)… */
+        public int $gorraDiferenciaMinima = 20,
+        /** …con por lo menos estas funciones de cada tipo en la sala. */
+        public int $gorraFuncionesMinimas = 2,
+        /** Una sala con por lo menos estas personas que votaron y no reservaron sugiere ir a buscarlas. */
+        public int $votaronSinReservarMinimos = 5,
+        /** Una función que vendió este porcentaje o más de sus lugares está agotada: sumar otra. */
+        public int $agotadaOcupacionMinima = 95,
     ) {
-        foreach ([$diaFlojoOcupacionMaxima, $repetirOcupacionMinima, $repetirAsistenciaMinima, $pedidoVotosMinimos] as $porcentaje) {
+        foreach ([$diaFlojoOcupacionMaxima, $repetirOcupacionMinima, $repetirAsistenciaMinima, $pedidoVotosMinimos, $gorraDiferenciaMinima, $agotadaOcupacionMinima] as $porcentaje) {
             if ($porcentaje < 0 || $porcentaje > 100) {
                 throw new RuntimeException('Los porcentajes de [reportes] van de 0 a 100.');
             }
         }
-        if ($diaFlojoFuncionesMinimas < 1) {
-            throw new RuntimeException('dia_flojo_funciones_minimas de [reportes] tiene que ser 1 o más.');
+        foreach (['dia_flojo_funciones_minimas' => $diaFlojoFuncionesMinimas, 'gorra_funciones_minimas' => $gorraFuncionesMinimas, 'votaron_sin_reservar_minimos' => $votaronSinReservarMinimos] as $clave => $cantidad) {
+            if ($cantidad < 1) {
+                throw new RuntimeException("{$clave} de [reportes] tiene que ser 1 o más.");
+            }
         }
         if ($repetirPromedioMinimo < 1 || $repetirPromedioMinimo > 5) {
             throw new RuntimeException('repetir_promedio_minimo de [reportes] va de 1 a 5.');
@@ -67,6 +77,10 @@ final readonly class Umbrales
             $entero('repetir_asistencia_minima', $porDefecto->repetirAsistenciaMinima),
             (float) $promedio,
             $entero('pedido_votos_minimos', $porDefecto->pedidoVotosMinimos),
+            $entero('gorra_diferencia_minima', $porDefecto->gorraDiferenciaMinima),
+            $entero('gorra_funciones_minimas', $porDefecto->gorraFuncionesMinimas),
+            $entero('votaron_sin_reservar_minimos', $porDefecto->votaronSinReservarMinimos),
+            $entero('agotada_ocupacion_minima', $porDefecto->agotadaOcupacionMinima),
         );
     }
 }

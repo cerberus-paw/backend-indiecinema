@@ -15,15 +15,18 @@ use IndieCinema\Nucleo\Seguridad\Usuario;
 use IndieCinema\Recaudacion\Modelo\DiaFlojo;
 use IndieCinema\Recaudacion\Modelo\FuncionFinalizada;
 use IndieCinema\Recaudacion\Modelo\Monto;
+use IndieCinema\Recaudacion\Modelo\ObraAgotada;
 use IndieCinema\Recaudacion\Modelo\ObraVotada;
 use IndieCinema\Recaudacion\Modelo\PedidoDelPublico;
 use IndieCinema\Recaudacion\Modelo\Periodo;
+use IndieCinema\Recaudacion\Modelo\PrecioDeLaEntrada;
 use IndieCinema\Recaudacion\Modelo\ReglaIncumplida;
 use IndieCinema\Recaudacion\Modelo\ReporteDeObra;
 use IndieCinema\Recaudacion\Modelo\RendimientoDeSala;
 use IndieCinema\Recaudacion\Modelo\TituloParaRepetir;
 use IndieCinema\Recaudacion\Modelo\TotalDeFunciones;
 use IndieCinema\Recaudacion\Modelo\Umbrales;
+use IndieCinema\Recaudacion\Modelo\VotantesSinReserva;
 use IndieCinema\Recaudacion\Servicios\ObrasDelDueno;
 use IndieCinema\Recaudacion\Servicios\ServicioDeReportes;
 use IndieCinema\Recaudacion\Servicios\Sugerencias;
@@ -34,7 +37,7 @@ use LogicException;
  * Los reportes de recaudación: lo que pasó en las salas en un período. El organizador ve las suyas
  * y el administrador, todas.
  *
- * - GET /recaudacion/reportes: qué conviene hacer (EF-09.1). Va primero porque es lo que pidió el
+ * - GET /recaudacion/reportes: qué conviene hacer (EF-09.1 y EF-09.5). Va primero porque es lo que pidió el
  *   profe el 11/11: un reporte que sólo muestra números es una máquina de escribir; uno que dice
  *   qué día conviene una promoción sirve para decidir.
  * - GET /recaudacion/reportes/funciones: los totales de cada mes y las funciones de uno (EF-09.2).
@@ -83,7 +86,28 @@ final class Reportes extends Controlador
                 'funciones' => $dia->funciones,
                 'ocupacion' => "{$dia->ocupacion} %",
                 'resto' => $dia->ocupacionResto === null ? null : "{$dia->ocupacionResto} %",
+                'para_dar' => $dia->paraDar === null ? null : self::pedido($dia->paraDar),
             ], $sugerencias->diasFlojos($datos)),
+            'precios' => array_map(static fn (PrecioDeLaEntrada $precio): array => [
+                'sala' => $precio->salaNombre,
+                'funciones_gorra' => $precio->funcionesGorra,
+                'gorra' => "{$precio->ocupacionGorra} %",
+                'funciones_pagas' => $precio->funcionesPagas,
+                'pagas' => "{$precio->ocupacionPagas} %",
+                'sensible' => $precio->sensible,
+            ], $sugerencias->precioDeLaEntrada($datos)),
+            'sin_reserva' => array_map(static fn (VotantesSinReserva $sala): array => [
+                'sala' => $sala->salaNombre,
+                'votantes' => $sala->votantes,
+                'sin_reserva' => $sala->sinReserva,
+            ], $sugerencias->votaronSinReservar($datos)),
+            'agotadas' => array_map(static fn (ObraAgotada $obra): array => [
+                'titulo' => $obra->titulo,
+                'sala' => $obra->salaNombre,
+                'funciones' => $obra->funciones,
+                'agotadas' => $obra->agotadas,
+                'ocupacion' => "{$obra->ocupacion} %",
+            ], $sugerencias->obrasAgotadas($datos)),
             'titulos' => array_map(static fn (TituloParaRepetir $titulo): array => [
                 'titulo' => $titulo->titulo,
                 'funciones' => $titulo->funciones,
@@ -91,12 +115,7 @@ final class Reportes extends Controlador
                 'asistencia' => "{$titulo->asistencia} %",
                 'promedio' => self::promedio($titulo->promedio),
             ], $sugerencias->titulosParaRepetir($datos)),
-            'pedidos' => array_map(static fn (PedidoDelPublico $pedido): array => [
-                'titulo' => $pedido->titulo,
-                'votaciones' => $pedido->votaciones,
-                'votos' => $pedido->votos,
-                'porcentaje' => "{$pedido->porcentaje} %",
-            ], $sugerencias->pedidosDelPublico($datos)),
+            'pedidos' => array_map(self::pedido(...), $sugerencias->pedidosDelPublico($datos)),
             'salas' => array_map(self::rendimiento(...), $sugerencias->salasQueRinden($datos)),
             'umbrales' => [
                 'dia_flojo' => "{$this->umbrales->diaFlojoOcupacionMaxima} %",
@@ -105,8 +124,23 @@ final class Reportes extends Controlador
                 'repetir_asistencia' => "{$this->umbrales->repetirAsistenciaMinima} %",
                 'repetir_promedio' => self::promedio($this->umbrales->repetirPromedioMinimo),
                 'pedido' => "{$this->umbrales->pedidoVotosMinimos} %",
+                'gorra_diferencia' => $this->umbrales->gorraDiferenciaMinima,
+                'agotada' => "{$this->umbrales->agotadaOcupacionMinima} %",
             ],
         ]);
+    }
+
+    /**
+     * @return array{titulo: string, votaciones: int, votos: int, porcentaje: string}
+     */
+    private static function pedido(PedidoDelPublico $pedido): array
+    {
+        return [
+            'titulo' => $pedido->titulo,
+            'votaciones' => $pedido->votaciones,
+            'votos' => $pedido->votos,
+            'porcentaje' => "{$pedido->porcentaje} %",
+        ];
     }
 
     /**

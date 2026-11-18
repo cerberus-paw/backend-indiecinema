@@ -356,7 +356,15 @@ final class MiCuentaTest extends TestCase
     {
         yield 'espectador' => ['espectador', [], false];
         yield 'organizador' => ['organizador', [Rol::Organizador], true];
-        yield 'moderador' => ['moderador', [Rol::Organizador, Rol::Moderador], true];
+        // El moderador alcanza el rol, pero lo suyo es la moderación (IC-662).
+        yield 'moderador' => ['moderador', [Rol::Organizador, Rol::Moderador], false];
+    }
+
+    public function testElModeradorVaASuModeracionDesdeLaBarra(): void
+    {
+        $barra = self::barra($this->pedir($this->agregar([Rol::Moderador]), 'moderador'));
+
+        self::assertStringContainsString('href="/moderacion/solicitudes"', $barra);
     }
 
     /**

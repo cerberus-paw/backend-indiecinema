@@ -41,8 +41,6 @@ final class FuncionesInternas extends Controlador
      */
     private const MAXIMAS_FINALIZADAS = 2000;
 
-    /** Un año y un día: el período más largo que pide la reportería. */
-    private const DIAS_MAXIMOS_DE_UN_PERIODO = 366;
 
     public function __construct(private readonly ServicioDeFunciones $servicio)
     {
@@ -139,8 +137,10 @@ final class FuncionesInternas extends Controlador
     {
         $desde = self::dia($peticion->consulta('desde'));
         $hasta = self::dia($peticion->consulta('hasta'));
-        if ($desde === null || $hasta === null || $hasta < $desde || $desde->diff($hasta)->days > self::DIAS_MAXIMOS_DE_UN_PERIODO) {
-            return $this->json(['error' => 'Se piden «desde» y «hasta» en AAAA-MM-DD, en ese orden y con hasta ' . self::DIAS_MAXIMOS_DE_UN_PERIODO . ' días entre los dos.'], 400);
+        // Sin tope de días: la reportería pide todo cuando no se elige un período, y lo que pasa del
+        // máximo de una respuesta ya viene recortado y con «completas» en false.
+        if ($desde === null || $hasta === null || $hasta < $desde) {
+            return $this->json(['error' => 'Se piden «desde» y «hasta» en AAAA-MM-DD, en ese orden.'], 400);
         }
         $organizador = $peticion->consulta('organizador');
         $dueno = $peticion->consulta('dueno');

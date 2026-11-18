@@ -84,7 +84,8 @@ final class ReportesTest extends TestCase
 
         self::assertSame(200, $respuesta->estado(), $respuesta->cuerpo());
         $texto = self::texto($respuesta);
-        self::assertStringContainsString('Lo que pasó en tus salas del 1 al 30 de noviembre de 2026', $texto);
+        self::assertStringContainsString('Recomendaciones', $texto);
+        self::assertStringNotContainsString('Qué conviene hacer', $texto);
         // Las tarjetas: 90 de 160 lugares, 83 de 90 fueron, (45 + 34,4 + 6) / 20.
         self::assertStringContainsString('Funciones 4 finalizadas', $texto);
         self::assertStringContainsString('Ocupación 56 %', $texto);
@@ -111,7 +112,6 @@ final class ReportesTest extends TestCase
 
         self::assertSame(200, $respuesta->estado(), $respuesta->cuerpo());
         $texto = self::texto($respuesta);
-        self::assertStringContainsString('Lo que pasó en todas las salas', $texto);
         self::assertStringContainsString('Funciones 5 finalizadas', $texto);
         // El Galpón rinde más que el Norte: 56 % contra 50 %.
         self::assertMatchesRegularExpression('/El Galpón 4 56 %.*Cineclub Norte 1 50 % 75 % — —/', $texto);
@@ -152,17 +152,37 @@ final class ReportesTest extends TestCase
 
         self::assertSame(422, $respuesta->estado());
         self::assertStringContainsString('El último día no puede ser anterior al primero.', self::texto($respuesta));
-        self::assertStringContainsString('Lo que pasó en tus salas, y qué conviene hacer con eso.', self::texto($respuesta));
         self::assertStringContainsString('value="2026-11-30"', $respuesta->cuerpo());
         self::assertStringNotContainsString('Días para una promoción', self::texto($respuesta));
     }
 
-    public function testSinPeriodoMuestraLosUltimosNoventaDias(): void
+    public function testSinPeriodoMuestraTodoConElFiltroVacio(): void
     {
         $respuesta = $this->pedir('/reportes');
 
         self::assertSame(200, $respuesta->estado(), $respuesta->cuerpo());
-        self::assertStringContainsString('value="' . date('Y-m-d') . '"', $respuesta->cuerpo());
+        self::assertStringContainsString('name="desde" value=""', $respuesta->cuerpo());
+        self::assertStringContainsString('name="hasta" value=""', $respuesta->cuerpo());
+        // Entran las funciones de las pruebas sin haber elegido un período.
+        self::assertStringContainsString('Recomendaciones', self::texto($respuesta));
+        self::assertStringNotContainsString('No hubo funciones finalizadas en el período.', self::texto($respuesta));
+    }
+
+    public function testUnDiaVacioNoPoneLimiteDeEseLado(): void
+    {
+        // Sin «desde», todo hasta el 31 de octubre: la de octubre sí, las de noviembre no.
+        $hastaOctubre = $this->pedir('/reportes/funciones?desde=&hasta=2026-10-31');
+        self::assertSame(200, $hastaOctubre->estado(), $hastaOctubre->cuerpo());
+        self::assertStringContainsString('Octubre de 2026', self::texto($hastaOctubre));
+        self::assertStringNotContainsString('Noviembre de 2026', self::texto($hastaOctubre));
+        self::assertStringContainsString('name="desde" value=""', $hastaOctubre->cuerpo());
+
+        // Sin «hasta», todo desde el 1 de noviembre: las de noviembre sí, la de octubre no.
+        $desdeNoviembre = $this->pedir('/reportes/funciones?desde=2026-11-01&hasta=');
+        self::assertSame(200, $desdeNoviembre->estado(), $desdeNoviembre->cuerpo());
+        self::assertStringContainsString('Noviembre de 2026', self::texto($desdeNoviembre));
+        self::assertStringNotContainsString('Octubre de 2026', self::texto($desdeNoviembre));
+        self::assertStringContainsString('name="hasta" value=""', $desdeNoviembre->cuerpo());
     }
 
     public function testUnEspectadorNoEntra(): void

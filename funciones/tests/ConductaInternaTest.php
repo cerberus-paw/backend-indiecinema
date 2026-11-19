@@ -22,6 +22,7 @@ final class ConductaInternaTest extends TestCase
 
     private const TOKEN_DE_CUENTAS = 'token-de-cuentas';
     private const TOKEN_DE_PROGRAMACION = 'token-de-programacion';
+    private const TOKEN_DE_RECAUDACION = 'token-de-recaudacion';
 
     private Configuracion $configuracion;
     private BaseDeDatos $base;
@@ -35,6 +36,7 @@ final class ConductaInternaTest extends TestCase
             'llamadores' => [
                 'cuentas' => hash('sha256', self::TOKEN_DE_CUENTAS),
                 'programacion' => hash('sha256', self::TOKEN_DE_PROGRAMACION),
+                'recaudacion' => hash('sha256', self::TOKEN_DE_RECAUDACION),
             ],
         ]);
         $this->base = self::baseConTablasNuevas($this->configuracion);
@@ -43,11 +45,11 @@ final class ConductaInternaTest extends TestCase
     /**
      * @param array<string, string> $consulta
      */
-    private function pedir(array $consulta = [], string $llamador = 'cuentas', string $token = self::TOKEN_DE_CUENTAS): Respuesta
+    private function pedir(array $consulta = [], string $llamador = 'cuentas', string $token = self::TOKEN_DE_CUENTAS, string $ruta = '/interno/usuarios/conducta'): Respuesta
     {
         $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion, new Log('funciones', fopen('php://memory', 'w')));
 
-        return $aplicacion->atender(new Peticion('GET', '/interno/usuarios/conducta', $consulta, [], [
+        return $aplicacion->atender(new Peticion('GET', $ruta, $consulta, [], [
             'X-Llamador' => $llamador,
             'Authorization' => "Bearer {$token}",
         ], [], []));
@@ -100,5 +102,60 @@ final class ConductaInternaTest extends TestCase
     {
         self::assertSame(403, $this->pedir([], 'programacion', self::TOKEN_DE_PROGRAMACION)->estado());
         self::assertSame(403, $this->pedir([], 'cuentas', 'otro-token')->estado());
+    }
+
+    /**
+     * Una reserva de la función, en el estado que se pide, con su calificación de conducta si se pide.
+     */
+    private function reserva(string $funcion, string $estado, ?bool $positiva = null): void
+    {
+        $id = Uuid::nuevo();
+        $usuario = Uuid::nuevo();
+        $this->base->ejecutar(
+            'INSERT INTO reserva (id, funcion_id, usuario_id, codigo, cantidad, total, estado, creada_en) VALUES (?, ?, ?, ?, 1, 0, ?, NOW())',
+            [$id, $funcion, $usuario, strtoupper(substr(str_replace('-', '', $id), 0, 8)), $estado],
+        );
+        if ($positiva !== null) {
+            $this->base->ejecutar(
+                'INSERT INTO conducta (reserva_id, usuario_id, organizador_id, positiva, motivo, creada_en) VALUES (?, ?, ?, ?, ?, NOW())',
+                [$id, $usuario, Uuid::nuevo(), $positiva ? 1 : 0, $positiva ? null : 'Molestó en la sala'],
+            );
+        }
+    }
+
+    public function testRecaudacionPideLasAusenciasYLasNegativasDeCadaFuncion(): void
+    {
+        $una = Uuid::nuevo();
+        $otra = Uuid::nuevo();
+        $sinNada = Uuid::nuevo();
+        $this->reserva($una, 'ausente');
+        $this->reserva($una, 'ausente');
+        $this->reserva($una, 'asistio', false);
+        $this->reserva($una, 'asistio', true);
+        $this->reserva($otra, 'asistio', false);
+        $this->reserva($sinNada, 'asistio');
+
+        $respuesta = $this->pedir(['funciones' => "{$una},{$otra},{$sinNada}"], 'recaudacion', self::TOKEN_DE_RECAUDACION, '/interno/conducta/funciones');
+
+        self::assertSame(200, $respuesta->estado(), $respuesta->cuerpo());
+        $funciones = json_decode($respuesta->cuerpo(), true)['funciones'];
+        ksort($funciones);
+        $esperadas = [$una => ['ausentes' => 2, 'negativas' => 1], $otra => ['ausentes' => 0, 'negativas' => 1]];
+        ksort($esperadas);
+        self::assertSame($esperadas, $funciones);
+    }
+
+    public function testLaConductaDeLasFuncionesPideIdsValidosYLaPideSoloRecaudacion(): void
+    {
+        $ruta = '/interno/conducta/funciones';
+
+        self::assertSame(400, $this->pedir([], 'recaudacion', self::TOKEN_DE_RECAUDACION, $ruta)->estado());
+        self::assertSame(400, $this->pedir(['funciones' => 'no-es-uuid'], 'recaudacion', self::TOKEN_DE_RECAUDACION, $ruta)->estado());
+        self::assertSame(403, $this->pedir(['funciones' => Uuid::nuevo()], 'cuentas', self::TOKEN_DE_CUENTAS, $ruta)->estado());
+    }
+
+    public function testRecaudacionTambienPideElPuntajeDeVarios(): void
+    {
+        self::assertSame(200, $this->pedir(['ids' => Uuid::nuevo()], 'recaudacion', self::TOKEN_DE_RECAUDACION)->estado());
     }
 }

@@ -191,4 +191,35 @@ final class RepositorioDeConducta
 
         return $porUsuario;
     }
+
+    /**
+     * Las ausencias y las calificaciones de conducta negativas de cada función (EF-22.4): para
+     * los reportes del administrador, que las suman por sala.
+     *
+     * @param list<string> $funcionesIds
+     *
+     * @return array<string, array{ausentes: int, negativas: int}> por función; las que no tienen ninguna no vienen
+     */
+    public function deLasFunciones(array $funcionesIds): array
+    {
+        if ($funcionesIds === []) {
+            return [];
+        }
+        $marcas = implode(', ', array_fill(0, count($funcionesIds), '?'));
+        $porFuncion = [];
+        foreach ($this->base->filas(
+            "SELECT r.funcion_id,
+                    SUM(r.estado = 'ausente') AS ausentes,
+                    SUM(c.positiva = FALSE) AS negativas
+             FROM reserva r
+             LEFT JOIN conducta c ON c.reserva_id = r.id
+             WHERE r.funcion_id IN ({$marcas}) AND (r.estado = 'ausente' OR c.positiva = FALSE)
+             GROUP BY r.funcion_id",
+            $funcionesIds,
+        ) as $fila) {
+            $porFuncion[(string) $fila['funcion_id']] = ['ausentes' => (int) $fila['ausentes'], 'negativas' => (int) $fila['negativas']];
+        }
+
+        return $porFuncion;
+    }
 }

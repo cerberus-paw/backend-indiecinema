@@ -80,7 +80,9 @@ return static function (Router $router): void {
     $router->interna('GET', '/interno/cobros', [CobrosInternos::class, 'deVarias'], ['recaudacion']);
 
     // Puntaje de conducta en lote, para «Usuarios y roles» del administrador en cuentas (EF-13.3).
-    $router->interna('GET', '/interno/usuarios/conducta', [ConductaInterna::class, 'deVarios'], ['cuentas']);
+    $router->interna('GET', '/interno/usuarios/conducta', [ConductaInterna::class, 'deVarios'], ['cuentas', 'recaudacion']);
+    // Las ausencias y las negativas de cada función, para los reportes del administrador (EF-22.4).
+    $router->interna('GET', '/interno/conducta/funciones', [ConductaInterna::class, 'deFunciones'], ['recaudacion']);
 
     // Los puntos y los cupones de recaudación (EF-17.1): las asistencias de un espectador, que
     // suman puntos, y cuáles de sus cupones están en una reserva.

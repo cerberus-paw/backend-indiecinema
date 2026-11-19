@@ -15,6 +15,8 @@ use IndieCinema\Nucleo\Seguridad\Usuario;
 use IndieCinema\Recaudacion\Modelo\CostosDeReferencia;
 use IndieCinema\Recaudacion\Modelo\DiaFlojo;
 use IndieCinema\Recaudacion\Modelo\FuncionFinalizada;
+use IndieCinema\Recaudacion\Modelo\ModeracionDeSala;
+use IndieCinema\Recaudacion\Modelo\ModeracionDelPeriodo;
 use IndieCinema\Recaudacion\Modelo\Monto;
 use IndieCinema\Recaudacion\Modelo\ObraAgotada;
 use IndieCinema\Recaudacion\Modelo\ObraVotada;
@@ -31,6 +33,7 @@ use IndieCinema\Recaudacion\Modelo\TituloParaRepetir;
 use IndieCinema\Recaudacion\Modelo\TotalDeFunciones;
 use IndieCinema\Recaudacion\Modelo\Umbrales;
 use IndieCinema\Recaudacion\Modelo\VotantesSinReserva;
+use IndieCinema\Recaudacion\Servicios\ModeracionYConducta;
 use IndieCinema\Recaudacion\Servicios\ObrasDelDueno;
 use IndieCinema\Recaudacion\Servicios\ResultadosDelPeriodo;
 use IndieCinema\Recaudacion\Servicios\ServicioDeReportes;
@@ -43,7 +46,8 @@ use LogicException;
  * y el administrador, todas.
  *
  * - GET /recaudacion/reportes: si cada sala (y, para el administrador, la plataforma) gana o pierde
- *   plata (EF-22.1), y qué conviene hacer (EF-09.1 y EF-09.5). Va primero porque es lo que pidió el
+ *   plata (EF-22.1), qué conviene hacer (EF-09.1, EF-09.5 y EF-22.3) y, para el administrador, la
+ *   moderación y la conducta del período (EF-22.4). Va primero porque es lo que pidió el
  *   profe el 11/11: un reporte que sólo muestra números es una máquina de escribir; uno que dice
  *   qué día conviene una promoción sirve para decidir.
  * - GET /recaudacion/reportes/funciones: los totales de cada mes y las funciones de uno (EF-09.2).
@@ -63,6 +67,7 @@ final class Reportes extends Controlador
         private readonly ServicioDeReportes $reportes,
         Configuracion $configuracion,
         private readonly ?ResultadosDelPeriodo $resultados = null,
+        private readonly ?ModeracionYConducta $moderacion = null,
     ) {
         $this->umbrales = Umbrales::desdeConfiguracion($configuracion);
     }
@@ -81,6 +86,7 @@ final class Reportes extends Controlador
         $total = $sugerencias->total($datos);
         $resultados = $this->resultados?->salas($datos) ?? [];
         $plataforma = $administrador ? $this->resultados?->plataforma($datos, $resultados) : null;
+        $moderacion = $administrador && $datos->funciones !== [] ? $this->moderacion?->delPeriodo($datos) : null;
 
         return $this->vista('reportes.html.twig', [
             'periodo' => $periodoElegido,
@@ -88,6 +94,7 @@ final class Reportes extends Controlador
             'avisos' => $datos->avisos,
             'ganancias' => $this->resultados === null ? null : self::ganancias($resultados, $plataforma, $this->resultados->referencia()),
             'costo_cargado' => self::avisoDelCosto($peticion),
+            'moderacion' => $moderacion === null ? null : self::moderacion($moderacion),
             'funciones' => count($datos->funciones),
             'sin_ventas' => $datos->ventas === null,
             'resumen' => $total === null ? null : self::rendimiento($total),
@@ -235,6 +242,38 @@ final class Reportes extends Controlador
             'costo_funcion' => self::pesos($referencia->costoFuncionCentavos),
             'servidores_mes' => self::pesos($referencia->servidoresMesCentavos),
             'desarrollo_mes' => self::pesos($referencia->desarrolloMesCentavos),
+        ];
+    }
+
+    /**
+     * La moderación y la conducta del período, ya escritas (EF-22.4).
+     *
+     * @return array<string, mixed>
+     */
+    private static function moderacion(ModeracionDelPeriodo $moderacion): array
+    {
+        $causas = ['retiro' => 'la retiró su organizador', 'vencimiento' => 'por un documento vencido', 'denuncia' => 'por una denuncia'];
+
+        return [
+            'avisos' => $moderacion->avisos,
+            'salas' => array_map(static fn (ModeracionDeSala $sala): array => [
+                'nombre' => $sala->salaNombre,
+                'denuncias' => $sala->denuncias,
+                'total_denuncias' => $sala->totalDeDenuncias(),
+                'suspension' => $sala->suspension === null ? null : ($causas[$sala->suspension] ?? $sala->suspension),
+                'ausentes' => $sala->ausentes,
+                'negativas' => $sala->negativas,
+                'bajo_umbral' => $sala->bajoUmbral,
+                'espectadores' => $sala->espectadores,
+            ], $moderacion->salas),
+            'solicitudes' => [
+                'pendientes' => ($moderacion->solicitudes['pendiente'] ?? 0) + ($moderacion->solicitudes['en_revision_manual'] ?? 0),
+                'aprobadas' => $moderacion->solicitudes['aprobada'] ?? 0,
+                'rechazadas' => $moderacion->solicitudes['rechazada'] ?? 0,
+            ],
+            'otras_denuncias' => $moderacion->otrasDenuncias,
+            'total_otras_denuncias' => array_sum($moderacion->otrasDenuncias),
+            'otras_suspendidas' => $moderacion->otrasSuspendidas,
         ];
     }
 

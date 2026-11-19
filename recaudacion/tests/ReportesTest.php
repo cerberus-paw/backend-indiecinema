@@ -98,6 +98,8 @@ final class ReportesTest extends TestCase
         self::assertStringContainsString('Para ese día: La ciénaga, que el público de esta sala votó y no vio (4 votos en 1 votación, el 40 %).', $texto);
         self::assertStringContainsString('El Galpón: 8 de las 10 personas que votaron no reservaron ninguna función.', $texto);
         self::assertStringContainsString('Rojo, en El Galpón: se agotó en 1 de sus 2 funciones (93 % de los lugares vendidos). La demanda llegó al cupo: sumá otra función.', $texto);
+        // La combinada (EF-22.3): Rojo se agotó y gustó, y los miércoles sobra lugar.
+        self::assertStringContainsString('Lo que más conviene El Galpón: Sumar una función de «Rojo» los miércoles. Por qué Se agotó en 1 de sus 2 funciones', $texto);
         // Todas sus funciones son pagas: no hay con qué comparar el precio.
         self::assertStringNotContainsString('A la gorra o con precio', $texto);
         // «Rojo»: 74 de 80, 70 de 74 fueron, 4,4 de promedio.

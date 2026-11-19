@@ -21,6 +21,7 @@ use IndieCinema\Recaudacion\Modelo\ObraVotada;
 use IndieCinema\Recaudacion\Modelo\PedidoDelPublico;
 use IndieCinema\Recaudacion\Modelo\Periodo;
 use IndieCinema\Recaudacion\Modelo\PrecioDeLaEntrada;
+use IndieCinema\Recaudacion\Modelo\RecomendacionCombinada;
 use IndieCinema\Recaudacion\Modelo\ReglaIncumplida;
 use IndieCinema\Recaudacion\Modelo\ReporteDeObra;
 use IndieCinema\Recaudacion\Modelo\RendimientoDeSala;
@@ -90,6 +91,12 @@ final class Reportes extends Controlador
             'funciones' => count($datos->funciones),
             'sin_ventas' => $datos->ventas === null,
             'resumen' => $total === null ? null : self::rendimiento($total),
+            'combinadas' => array_map(static fn (RecomendacionCombinada $recomendacion): array => [
+                'regla' => $recomendacion->regla,
+                'sala' => $recomendacion->salaNombre,
+                'accion' => $recomendacion->accion,
+                'porque' => $recomendacion->porque,
+            ], $sugerencias->combinadas($datos)),
             'dias_flojos' => array_map(static fn (DiaFlojo $dia): array => [
                 'sala' => $dia->salaNombre,
                 'dia' => self::DIAS[$dia->dia],

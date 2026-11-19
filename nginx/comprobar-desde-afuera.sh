@@ -168,6 +168,9 @@ demasiados POST $reservar text/html
 echo "Muchos pedidos de títulos seguidos desde una IP:"
 rafaga 3 POST /pedidos/nuevo text/html
 
+echo "Muchos votos seguidos desde una IP:"
+rafaga 11 POST /cartelera/00000003-0000-4000-8000-000000000001/votar application/json application/json
+
 if ((fallas > 0)); then
 	echo "$fallas comprobaciones fallaron."
 	exit 1

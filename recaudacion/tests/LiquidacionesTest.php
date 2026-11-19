@@ -268,6 +268,11 @@ final class LiquidacionesTest extends TestCase
         self::assertNotNull($fila['transferida_en']);
         // Y la organizadora lo ve en su pantalla.
         self::assertStringContainsString('Transferida', $this->pedir('GET', self::MIAS)->cuerpo());
+        // Queda en el log quién la marcó (EF-18.1), con los ids y sin la nota.
+        rewind($this->salidaDelLog);
+        $log = (string) stream_get_contents($this->salidaDelLog);
+        self::assertStringContainsString(self::ADMINISTRADORA . " marcó como transferida la liquidación {$id}.", $log);
+        self::assertStringNotContainsString('Transferencia 00123', $log);
     }
 
     public function testMarcarlaDeNuevoNoPisaLaFechaNiLaNota(): void

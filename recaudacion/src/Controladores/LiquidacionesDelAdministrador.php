@@ -15,6 +15,7 @@ use IndieCinema\Recaudacion\Modelo\Mes;
 use IndieCinema\Recaudacion\Modelo\Monto;
 use IndieCinema\Recaudacion\Servicios\ServicioDeLiquidaciones;
 use IndieCinema\Recaudacion\Servicios\UsuariosDeCuentas;
+use LogicException;
 
 /**
  * «Liquidaciones» del administrador, en /recaudacion/administracion/liquidaciones (EF-08.3): lo
@@ -77,7 +78,8 @@ final class LiquidacionesDelAdministrador extends Controlador
         }
 
         $mes = $liquidacion->periodo->comoTexto();
-        $marcada = $this->liquidaciones->marcarTransferida($id, $nota === '' ? null : $nota);
+        $administrador = $peticion->usuario() ?? throw new LogicException('Ruta de administrador sin usuario.');
+        $marcada = $this->liquidaciones->marcarTransferida($administrador, $id, $nota === '' ? null : $nota);
 
         return $this->redirigir("/administracion/liquidaciones?mes={$mes}&" . ($marcada ? 'transferida=1' : 'ya=1'));
     }

@@ -9,6 +9,11 @@ el `docker-compose.yml` de este repositorio. Desde el 03/11 hay además un servi
 en otra EC2 (README, «Ramas y entornos»), con los mismos controles salvo lo que dice «El servidor
 de desarrollo», al final de «Sistema operativo».
 
+Repasado el 19/11/2026 con los cinco subsistemas de la entrega final (cuentas, programación,
+funciones, moderación y recaudación) y contra la tabla de seguridad por capa de la propuesta: la
+sección «Contra la propuesta», antes de «Por etapa», dice dónde está cada control prometido o por
+qué no se hizo (EF-18.1).
+
 ## Red
 
 | Control | Dónde | Cómo se comprueba |
@@ -24,7 +29,7 @@ de desarrollo», al final de «Sistema operativo».
 | Un solo punto de entrada: sólo nginx publica puertos. MySQL y los subsistemas quedan en la red interna del compose | `ports` de `docker-compose.yml` | en el servidor escuchan sólo el 22, el 80 y el 443 (`ss -tln`) |
 | El buzón de prueba (Mailpit), que simula el envío de correos, sólo escucha en la máquina | `127.0.0.1:8025` en `docker-compose.yml` | se ve con un túnel: `ssh -L 8025:127.0.0.1:8025 …` |
 | Las rutas `/interno/` (las APIs entre subsistemas) y el `auth_request` de la sesión no se alcanzan desde afuera | `nginx/templates/sitio.inc.template` | `nginx/comprobar-desde-afuera.sh https://indiecinema.duckdns.org`, que también corre la CI |
-| Límite de pedidos por IP al ingresar, registrarse, pedir una sala, reservar y buscar (la cartelera, su CSV y las obras). Quien se pasa lee que espere un minuto: en JSON si lo pidió el JavaScript, como la reserva, y en una página si no | `limit_req_zone` en `nginx/templates/indiecinema.conf.template`; `limit_req` y `error_page 429` en `nginx/templates/sitio.inc.template` | `nginx/comprobar-desde-afuera.sh`: superar el límite de la reserva o de la búsqueda responde 429 con el mensaje |
+| Límite de pedidos por IP al ingresar, registrarse, recuperar la contraseña, pedir una sala o un título, denunciar, reservar, votar (el título, la franja y la fecha del acuerdo) y buscar (la cartelera, su CSV, las obras y los pedidos). Quien se pasa lee que espere un minuto: en JSON si lo pidió el JavaScript, como la reserva y el voto, y en una página si no. El aviso de pago de Mercado Pago no tiene límite a propósito: llega desde pocas IP de Mercado Pago, que reintenta, y un límite descartaría avisos de verdad; lo cuidan la firma y que un aviso repetido no confirma dos veces (ver «Aplicación») | `limit_req_zone` en `nginx/templates/indiecinema.conf.template`; `limit_req` y `error_page 429` en `nginx/templates/sitio.inc.template` | `nginx/comprobar-desde-afuera.sh`: superar el límite de la reserva, del voto, del pedido de títulos o de la búsqueda responde 429 con el mensaje |
 | Los metadatos de la instancia (de donde saldrían credenciales de AWS) sólo con IMDSv2, que pide un token | configuración de la instancia en AWS | sin token, `curl http://169.254.169.254/latest/meta-data/` responde 401 |
 
 ## Sistema operativo
@@ -39,6 +44,9 @@ de desarrollo», al final de «Sistema operativo».
 | Los secretos no están en el repositorio, sólo los lee el usuario del despliegue, y gitleaks revisa cada pull request y cada push a `main` o a `dev`. Lo que necesita GitHub Actions está en los environments: la clave de cada servidor y, en `desarrollo`, las cuentas de las pruebas de punta a punta (el espectador en `E2E_CORREO` y `E2E_CLAVE`, y el organizador y el administrador en `E2E_ORGANIZADOR_*` y `E2E_ADMINISTRADOR_*`), que sólo existen en ese servidor | `.env` (600) y cada `config.ini` (640), que ignora `.gitignore`; `.gitleaks.toml` y la CI | `stat -c '%a %n' .env */config/config.ini` |
 | Cada subsistema corre como `www-data`, sin ninguna capacidad de root, sin poder ganar privilegios y con el sistema de archivos de sólo lectura | `php/Dockerfile` y `x-subsistema` en `docker-compose.yml` (`cap_drop: [ALL]`, `no-new-privileges`, `read_only`) | `docker compose exec programacion id` |
 | Un subsistema comprometido no lee el código ni los secretos de los otros: cada uno monta sólo su carpeta | `volumes` de cada subsistema en `docker-compose.yml` | — |
+| Los archivos que suben los usuarios viven en volúmenes de Docker, fuera del código y del webroot, y cada uno lo monta sólo su subsistema: `archivos-programacion` (fotos de salas y afiches) y `archivos-moderacion` (la documentación de las salas y las fotos de las solicitudes). nginx no monta ninguno: se sirven sólo por un controlador que mira el rol (ver «Aplicación»). Funciones y recaudación no reciben archivos y no tienen volumen | `volumes` de `programacion` y `moderacion` en `docker-compose.yml` | `docker volume ls` |
+| Cada subsistema tiene sus propios secretos: su clave de MySQL, su secreto con nginx y el token con que llama a los otros. El access token y la clave del webhook de Mercado Pago están sólo en el `config.ini` de funciones: recaudación pide lo cobrado por la API interna y nunca ve la credencial. Un subsistema nuevo se suma a un servidor en marcha con sus secretos al azar y sin tocar los de los otros | `.env` y el `config.ini` de cada subsistema; `herramientas/generar-secretos.sh` y `herramientas/sumar-subsistema.sh` | `php herramientas/comprobar-config.php`, que dice qué falta sin mostrar valores |
+| Las seis tareas programadas (vencer las reservas sin pagar, cerrar votaciones por fecha, finalizar funciones, recordar funciones, repartir y suspender salas con la documentación vencida) corren con `docker compose exec` en el contenedor de su subsistema: con su usuario de base y sus permisos, no como root ni con otro usuario de MySQL. Las instala el despliegue y reemplaza sólo sus líneas del crontab | `herramientas/crontab` y `instalar_tareas()` en `herramientas/desplegar.sh` | `crontab -l` en el servidor |
 | Docker aísla los contenedores con AppArmor y seccomp | perfiles por defecto de Docker | `docker info` |
 | Respaldo diario de la base (los cinco esquemas y `control_migraciones`) y de los volúmenes de archivos, cifrado con la clave pública del grupo: en el servidor no hay con qué descifrarlo, así que un respaldo filtrado no se lee. Quedan 14 días en el servidor y cada uno se copia afuera si el servidor tiene un destino configurado (un bucket de S3 o otra máquina por scp) (EF-18.5) | `herramientas/respaldar.sh`, su línea en `herramientas/crontab` y `~/.config/indiecinema/` en cada servidor (README, «Respaldos») | `~/respaldos/respaldar.log` y `ls ~/respaldos/diarios` |
 
@@ -64,7 +72,7 @@ por la red interna del compose.
 
 | Control | Dónde | Cómo se comprueba |
 |---|---|---|
-| Un esquema por subsistema, y un usuario por subsistema que sólo lee y escribe datos del suyo: sin crear, alterar ni borrar tablas, y sin ver los esquemas de los otros. Lo que un subsistema necesita de otro lo pide por la API interna | `mysql/init/01-esquemas-y-usuarios.sh` | `docker compose exec mysql bash /herramientas/comprobar-aislamiento.sh`: en el VPS, el 18/10, los 15 intentos dieron `command denied` |
+| Un esquema por subsistema (cuentas, programación, funciones, moderación y recaudación), y un usuario por subsistema que sólo lee y escribe datos del suyo: sin crear, alterar ni borrar tablas, y sin ver los esquemas de los otros. Lo que un subsistema necesita de otro lo pide por la API interna. En un servidor que ya tiene datos, el esquema de un subsistema nuevo se crea con los mismos permisos | `mysql/init/01-esquemas-y-usuarios.sh` y `mysql/herramientas/crear-esquema.sh` | `docker compose exec mysql bash /herramientas/comprobar-aislamiento.sh`: en el servidor de desarrollo, el 19/11, los 35 intentos (siete por subsistema) dieron `command denied` |
 | Las tablas las crea y las cambia sólo el usuario de migraciones, que la aplicación nunca usa. Ese usuario y root entran sólo desde adentro del contenedor de MySQL | `mysql/init/02-usuario-de-migraciones.sh` y `MYSQL_ROOT_HOST: localhost` en `docker-compose.yml` | `SELECT user, host FROM mysql.user`: `migraciones` y `root` en `localhost` |
 | El registro de las migraciones aplicadas está en un esquema que ningún subsistema ve, con la huella de cada archivo: la aplicación no puede hacer que una se repita, y una migración editada después de aplicarse se rechaza | `control_migraciones` y `mysql/herramientas/migrar.sh` | `MigracionesTest` de cada subsistema |
 | Las claves de los usuarios de MySQL salen de `.env` al crear la base: no están en el repositorio | variables `MYSQL_CLAVE_*` de `docker-compose.yml` | gitleaks en la CI |
@@ -113,6 +121,7 @@ con `fetch` sin recargar la página. Lo que agregó esa entrega está en las fil
 | La API interna (`/interno/`) sólo atiende a los subsistemas que declara cada ruta, cada uno con su token; en la configuración está sólo el SHA-256 del token | `$router->interna()` en cada `rutas.php` y `[llamadores]` en cada `config.ini` | `UsuariosInternosTest::testSoloLasLlamaProgramacionConSuToken`, `FuncionesInternasTest::testSoloLaPideFuncionesConSuToken` |
 | En producción, un error responde 500 sin el detalle, que queda en el log. Con algún valor de ejemplo en `config.ini` el subsistema no arranca | `nucleo/src/Aplicacion.php` y `entorno = "produccion"` | `AplicacionTest::testUnErrorEnProduccionNoMuestraElDetalleYQuedaEnElLog` |
 | Las dependencias se revisan contra los avisos de seguridad conocidos en cada pull request | `composer audit` en `.github/workflows/ci.yml` | la CI |
+| Auditoría: queda en el log quién cambió un rol, quién resolvió una solicitud de sala, un documento o una obra, quién suspendió una sala o levantó su suspensión y quién marcó una liquidación como transferida. Con los ids de quién y de qué, sin nombres, correos ni notas: los logs no llevan datos personales. La denuncia resuelta guarda en la base quién la resolvió y cuándo (`resuelta_por`, `resuelta_en`), y la suspensión que sale de ella queda además en el log | `log->notice` en `ServicioDeUsuarios` (cuentas), `ServicioDeSolicitudes`, `ServicioDeRenovaciones`, `ServicioDeObras` y `ServicioDeSuspensiones` (moderación), y `ServicioDeLiquidaciones` (recaudación); `moderacion/migraciones/011_tabla_denuncia.sql` | `docker compose logs`; `LiquidacionesTest::testElAdministradorMarcaUnaComoTransferidaConSuNota` |
 
 **Las cookies en producción**
 
@@ -271,6 +280,39 @@ docker run --rm --network indiecinema_interna -m 4g -v "$PWD:/zap/wrk:rw" \
 
 `activo.tsv` saltea la regla 40026. Con 4 GB por contenedor entran dos a la vez, pero el del
 administrador va solo, porque puede suspender a las otras cuentas o cambiarles el rol.
+
+## Contra la propuesta
+
+La tabla de seguridad por capa de la propuesta (Entrega 1, sección 3), control por control: si está
+hecho, dónde y cómo se comprueba, o por qué no. Lo hecho tiene su fila en las secciones de arriba.
+
+| Capa | Control prometido | Estado | Dónde, o por qué no |
+|---|---|---|---|
+| Red | HTTPS obligatorio con Let's Encrypt, redirección de HTTP y HSTS | Hecho | «Red» |
+| Red | Firewall con sólo el 80, el 443 y SSH; la base y los subsistemas en la red interna; nginx no publica `/interno/` y descarta las cabeceras `X-Usuario-*` que lleguen de afuera | Hecho | «Red»; las cabeceras se vacían en `sitio.inc.template` antes del `auth_request`, y un subsistema además las ignora sin el secreto de nginx («Aplicación») |
+| Red | Límite por IP al iniciar sesión, al registrarse, en los votos y en el webhook de pago | Hecho, salvo el webhook | «Red». El webhook queda sin límite a propósito: Mercado Pago avisa desde pocas IP y reintenta, y un límite descartaría avisos de verdad. Lo cuidan la firma y la idempotencia |
+| Red | Webhook aceptado sólo con la firma `x-signature` | Hecho | «Aplicación» |
+| Sistema operativo | Distribución LTS con actualizaciones de seguridad automáticas | Hecho | «Sistema operativo» |
+| Sistema operativo | Imágenes oficiales reconstruidas en cada entrega | Hecho | `docker compose up --build` en cada despliegue; las imágenes de base (`php:8.4-apache`, `nginx:stable-alpine`, `mysql:8.4`) son las oficiales |
+| Sistema operativo | SSH sólo con clave, sin root y con fail2ban | Hecho | «Sistema operativo» |
+| Sistema operativo | Cada contenedor sin privilegios y con sus volúmenes; la documentación de las salas en el volumen de moderación, fuera del webroot | Hecho | «Sistema operativo» |
+| Sistema operativo | Configuración fuera del repositorio, leída sólo por su servicio; la credencial de Mercado Pago sólo en funciones | Hecho | «Sistema operativo» |
+| Sistema operativo | Respaldos diarios de la base y de los archivos, cifrados y fuera del VPS | Hecho, salvo el destino afuera | «Sistema operativo»: diarios y cifrados con la clave pública del grupo. La copia fuera del VPS ya la hace el script, pero cada servidor necesita su destino (un bucket de S3 o una máquina por scp) y todavía no lo tiene: faltan las credenciales (EF-18.5, IC-622) |
+| Base de datos | Un usuario por subsistema con permisos sólo sobre su esquema | Hecho | «Base de datos» |
+| Base de datos | Lo que otro subsistema necesita leer, como vista de sólo lectura | No, se reemplazó | Se decidió en la arquitectura (Entrega 2): lo que un subsistema necesita de otro lo pide por la API interna, con un token por llamador. Una vista cruzaría esquemas y le daría al usuario de un subsistema acceso a tablas de otro, que es lo que la separación evita |
+| Base de datos | Sin permisos de estructura para la aplicación; las migraciones con otro usuario | Hecho | «Base de datos» |
+| Base de datos | MySQL sin escuchar fuera de la red interna | Hecho | «Red» y «Base de datos» |
+| Base de datos | Reglas en la base: un voto por usuario y función, un registro por identificador de pago | Hecho | «Base de datos»: `un_voto_por_usuario_y_funcion` (programación) y `pago_id` único (funciones) |
+| Base de datos | Restauración probada antes de cada entrega | Hecho | «Base de datos»: el 19/11/2026, con el respaldo del servidor de desarrollo |
+| Aplicación | Autenticación propia: Argon2id, cookie `HttpOnly`, `Secure` y `SameSite`, identificador nuevo al ingresar, recuperación con un token de un solo uso que vence | Hecho | «Aplicación»; el token de recuperación vence en una hora y se marca usado (`cuentas/migraciones/006_tabla_token_de_cuenta.sql`) |
+| Aplicación | Rol mínimo por ruta y dueño del recurso | Hecho | «Aplicación» y la matriz de `docs/permisos.md` (EF-18.2) |
+| Aplicación | Consultas preparadas, autoescape de Twig y token CSRF en todo formulario | Hecho | «Aplicación» |
+| Aplicación | Archivos validados por contenido y tamaño, renombrados al azar y entregados por un controlador que mira el rol | Hecho | «Aplicación» |
+| Aplicación | La reserva se confirma con el aviso más la consulta a la API de Mercado Pago, con el monto, nunca por el regreso | Hecho | «Aplicación» |
+| Aplicación | Correo verificado para votar y reservar; califica sólo quien asistió | Hecho | `Cartelera` (programación) y `Reservas` (funciones) piden el correo verificado; `Calificacion` acepta sólo una reserva con la asistencia registrada (funciones) |
+| Aplicación | Auditoría de los cambios de rol, las decisiones de moderación y las liquidaciones, sin datos personales en los logs | Hecho | «Aplicación». Las liquidaciones se sumaron con EF-18.1 |
+| Operación | Rotación de la credencial de Mercado Pago y de los tokens entre subsistemas | No automática | Se rota a mano: el token nuevo en el `config.ini` del subsistema y su SHA-256 en `[llamadores]` de los que lo llaman (`sumar-subsistema.sh` muestra el armado). No hubo un incidente que la pidiera, y automatizarla no entraba en el alcance |
+| Operación | Ante un incidente: suspender la cuenta o la sala, cerrar sus sesiones y rotar los secretos | Hecho, salvo suspender cuentas | La sala la suspende el moderador (EF-07); cambiar el rol de un usuario cierra sus sesiones. Suspender una cuenta es EF-14 (IC-582), todavía por hacer |
 
 ## Por etapa
 

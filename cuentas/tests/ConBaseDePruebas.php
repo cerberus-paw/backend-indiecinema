@@ -56,7 +56,8 @@ trait ConBaseDePruebas
 
             return $base;
         }
-        // Antes que usuario: tiene una clave foránea a ella (EF-15.4).
+        // Antes que usuario: tienen una clave foránea a ella (EF-15.4, EF-14.3).
+        $base->ejecutar('DROP TABLE IF EXISTS cambio_estado_cuenta');
         $base->ejecutar('DROP TABLE IF EXISTS seguimiento');
         $base->ejecutar('DROP TABLE IF EXISTS token_de_cuenta');
         $base->ejecutar('DROP TABLE IF EXISTS solicitud');

@@ -50,6 +50,8 @@ return static function (Router $router): void {
     // organizador a los que se les cambió en la tabla; sólo para el administrador.
     $router->get('/administracion/usuarios', [AdministracionDeUsuarios::class, 'listar'], Rol::Administrador);
     $router->post('/administracion/usuarios/roles', [AdministracionDeUsuarios::class, 'guardarRoles'], Rol::Administrador);
+    // Suspender (con motivo) o reactivar una cuenta (EF-14.3).
+    $router->post('/administracion/usuarios/{id}/estado', [AdministracionDeUsuarios::class, 'cambiarEstado'], Rol::Administrador);
 
     // El auth_request de nginx, en cada pedido del sitio: quién es el de la cookie.
     $router->interna('GET', '/interno/sesion', [SesionInterna::class, 'validar'], ['nginx']);

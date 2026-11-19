@@ -886,4 +886,160 @@ final class AdministracionDeUsuariosTest extends TestCase
         self::assertSame(['Eva Espectadora', 'Paco Penalizado'], self::nombres($sinFunciones));
         self::assertStringContainsString('>—</span>', $sinFunciones->cuerpo());
     }
+
+    /**
+     * «Suspender» o «Reactivar» de la columna «Acciones» (EF-14.3).
+     *
+     * @param array<string, string> $campos
+     */
+    private function cambiarEstado(string $id, string $accion, array $campos = [], ?string $rol = 'administrador'): Respuesta
+    {
+        return $this->enviar(self::URL . "/{$id}/estado", ['accion' => $accion] + $campos, $rol);
+    }
+
+    private function estado(string $id): string
+    {
+        return (string) $this->base->valor('SELECT estado FROM usuario WHERE id = ?', [$id]);
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function cambiosDeEstado(string $id): array
+    {
+        return $this->base->filas('SELECT estado_anterior, estado_nuevo, motivo, autor_id FROM cambio_estado_cuenta WHERE usuario_id = ? ORDER BY id', [$id]);
+    }
+
+    public function testSuspenderConMotivoCierraSusSesionesYQuedaRegistrado(): void
+    {
+        $id = $this->agregar('Eva Espectadora', 'eva@ejemplo.com');
+        $this->abrirSesion($id);
+
+        $respuesta = $this->cambiarEstado($id, 'suspender', ['motivo' => '  Insultos en las calificaciones  ', 'q' => 'eva']);
+
+        self::assertSame(303, $respuesta->estado(), $respuesta->cuerpo());
+        self::assertSame("/cuenta/administracion/usuarios?q=eva&suspendido={$id}", $respuesta->cabecera('Location'));
+        self::assertSame('suspendida', $this->estado($id));
+        // Queda afuera en el próximo pedido: nginx no encuentra su sesión.
+        self::assertSame(0, $this->sesiones($id));
+        self::assertSame([['estado_anterior' => 'activa', 'estado_nuevo' => 'suspendida', 'motivo' => 'Insultos en las calificaciones', 'autor_id' => self::ADMINISTRADOR]], $this->cambiosDeEstado($id));
+        self::assertStringContainsString(self::ADMINISTRADOR . " suspendió a {$id}: Insultos en las calificaciones", $this->log());
+
+        $listado = $this->pedir(self::URL . "?suspendido={$id}")->cuerpo();
+        self::assertStringContainsString('Suspendiste la cuenta de «Eva Espectadora»', $listado);
+        self::assertStringContainsString(': Insultos en las calificaciones</span>', $listado);
+        self::assertStringContainsString('value="reactivar"', $listado);
+    }
+
+    public function testReactivarLaDejaComoEstabaAntesDeSuspenderla(): void
+    {
+        $activa = $this->agregar('Eva Espectadora', 'eva@ejemplo.com');
+        $pendiente = $this->agregar('Pedro Vidal', 'pvidal@ejemplo.com', estado: EstadoCuenta::Pendiente);
+        $this->cambiarEstado($activa, 'suspender', ['motivo' => 'Spam']);
+        $this->cambiarEstado($pendiente, 'suspender', ['motivo' => 'Cuenta de spam']);
+
+        self::assertSame("/cuenta/administracion/usuarios?reactivado={$activa}", $this->cambiarEstado($activa, 'reactivar')->cabecera('Location'));
+        $this->cambiarEstado($pendiente, 'reactivar');
+
+        self::assertSame('activa', $this->estado($activa));
+        // La que nunca verificó el correo sigue teniendo que hacerlo.
+        self::assertSame('pendiente', $this->estado($pendiente));
+        self::assertSame(['suspendida', 'pendiente'], array_column($this->cambiosDeEstado($pendiente), 'estado_nuevo'));
+        self::assertStringContainsString(self::ADMINISTRADOR . " reactivó a {$activa}.", $this->log());
+        self::assertStringContainsString('Reactivaste la cuenta de «Eva Espectadora»', $this->pedir(self::URL . "?reactivado={$activa}")->cuerpo());
+    }
+
+    public function testUnaSuspendidaSinRegistroSeReactivaComoActiva(): void
+    {
+        $id = $this->agregar('Marta Gil', 'marta@ejemplo.com', estado: EstadoCuenta::Suspendida);
+
+        $listado = $this->pedir(self::URL)->cuerpo();
+        self::assertStringContainsString('value="reactivar"', $listado);
+        self::assertStringNotContainsString('Desde el', $listado);
+
+        $this->cambiarEstado($id, 'reactivar');
+
+        self::assertSame('activa', $this->estado($id));
+    }
+
+    public function testSuspenderDosVecesNoCambiaNiRegistraOtraVez(): void
+    {
+        $id = $this->agregar('Eva Espectadora', 'eva@ejemplo.com');
+        $this->cambiarEstado($id, 'suspender', ['motivo' => 'Spam']);
+
+        $otra = $this->cambiarEstado($id, 'suspender', ['motivo' => 'Otra pestaña']);
+        $reactivarActiva = $this->cambiarEstado($this->agregar('Ana', 'ana@ejemplo.com'), 'reactivar');
+
+        self::assertSame('/cuenta/administracion/usuarios', $otra->cabecera('Location'));
+        self::assertSame('/cuenta/administracion/usuarios', $reactivarActiva->cabecera('Location'));
+        self::assertCount(1, $this->cambiosDeEstado($id));
+    }
+
+    /**
+     * @return iterable<string, array{array<string, string>}>
+     */
+    public static function suspensionesInvalidas(): iterable
+    {
+        yield 'sin motivo' => [['accion' => 'suspender']];
+        yield 'motivo en blanco' => [['accion' => 'suspender', 'motivo' => "  \n "]];
+        yield 'motivo largo' => [['accion' => 'suspender', 'motivo' => str_repeat('a', 301)]];
+        yield 'otra acción' => [['accion' => 'borrar', 'motivo' => 'Spam']];
+        yield 'sin acción' => [['motivo' => 'Spam']];
+    }
+
+    /**
+     * @param array<string, string> $campos
+     */
+    #[DataProvider('suspensionesInvalidas')]
+    public function testUnaSuspensionInvalidaDa400YNoCambiaNada(array $campos): void
+    {
+        $id = $this->agregar('Eva Espectadora', 'eva@ejemplo.com');
+
+        self::assertSame(400, $this->enviar(self::URL . "/{$id}/estado", $campos)->estado());
+
+        self::assertSame('activa', $this->estado($id));
+        self::assertSame([], $this->cambiosDeEstado($id));
+    }
+
+    public function testNoSeSuspendeLaPropiaCuentaNiLaDeOtroAdministrador(): void
+    {
+        $this->usuarios->agregar(new Usuario(self::ADMINISTRADOR, 'Yo Admin', 'yo@ejemplo.com', 'hash', EstadoCuenta::Activa, [Rol::Espectador, Rol::Administrador]));
+        $otro = $this->agregar('Ana Pérez', 'ana@ejemplo.com', [Rol::Administrador]);
+        $eva = $this->agregar('Eva Espectadora', 'eva@ejemplo.com');
+
+        self::assertSame(400, $this->cambiarEstado(self::ADMINISTRADOR, 'suspender', ['motivo' => 'Prueba'])->estado());
+        self::assertSame(400, $this->cambiarEstado($otro, 'suspender', ['motivo' => 'Prueba'])->estado());
+        self::assertSame('activa', $this->estado(self::ADMINISTRADOR));
+        self::assertSame('activa', $this->estado($otro));
+
+        // En la tabla, sólo la fila de Eva tiene su formulario.
+        $listado = $this->pedir(self::URL)->cuerpo();
+        self::assertSame(1, preg_match_all('#<form id="estado-([^"]+)"#', $listado, $formularios));
+        self::assertSame([$eva], $formularios[1]);
+    }
+
+    public function testConUnUsuarioQueNoExisteDa404(): void
+    {
+        self::assertSame(404, $this->cambiarEstado(Uuid::nuevo(), 'suspender', ['motivo' => 'Spam'])->estado());
+    }
+
+    public function testSinElTokenCsrfNoSuspende(): void
+    {
+        $id = $this->agregar('Eva Espectadora', 'eva@ejemplo.com');
+
+        $respuesta = $this->pedir(self::URL . "/{$id}/estado", metodo: 'POST', cuerpo: ['accion' => 'suspender', 'motivo' => 'Spam', '_csrf' => str_repeat('d', 64)]);
+
+        self::assertSame(403, $respuesta->estado());
+        self::assertSame('activa', $this->estado($id));
+    }
+
+    #[DataProvider('otrosRoles')]
+    public function testSoloElAdministradorSuspende(?string $rol, int $estado): void
+    {
+        $id = $this->agregar('Eva Espectadora', 'eva@ejemplo.com');
+
+        self::assertSame($estado, $this->cambiarEstado($id, 'suspender', ['motivo' => 'Spam'], $rol)->estado());
+
+        self::assertSame('activa', $this->estado($id));
+    }
 }

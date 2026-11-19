@@ -173,6 +173,7 @@ Prefijo `/recaudacion`. Los beneficios y los puntos, los reportes y las liquidac
 | GET | `/puntos` | espectador |
 | POST | `/puntos/canjear` | espectador |
 | GET | `/reportes` | organizador |
+| POST | `/reportes/costos` | organizador |
 | GET | `/reportes/funciones` | organizador |
 | GET | `/reportes/funciones.csv` | organizador |
 | GET | `/reportes/obras` | organizador |

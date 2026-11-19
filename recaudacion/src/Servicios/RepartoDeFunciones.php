@@ -19,7 +19,8 @@ use RuntimeException;
  * Le pide a programación las funciones finalizadas desde la última que repartió
  * (GET /interno/funciones/finalizadas?desde=…, por fecha de finalización y no por la de la función)
  * y a funciones lo cobrado de cada una (GET /interno/cobros), que ya viene neto de reembolsos. Con
- * los porcentajes que regían en la fecha de la función (EF-08.1) guarda el reparto y sus partes.
+ * los porcentajes que regían en la fecha de la función (EF-08.1) guarda el reparto y sus partes,
+ * después de descontar la comisión de Mercado Pago (EF-22.1).
  *
  * Correrla de más no duplica nada: la función ya repartida se saltea, y la clave única de
  * reparto.funcion_id es la red. Si uno de los dos subsistemas no responde, no reparte nada y la
@@ -39,6 +40,8 @@ final class RepartoDeFunciones
         private readonly CobrosDeFunciones $cobros,
         private readonly ServicioDeParametrosDeReparto $parametros,
         private readonly RepositorioDeRepartos $repartos,
+        /** La comisión de Mercado Pago, en centésimos de punto, que se descuenta antes de repartir (EF-22.1). */
+        private readonly int $comisionCentesimos = 0,
     ) {
     }
 
@@ -101,7 +104,7 @@ final class RepartoDeFunciones
             throw new RuntimeException("La función {$funcion->id} se finalizó sin ninguna obra proyectada: no hay cómo repartirla.");
         }
 
-        return Reparto::calcular($funcion, $neto, $parametro, $ahora);
+        return Reparto::calcular($funcion, $neto, $parametro, $ahora, $this->comisionCentesimos);
     }
 
     /**

@@ -652,8 +652,34 @@ no duplica nada:
   documentos les da 30 días desde esa fecha (con un aviso al empezar y otro siete días antes del
   fin) y después las suspende. Al desplegar EF-07.5, poner ahí la fecha del despliegue.
 
+- `respaldar` (todos los días a las 4): el respaldo de la base y de los archivos (ver «Respaldos»).
+
 En local no se instalan: se prueban a mano con el `docker compose exec` de cada línea, y los correos
 llegan a Mailpit.
+
+### Respaldos
+
+`herramientas/respaldar.sh` guarda cada día, en un solo archivo cifrado, el volcado de los cinco
+esquemas (y `control_migraciones`) y los volúmenes de archivos de programación y de moderación. Lo
+cifra con la clave pública de `~/.config/indiecinema/respaldo.asc`: en el servidor no hay con qué
+descifrarlo. Deja los últimos 14 días en `~/respaldos/diarios` y, si existe
+`~/.config/indiecinema/respaldo-destino`, copia cada uno afuera del servidor (`s3://bucket/carpeta`
+con la AWS CLI, o `usuario@host:carpeta` con scp). Lo que pasó queda en `~/respaldos/respaldar.log`.
+
+Para preparar un servidor, una vez:
+
+```
+mkdir -p ~/.config/indiecinema && chmod 700 ~/.config/indiecinema
+# la pública del grupo (gpg --armor --export respaldos@indiecinema.test), nunca la privada
+cat > ~/.config/indiecinema/respaldo.asc
+echo s3://bucket/indiecinema/produccion > ~/.config/indiecinema/respaldo-destino   # opcional
+bash herramientas/respaldar.sh
+```
+
+La clave privada la guarda el grupo fuera de los servidores. Con ella, `herramientas/restaurar.sh
+<respaldo>` lo descifra, lo carga en un MySQL descartable y muestra las filas de cada tabla para
+compararlas con las del servidor: es la restauración probada que pide la propuesta antes de cada
+entrega (en `docs/seguridad.md`, la última).
 
 ### Ramas y entornos
 

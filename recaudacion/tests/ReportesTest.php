@@ -34,6 +34,7 @@ final class ReportesTest extends TestCase
 
     private static string $programacion;
     private static string $funciones;
+    private static string $moderacion;
 
     /** Un puerto donde no atiende nadie: un subsistema caído. */
     private static string $caido;
@@ -42,6 +43,7 @@ final class ReportesTest extends TestCase
     {
         self::$programacion = self::levantar('programacion.php');
         self::$funciones = self::levantar('funciones.php');
+        self::$moderacion = self::levantar('moderacion.php');
         self::$caido = 'http://127.0.0.1:' . self::puertoLibre();
     }
 
@@ -58,7 +60,7 @@ final class ReportesTest extends TestCase
         $configuracion = new Configuracion([
             'app' => ['subsistema' => 'recaudacion', 'prefijo' => '/recaudacion', 'entorno' => 'desarrollo'],
             'nginx' => ['secreto' => 'secreto-de-nginx'],
-            'subsistemas' => [...['programacion' => self::$programacion, 'funciones' => self::$funciones], ...$subsistemas],
+            'subsistemas' => [...['programacion' => self::$programacion, 'funciones' => self::$funciones, 'moderacion' => self::$moderacion], ...$subsistemas],
             'interno' => ['token' => 'token-de-recaudacion'],
         ]);
         $aplicacion = new Aplicacion(dirname(__DIR__), $configuracion, new Log('recaudacion', fopen('php://memory', 'w')));
@@ -317,5 +319,31 @@ final class ReportesTest extends TestCase
     public function testElAdministradorNoTieneLaPestanaDeSusObras(): void
     {
         self::assertStringNotContainsString('>Mis obras</a>', $this->pedir(self::NOVIEMBRE, self::ADMINISTRADORA, 'administrador')->cuerpo());
+    }
+
+    public function testElAdministradorVeLaModeracionYLaConductaDeCadaSala(): void
+    {
+        $texto = self::texto($this->pedir(self::NOVIEMBRE, self::ADMINISTRADORA, 'administrador'));
+
+        self::assertStringContainsString('Moderación y conducta', $texto);
+        self::assertStringContainsString('Solicitudes de sala 2 sin resolver; 1 aprobadas y 0 rechazadas', $texto);
+        self::assertStringContainsString('Otras denuncias 1 de obras y calificaciones; 1 abiertas', $texto);
+        // El Galpón y la que no tuvo funciones.
+        self::assertStringContainsString('Salas suspendidas 2', $texto);
+        self::assertMatchesRegularExpression('/El Galpón Suspendida por una denuncia 3 2 abiertas, 1 desestimadas y 0 resueltas 2 1 1 de \d+ espectadores/', $texto);
+        self::assertMatchesRegularExpression('/Cineclub Norte 0 0 0 1 de 20 espectadores/', $texto);
+    }
+
+    public function testElOrganizadorNoVeLaModeracion(): void
+    {
+        self::assertStringNotContainsString('Moderación y conducta', self::texto($this->pedir(self::NOVIEMBRE)));
+    }
+
+    public function testSiModeracionNoRespondeLoDiceYSigueConLaConducta(): void
+    {
+        $texto = self::texto($this->pedir(self::NOVIEMBRE, self::ADMINISTRADORA, 'administrador', ['moderacion' => self::$caido]));
+
+        self::assertStringContainsString('Moderación no respondió: faltan las denuncias, las salas suspendidas y las solicitudes.', $texto);
+        self::assertMatchesRegularExpression('/El Galpón 0 2 1 1 de \d+ espectadores/', $texto);
     }
 }

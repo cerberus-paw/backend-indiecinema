@@ -121,6 +121,26 @@ if ($ruta === '/interno/cupones/en-uso') {
 
     return;
 }
+// La conducta de las funciones para los reportes del administrador (EF-22.4): la del primer
+// miércoles del Galpón tuvo dos ausentes y una calificación negativa.
+if ($ruta === '/interno/conducta/funciones') {
+    $ids = explode(',', (string) ($_GET['funciones'] ?? ''));
+    echo json_encode(['funciones' => (object) array_intersect_key(['30000000-0000-4000-8000-000000000001' => ['ausentes' => 2, 'negativas' => 1]], array_flip($ids))]);
+
+    return;
+}
+// El comprador 100 está bajo el umbral de conducta.
+if ($ruta === '/interno/usuarios/conducta') {
+    $ids = explode(',', (string) ($_GET['ids'] ?? ''));
+    $conductas = [];
+    foreach ($ids as $id) {
+        $bajo = $id === '90000000-0000-4000-8000-000000000100';
+        $conductas[$id] = ['puntaje' => $bajo ? 40 : 100, 'bajo_umbral' => $bajo, 'negativas' => $bajo ? 2 : 0, 'ausencias' => 0];
+    }
+    echo json_encode(['conductas' => (object) $conductas]);
+
+    return;
+}
 if ($ruta === '/interno/cobros') {
     $ids = explode(',', (string) ($_GET['funciones'] ?? ''));
     echo json_encode(['cobros' => (object) array_combine($ids, array_map($cobros, $ids))]);

@@ -798,6 +798,12 @@ final class SolicitudDeSalaTest extends TestCase
         self::assertSame(404, $this->pedir(usuario: self::OTRO, url: $url)->estado());
         self::assertSame(404, $this->pedir(url: '/solicitudes/no-es-un-id/foto')->estado());
         self::assertSame(401, $this->pedir(rol: null, url: $url)->estado());
+        // Ni con el nombre con que quedó en el volumen en lugar del id, ni con una ruta armada a
+        // mano (EF-18.2).
+        $imagen = (string) $this->base->valor('SELECT imagen FROM solicitud_sala WHERE id = ?', [$id]);
+        foreach (["/solicitudes/{$imagen}/foto", '/solicitudes/' . rawurlencode("../{$imagen}") . '/foto', '/solicitudes/..%2F..%2Fetc%2Fpasswd/foto'] as $armada) {
+            self::assertSame(404, $this->pedir(rol: 'moderador', usuario: self::OTRO, url: $armada)->estado(), $armada);
+        }
 
         // Al corregirla, la pantalla la muestra con la dirección de moderación.
         $this->rechazarLaUltima();

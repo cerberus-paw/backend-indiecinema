@@ -297,13 +297,13 @@ hecho, dónde y cómo se comprueba, o por qué no. Lo hecho tiene su fila en las
 | Sistema operativo | SSH sólo con clave, sin root y con fail2ban | Hecho | «Sistema operativo» |
 | Sistema operativo | Cada contenedor sin privilegios y con sus volúmenes; la documentación de las salas en el volumen de moderación, fuera del webroot | Hecho | «Sistema operativo» |
 | Sistema operativo | Configuración fuera del repositorio, leída sólo por su servicio; la credencial de Mercado Pago sólo en funciones | Hecho | «Sistema operativo» |
-| Sistema operativo | Respaldos diarios de la base y de los archivos, cifrados y fuera del VPS | Pendiente | EF-18.5 (IC-622) |
+| Sistema operativo | Respaldos diarios de la base y de los archivos, cifrados y fuera del VPS | Hecho, salvo el destino afuera | «Sistema operativo»: diarios y cifrados con la clave pública del grupo. La copia fuera del VPS ya la hace el script, pero cada servidor necesita su destino (un bucket de S3 o una máquina por scp) y todavía no lo tiene: faltan las credenciales (EF-18.5, IC-622) |
 | Base de datos | Un usuario por subsistema con permisos sólo sobre su esquema | Hecho | «Base de datos» |
 | Base de datos | Lo que otro subsistema necesita leer, como vista de sólo lectura | No, se reemplazó | Se decidió en la arquitectura (Entrega 2): lo que un subsistema necesita de otro lo pide por la API interna, con un token por llamador. Una vista cruzaría esquemas y le daría al usuario de un subsistema acceso a tablas de otro, que es lo que la separación evita |
 | Base de datos | Sin permisos de estructura para la aplicación; las migraciones con otro usuario | Hecho | «Base de datos» |
 | Base de datos | MySQL sin escuchar fuera de la red interna | Hecho | «Red» y «Base de datos» |
 | Base de datos | Reglas en la base: un voto por usuario y función, un registro por identificador de pago | Hecho | «Base de datos»: `un_voto_por_usuario_y_funcion` (programación) y `pago_id` único (funciones) |
-| Base de datos | Restauración probada antes de cada entrega | Pendiente | EF-18.5 (IC-622), con los respaldos |
+| Base de datos | Restauración probada antes de cada entrega | Hecho | «Base de datos»: el 19/11/2026, con el respaldo del servidor de desarrollo |
 | Aplicación | Autenticación propia: Argon2id, cookie `HttpOnly`, `Secure` y `SameSite`, identificador nuevo al ingresar, recuperación con un token de un solo uso que vence | Hecho | «Aplicación»; el token de recuperación vence en una hora y se marca usado (`cuentas/migraciones/006_tabla_token_de_cuenta.sql`) |
 | Aplicación | Rol mínimo por ruta y dueño del recurso | Hecho | «Aplicación» y la matriz de `docs/permisos.md` (EF-18.2) |
 | Aplicación | Consultas preparadas, autoescape de Twig y token CSRF en todo formulario | Hecho | «Aplicación» |

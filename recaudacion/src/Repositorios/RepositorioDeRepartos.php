@@ -35,13 +35,14 @@ final class RepositorioDeRepartos
     {
         $this->base->enTransaccion(function (BaseDeDatos $base) use ($reparto): void {
             $base->ejecutar(
-                'INSERT INTO reparto (id, funcion_id, cobrado, parametro_id, finalizada_en, calculado_en,
+                'INSERT INTO reparto (id, funcion_id, cobrado, comision, parametro_id, finalizada_en, calculado_en,
                                       funcion_fecha_hora, sala_nombre, titulos)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
                 [
                     $reparto->id,
                     $reparto->funcionId,
                     $reparto->cobrado(),
+                    $reparto->comision(),
                     $reparto->parametroId,
                     $reparto->finalizadaEn,
                     $reparto->calculadoEn,
@@ -169,5 +170,42 @@ final class RepositorioDeRepartos
                 [$funcionId],
             ),
         );
+    }
+
+    /**
+     * Cómo se repartió cada una de esas funciones, sumado por rol: para el resultado de cada sala
+     * y de la plataforma en los reportes (EF-22.1). Las que todavía no se repartieron no vienen.
+     *
+     * @param list<string> $funcionesIds
+     *
+     * @return array<string, array{cobrado: int, comision: int, sala: int, dueno: int, plataforma: int}> por función, en centavos
+     */
+    public function sumasPorRol(array $funcionesIds): array
+    {
+        $sumas = [];
+        foreach (array_chunk(array_values(array_unique($funcionesIds)), 500) as $tanda) {
+            $marcas = implode(', ', array_fill(0, count($tanda), '?'));
+            foreach ($this->base->filas(
+                "SELECT r.funcion_id, r.cobrado, r.comision,
+                        COALESCE(SUM(CASE WHEN p.rol = 'sala' THEN p.monto END), 0) AS sala,
+                        COALESCE(SUM(CASE WHEN p.rol = 'dueno' THEN p.monto END), 0) AS dueno,
+                        COALESCE(SUM(CASE WHEN p.rol = 'plataforma' THEN p.monto END), 0) AS plataforma
+                 FROM reparto r
+                 LEFT JOIN reparto_parte p ON p.reparto_id = r.id
+                 WHERE r.funcion_id IN ({$marcas})
+                 GROUP BY r.id, r.funcion_id, r.cobrado, r.comision",
+                $tanda,
+            ) as $fila) {
+                $sumas[(string) $fila['funcion_id']] = [
+                    'cobrado' => Monto::centavos((string) $fila['cobrado']),
+                    'comision' => Monto::centavos((string) $fila['comision']),
+                    'sala' => Monto::centavos((string) $fila['sala']),
+                    'dueno' => Monto::centavos((string) $fila['dueno']),
+                    'plataforma' => Monto::centavos((string) $fila['plataforma']),
+                ];
+            }
+        }
+
+        return $sumas;
     }
 }

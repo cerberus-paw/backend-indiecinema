@@ -12,6 +12,7 @@ use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Seguridad\Rol;
 use IndieCinema\Nucleo\Seguridad\Usuario;
+use IndieCinema\Recaudacion\Modelo\CostosDeReferencia;
 use IndieCinema\Recaudacion\Modelo\DiaFlojo;
 use IndieCinema\Recaudacion\Modelo\FuncionFinalizada;
 use IndieCinema\Recaudacion\Modelo\Monto;
@@ -23,11 +24,14 @@ use IndieCinema\Recaudacion\Modelo\PrecioDeLaEntrada;
 use IndieCinema\Recaudacion\Modelo\ReglaIncumplida;
 use IndieCinema\Recaudacion\Modelo\ReporteDeObra;
 use IndieCinema\Recaudacion\Modelo\RendimientoDeSala;
+use IndieCinema\Recaudacion\Modelo\ResultadoDePlataforma;
+use IndieCinema\Recaudacion\Modelo\ResultadoDeSala;
 use IndieCinema\Recaudacion\Modelo\TituloParaRepetir;
 use IndieCinema\Recaudacion\Modelo\TotalDeFunciones;
 use IndieCinema\Recaudacion\Modelo\Umbrales;
 use IndieCinema\Recaudacion\Modelo\VotantesSinReserva;
 use IndieCinema\Recaudacion\Servicios\ObrasDelDueno;
+use IndieCinema\Recaudacion\Servicios\ResultadosDelPeriodo;
 use IndieCinema\Recaudacion\Servicios\ServicioDeReportes;
 use IndieCinema\Recaudacion\Servicios\Sugerencias;
 use IndieCinema\Recaudacion\Servicios\TotalesDelPeriodo;
@@ -37,7 +41,8 @@ use LogicException;
  * Los reportes de recaudación: lo que pasó en las salas en un período. El organizador ve las suyas
  * y el administrador, todas.
  *
- * - GET /recaudacion/reportes: qué conviene hacer (EF-09.1 y EF-09.5). Va primero porque es lo que pidió el
+ * - GET /recaudacion/reportes: si cada sala (y, para el administrador, la plataforma) gana o pierde
+ *   plata (EF-22.1), y qué conviene hacer (EF-09.1 y EF-09.5). Va primero porque es lo que pidió el
  *   profe el 11/11: un reporte que sólo muestra números es una máquina de escribir; uno que dice
  *   qué día conviene una promoción sirve para decidir.
  * - GET /recaudacion/reportes/funciones: los totales de cada mes y las funciones de uno (EF-09.2).
@@ -56,6 +61,7 @@ final class Reportes extends Controlador
     public function __construct(
         private readonly ServicioDeReportes $reportes,
         Configuracion $configuracion,
+        private readonly ?ResultadosDelPeriodo $resultados = null,
     ) {
         $this->umbrales = Umbrales::desdeConfiguracion($configuracion);
     }
@@ -72,11 +78,15 @@ final class Reportes extends Controlador
         $datos = $this->reportes->delOrganizador($periodo, $administrador ? null : $usuario->id);
         $sugerencias = new Sugerencias($this->umbrales);
         $total = $sugerencias->total($datos);
+        $resultados = $this->resultados?->salas($datos) ?? [];
+        $plataforma = $administrador ? $this->resultados?->plataforma($datos, $resultados) : null;
 
         return $this->vista('reportes.html.twig', [
             'periodo' => $periodoElegido,
             'administrador' => $administrador,
             'avisos' => $datos->avisos,
+            'ganancias' => $this->resultados === null ? null : self::ganancias($resultados, $plataforma, $this->resultados->referencia()),
+            'costo_cargado' => self::avisoDelCosto($peticion),
             'funciones' => count($datos->funciones),
             'sin_ventas' => $datos->ventas === null,
             'resumen' => $total === null ? null : self::rendimiento($total),
@@ -128,6 +138,103 @@ final class Reportes extends Controlador
                 'agotada' => "{$this->umbrales->agotadaOcupacionMinima} %",
             ],
         ]);
+    }
+
+    /**
+     * «Guardar» el costo por función de una sala (EF-22.1). El organizador sólo carga el de sus
+     * salas: las que tuvieron alguna función suya, que son las únicas que ve en el reporte. Vuelve
+     * al reporte con el mismo período.
+     *
+     * @throws ExcepcionHttp 403 si la sala no es suya; 422 si el costo no es un monto
+     */
+    public function cargarCosto(Peticion $peticion): Respuesta
+    {
+        $usuario = self::usuario($peticion);
+        $sala = $peticion->campo('sala');
+        $costo = $peticion->campo('costo');
+        if (!is_string($sala) || !is_string($costo) || $this->resultados === null) {
+            throw ExcepcionHttp::solicitudInvalida('Elegí la sala y escribí el costo.');
+        }
+        if (!$usuario->alcanza(Rol::Administrador)) {
+            $suyas = TotalesDelPeriodo::salas($this->reportes->delOrganizador(Periodo::todo(new DateTimeImmutable('today')), $usuario->id));
+            if (!isset($suyas[$sala])) {
+                throw ExcepcionHttp::prohibida();
+            }
+        }
+        $filtros = array_filter(['desde' => $peticion->campo('desde'), 'hasta' => $peticion->campo('hasta')], static fn (mixed $valor): bool => is_string($valor) && $valor !== '');
+        try {
+            $this->resultados->cargarCosto($sala, $costo, $usuario->id);
+        } catch (ReglaIncumplida $regla) {
+            return $this->redirigir('/reportes?' . http_build_query([...$filtros, 'costo_error' => $regla->getMessage()]) . '#ganancias');
+        }
+
+        return $this->redirigir('/reportes?' . http_build_query([...$filtros, 'costo_cargado' => '1']) . '#ganancias');
+    }
+
+    /**
+     * @return ?array{tipo: string, texto: string}
+     */
+    private static function avisoDelCosto(Peticion $peticion): ?array
+    {
+        $error = $peticion->consulta('costo_error');
+        if (is_string($error) && $error !== '') {
+            // Sólo los textos que arma el servicio: el parámetro viaja en la URL.
+            $conocidos = ['Escribí el costo en pesos, sin signos: por ejemplo, 45000.', 'El costo por función puede ser de hasta $ 10.000.000.'];
+
+            return in_array($error, $conocidos, true) ? ['tipo' => 'error', 'texto' => $error] : null;
+        }
+
+        return $peticion->consulta('costo_cargado') === '1' ? ['tipo' => 'exito', 'texto' => 'Guardaste el costo por función: el resultado de la sala ya lo usa.'] : null;
+    }
+
+    /**
+     * Si cada sala y la plataforma ganan o pierden, ya escrito (EF-22.1).
+     *
+     * @param list<ResultadoDeSala> $salas
+     *
+     * @return array<string, mixed>
+     */
+    private static function ganancias(array $salas, ?ResultadoDePlataforma $plataforma, CostosDeReferencia $referencia): array
+    {
+        return [
+            'salas' => array_map(static fn (ResultadoDeSala $sala): array => [
+                'id' => $sala->salaId,
+                'nombre' => $sala->salaNombre,
+                'funciones' => $sala->funciones,
+                'cobrado' => self::pesos($sala->cobrado),
+                'comision' => self::pesos($sala->comision),
+                'duenos' => self::pesos($sala->duenos),
+                'plataforma' => self::pesos($sala->plataforma),
+                'sala' => self::pesos($sala->sala),
+                'costo' => self::pesos($sala->costo()),
+                'costo_funcion' => self::pesos($sala->costoFuncion),
+                'costo_funcion_valor' => Monto::comoDecimal($sala->costoFuncion),
+                'costo_propio' => $sala->costoPropio,
+                'resultado' => self::conSigno($sala->resultado()),
+                'gana' => $sala->resultado() >= 0,
+                'estimadas' => $sala->estimadas,
+                'sin_datos' => $sala->sinDatos,
+            ], $salas),
+            'plataforma' => $plataforma === null ? null : [
+                'ingresos' => self::pesos($plataforma->ingresos),
+                'servidores' => self::pesos($plataforma->servidores),
+                'desarrollo' => self::pesos($plataforma->desarrollo),
+                'costo' => self::pesos($plataforma->costo()),
+                'dias' => $plataforma->dias,
+                'resultado' => self::conSigno($plataforma->resultado()),
+                'gana' => $plataforma->resultado() >= 0,
+            ],
+            'comision' => str_replace('.', ',', rtrim(rtrim(sprintf('%.2f', $referencia->comisionCentesimos / 100), '0'), '.')) . ' %',
+            'costo_funcion' => self::pesos($referencia->costoFuncionCentavos),
+            'servidores_mes' => self::pesos($referencia->servidoresMesCentavos),
+            'desarrollo_mes' => self::pesos($referencia->desarrolloMesCentavos),
+        ];
+    }
+
+    /** «+ $ 31.000» o «− $ 8.400»: el signo, además del color, dice si ganó o perdió. */
+    private static function conSigno(int $centavos): string
+    {
+        return ($centavos < 0 ? '− ' : '+ ') . self::pesos(abs($centavos));
     }
 
     /**

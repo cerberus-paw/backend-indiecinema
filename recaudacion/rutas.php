@@ -29,6 +29,8 @@ return static function (Router $router): void {
     // Lo que pasó en las salas en un período y qué conviene hacer (EF-09): el organizador ve las
     // suyas y el administrador, todas.
     $router->get('/reportes', [Reportes::class, 'mostrar'], Rol::Organizador);
+    // El costo por función de una sala, contra el que se ve si gana o pierde plata (EF-22.1).
+    $router->post('/reportes/costos', [Reportes::class, 'cargarCosto'], Rol::Organizador);
     // Los totales de cada mes y las funciones de uno (EF-09.2), y todas en CSV.
     $router->get('/reportes/funciones', [Reportes::class, 'funciones'], Rol::Organizador);
     $router->get('/reportes/funciones.csv', [Reportes::class, 'descargar'], Rol::Organizador);

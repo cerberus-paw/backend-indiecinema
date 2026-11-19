@@ -29,6 +29,12 @@ final readonly class VentasDeFuncion
         $asistentes = 0;
         $compradores = [];
         foreach ($cobros->reservas as $reserva) {
+            // Funciones manda también las canceladas que se habían pagado, para el reparto: no
+            // ocupan un lugar ni son de alguien que vino. Si se contaran, una función que el
+            // organizador canceló seguiría llena en los reportes (lo mostró el escenario de EF-22.5).
+            if ($reserva->estado === 'cancelada') {
+                continue;
+            }
             $vendidas += $reserva->cantidad;
             if ($reserva->estado === 'asistio') {
                 $asistentes += $reserva->cantidad;

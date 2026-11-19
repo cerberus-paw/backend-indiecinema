@@ -9,11 +9,10 @@
 
 set -uo pipefail
 
-# Una tabla de cada esquema para intentar leer. No hace falta que exista: MySQL controla el
-# permiso antes de buscar la tabla, así que el error es el mismo.
-# Las de moderación y recaudación todavía no existen (llegan con EF-07 y EF-08): para el intento
-# da lo mismo.
-declare -A tabla=([cuentas]=usuario [programacion]=sala [funciones]=reserva [moderacion]=solicitud [recaudacion]=liquidacion)
+# Una tabla de verdad de cada esquema para intentar leer. MySQL controla el permiso antes de
+# buscar la tabla, así que el error sería el mismo aunque no existiera, pero con una que existe el
+# intento es el de un subsistema comprometido.
+declare -A tabla=([cuentas]=usuario [programacion]=sala [funciones]=reserva [moderacion]=solicitud_sala [recaudacion]=liquidacion)
 fallas=0
 
 # Corre $3 como el usuario $1 y espera que MySQL lo rechace por permisos.

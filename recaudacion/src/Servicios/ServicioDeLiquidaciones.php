@@ -5,11 +5,14 @@ declare(strict_types=1);
 namespace IndieCinema\Recaudacion\Servicios;
 
 use DateTimeImmutable;
+use IndieCinema\Nucleo\Seguridad\Usuario;
 use IndieCinema\Recaudacion\Modelo\Liquidacion;
 use IndieCinema\Recaudacion\Modelo\Mes;
 use IndieCinema\Recaudacion\Modelo\ParteLiquidada;
 use IndieCinema\Recaudacion\Repositorios\RepositorioDeLiquidaciones;
 use IndieCinema\Recaudacion\Repositorios\RepositorioDeRepartos;
+use Psr\Log\LoggerInterface;
+use Psr\Log\NullLogger;
 
 /**
  * Lo que se le liquida a cada organizador y a cada dueño por mes (EF-08.3).
@@ -26,6 +29,8 @@ final class ServicioDeLiquidaciones
     public function __construct(
         private readonly RepositorioDeLiquidaciones $liquidaciones,
         private readonly RepositorioDeRepartos $repartos,
+        // La tarea del cron (bin/repartir.php) sólo arma: no marca nada, y no necesita el log.
+        private readonly LoggerInterface $log = new NullLogger(),
     ) {
     }
 
@@ -95,9 +100,19 @@ final class ServicioDeLiquidaciones
      * @return bool si ésta la marcó; false si ya estaba transferida, y entonces no se pisa la
      *              fecha ni la nota de la primera vez
      */
-    public function marcarTransferida(string $id, ?string $nota, DateTimeImmutable $ahora = new DateTimeImmutable()): bool
+    public function marcarTransferida(Usuario $administrador, string $id, ?string $nota, DateTimeImmutable $ahora = new DateTimeImmutable()): bool
     {
-        return $this->liquidaciones->marcarTransferida($id, $nota, $ahora);
+        $marcada = $this->liquidaciones->marcarTransferida($id, $nota, $ahora);
+        if ($marcada) {
+            // La auditoría que prometió la propuesta (EF-18.1): quién la marcó, como los cambios de
+            // rol en cuentas y las decisiones de moderación. Sólo los ids, sin datos personales.
+            $this->log->notice('{administrador} marcó como transferida la liquidación {liquidacion}.', [
+                'administrador' => $administrador->id,
+                'liquidacion' => $id,
+            ]);
+        }
+
+        return $marcada;
     }
 
     /**

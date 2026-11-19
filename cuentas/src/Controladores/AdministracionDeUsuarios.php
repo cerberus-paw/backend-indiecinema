@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace IndieCinema\Cuentas\Controladores;
 
+use DateTimeImmutable;
+use DateTimeZone;
+use IndieCinema\Cuentas\Modelo\EstadoCuenta;
 use IndieCinema\Cuentas\Modelo\UsuarioEnListado;
 use IndieCinema\Cuentas\Servicios\ConductaDeFunciones;
 use IndieCinema\Cuentas\Servicios\ServicioDeUsuarios;
@@ -20,13 +23,16 @@ use LogicException;
  * la E2, con las tarjetas de números, un buscador por nombre o correo y los filtros de rol,
  * estado y año de alta, que viajan en la URL (un formulario GET), así funciona sin JavaScript y se puede
  * compartir. En cada fila, el rol es un desplegable, y «Guardar cambios» manda en un POST los de
- * toda la tabla. Sólo el administrador llega: lo controla el rol de la ruta, y el núcleo ya
+ * toda la tabla; en «Acciones», suspender (con motivo) o reactivar cada cuenta. Sólo el administrador llega: lo controla el rol de la ruta, y el núcleo ya
  * controló el token CSRF de los POST.
  */
 final class AdministracionDeUsuarios extends Controlador
 {
     /** Cuántas páginas se numeran a cada lado de la actual, además de la primera y la última. */
     private const PAGINAS_ALREDEDOR = 2;
+
+    /** La fecha de la suspensión se muestra en la hora de Argentina, como el resto del sitio. */
+    private const ZONA = 'America/Argentina/Buenos_Aires';
 
     public function __construct(
         private readonly ServicioDeUsuarios $servicio,
@@ -53,21 +59,22 @@ final class AdministracionDeUsuarios extends Controlador
         $total = $pagina->totalDePaginas();
 
         $resumen = $this->servicio->resumen();
-        $conductas = $this->conductas?->deVarios(array_map(
-            static fn (UsuarioEnListado $usuario): string => $usuario->id,
-            $pagina->usuarios,
-        ));
+        $ids = array_map(static fn (UsuarioEnListado $usuario): string => $usuario->id, $pagina->usuarios);
+        $conductas = $this->conductas?->deVarios($ids);
+        $suspensiones = $this->servicio->suspensiones($ids);
+        $administrador = self::administrador($peticion);
 
         return $this->vista('administracion_usuarios.html.twig', [
             'resumen' => ['usuarios' => $resumen->usuarios, 'nuevos' => $resumen->nuevos, 'organizadores' => $resumen->organizadores],
             'usuarios' => array_map(
-                static fn (UsuarioEnListado $usuario): array => self::datos($usuario, $conductas[$usuario->id] ?? null),
+                static fn (UsuarioEnListado $usuario): array => self::datos($usuario, $administrador, $conductas[$usuario->id] ?? null, $suspensiones[$usuario->id] ?? null),
                 $pagina->usuarios,
             ),
             'filtros' => $parametros->valores,
             'anios_de_alta' => self::aniosDeAlta($this->servicio->aniosDeAlta(), $parametros->filtros->alta),
             'avisos' => $parametros->avisos,
             'mensaje_exito' => $this->mensaje($peticion),
+            'maximo_motivo' => ServicioDeUsuarios::MAXIMO_MOTIVO,
             'paginado' => [
                 'numero' => $pagina->numero,
                 'total_paginas' => $total,
@@ -119,6 +126,27 @@ final class AdministracionDeUsuarios extends Controlador
         });
     }
 
+    /**
+     * «Suspender» con su motivo o «Reactivar», desde la columna «Acciones» (EF-14.3). Vuelve al
+     * listado con la misma búsqueda, como «Guardar cambios». Si ya estaba como se pidió (otra
+     * pestaña), vuelve sin aviso.
+     *
+     * @throws ExcepcionHttp 404 si el usuario no existe; 400 si la acción no es una de las dos,
+     *                       falta el motivo, o es la propia cuenta o la de un administrador
+     */
+    public function cambiarEstado(Peticion $peticion): Respuesta
+    {
+        $id = (string) $peticion->parametro('id');
+        $administrador = self::administrador($peticion);
+        $hecho = match ($peticion->campo('accion')) {
+            'suspender' => $this->servicio->suspender($id, is_string($motivo = $peticion->campo('motivo')) ? $motivo : '', $administrador) ? 'suspendido' : null,
+            'reactivar' => $this->servicio->reactivar($id, $administrador) ? 'reactivado' : null,
+            default => throw ExcepcionHttp::solicitudInvalida('Elegí suspender o reactivar.'),
+        };
+
+        return self::volverAlListado($peticion, $hecho === null ? [] : [$hecho => $id]);
+    }
+
     private static function administrador(Peticion $peticion): Usuario
     {
         return $peticion->usuario() ?? throw new LogicException('La ruta pide el rol de administrador: sin sesión no llega acá.');
@@ -155,6 +183,8 @@ final class AdministracionDeUsuarios extends Controlador
             'organizador_quitado' => 'Le quitaste el rol de organizador a «%s».',
             'moderador_dado' => 'Le diste el rol de moderador a «%s». Lo va a tener la próxima vez que ingrese.',
             'moderador_quitado' => 'Le quitaste el rol de moderador a «%s».',
+            'suspendido' => 'Suspendiste la cuenta de «%s»: ya no puede ingresar y se cerraron sus sesiones.',
+            'reactivado' => 'Reactivaste la cuenta de «%s»: ya puede volver a ingresar.',
         ];
         foreach ($avisos as $clave => $texto) {
             $id = $peticion->consulta($clave);
@@ -177,12 +207,17 @@ final class AdministracionDeUsuarios extends Controlador
      * El rol es el mayor, como en el wireframe: los roles se acumulan, y el organizador también es
      * espectador.
      *
-     * @param ?array{puntaje: int, bajo_umbral: bool, negativas: int, ausencias: int} $conducta
+     * En «Acciones», suspender o reactivar, salvo en la propia cuenta y en la de un administrador.
      *
-     * @return array{id: string, nombre: string, correo: string, rol: string, estado: string, conducta: ?array{puntaje: int, bajo_umbral: bool, negativas: int, ausencias: int}}
+     * @param ?array{puntaje: int, bajo_umbral: bool, negativas: int, ausencias: int} $conducta
+     * @param ?array{motivo: ?string, anterior: EstadoCuenta, desde: DateTimeImmutable} $suspension
+     *
+     * @return array{id: string, nombre: string, correo: string, rol: string, estado: string, conducta: ?array{puntaje: int, bajo_umbral: bool, negativas: int, ausencias: int}, accion: ?string, suspension: ?array{motivo: ?string, desde: string}}
      */
-    private static function datos(UsuarioEnListado $usuario, ?array $conducta = null): array
+    private static function datos(UsuarioEnListado $usuario, Usuario $administrador, ?array $conducta = null, ?array $suspension = null): array
     {
+        $suspendida = $usuario->estado === EstadoCuenta::Suspendida;
+
         return [
             'id' => $usuario->id,
             'nombre' => $usuario->nombre,
@@ -190,6 +225,10 @@ final class AdministracionDeUsuarios extends Controlador
             'rol' => $usuario->mayorRol()->value,
             'estado' => $usuario->estado->value,
             'conducta' => $conducta,
+            'accion' => ServicioDeUsuarios::sePuedeSuspender($usuario, $administrador) ? ($suspendida ? 'reactivar' : 'suspender') : null,
+            'suspension' => $suspendida && $suspension !== null
+                ? ['motivo' => $suspension['motivo'], 'desde' => $suspension['desde']->setTimezone(new DateTimeZone(self::ZONA))->format('d/m/Y')]
+                : null,
         ];
     }
 

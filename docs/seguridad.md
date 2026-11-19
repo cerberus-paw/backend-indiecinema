@@ -210,7 +210,31 @@ la sección siguiente, que atacó el sitio con cada rol.
 
 ## Análisis con OWASP ZAP
 
-Hecho entre el 7 y el 8/11/2026 con la imagen `ghcr.io/zaproxy/zaproxy:stable` (ZAP 2.17), en
+**19/11/2026, con los cinco subsistemas (EF-18.4).** Escaneo activo con sesión contra el compose
+local, con moderación y recaudación y los datos de la demo: Eva (espectadora, 202 URL), Omar
+(organizador, 507) y Mora (moderadora, 242), con la receta del final de esta sección. Los informes
+están en `docs/zap/2026-11-19-activo-*.html`. El pasivo sin sesión lo sigue corriendo el CD después
+de cada publicación de `dev`, y pasa.
+
+**Ninguna alerta alta es real.** Las cuatro que aparecieron se reprodujeron a mano:
+
+| Alerta | Dónde | Tratamiento |
+|---|---|---|
+| SQL Injection (40018), alta | `GET /cartelera?precio_min=0' AND '1'='1' --` (organizador) | **Falso positivo**: las respuestas a las dos condiciones de ZAP son idénticas salvo el token CSRF de la página, que es nuevo en cada pedido sin cookie; un precio inválido se deja afuera del filtro, igual que «abc». ZAP comparó esa diferencia, o datos que otro escaneo cambiaba en el medio |
+| SQL Injection (40018), alta | `POST /funcion/organizador/funciones/{id}/conducta`, campo `motivo` | **Falso positivo**: el motivo va como parámetro de una sentencia preparada (`RepositorioDeConducta`). La respuesta cambia porque el primer envío califica y el siguiente responde que esa conducta ya fue calificada |
+| Path Traversal (6), alta | `GET /cartelera.csv?orden=cartelera.csv` (organizador) | **Falso positivo**: `orden` se compara con una lista de órdenes conocidos y uno que no está se deja afuera; no se abre ningún archivo con él |
+| Source Code Disclosure - File Inclusion (43), alta | `POST /funcion/reservar/{id}`, campo `cantidad` (espectadora) | **Falso positivo**: `cantidad` se lee con `filter_var` como entero entre 1 y el cupo; con otra cosa responde el error del campo. No se abre ningún archivo |
+
+Las medias son las de noviembre, con el mismo tratamiento (tabla de abajo): *Anti-CSRF Tokens
+Check* (20012: ZAP mira el buscador, que es GET, y el formulario de salir, que lleva el token),
+*Bypassing 403* (40038: nginx no usa `X-Original-URL`) y *HTTP Only Site* (10106: el compose local va
+por HTTP a propósito). Una baja nueva, *Private IP Disclosure* (2) en `/pedidos?pagina=2`, es dato
+que cargó el propio ZAP: el escaneo del organizador pidió títulos con su dirección de callback
+(`172.23.0.10`), que se muestran escapados (el `<script>` que mandó sale como texto).
+
+**Noviembre (7 y 8/11).**
+
+Hecho entre el 7 y el 8/11/2026, con los tres subsistemas de la Entrega 4, con la imagen `ghcr.io/zaproxy/zaproxy:stable` (ZAP 2.17), en
 tres partes:
 
 - **Pasivo (baseline), sin sesión**, contra https://indiecinema-dev.duckdns.org: recorre las páginas
@@ -262,11 +286,12 @@ plantilla (ver «Red»).
 prueba cargados, por cada cuenta: ingresar con `POST /cuenta/ingresar` (`email`, `password` y
 `_csrf`, igual a la cookie `csrf`), y pasarle a ZAP las cookies `csrf` y `sesion`. Son `Secure`,
 así que por HTTP hay que mandarlas a mano, con el reemplazo de cabeceras. Además, excluir
-`/cuenta/salir`, que le cerraría la sesión, y limitar la memoria de Java:
+`/cuenta/salir`, que le cerraría la sesión, y limitar la memoria de Java. Las reglas que se
+saltean están en `.zap/reglas.tsv`, con su porqué:
 
 ```
-echo -Xmx2g > zap-jvm.properties
-printf '40026\tIGNORE\n' > activo.tsv
+echo -Xmx3g > zap-jvm.properties
+cp .zap/reglas.tsv activo.tsv
 SESION='csrf=…;sesion=…'
 R='replacer.full_list(0)'
 OPCIONES="-config $R.description=sesion -config $R.enabled=true -config $R.matchtype=REQ_HEADER"
@@ -278,7 +303,7 @@ docker run --rm --network indiecinema_interna -m 4g -v "$PWD:/zap/wrk:rw" \
   zap-full-scan.py -t http://nginx/ -m 5 -I -c activo.tsv -r informe.html -z "$OPCIONES"
 ```
 
-`activo.tsv` saltea la regla 40026. Con 4 GB por contenedor entran dos a la vez, pero el del
+`activo.tsv` saltea la regla 40026. En el compose local la red se llama `<proyecto>_interna`. Con 4 GB por contenedor entran dos a la vez, pero el del
 administrador va solo, porque puede suspender a las otras cuentas o cambiarles el rol.
 
 ## Contra la propuesta

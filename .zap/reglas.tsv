@@ -4,3 +4,4 @@
 # de una regla que no esté acá. Antes de sumar una, revisarla y anotarla en docs/seguridad.md,
 # «Análisis con OWASP ZAP».
 10031	IGNORE	(User Controllable HTML Element Attribute: los filtros de la cartelera vuelven en el value del formulario, y Twig los escapa. Es informativa; se ignora para que no tape lo demás en el informe)
+40026	IGNORE	(Cross Site Scripting (DOM Based): abre un Firefox adentro de ZAP y lo tumbaba por memoria en el escaneo activo. Ese riesgo lo cubren la CSP y que el JavaScript no arma HTML con texto de nadie; ver docs/seguridad.md)

@@ -27,6 +27,7 @@ Prefijo `/cuenta`. La cuenta de cada uno, el ingreso y el registro, y los usuari
 | GET | `/` | espectador |
 | GET | `/administracion/usuarios` | administrador |
 | POST | `/administracion/usuarios/roles` | administrador |
+| POST | `/administracion/usuarios/{id}/estado` | administrador |
 | GET | `/contrasena` | espectador |
 | POST | `/contrasena` | espectador |
 | GET | `/datos` | espectador |

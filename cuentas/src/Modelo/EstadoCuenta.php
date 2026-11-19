@@ -13,6 +13,6 @@ enum EstadoCuenta: string
     /** Registrada, esperando que verifique el correo. */
     case Pendiente = 'pendiente';
     case Activa = 'activa';
-    /** La suspende moderación (E4). */
+    /** La suspende el administrador desde «Usuarios y roles» (EF-14.3): no ingresa. */
     case Suspendida = 'suspendida';
 }

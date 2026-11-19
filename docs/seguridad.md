@@ -40,6 +40,7 @@ de desarrollo», al final de «Sistema operativo».
 | Cada subsistema corre como `www-data`, sin ninguna capacidad de root, sin poder ganar privilegios y con el sistema de archivos de sólo lectura | `php/Dockerfile` y `x-subsistema` en `docker-compose.yml` (`cap_drop: [ALL]`, `no-new-privileges`, `read_only`) | `docker compose exec programacion id` |
 | Un subsistema comprometido no lee el código ni los secretos de los otros: cada uno monta sólo su carpeta | `volumes` de cada subsistema en `docker-compose.yml` | — |
 | Docker aísla los contenedores con AppArmor y seccomp | perfiles por defecto de Docker | `docker info` |
+| Respaldo diario de la base (los cinco esquemas y `control_migraciones`) y de los volúmenes de archivos, cifrado con la clave pública del grupo: en el servidor no hay con qué descifrarlo, así que un respaldo filtrado no se lee. Quedan 14 días en el servidor y cada uno se copia afuera si el servidor tiene un destino configurado (un bucket de S3 o otra máquina por scp) (EF-18.5) | `herramientas/respaldar.sh`, su línea en `herramientas/crontab` y `~/.config/indiecinema/` en cada servidor (README, «Respaldos») | `~/respaldos/respaldar.log` y `ls ~/respaldos/diarios` |
 
 **El servidor de desarrollo**
 
@@ -74,6 +75,7 @@ por la red interna del compose.
 | Un voto por usuario en cada acuerdo de fecha y uno por franja: cambiar el voto reemplaza el que había en lugar de sumar otro | los `UNIQUE INDEX` de `voto_acuerdo` en `funciones/migraciones/004…` y `005…` | `MigracionesTest::testUnUsuarioMarcaVariasFranjasPeroCadaUnaUnaSolaVez` (funciones) |
 | Una calificación por espectador y función, con el puntaje entre 1 y 5: dos envíos a la vez, o dos reservas de la misma función, no dejan dos (EF-04.2) | `UNIQUE INDEX calificacion_una_por_funcion` y `CHECK` del puntaje en `funciones/migraciones/012_tabla_calificacion.sql` | `CalificacionesTest::testConDosReservasDeLaMismaFuncionCalificaUnaSolaVez` (funciones) |
 | Cada cambio de estado de una reserva queda registrado con su autor y el estado anterior, y la base rechaza un cambio que no cambia nada | `funciones/migraciones/006_tabla_cambio_reserva.sql` | `RepositorioDeReservasTest::testCadaCambioQuedaEnElHistorialConSuAutor` |
+| Restauración probada: un respaldo se descifra fuera del servidor, se carga en un MySQL limpio y se cuentan las filas de cada tabla contra las del servidor. El 19/11/2026, con el respaldo del servidor de desarrollo de ese día: las 37 tablas con las mismas filas, y los dos volúmenes legibles (19 y 17 archivos) | `herramientas/restaurar.sh` (README, «Respaldos») | correrlo con el respaldo del día y la clave privada del grupo |
 | El cupo no lo puede hacer cumplir la base: la función vive en programación y no hay fila que bloquear acá. Lo controla la aplicación (ver «Aplicación») | comentario de `funciones/migraciones/001_tabla_reserva.sql` | — |
 
 ## Aplicación

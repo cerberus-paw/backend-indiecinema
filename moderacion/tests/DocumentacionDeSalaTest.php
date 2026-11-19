@@ -258,5 +258,12 @@ final class DocumentacionDeSalaTest extends TestCase
         self::assertSame(file_get_contents(Documentos::ruta('poliza.pdf')), $suya->cuerpo());
         self::assertSame(404, $this->pedir(url: "/documentos/{$id}", usuario: self::OTRO)->estado());
         self::assertSame(200, $this->pedir(url: "/documentos/{$id}", rol: 'moderador', usuario: self::OTRO)->estado());
+
+        // Ni por el nombre con que quedó en el volumen ni con una ruta armada a mano (EF-18.2): se
+        // baja sólo por el id, y el archivo lo busca el servidor.
+        $archivo = (string) $this->base->valor('SELECT archivo FROM documento WHERE id = ?', [$id]);
+        foreach (["/documentos/{$archivo}", '/documentos/poliza.pdf', '/documentos/' . rawurlencode("../{$archivo}"), '/documentos/..%2F..%2Fetc%2Fpasswd'] as $url) {
+            self::assertSame(404, $this->pedir(url: $url, rol: 'moderador', usuario: self::OTRO)->estado(), $url);
+        }
     }
 }

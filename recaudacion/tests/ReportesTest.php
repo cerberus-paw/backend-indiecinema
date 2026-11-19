@@ -10,6 +10,7 @@ use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Log;
 use IndieCinema\Nucleo\Pruebas\Dobles\PaginasParaValidar;
+use IndieCinema\Recaudacion\Controladores\Reportes;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -74,6 +75,24 @@ final class ReportesTest extends TestCase
         ], [], [])));
     }
 
+    /**
+     * El texto de todos los temas de la página, uno detrás del otro: desde EF-22.2 cada tema es
+     * una pestaña.
+     *
+     * @param array<string, string> $subsistemas
+     */
+    private function todosLosTemas(string $ruta, string $usuario = self::ORGANIZADORA, string $rol = 'organizador', array $subsistemas = []): string
+    {
+        $texto = '';
+        foreach (array_keys(Reportes::TEMAS) as $tema) {
+            $respuesta = $this->pedir("{$ruta}&tema={$tema}", $usuario, $rol, $subsistemas);
+            self::assertSame(200, $respuesta->estado(), $respuesta->cuerpo());
+            $texto .= ' ' . self::texto($respuesta);
+        }
+
+        return $texto;
+    }
+
     /** El texto que se ve, sin etiquetas ni espacios de más: para buscar frases enteras. */
     private static function texto(Respuesta $respuesta): string
     {
@@ -85,7 +104,7 @@ final class ReportesTest extends TestCase
         $respuesta = $this->pedir(self::NOVIEMBRE);
 
         self::assertSame(200, $respuesta->estado(), $respuesta->cuerpo());
-        $texto = self::texto($respuesta);
+        $texto = $this->todosLosTemas(self::NOVIEMBRE);
         self::assertStringContainsString('Recomendaciones', $texto);
         self::assertStringNotContainsString('Qué conviene hacer', $texto);
         // Las tarjetas: 90 de 160 lugares, 83 de 90 fueron, (45 + 34,4 + 6) / 20.
@@ -121,7 +140,7 @@ final class ReportesTest extends TestCase
         $respuesta = $this->pedir(self::NOVIEMBRE, self::ADMINISTRADORA, 'administrador');
 
         self::assertSame(200, $respuesta->estado(), $respuesta->cuerpo());
-        $texto = self::texto($respuesta);
+        $texto = $this->todosLosTemas(self::NOVIEMBRE, self::ADMINISTRADORA, 'administrador');
         self::assertStringContainsString('Funciones 5 finalizadas', $texto);
         // El Galpón rinde más que el Norte: 56 % contra 50 %.
         self::assertMatchesRegularExpression('/El Galpón 4 56 %.*Cineclub Norte 1 50 % 75 % — —/', $texto);
@@ -141,7 +160,7 @@ final class ReportesTest extends TestCase
         $respuesta = $this->pedir(self::NOVIEMBRE, subsistemas: ['funciones' => self::$caido]);
 
         self::assertSame(200, $respuesta->estado(), $respuesta->cuerpo());
-        $texto = self::texto($respuesta);
+        $texto = $this->todosLosTemas(self::NOVIEMBRE, subsistemas: ['funciones' => self::$caido]);
         self::assertStringContainsString('Funciones no respondió: faltan las ventas', $texto);
         self::assertStringContainsString('La ciénaga: 4 votos', $texto);
         self::assertStringContainsString('Sin las ventas de funciones no se puede calcular.', $texto);
@@ -323,7 +342,7 @@ final class ReportesTest extends TestCase
 
     public function testElAdministradorVeLaModeracionYLaConductaDeCadaSala(): void
     {
-        $texto = self::texto($this->pedir(self::NOVIEMBRE, self::ADMINISTRADORA, 'administrador'));
+        $texto = self::texto($this->pedir(self::NOVIEMBRE . '&tema=salas', self::ADMINISTRADORA, 'administrador'));
 
         self::assertStringContainsString('Moderación y conducta', $texto);
         self::assertStringContainsString('Solicitudes de sala 2 sin resolver; 1 aprobadas y 0 rechazadas', $texto);
@@ -336,14 +355,37 @@ final class ReportesTest extends TestCase
 
     public function testElOrganizadorNoVeLaModeracion(): void
     {
-        self::assertStringNotContainsString('Moderación y conducta', self::texto($this->pedir(self::NOVIEMBRE)));
+        self::assertStringNotContainsString('Moderación y conducta', self::texto($this->pedir(self::NOVIEMBRE . '&tema=salas')));
     }
 
     public function testSiModeracionNoRespondeLoDiceYSigueConLaConducta(): void
     {
-        $texto = self::texto($this->pedir(self::NOVIEMBRE, self::ADMINISTRADORA, 'administrador', ['moderacion' => self::$caido]));
+        $texto = self::texto($this->pedir(self::NOVIEMBRE . '&tema=salas', self::ADMINISTRADORA, 'administrador', ['moderacion' => self::$caido]));
 
         self::assertStringContainsString('Moderación no respondió: faltan las denuncias, las salas suspendidas y las solicitudes.', $texto);
         self::assertMatchesRegularExpression('/El Galpón 0 2 1 1 de \d+ espectadores/', $texto);
+    }
+
+    public function testLosTemasSonPestanasQueConservanElPeriodo(): void
+    {
+        $resumen = $this->pedir(self::NOVIEMBRE);
+        $texto = self::texto($resumen);
+
+        // Por defecto, el resumen: las tarjetas, lo que más conviene y los gráficos.
+        self::assertStringContainsString('Lo que más conviene', $texto);
+        self::assertStringContainsString('Ocupación por día Miércoles 20 %', $texto);
+        self::assertStringNotContainsString('Días para una promoción', $texto);
+        self::assertStringContainsString('<a href="/recaudacion/reportes?desde=2026-11-01&amp;hasta=2026-11-30&amp;tema=promociones" class="reporte-pestana">Promociones</a>', $resumen->cuerpo());
+        self::assertStringContainsString('aria-current="page">Resumen</a>', $resumen->cuerpo());
+        // Las barras son SVG con atributos: la CSP no deja estilos en línea.
+        self::assertStringContainsString('<rect class="reporte-barra-valor" width="20" height="8" rx="2"/>', $resumen->cuerpo());
+        self::assertStringNotContainsString('style="', $resumen->cuerpo());
+
+        $promociones = self::texto($this->pedir(self::NOVIEMBRE . '&tema=promociones'));
+        self::assertStringContainsString('Días para una promoción', $promociones);
+        self::assertStringNotContainsString('Títulos para repetir', $promociones);
+
+        // Un tema que no existe es el resumen.
+        self::assertStringContainsString('Lo que más conviene', self::texto($this->pedir(self::NOVIEMBRE . '&tema=otro')));
     }
 }

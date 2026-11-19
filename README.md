@@ -44,6 +44,7 @@ backend-indiecinema/
 ├── docs/seguridad.md      seguridad por capa: qué protege cada una y dónde está configurado, y
 │                          las amenazas ordenadas por impacto y probabilidad
 ├── docs/guion-de-prueba.md  el recorrido de punta a punta en el sitio publicado, con cada rol
+├── docs/recomendaciones.md  con qué variables y reglas sugiere algo el reporte
 ├── nucleo/                MVC común: ruteo, middleware, base de datos, vistas y errores
 ├── cuentas/               /cuenta/   registro, ingreso, sesión, roles y usuarios del administrador
 ├── programacion/          /          obras, salas, funciones, cartelera y votación de títulos
@@ -271,6 +272,8 @@ todo el sitio se vea igual aunque lo sirvan subsistemas distintos.
   un título para repetir o lo que el público pidió está en `[reportes]` de su `config.ini`. Los
   totales van de a un mes por página, y el CSV trae todas las funciones del período. El dueño de
   una obra ve cómo le fue en cualquier sala, también en las votaciones que perdió.
+  Cómo llega a cada recomendación, también las que cruzan varias variables (EF-22.3), está en
+  [`docs/recomendaciones.md`](docs/recomendaciones.md).
 - **El reparto de lo cobrado es un parámetro con fecha de vigencia**, no una constante
   (`/recaudacion/administracion/reparto`, EF-08.1): el administrador carga con cuánto se reparte
   entre la sala, el dueño de la obra y la plataforma —70/15/15 es lo que deja la migración— y

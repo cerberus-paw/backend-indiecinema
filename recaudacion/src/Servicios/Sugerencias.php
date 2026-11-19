@@ -10,6 +10,7 @@ use IndieCinema\Recaudacion\Modelo\FuncionFinalizada;
 use IndieCinema\Recaudacion\Modelo\ObraAgotada;
 use IndieCinema\Recaudacion\Modelo\PedidoDelPublico;
 use IndieCinema\Recaudacion\Modelo\PrecioDeLaEntrada;
+use IndieCinema\Recaudacion\Modelo\RecomendacionCombinada;
 use IndieCinema\Recaudacion\Modelo\RendimientoDeSala;
 use IndieCinema\Recaudacion\Modelo\TituloParaRepetir;
 use IndieCinema\Recaudacion\Modelo\Umbrales;
@@ -26,6 +27,8 @@ use IndieCinema\Recaudacion\Modelo\VotantesSinReserva;
  */
 final class Sugerencias
 {
+    private const DIAS = [1 => 'lunes', 2 => 'martes', 3 => 'miércoles', 4 => 'jueves', 5 => 'viernes', 6 => 'sábados', 7 => 'domingos'];
+
     public function __construct(private readonly Umbrales $umbrales)
     {
     }
@@ -335,6 +338,171 @@ final class Sugerencias
             <=> [$a->agotadas, $a->ocupacion, $b->titulo, $b->salaNombre]);
 
         return $obras;
+    }
+
+    /**
+     * Las recomendaciones que cruzan varias variables (EF-22.3): las de arriba miran una sola cosa
+     * por vez, y el profe pidió el 18/11 «empezar a mezclar los ingredientes». Todas parten de un
+     * día flojo de una sala y le suman otra cosa que sabe el reporte de esa misma sala:
+     *
+     * - lo que su público votó y no vio, y que a la gorra llena más que con precio: dar ese
+     *   título a la gorra ese día, porque ya funcionó;
+     * - la franja horaria: si las de la noche llenan bastante más que las de la tarde (o al revés)
+     *   y el día flojo está en la que llena menos, cambiarle el horario;
+     * - lo que se agota y gusta: sumar una función de eso el día flojo.
+     *
+     * Cada una trae los datos que la justifican. Las reglas, con sus umbrales, están en
+     * docs/recomendaciones.md.
+     *
+     * @return list<RecomendacionCombinada> en el orden de los días flojos, de la ocupación más baja
+     */
+    public function combinadas(DatosDelReporte $datos): array
+    {
+        $flojos = $this->diasFlojos($datos);
+        if ($flojos === []) {
+            return [];
+        }
+        $precios = [];
+        foreach ($this->precioDeLaEntrada($datos) as $precio) {
+            $precios[$precio->salaId] = $precio;
+        }
+        $agotadas = $this->obrasAgotadas($datos);
+        $promedios = self::promediosPorObra($datos);
+
+        $recomendaciones = [];
+        foreach ($flojos as $dia) {
+            $nombre = self::DIAS[$dia->dia];
+            $elDiaFlojo = "Los {$nombre} se vendió el {$dia->ocupacion} % de los lugares"
+                . ($dia->ocupacionResto === null ? '' : ", contra el {$dia->ocupacionResto} % del resto de la semana")
+                . " ({$dia->funciones} funciones).";
+
+            $precio = $precios[$dia->salaId] ?? null;
+            if ($dia->paraDar !== null && $precio !== null && $precio->sensible) {
+                $pedido = $dia->paraDar;
+                $recomendaciones[] = new RecomendacionCombinada(
+                    RecomendacionCombinada::PEDIDO_A_LA_GORRA,
+                    $dia->salaId,
+                    $dia->salaNombre,
+                    "Los {$nombre}, dar «{$pedido->titulo}» a la gorra.",
+                    [
+                        $elDiaFlojo,
+                        "Su público lo votó y no lo vio: {$pedido->votos} " . self::plural($pedido->votos, 'voto', 'votos') . " en {$pedido->votaciones} " . self::plural($pedido->votaciones, 'votación', 'votaciones') . ", el {$pedido->porcentaje} %.",
+                        "A la gorra ya funcionó en esta sala: llenó el {$precio->ocupacionGorra} % en {$precio->funcionesGorra} funciones, contra el {$precio->ocupacionPagas} % con precio.",
+                    ],
+                );
+            }
+
+            $franjas = $this->franjas($datos, $dia->salaId, $dia->dia);
+            if ($franjas !== null) {
+                $corte = $this->umbrales->franjaCorteHora;
+                $hacia = $franjas['mejor'] === 'noche' ? "a la noche, desde las {$corte} h" : "a la tarde, antes de las {$corte} h";
+                $recomendaciones[] = new RecomendacionCombinada(
+                    RecomendacionCombinada::OTRO_HORARIO,
+                    $dia->salaId,
+                    $dia->salaNombre,
+                    "Los {$nombre}, pasar las funciones {$hacia}.",
+                    [
+                        $elDiaFlojo,
+                        "En esta sala, las de la {$franjas['mejor']} llenan el {$franjas['ocupacion_mejor']} % ({$franjas['funciones_mejor']} funciones) y las de la {$franjas['peor']}, el {$franjas['ocupacion_peor']} % ({$franjas['funciones_peor']}).",
+                        "De las {$dia->funciones} funciones de los {$nombre}, {$franjas['el_dia_en_la_peor']} fueron a la {$franjas['peor']}.",
+                    ],
+                );
+            }
+
+            foreach ($agotadas as $obra) {
+                $promedio = $promedios[$obra->obraId] ?? null;
+                if ($obra->salaId !== $dia->salaId || $promedio === null || $promedio < $this->umbrales->repetirPromedioMinimo) {
+                    continue;
+                }
+                $recomendaciones[] = new RecomendacionCombinada(
+                    RecomendacionCombinada::AGOTADA_EL_DIA_FLOJO,
+                    $dia->salaId,
+                    $dia->salaNombre,
+                    "Sumar una función de «{$obra->titulo}» los {$nombre}.",
+                    [
+                        "Se agotó en {$obra->agotadas} de sus {$obra->funciones} funciones en esta sala ({$obra->ocupacion} % de los lugares vendidos): hay gente que se quedó afuera.",
+                        'Gustó: ' . str_replace('.', ',', sprintf('%.1f', $promedio)) . ' de promedio.',
+                        $elDiaFlojo,
+                    ],
+                );
+                // Una por día: la que más se agotó, que es la primera.
+                break;
+            }
+        }
+
+        return $recomendaciones;
+    }
+
+    /**
+     * Cómo llenan en una sala las funciones de la tarde y las de la noche, si la diferencia dice
+     * algo y el día flojo está en la que llena menos. Null si no.
+     *
+     * @return ?array{mejor: string, peor: string, ocupacion_mejor: int, ocupacion_peor: int, funciones_mejor: int, funciones_peor: int, el_dia_en_la_peor: int}
+     */
+    private function franjas(DatosDelReporte $datos, string $salaId, int $dia): ?array
+    {
+        $franjas = ['tarde' => [0, 0, 0], 'noche' => [0, 0, 0]];
+        $elDia = ['tarde' => 0, 'noche' => 0];
+        foreach ($datos->funciones as $funcion) {
+            $ventas = $datos->ventasDe($funcion->id);
+            if ($funcion->salaId !== $salaId || $ventas === null) {
+                continue;
+            }
+            $franja = (int) $funcion->fechaHora->format('G') < $this->umbrales->franjaCorteHora ? 'tarde' : 'noche';
+            [$funciones, $vendidas, $cupo] = $franjas[$franja];
+            $franjas[$franja] = [$funciones + 1, $vendidas + $ventas->vendidas, $cupo + $funcion->cupo];
+            if ((int) $funcion->fechaHora->format('N') === $dia) {
+                ++$elDia[$franja];
+            }
+        }
+        if ($franjas['tarde'][0] < $this->umbrales->franjaFuncionesMinimas || $franjas['noche'][0] < $this->umbrales->franjaFuncionesMinimas) {
+            return null;
+        }
+        $ocupacion = [
+            'tarde' => self::porcentaje($franjas['tarde'][1], $franjas['tarde'][2]),
+            'noche' => self::porcentaje($franjas['noche'][1], $franjas['noche'][2]),
+        ];
+        [$mejor, $peor] = $ocupacion['noche'] >= $ocupacion['tarde'] ? ['noche', 'tarde'] : ['tarde', 'noche'];
+        if ($ocupacion[$mejor] - $ocupacion[$peor] < $this->umbrales->franjaDiferenciaMinima || $elDia[$peor] <= $elDia[$mejor]) {
+            return null;
+        }
+
+        return [
+            'mejor' => $mejor,
+            'peor' => $peor,
+            'ocupacion_mejor' => $ocupacion[$mejor],
+            'ocupacion_peor' => $ocupacion[$peor],
+            'funciones_mejor' => $franjas[$mejor][0],
+            'funciones_peor' => $franjas[$peor][0],
+            'el_dia_en_la_peor' => $elDia[$peor],
+        ];
+    }
+
+    /**
+     * El promedio de las calificaciones de cada obra en todas sus funciones del período.
+     *
+     * @return array<string, float> por id de obra; las que nadie calificó no están
+     */
+    private static function promediosPorObra(DatosDelReporte $datos): array
+    {
+        $porObra = [];
+        foreach ($datos->funciones as $funcion) {
+            $calificacion = $datos->calificacionDe($funcion->id);
+            if ($calificacion === null || $calificacion->cantidad === 0) {
+                continue;
+            }
+            foreach ($funcion->elegidas() as $obra) {
+                [$puntos, $cantidad] = $porObra[$obra->id] ?? [0.0, 0];
+                $porObra[$obra->id] = [$puntos + $calificacion->promedio * $calificacion->cantidad, $cantidad + $calificacion->cantidad];
+            }
+        }
+
+        return array_map(static fn (array $obra): float => round($obra[0] / $obra[1], 1), $porObra);
+    }
+
+    private static function plural(int $cantidad, string $uno, string $varios): string
+    {
+        return $cantidad === 1 ? $uno : $varios;
     }
 
     /**

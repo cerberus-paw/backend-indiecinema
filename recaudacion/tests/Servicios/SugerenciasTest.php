@@ -10,6 +10,7 @@ use IndieCinema\Recaudacion\Modelo\DatosDelReporte;
 use IndieCinema\Recaudacion\Modelo\FuncionFinalizada;
 use IndieCinema\Recaudacion\Modelo\ObraVotada;
 use IndieCinema\Recaudacion\Modelo\Periodo;
+use IndieCinema\Recaudacion\Modelo\RecomendacionCombinada;
 use IndieCinema\Recaudacion\Modelo\Umbrales;
 use IndieCinema\Recaudacion\Modelo\VentasDeFuncion;
 use IndieCinema\Recaudacion\Servicios\Sugerencias;
@@ -374,5 +375,107 @@ final class SugerenciasTest extends TestCase
 
         self::assertNotNull($total);
         self::assertSame([2, 50, 63], [$total->funciones, $total->ocupacion, $total->asistencia]);
+    }
+
+    // Combinadas (EF-22.3): todas parten de un día flojo y le suman otra variable de la misma sala.
+
+    public function testElDiaFlojoConUnPedidoYUnPublicoSensibleAlPrecioSugiereDarloALaGorra(): void
+    {
+        // Los miércoles, 20 de 80; los sábados, con precio, 60 de 80, y la votación de La ciénaga.
+        $this->funcion('2026-11-04 21:00', 10);
+        $this->funcion('2026-11-11 21:00', 10);
+        $this->funcion('2026-11-07 21:00', 30, obras: [self::obra('Zama', true, 6), self::obra('La ciénaga', false, 4)]);
+        $this->funcion('2026-11-14 21:00', 30);
+        // Los viernes, a la gorra, llenó el 95 %.
+        $this->funcion('2026-11-06 21:00', 38, precio: '0.00');
+        $this->funcion('2026-11-13 21:00', 38, precio: '0.00');
+
+        $combinadas = self::sugerencias()->combinadas($this->datos());
+
+        self::assertCount(1, $combinadas);
+        self::assertSame(RecomendacionCombinada::PEDIDO_A_LA_GORRA, $combinadas[0]->regla);
+        self::assertSame('Los miércoles, dar «La ciénaga» a la gorra.', $combinadas[0]->accion);
+        self::assertSame([
+            'Los miércoles se vendió el 25 % de los lugares, contra el 85 % del resto de la semana (2 funciones).',
+            'Su público lo votó y no lo vio: 4 votos en 1 votación, el 40 %.',
+            'A la gorra ya funcionó en esta sala: llenó el 95 % en 2 funciones, contra el 50 % con precio.',
+        ], $combinadas[0]->porque);
+    }
+
+    public function testSinUnPublicoSensibleAlPrecioNoSugiereLaGorra(): void
+    {
+        $this->funcion('2026-11-04 21:00', 10);
+        $this->funcion('2026-11-11 21:00', 10);
+        $this->funcion('2026-11-07 21:00', 30, obras: [self::obra('Zama', true, 6), self::obra('La ciénaga', false, 4)]);
+        $this->funcion('2026-11-14 21:00', 30);
+
+        self::assertSame([], self::sugerencias()->combinadas($this->datos()));
+    }
+
+    public function testSiElDiaFlojoEstaEnLaFranjaQueMenosLlenaSugiereOtroHorario(): void
+    {
+        // Las de la tarde, los miércoles: 20 de 80. Las de la noche, los sábados: 72 de 80.
+        $this->funcion('2026-11-04 18:00', 10);
+        $this->funcion('2026-11-11 18:00', 10);
+        $this->funcion('2026-11-07 21:00', 36);
+        $this->funcion('2026-11-14 21:00', 36);
+
+        $combinadas = self::sugerencias()->combinadas($this->datos());
+
+        self::assertCount(1, $combinadas);
+        self::assertSame(RecomendacionCombinada::OTRO_HORARIO, $combinadas[0]->regla);
+        self::assertSame('Los miércoles, pasar las funciones a la noche, desde las 20 h.', $combinadas[0]->accion);
+        self::assertSame('En esta sala, las de la noche llenan el 90 % (2 funciones) y las de la tarde, el 25 % (2).', $combinadas[0]->porque[1]);
+        self::assertSame('De las 2 funciones de los miércoles, 2 fueron a la tarde.', $combinadas[0]->porque[2]);
+    }
+
+    public function testElCorteDeLaFranjaSaleDeLosUmbrales(): void
+    {
+        $this->funcion('2026-11-04 18:00', 10);
+        $this->funcion('2026-11-11 18:00', 10);
+        $this->funcion('2026-11-07 21:00', 36);
+        $this->funcion('2026-11-14 21:00', 36);
+
+        // Con el corte a las 17, todas son de la noche: no hay dos franjas que comparar.
+        $combinadas = (new Sugerencias(new Umbrales(franjaCorteHora: 17)))->combinadas($this->datos());
+
+        self::assertSame([], $combinadas);
+    }
+
+    public function testLoQueSeAgotaYGustaSeSugiereElDiaFlojo(): void
+    {
+        $this->funcion('2026-11-04 21:00', 10);
+        $this->funcion('2026-11-11 21:00', 10);
+        $this->funcion('2026-11-07 21:00', 39, obras: [self::obra('Rojo')], calificacion: new CalificacionDeFuncion(4.5, 10));
+        $this->funcion('2026-11-14 21:00', 30, obras: [self::obra('Rojo')]);
+
+        $combinadas = self::sugerencias()->combinadas($this->datos());
+
+        self::assertCount(1, $combinadas);
+        self::assertSame(RecomendacionCombinada::AGOTADA_EL_DIA_FLOJO, $combinadas[0]->regla);
+        self::assertSame('Sumar una función de «Rojo» los miércoles.', $combinadas[0]->accion);
+        self::assertSame([
+            'Se agotó en 1 de sus 2 funciones en esta sala (86 % de los lugares vendidos): hay gente que se quedó afuera.',
+            'Gustó: 4,5 de promedio.',
+            'Los miércoles se vendió el 25 % de los lugares, contra el 86 % del resto de la semana (2 funciones).',
+        ], $combinadas[0]->porque);
+    }
+
+    public function testLoQueSeAgotaPeroNoGustaNoSeSugiere(): void
+    {
+        $this->funcion('2026-11-04 21:00', 10);
+        $this->funcion('2026-11-11 21:00', 10);
+        $this->funcion('2026-11-07 21:00', 39, obras: [self::obra('Rojo')], calificacion: new CalificacionDeFuncion(3.5, 10));
+        $this->funcion('2026-11-14 21:00', 30, obras: [self::obra('Rojo')]);
+
+        self::assertSame([], self::sugerencias()->combinadas($this->datos()));
+    }
+
+    public function testSinDiaFlojoNoHayCombinadas(): void
+    {
+        $this->funcion('2026-11-07 21:00', 39, obras: [self::obra('Rojo')], calificacion: new CalificacionDeFuncion(5.0, 10));
+        $this->funcion('2026-11-14 21:00', 39, obras: [self::obra('Rojo')]);
+
+        self::assertSame([], self::sugerencias()->combinadas($this->datos()));
     }
 }

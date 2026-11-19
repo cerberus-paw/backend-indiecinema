@@ -7,6 +7,7 @@ namespace IndieCinema\Funciones\Repositorios;
 use DateTimeImmutable;
 use DateTimeZone;
 use IndieCinema\Funciones\Modelo\AutorDelCambio;
+use IndieCinema\Funciones\Modelo\CambioDeReserva;
 use IndieCinema\Funciones\Modelo\EstadoReserva;
 use IndieCinema\Funciones\Modelo\ReglaIncumplida;
 use IndieCinema\Funciones\Modelo\Reserva;
@@ -232,6 +233,31 @@ final class RepositorioDeReservas
         return $motivos;
     }
 
+    /**
+     * El historial de una reserva (EF-18.6), del primer cambio al último: cada cambio de estado con
+     * su autor, también los del sistema. Usa el índice por reserva y fecha; el id desempata dos
+     * cambios del mismo segundo.
+     *
+     * @return list<CambioDeReserva>
+     */
+    public function historial(string $reservaId): array
+    {
+        return array_map(
+            static fn (array $fila): CambioDeReserva => new CambioDeReserva(
+                EstadoReserva::from((string) $fila['estado_anterior']),
+                EstadoReserva::from((string) $fila['estado_nuevo']),
+                (string) $fila['autor_rol'],
+                $fila['autor_id'] === null ? null : (string) $fila['autor_id'],
+                $fila['motivo'] === null ? null : (string) $fila['motivo'],
+                new DateTimeImmutable((string) $fila['hecho_en'], new DateTimeZone('UTC')),
+            ),
+            $this->base->filas(
+                'SELECT estado_anterior, estado_nuevo, autor_rol, autor_id, motivo, hecho_en FROM cambio_reserva WHERE reserva_id = ? ORDER BY hecho_en, id',
+                [$reservaId],
+            ),
+        );
+    }
+
     public function buscar(string $id): ?Reserva
     {
         $fila = $this->base->fila('SELECT * FROM reserva WHERE id = ?', [$id]);
@@ -357,7 +383,7 @@ final class RepositorioDeReservas
     {
         $this->base->ejecutar(
             'INSERT INTO cambio_reserva (reserva_id, estado_anterior, estado_nuevo, autor_id, autor_rol, motivo, hecho_en) VALUES (?, ?, ?, ?, ?, ?, ?)',
-            [$reserva->id, $anterior, $reserva->estado, $autor->id, $autor->rol->value, $autor->motivo, $ahora->setTimezone(new DateTimeZone('UTC'))],
+            [$reserva->id, $anterior, $reserva->estado, $autor->id, $autor->rolEnElHistorial(), $autor->motivo, $ahora->setTimezone(new DateTimeZone('UTC'))],
         );
     }
 

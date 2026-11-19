@@ -62,7 +62,10 @@ final class ReservasInternas extends Controlador
      * reservas confirmadas sin asistencia quedan ausentes. Programación lo pide antes de guardar
      * la función como finalizada, y si no recibe la respuesta lo repite en la próxima pasada.
      *
-     * @throws ExcepcionHttp 404 si el id no es un UUID; 400 sin el organizador de la función
+     * El paso a ausente lo hace el sistema (EF-18.6): programación todavía manda el organizador
+     * de la función, pero ya no hace falta.
+     *
+     * @throws ExcepcionHttp 404 si el id no es un UUID
      */
     public function finalizada(Peticion $peticion): Respuesta
     {
@@ -70,11 +73,6 @@ final class ReservasInternas extends Controlador
         if (!Uuid::esValido($id)) {
             throw ExcepcionHttp::noEncontrada();
         }
-        $organizador = $peticion->campo('organizador_id');
-        if (!is_string($organizador) || !Uuid::esValido($organizador)) {
-            throw ExcepcionHttp::solicitudInvalida('Falta el id del organizador de la función, en «organizador_id».');
-        }
-
-        return $this->json(['ausentes' => $this->servicio->marcarAusentes($id, $organizador)]);
+        return $this->json(['ausentes' => $this->servicio->marcarAusentes($id)]);
     }
 }

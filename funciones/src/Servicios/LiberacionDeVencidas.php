@@ -7,7 +7,6 @@ namespace IndieCinema\Funciones\Servicios;
 use DateTimeImmutable;
 use IndieCinema\Funciones\Modelo\AutorDelCambio;
 use IndieCinema\Funciones\Repositorios\RepositorioDeReservas;
-use IndieCinema\Nucleo\Seguridad\Rol;
 
 /**
  * Cancela las reservas que vencieron sin pagar (X-01.5), para que «Mis reservas», el panel del
@@ -38,8 +37,8 @@ final class LiberacionDeVencidas
         do {
             $vencidas = $this->reservas->vencidas($ahora, self::POR_TANDA);
             foreach ($vencidas as $reserva) {
-                // El espectador no pagó a tiempo: es su reserva la que vence.
-                $autor = new AutorDelCambio($reserva->usuarioId, Rol::Espectador, self::MOTIVO);
+                // Nadie la cancela: vence sola, y en el historial queda como del sistema (EF-18.6).
+                $autor = AutorDelCambio::sistema(self::MOTIVO);
                 if ($this->reservas->guardarEstado($reserva->cancelar(), $reserva->estado, $autor, $ahora)) {
                     ++$canceladas;
                 }

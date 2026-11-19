@@ -220,6 +220,21 @@ final class MigracionesTest extends TestCase
         self::assertSame(2, $this->base->valor('SELECT COUNT(*) FROM cambio_reserva WHERE reserva_id = ?', [$datos['id']]));
     }
 
+    /**
+     * EF-18.6: un cambio del sistema no tiene usuario, y uno de un usuario no puede quedar sin él.
+     */
+    public function testUnCambioDelSistemaNoTieneUsuarioYUnoDeUsuarioSi(): void
+    {
+        $datos = $this->reservaValida();
+        $this->insertarReserva($datos);
+        $cambio = 'INSERT INTO cambio_reserva (reserva_id, estado_anterior, estado_nuevo, autor_id, autor_rol, hecho_en) VALUES (?, ?, ?, ?, ?, ?)';
+
+        $this->base->ejecutar($cambio, [$datos['id'], 'pendiente_pago', 'cancelada', null, 'sistema', '2026-10-21 18:40:00']);
+        $this->assertRechaza(self::RESTRICCION_CHECK, fn () => $this->base->ejecutar($cambio, [$datos['id'], 'confirmada', 'ausente', $datos['usuario_id'], 'sistema', '2026-10-21 18:40:00']));
+        $this->assertRechaza(self::RESTRICCION_CHECK, fn () => $this->base->ejecutar($cambio, [$datos['id'], 'confirmada', 'cancelada', null, 'espectador', '2026-10-21 18:40:00']));
+        self::assertSame(1, $this->base->valor('SELECT COUNT(*) FROM cambio_reserva WHERE reserva_id = ?', [$datos['id']]));
+    }
+
     public function testLaBaseRechazaLaFaltaDeCamposObligatorios(): void
     {
         $this->assertRechaza(self::CAMPO_OBLIGATORIO, fn () => $this->base->ejecutar(

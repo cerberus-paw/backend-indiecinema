@@ -50,7 +50,8 @@ jobs:
           MYSQL_DATABASE: pruebas
         ports: ["3306:3306"]
         # Los datos en memoria (tmpfs): la base se tira al terminar, y crear tablas sin esperar al
-        # disco es lo que más tarda, porque cada prueba las rehace con las migraciones (IC-663).
+        # disco es lo que más tarda: cada clase de prueba migra una vez y después vacía las tablas
+        # entre prueba y prueba (ConBaseDePruebas, IC-663).
         options: >-
           --tmpfs /var/lib/mysql:rw
           --health-cmd="mysqladmin ping -h 127.0.0.1 -ppruebas"

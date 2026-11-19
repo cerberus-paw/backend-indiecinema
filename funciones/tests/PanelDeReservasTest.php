@@ -571,8 +571,8 @@ final class PanelDeReservasTest extends TestCase
     public function testElRegistroAnotaCadaCambioConSuAutorTambienLosAutomaticos(): void
     {
         // La que vence sin pagar: la cancela la tarea programada.
-        $vencida = $this->reserva(self::PROXIMA, 1, 'pendiente_pago');
-        $this->base->ejecutar("UPDATE reserva SET vence_en = '2026-10-19 13:15:00' WHERE codigo = ?", [$vencida]);
+        $vencida = $this->reserva(self::PROXIMA, 1);
+        $this->base->ejecutar("UPDATE reserva SET estado = 'pendiente_pago', vence_en = '2026-10-19 13:15:00' WHERE codigo = ?", [$vencida]);
         (new LiberacionDeVencidas(new RepositorioDeReservas($this->base)))->liberar(new DateTimeImmutable('2026-10-19 13:20:00', new DateTimeZone('UTC')));
         // La que no fue: queda ausente al terminar la función, y el organizador la corrige tarde.
         $ausente = $this->reserva(self::EMPEZADA, 1);

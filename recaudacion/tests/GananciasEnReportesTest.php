@@ -27,7 +27,7 @@ final class GananciasEnReportesTest extends TestCase
     private const ADMINISTRADORA = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
     private const GALPON = '10000000-0000-4000-8000-000000000001';
     private const NORTE = '10000000-0000-4000-8000-000000000002';
-    private const NOVIEMBRE = '/reportes?desde=2026-11-01&hasta=2026-11-30';
+    private const NOVIEMBRE = '/reportes?desde=2026-11-01&hasta=2026-11-30&tema=plata';
     private const CSRF = 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc';
 
     private static string $programacion;
@@ -122,7 +122,7 @@ final class GananciasEnReportesTest extends TestCase
         $respuesta = $this->cargarCosto(['sala' => self::GALPON, 'costo' => '9.000.000', 'desde' => '2026-11-01', 'hasta' => '2026-11-30']);
 
         self::assertSame(303, $respuesta->estado(), $respuesta->cuerpo());
-        self::assertSame('/recaudacion/reportes?desde=2026-11-01&hasta=2026-11-30&costo_cargado=1#ganancias', $respuesta->cabecera('Location'));
+        self::assertSame('/recaudacion/reportes?desde=2026-11-01&hasta=2026-11-30&tema=plata&costo_cargado=1#ganancias', $respuesta->cabecera('Location'));
         self::assertSame('9000000.00', (string) $this->base->valor('SELECT costo_funcion FROM costo_sala WHERE sala_id = ?', [self::GALPON]));
 
         $despues = $this->pedir(self::NOVIEMBRE . '&costo_cargado=1');

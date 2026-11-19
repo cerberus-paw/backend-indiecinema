@@ -13,6 +13,7 @@ use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Seguridad\Rol;
 use IndieCinema\Nucleo\Seguridad\Usuario;
 use IndieCinema\Recaudacion\Modelo\CostosDeReferencia;
+use IndieCinema\Recaudacion\Modelo\DatosDelReporte;
 use IndieCinema\Recaudacion\Modelo\DiaFlojo;
 use IndieCinema\Recaudacion\Modelo\FuncionFinalizada;
 use IndieCinema\Recaudacion\Modelo\ModeracionDeSala;
@@ -59,6 +60,14 @@ final class Reportes extends Controlador
 {
     private const DIAS = [1 => 'lunes', 2 => 'martes', 3 => 'miércoles', 4 => 'jueves', 5 => 'viernes', 6 => 'sábado', 7 => 'domingo'];
 
+    /**
+     * Los temas de la página de recomendaciones (EF-22.2), como pestañas que son enlaces: cada uno
+     * va a lo que le interesa en vez de leer todo una cosa abajo de la otra.
+     */
+    public const TEMAS = ['resumen' => 'Resumen', 'plata' => 'Plata', 'promociones' => 'Promociones', 'programacion' => 'Programación', 'salas' => 'Salas'];
+
+    private const MESES_CORTOS = [1 => 'ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+
     private const MESES = [1 => 'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 
     private readonly Umbrales $umbrales;
@@ -77,8 +86,10 @@ final class Reportes extends Controlador
         [$periodo, $periodoElegido, $error] = self::periodoPedido($peticion);
         $usuario = self::usuario($peticion);
         $administrador = $usuario->alcanza(Rol::Administrador);
+        $tema = $peticion->consulta('tema');
+        $tema = is_string($tema) && isset(self::TEMAS[$tema]) ? $tema : 'resumen';
         if ($error !== null) {
-            return $this->vista('reportes.html.twig', ['periodo' => $periodoElegido, 'error' => $error, 'administrador' => $administrador], 422);
+            return $this->vista('reportes.html.twig', ['periodo' => $periodoElegido, 'error' => $error, 'administrador' => $administrador, 'tema' => $tema, 'temas' => self::TEMAS], 422);
         }
 
         $datos = $this->reportes->delOrganizador($periodo, $administrador ? null : $usuario->id);
@@ -86,11 +97,20 @@ final class Reportes extends Controlador
         $total = $sugerencias->total($datos);
         $resultados = $this->resultados?->salas($datos) ?? [];
         $plataforma = $administrador ? $this->resultados?->plataforma($datos, $resultados) : null;
+        $meses = TotalesDelPeriodo::porMes($datos, $datos->funciones);
         $moderacion = $administrador && $datos->funciones !== [] ? $this->moderacion?->delPeriodo($datos) : null;
 
         return $this->vista('reportes.html.twig', [
             'periodo' => $periodoElegido,
             'administrador' => $administrador,
+            'tema' => $tema,
+            'temas' => self::TEMAS,
+            'funciones_por_mes' => array_map(
+                static fn (string $mes, TotalDeFunciones $total): array => ['mes' => self::MESES_CORTOS[(int) substr($mes, 5, 2)], 'funciones' => $total->funciones],
+                array_keys($meses),
+                $meses,
+            ),
+            'ocupacion_por_dia' => self::ocupacionPorDia($datos),
             'avisos' => $datos->avisos,
             'ganancias' => $this->resultados === null ? null : self::ganancias($resultados, $plataforma, $this->resultados->referencia()),
             'costo_cargado' => self::avisoDelCosto($peticion),
@@ -116,6 +136,8 @@ final class Reportes extends Controlador
                 'sala' => $precio->salaNombre,
                 'funciones_gorra' => $precio->funcionesGorra,
                 'gorra' => "{$precio->ocupacionGorra} %",
+                'gorra_valor' => $precio->ocupacionGorra,
+                'pagas_valor' => $precio->ocupacionPagas,
                 'funciones_pagas' => $precio->funcionesPagas,
                 'pagas' => "{$precio->ocupacionPagas} %",
                 'sensible' => $precio->sensible,
@@ -179,10 +201,10 @@ final class Reportes extends Controlador
         try {
             $this->resultados->cargarCosto($sala, $costo, $usuario->id);
         } catch (ReglaIncumplida $regla) {
-            return $this->redirigir('/reportes?' . http_build_query([...$filtros, 'costo_error' => $regla->getMessage()]) . '#ganancias');
+            return $this->redirigir('/reportes?' . http_build_query([...$filtros, 'tema' => 'plata', 'costo_error' => $regla->getMessage()]) . '#ganancias');
         }
 
-        return $this->redirigir('/reportes?' . http_build_query([...$filtros, 'costo_cargado' => '1']) . '#ganancias');
+        return $this->redirigir('/reportes?' . http_build_query([...$filtros, 'tema' => 'plata', 'costo_cargado' => '1']) . '#ganancias');
     }
 
     /**
@@ -243,6 +265,33 @@ final class Reportes extends Controlador
             'servidores_mes' => self::pesos($referencia->servidoresMesCentavos),
             'desarrollo_mes' => self::pesos($referencia->desarrolloMesCentavos),
         ];
+    }
+
+    /**
+     * La ocupación de cada día de la semana, en todas las salas juntas, para el gráfico del resumen
+     * (EF-22.2). Sólo los días que tuvieron funciones con ventas.
+     *
+     * @return list<array{dia: string, ocupacion: int, funciones: int}>
+     */
+    private static function ocupacionPorDia(DatosDelReporte $datos): array
+    {
+        $porDia = [];
+        foreach ($datos->funciones as $funcion) {
+            $ventas = $datos->ventasDe($funcion->id);
+            if ($ventas === null || $funcion->cupo === 0) {
+                continue;
+            }
+            $dia = (int) $funcion->fechaHora->format('N');
+            [$funciones, $vendidas, $cupo] = $porDia[$dia] ?? [0, 0, 0];
+            $porDia[$dia] = [$funciones + 1, $vendidas + $ventas->vendidas, $cupo + $funcion->cupo];
+        }
+        ksort($porDia);
+
+        return array_map(static fn (int $dia, array $acumulado): array => [
+            'dia' => ucfirst(self::DIAS[$dia]),
+            'ocupacion' => intdiv(200 * $acumulado[1] + $acumulado[2], 2 * $acumulado[2]),
+            'funciones' => $acumulado[0],
+        ], array_keys($porDia), $porDia);
     }
 
     /**
@@ -537,7 +586,11 @@ final class Reportes extends Controlador
             'nombre' => $sala->salaNombre,
             'funciones' => $sala->funciones,
             'ocupacion' => "{$sala->ocupacion} %",
+            'ocupacion_valor' => $sala->ocupacion,
             'asistencia' => $sala->asistencia === null ? null : "{$sala->asistencia} %",
+            'asistencia_valor' => $sala->asistencia,
+            // El promedio, de 1 a 5, como porcentaje del máximo: el largo de su barra.
+            'promedio_valor' => $sala->promedio === null ? null : (int) round($sala->promedio * 20),
             'promedio' => $sala->promedio === null ? null : self::promedio($sala->promedio),
             'conversion' => $sala->conversion === null ? null : "{$sala->conversion} %",
         ];

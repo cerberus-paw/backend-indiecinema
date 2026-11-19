@@ -30,7 +30,7 @@ final class ServicioDePanelDeReservas
     /** Las reservas que ve el administrador por página. */
     public const POR_PAGINA = 20;
 
-    /** El motivo del paso a ausente en el historial: con él la migración 020 reconoce los viejos. */
+    /** El motivo del paso a ausente en el historial: con él la migración 021 reconoce los viejos. */
     public const MOTIVO_AUSENTE = 'La función terminó sin la asistencia registrada.';
 
     /**

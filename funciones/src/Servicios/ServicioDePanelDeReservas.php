@@ -6,6 +6,7 @@ namespace IndieCinema\Funciones\Servicios;
 
 use DateTimeImmutable;
 use IndieCinema\Funciones\Modelo\AutorDelCambio;
+use IndieCinema\Funciones\Modelo\CambioDeReserva;
 use IndieCinema\Funciones\Modelo\Conducta;
 use IndieCinema\Funciones\Modelo\EstadoReserva;
 use IndieCinema\Funciones\Modelo\FuncionDeProgramacion;
@@ -28,6 +29,9 @@ final class ServicioDePanelDeReservas
 {
     /** Las reservas que ve el administrador por página. */
     public const POR_PAGINA = 20;
+
+    /** El motivo del paso a ausente en el historial: con él la migración 021 reconoce los viejos. */
+    public const MOTIVO_AUSENTE = 'La función terminó sin la asistencia registrada.';
 
     /**
      * @param ?ServicioDeReembolsos $reembolsos la devolución del pago al anular y al cancelarse la
@@ -173,6 +177,20 @@ final class ServicioDePanelDeReservas
     }
 
     /**
+     * Una reserva con su historial, para el detalle del administrador (EF-18.6).
+     *
+     * @return array{0: Reserva, 1: list<CambioDeReserva>}
+     *
+     * @throws ExcepcionHttp 404 si no existe
+     */
+    public function conSuHistorial(string $id): array
+    {
+        $reserva = (Uuid::esValido($id) ? $this->reservas->buscar($id) : null) ?? throw ExcepcionHttp::noEncontrada();
+
+        return [$reserva, $this->reservas->historial($reserva->id)];
+    }
+
+    /**
      * El administrador anula una reserva confirmada: queda cancelada y sus lugares se liberan, y
      * si estaba pagada se le devuelve la plata al espectador (EF-06.4). Si el reembolso no sale, la
      * anulación queda igual y el panel la muestra con el reembolso pendiente.
@@ -233,13 +251,14 @@ final class ServicioDePanelDeReservas
      * (una pendiente vence sola, X-01.5). Como cancelarDeLaFuncion(), repetirla no cambia nada:
      * programación la vuelve a pedir si no recibió la respuesta.
      *
-     * @param string $organizadorId el de la función, autor del cambio en el historial
+     * En el historial quedan como del sistema (EF-18.6): nadie las marca, pasan al terminar la
+     * función.
      *
      * @return int cuántas quedaron ausentes ahora
      */
-    public function marcarAusentes(string $funcionId, string $organizadorId, DateTimeImmutable $ahora = new DateTimeImmutable()): int
+    public function marcarAusentes(string $funcionId, DateTimeImmutable $ahora = new DateTimeImmutable()): int
     {
-        $autor = new AutorDelCambio($organizadorId, Rol::Organizador, 'La función terminó sin la asistencia registrada.');
+        $autor = AutorDelCambio::sistema(self::MOTIVO_AUSENTE);
         $ausentes = 0;
         foreach ($this->reservas->deLaFuncion($funcionId) as $reserva) {
             if ($reserva->estado !== EstadoReserva::Confirmada) {

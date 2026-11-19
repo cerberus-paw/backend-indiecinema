@@ -85,7 +85,7 @@ final class LiberacionDeVencidasTest extends TestCase
     }
 
     /**
-     * El historial dice por qué, con el espectador como autor: es su reserva la que venció.
+     * El historial dice por qué, y que la canceló el sistema, no el espectador (EF-18.6).
      */
     public function testElHistorialDiceQueVencio(): void
     {
@@ -94,7 +94,7 @@ final class LiberacionDeVencidasTest extends TestCase
         (new LiberacionDeVencidas($this->reservas))->liberar(self::enArgentina('2026-10-20 12:15:00'));
 
         self::assertSame(
-            ['pendiente_pago', 'cancelada', self::ESPECTADOR, 'espectador', LiberacionDeVencidas::MOTIVO, '2026-10-20 15:15:00'],
+            ['pendiente_pago', 'cancelada', null, 'sistema', LiberacionDeVencidas::MOTIVO, '2026-10-20 15:15:00'],
             array_values($this->base->fila('SELECT estado_anterior, estado_nuevo, autor_id, autor_rol, motivo, hecho_en FROM cambio_reserva WHERE reserva_id = ?', [$vencida->id]) ?? []),
         );
     }

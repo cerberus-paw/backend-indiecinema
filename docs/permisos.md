@@ -110,6 +110,7 @@ Prefijo `/funcion`. La reserva del espectador, el seguimiento de las reservas de
 | Método | Ruta | Rol mínimo |
 |---|---|---|
 | GET | `/administracion/reservas` | administrador |
+| GET | `/administracion/reservas/{id}` | administrador |
 | POST | `/administracion/reservas/{id}/anular` | administrador |
 | POST | `/organizador/funciones/{id}/asistencia` | organizador |
 | POST | `/organizador/funciones/{id}/conducta` | organizador |

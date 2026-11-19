@@ -321,6 +321,74 @@ final class RepositorioDeUsuarios
         ));
     }
 
+    /**
+     * Suspende o reactiva desde «Usuarios y roles» (EF-14.3): cambia el estado sólo si sigue siendo
+     * $anterior, cierra sus sesiones y deja quién, cuándo y por qué, todo en una transacción. Si
+     * otro administrador ya lo cambió (dos pestañas, o reenviar el POST), no hace nada.
+     *
+     * @return bool si lo cambió
+     */
+    public function cambiarEstadoRegistrado(
+        string $usuarioId,
+        EstadoCuenta $anterior,
+        EstadoCuenta $nuevo,
+        ?string $motivo,
+        string $autorId,
+        DateTimeImmutable $cuando,
+    ): bool {
+        return $this->base->enTransaccion(function (BaseDeDatos $base) use ($usuarioId, $anterior, $nuevo, $motivo, $autorId, $cuando): bool {
+            if ($base->ejecutar('UPDATE usuario SET estado = ? WHERE id = ? AND estado = ?', [$nuevo->value, $usuarioId, $anterior->value]) === 0) {
+                return false;
+            }
+            $base->ejecutar(
+                'INSERT INTO cambio_estado_cuenta (usuario_id, estado_anterior, estado_nuevo, motivo, autor_id, creado_en) VALUES (?, ?, ?, ?, ?, ?)',
+                [$usuarioId, $anterior->value, $nuevo->value, $motivo, $autorId, $cuando],
+            );
+            $base->ejecutar('DELETE FROM sesion WHERE usuario_id = ?', [$usuarioId]);
+
+            return true;
+        });
+    }
+
+    /**
+     * La última suspensión de cada cuenta suspendida de la lista: el motivo y el estado al que
+     * vuelve si se reactiva. Una cuenta suspendida sin registro (la de los datos de prueba, o la
+     * que se suspendió antes de EF-14.3) no viene.
+     *
+     * @param list<string> $ids
+     *
+     * @return array<string, array{motivo: ?string, anterior: EstadoCuenta, desde: DateTimeImmutable}>
+     */
+    public function suspensiones(array $ids): array
+    {
+        if ($ids === []) {
+            return [];
+        }
+        $marcas = implode(', ', array_fill(0, count($ids), '?'));
+        // La última fila de cada uno: la que no tiene otra más nueva (de id mayor) del mismo usuario.
+        $filas = $this->base->filas(
+            "SELECT c.usuario_id, c.motivo, c.estado_anterior, c.creado_en
+             FROM cambio_estado_cuenta c
+             JOIN usuario u ON u.id = c.usuario_id AND u.estado = 'suspendida'
+             WHERE c.usuario_id IN ({$marcas}) AND c.estado_nuevo = 'suspendida'
+               AND NOT EXISTS (
+                   SELECT 1 FROM cambio_estado_cuenta n
+                   WHERE n.usuario_id = c.usuario_id AND n.id > c.id
+               )",
+            $ids,
+        );
+        $suspensiones = [];
+        foreach ($filas as $fila) {
+            $suspensiones[(string) $fila['usuario_id']] = [
+                'motivo' => $fila['motivo'] === null ? null : (string) $fila['motivo'],
+                'anterior' => EstadoCuenta::from((string) $fila['estado_anterior']),
+                'desde' => new DateTimeImmutable((string) $fila['creado_en'], new DateTimeZone('UTC')),
+            ];
+        }
+
+        return $suspensiones;
+    }
+
     public function cambiarContrasena(string $usuarioId, string $contrasenaHash): void
     {
         $this->cerrandoSesiones($usuarioId, fn (BaseDeDatos $base) => $base->ejecutar(

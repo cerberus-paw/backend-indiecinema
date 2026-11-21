@@ -41,8 +41,8 @@ final class BarraDelOrganizadorTest extends TestCase
     private const CSRF = 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc';
     private const ORGANIZADORA = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 
-    /** El logo, a la portada, y las secciones: Mis salas, Mis funciones, Programar función, Reportes, Mis liquidaciones, Usuarios bloqueados, Pedidos para programar y Publicar una sala. */
-    private const ENLACES = ['/', '/organizador/bloqueados', '/organizador/funciones', '/organizador/funciones/nueva', '/organizador/pedidos', '/organizador/salas', '/recaudacion/liquidaciones', '/recaudacion/reportes', '/solicitar-sala'];
+    /** El logo y «Volver al sitio», a la portada, y las secciones: Mis salas, Publicar una sala, Mis obras, Cargar obra, Mis funciones, Programar función, Pedidos para programar, Reportes, Mis liquidaciones y Usuarios bloqueados. */
+    private const ENLACES = ['/', '/organizador/bloqueados', '/organizador/funciones', '/organizador/funciones/nueva', '/organizador/obras', '/organizador/obras/nueva', '/organizador/pedidos', '/organizador/salas', '/recaudacion/liquidaciones', '/recaudacion/reportes', '/solicitar-sala'];
 
     private Configuracion $configuracion;
     private BaseDeDatos $base;
@@ -50,7 +50,7 @@ final class BarraDelOrganizadorTest extends TestCase
     private Sala $sala;
     private string $obra;
 
-    /** @var array<string, string> lo que va en las rutas de las pantallas: {sala}, {en_votacion}, {en_acuerdo} y {programada} */
+    /** @var array<string, string> lo que va en las rutas de las pantallas: {sala}, {obra}, {en_votacion}, {en_acuerdo} y {programada} */
     private array $ids = [];
 
     protected function setUp(): void
@@ -89,6 +89,7 @@ final class BarraDelOrganizadorTest extends TestCase
 
         $this->ids = [
             '{sala}' => $this->sala->id,
+            '{obra}' => $this->obra,
             '{en_votacion}' => $this->enVotacion()->id,
             '{en_acuerdo}' => $enAcuerdo->id,
             '{programada}' => $programada->id,
@@ -167,6 +168,10 @@ final class BarraDelOrganizadorTest extends TestCase
     {
         yield 'Mis salas' => ['/organizador/salas', '/organizador/salas'];
         yield 'editar sala' => ['/organizador/salas/{sala}/editar', '/organizador/salas'];
+        // Las obras eran del sitio público, fuera del panel (F-02.23).
+        yield 'Mis obras' => ['/organizador/obras', '/organizador/obras'];
+        yield 'cargar obra' => ['/organizador/obras/nueva', '/organizador/obras/nueva'];
+        yield 'editar obra' => ['/organizador/obras/{obra}/editar', '/organizador/obras'];
         yield 'Mis funciones' => ['/organizador/funciones', '/organizador/funciones'];
         yield 'programar función' => ['/organizador/funciones/nueva', '/organizador/funciones/nueva'];
         // La edición usa el formulario de programar, pero es de una función que ya está en la lista.
@@ -190,6 +195,9 @@ final class BarraDelOrganizadorTest extends TestCase
         self::assertStringContainsString('action="/cuenta/salir"', $barra);
         // La barra reemplaza al encabezado del sitio.
         self::assertStringNotContainsString('aria-label="Navegación principal"', $pagina);
+        // Dice en qué panel se está, con el color del organizador (F-02.23).
+        self::assertStringContainsString('class="panel-menu panel-rol-organizador"', $barra);
+        self::assertMatchesRegularExpression('#<p class="panel-nombre">.*?Panel del organizador\s*</p>#s', $barra);
     }
 
     public function testElModeradorVeElMismoPanelPorqueAlcanzaElRolDeOrganizador(): void

@@ -159,7 +159,8 @@ final class PanelDeReservasTest extends TestCase
      */
     private static function totalCobrado(string $cuerpo): string
     {
-        preg_match('#Total cobrado</dt>\s*<dd class="panel-dato-valor"[^>]*>(.*?)</dd>#', $cuerpo, $partes);
+        // El total es un monto: lleva además panel-dato-monto, que lo deja en una línea (IC-691).
+        preg_match('#Total cobrado</dt>\s*<dd class="panel-dato-valor[^"]*"[^>]*>(.*?)</dd>#', $cuerpo, $partes);
 
         return $partes[1] ?? 'sin la tarjeta del total';
     }

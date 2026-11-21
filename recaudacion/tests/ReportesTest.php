@@ -132,7 +132,7 @@ final class ReportesTest extends TestCase
         // Sólo sus salas.
         self::assertStringNotContainsString('Cineclub Norte', $texto);
         // En el panel del organizador, con «Reportes» marcado.
-        self::assertMatchesRegularExpression('#<a href="/recaudacion/reportes" class="panel-menu-enlace activo" aria-current="page">Reportes</a>#', $respuesta->cuerpo());
+        self::assertMatchesRegularExpression('#<a href="/recaudacion/reportes" class="panel-menu-enlace activo" aria-current="page">\s*<svg[^>]*>.*?</svg>\s*<span>Reportes</span>\s*</a>#s', $respuesta->cuerpo());
     }
 
     public function testElAdministradorVeTodasLasSalas(): void
@@ -144,7 +144,8 @@ final class ReportesTest extends TestCase
         self::assertStringContainsString('Funciones 5 finalizadas', $texto);
         // El Galpón rinde más que el Norte: 56 % contra 50 %.
         self::assertMatchesRegularExpression('/El Galpón 4 56 %.*Cineclub Norte 1 50 % 75 % — —/', $texto);
-        self::assertStringContainsString('aria-label="Administración"', $respuesta->cuerpo());
+        // En el panel de administración, no en el del organizador (F-02.23).
+        self::assertStringContainsString('<aside class="panel-menu panel-rol-administrador" aria-label="Panel de administración">', $respuesta->cuerpo());
     }
 
     public function testSinFuncionesEnElPeriodoLoDice(): void

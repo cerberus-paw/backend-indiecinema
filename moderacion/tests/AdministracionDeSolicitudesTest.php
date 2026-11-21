@@ -1288,24 +1288,26 @@ final class AdministracionDeSolicitudesTest extends TestCase
     }
 
     /**
-     * @return iterable<string, array{string, list<string>}>
+     * @return iterable<string, array{string, list<string>, string}>
      */
     public static function barras(): iterable
     {
-        // El logo y las secciones que puede abrir: al moderador, sólo la bandeja.
-        yield 'moderador' => ['moderador', ['/moderacion/denuncias', '/moderacion/documentos', '/moderacion/obras', '/moderacion/solicitudes']];
-        yield 'administrador' => ['administrador', ['/cuenta/administracion/usuarios', '/funcion/administracion/reservas', '/moderacion/denuncias', '/moderacion/documentos', '/moderacion/obras', '/moderacion/solicitudes', '/recaudacion/administracion/comercios', '/recaudacion/administracion/liquidaciones', '/recaudacion/administracion/reparto', '/recaudacion/reportes']];
+        // El logo y las secciones que puede abrir: al moderador, sólo las bandejas, y el logo y «Volver
+        // al sitio» a la portada, porque también usa el sitio (F-02.23).
+        yield 'moderador' => ['moderador', ['/', '/moderacion/denuncias', '/moderacion/documentos', '/moderacion/obras', '/moderacion/solicitudes'], 'Panel de moderación'];
+        yield 'administrador' => ['administrador', ['/cuenta/administracion/usuarios', '/funcion/administracion/reservas', '/moderacion/denuncias', '/moderacion/documentos', '/moderacion/obras', '/moderacion/solicitudes', '/recaudacion/administracion/comercios', '/recaudacion/administracion/liquidaciones', '/recaudacion/administracion/reparto', '/recaudacion/reportes'], 'Panel de administración'];
     }
 
     /**
      * @param list<string> $enlaces
      */
     #[DataProvider('barras')]
-    public function testLaBarraLateralSoloTieneLoQuePuedeAbrir(string $rol, array $enlaces): void
+    public function testLaBarraLateralSoloTieneLoQuePuedeAbrir(string $rol, array $enlaces, string $panel): void
     {
         $cuerpo = $this->pedir('GET', '/solicitudes', $rol)->cuerpo();
 
-        self::assertSame(1, preg_match('#<aside class="panel-menu">.*?</aside>#s', $cuerpo, $barra));
+        // Cada uno en su panel, con su nombre y su color: se veían iguales (F-02.23).
+        self::assertSame(1, preg_match("#<aside class=\"panel-menu panel-rol-{$rol}\" aria-label=\"{$panel}\">.*?</aside>#s", $cuerpo, $barra));
         preg_match_all('#href="([^"]*)"#', $barra[0], $hrefs);
         $unicos = array_values(array_unique($hrefs[1]));
         sort($unicos);

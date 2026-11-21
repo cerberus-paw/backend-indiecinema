@@ -647,6 +647,53 @@ final class ReservasTest extends TestCase
     }
 
     /**
+     * Las pestañas por estado (F-02.25): vigentes (pagadas o por pagar), pasadas (fue o no fue) y
+     * canceladas, cada una con su cantidad. «Todas» sigue abriendo.
+     */
+    public function testMisReservasFiltraPorPestana(): void
+    {
+        $confirmada = $this->hecha(self::PROXIMA, '2026-10-01 10:00:00');
+        $porPagar = $this->hecha(self::PROXIMA, '2026-10-02 10:00:00');
+        // Una pendiente lleva su vencimiento: lo pide la base.
+        $this->base->ejecutar("UPDATE reserva SET estado = 'pendiente_pago', vence_en = '2030-01-01 00:00:00' WHERE codigo = ?", [$porPagar]);
+        $asistio = $this->hecha(self::PROXIMA, '2026-10-03 10:00:00', 'asistio');
+        $ausente = $this->hecha(self::PROXIMA, '2026-10-04 10:00:00', 'ausente');
+        $cancelada = $this->hecha(self::PROXIMA, '2026-10-05 10:00:00', 'cancelada');
+
+        $codigos = function (string $consulta): array {
+            preg_match_all('#<span class="panel-reservas-codigo">([A-Z0-9]{4})-([A-Z0-9]{4})</span>#', $this->pedir('GET', "/reservas{$consulta}")->cuerpo(), $partes);
+
+            return array_map(static fn (string $a, string $b): string => $a . $b, $partes[1], $partes[2]);
+        };
+        self::assertSame([$porPagar, $confirmada], $codigos('?ver=vigentes'));
+        self::assertSame([$ausente, $asistio], $codigos('?ver=pasadas'));
+        self::assertSame([$cancelada], $codigos('?ver=canceladas'));
+        self::assertCount(5, $codigos(''));
+        self::assertCount(5, $codigos('?ver=cualquiera'));
+
+        $cuerpo = $this->pedir('GET', '/reservas?ver=canceladas')->cuerpo();
+        self::assertMatchesRegularExpression('#<a href="\?ver=canceladas" class="pestana activa" aria-current="page">\s*Canceladas <span class="bandeja-cuenta">1</span>#', $cuerpo);
+        self::assertMatchesRegularExpression('#<a href="\?" class="pestana">\s*Todas <span class="bandeja-cuenta">5</span>#', $cuerpo);
+        self::assertMatchesRegularExpression('#Vigentes <span class="bandeja-cuenta">2</span>#', $cuerpo);
+        self::assertMatchesRegularExpression('#Pasadas <span class="bandeja-cuenta">2</span>#', $cuerpo);
+    }
+
+    public function testMisReservasConLaPestanaVaciaLoDiceYElPaginadoLaConserva(): void
+    {
+        for ($i = 1; $i <= 21; ++$i) {
+            $this->hecha(self::PROXIMA, sprintf('2026-10-%02d 10:00:00', $i), 'cancelada');
+        }
+
+        $vigentes = $this->pedir('GET', '/reservas?ver=vigentes')->cuerpo();
+        $canceladas = $this->pedir('GET', '/reservas?ver=canceladas')->cuerpo();
+
+        self::assertStringContainsString('No tenés reservas en esta pestaña.', $vigentes);
+        self::assertStringNotContainsString('Todavía no reservaste lugares', $vigentes);
+        self::assertStringContainsString('href="?ver=canceladas&amp;pagina=2"', $canceladas);
+        self::assertSame(1, substr_count($this->pedir('GET', '/reservas?ver=canceladas&pagina=2')->cuerpo(), 'data-reserva='));
+    }
+
+    /**
      * Si programación no responde, las reservas y sus códigos se ven igual, con un aviso.
      */
     public function testMisReservasSinProgramacionMuestraLosCodigosYUnAviso(): void

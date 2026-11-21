@@ -46,6 +46,19 @@ final class Reservas extends Controlador
      */
     private const ZONA = 'America/Argentina/Buenos_Aires';
 
+    /**
+     * Las pestañas de «Mis reservas» (F-02.25) y los estados de cada una. Una espectadora con
+     * muchas canceladas las veía mezcladas con las que todavía tiene que usar. «Vigentes» son las
+     * que esperan la función (pagadas o por pagar) y «Pasadas», las que ya se dieron, fuera o no.
+     * «Todas» es la de siempre y sigue siendo la que abre.
+     */
+    private const PESTANAS = [
+        'todas' => ['Todas', []],
+        'vigentes' => ['Vigentes', [EstadoReserva::Confirmada, EstadoReserva::PendientePago]],
+        'pasadas' => ['Pasadas', [EstadoReserva::Asistio, EstadoReserva::Ausente]],
+        'canceladas' => ['Canceladas', [EstadoReserva::Cancelada]],
+    ];
+
     public function __construct(
         private readonly ServicioDeReservas $servicio,
         private readonly AvisosDeReservas $avisos,
@@ -68,7 +81,10 @@ final class Reservas extends Controlador
         if ($numero === false) {
             throw ExcepcionHttp::noEncontrada();
         }
-        [$reservas, $total] = $this->servicio->pagina($espectador, $numero);
+        // Una pestaña que no existe abre «Todas», como sin ?ver=: es un filtro, no un recurso.
+        $ver = $peticion->consulta('ver');
+        $ver = is_string($ver) && isset(self::PESTANAS[$ver]) ? $ver : 'todas';
+        [$reservas, $total] = $this->servicio->pagina($espectador, $numero, self::PESTANAS[$ver][1]);
         $paginas = max(1, (int) ceil($total / ServicioDeReservas::POR_PAGINA));
         if ($numero > $paginas) {
             throw ExcepcionHttp::noEncontrada();
@@ -114,14 +130,16 @@ final class Reservas extends Controlador
             }, $reservas),
             'sin_programacion' => $sinProgramacion,
             'calificada' => $peticion->consulta('calificada') === '1',
+            'ver' => $ver,
+            'pestanas' => self::pestanas($this->servicio->cantidades($espectador)),
             'paginado' => [
                 'numero' => $numero,
                 'total_paginas' => $paginas,
                 'total' => $total,
-                'anterior' => $numero > 1 ? self::urlDePagina($numero - 1) : null,
-                'siguiente' => $numero < $paginas ? self::urlDePagina($numero + 1) : null,
+                'anterior' => $numero > 1 ? self::urlDePagina($numero - 1, $ver) : null,
+                'siguiente' => $numero < $paginas ? self::urlDePagina($numero + 1, $ver) : null,
                 'paginas' => array_map(
-                    static fn (int $n): array => ['numero' => $n, 'url' => self::urlDePagina($n), 'actual' => $n === $numero],
+                    static fn (int $n): array => ['numero' => $n, 'url' => self::urlDePagina($n, $ver), 'actual' => $n === $numero],
                     range(1, $paginas),
                 ),
             ],
@@ -129,11 +147,38 @@ final class Reservas extends Controlador
     }
 
     /**
-     * Relativa a la página: así no depende del prefijo de funciones, que pone nginx.
+     * Las pestañas de «Mis reservas», con cuántas hay en cada una.
+     *
+     * @param array<string, int> $cantidades las de ServicioDeReservas::cantidades()
+     *
+     * @return list<array{clave: string, texto: string, cantidad: int, url: string}>
      */
-    private static function urlDePagina(int $numero): string
+    private static function pestanas(array $cantidades): array
     {
-        return $numero > 1 ? "?pagina={$numero}" : '?';
+        $pestanas = [];
+        foreach (self::PESTANAS as $clave => [$texto, $estados]) {
+            $pestanas[] = [
+                'clave' => $clave,
+                'texto' => $texto,
+                'cantidad' => $estados === []
+                    ? array_sum($cantidades)
+                    : array_sum(array_map(static fn (EstadoReserva $estado): int => $cantidades[$estado->value] ?? 0, $estados)),
+                'url' => self::urlDePagina(1, $clave),
+            ];
+        }
+
+        return $pestanas;
+    }
+
+    /**
+     * Relativa a la página: así no depende del prefijo de funciones, que pone nginx. Lleva la
+     * pestaña, para que pasar de página no la pierda.
+     */
+    private static function urlDePagina(int $numero, string $ver = 'todas'): string
+    {
+        $consulta = array_filter(['ver' => $ver === 'todas' ? null : $ver, 'pagina' => $numero > 1 ? $numero : null]);
+
+        return '?' . http_build_query($consulta);
     }
 
     public function formulario(Peticion $peticion): Respuesta

@@ -91,15 +91,26 @@ final class ServicioDeReservas
 
     /**
      * Una página de «Mis reservas» (E4-04.1): sólo las del espectador, de la más nueva a la más
-     * vieja y en cualquier estado.
+     * vieja, en cualquier estado o en los de una pestaña (F-02.25).
      *
-     * @param int $numero desde 1
+     * @param int                 $numero  desde 1
+     * @param list<EstadoReserva> $estados vacía, en cualquier estado
      *
      * @return array{0: list<Reserva>, 1: int} las de la página y cuántas tiene en total
      */
-    public function pagina(Usuario $espectador, int $numero): array
+    public function pagina(Usuario $espectador, int $numero, array $estados = []): array
     {
-        return $this->reservas->delUsuario($espectador->id, $numero, self::POR_PAGINA);
+        return $this->reservas->delUsuario($espectador->id, $numero, self::POR_PAGINA, $estados);
+    }
+
+    /**
+     * Cuántas reservas tiene el espectador en cada estado (F-02.25).
+     *
+     * @return array<string, int> con el valor del estado como clave
+     */
+    public function cantidades(Usuario $espectador): array
+    {
+        return $this->reservas->cantidadesDelUsuario($espectador->id);
     }
 
     /**

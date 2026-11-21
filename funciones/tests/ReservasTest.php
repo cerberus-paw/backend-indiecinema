@@ -751,7 +751,9 @@ final class ReservasTest extends TestCase
         $cuerpo = $this->pedir('GET', '/reservas')->cuerpo();
 
         self::assertSame(1, substr_count($cuerpo, '/cancelar"'));
-        self::assertSame(3, substr_count($cuerpo, 'Ver comprobante'));
+        // La cancelada ya no sirve para entrar: su página es el detalle (IC-693).
+        self::assertSame(2, substr_count($cuerpo, 'Ver comprobante'));
+        self::assertSame(1, substr_count($cuerpo, 'Ver detalle'));
     }
 
     /**

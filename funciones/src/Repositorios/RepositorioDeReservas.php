@@ -497,19 +497,38 @@ final class RepositorioDeReservas
      * Las reservas de un espectador, de la más nueva a la más vieja, para «Mis reservas»
      * (E4-04.1). Usa el índice por usuario y fecha de alta.
      *
-     * @param int $numero desde 1
+     * @param int                $numero  desde 1
+     * @param list<EstadoReserva> $estados sólo las que están en alguno, para las pestañas de
+     *                                    «Mis reservas» (F-02.25); vacía, todas
      *
      * @return array{0: list<Reserva>, 1: int} las de la página y cuántas tiene en total
      */
-    public function delUsuario(string $usuarioId, int $numero, int $tamano): array
+    public function delUsuario(string $usuarioId, int $numero, int $tamano, array $estados = []): array
     {
-        $total = (int) $this->base->valor('SELECT COUNT(*) FROM reserva WHERE usuario_id = ?', [$usuarioId]);
+        $donde = $estados === [] ? '' : ' AND estado IN (' . implode(', ', array_fill(0, count($estados), '?')) . ')';
+        $total = (int) $this->base->valor("SELECT COUNT(*) FROM reserva WHERE usuario_id = ?{$donde}", [$usuarioId, ...$estados]);
         $filas = $this->base->filas(
-            'SELECT * FROM reserva WHERE usuario_id = ? ORDER BY creada_en DESC, codigo LIMIT ? OFFSET ?',
-            [$usuarioId, $tamano, ($numero - 1) * $tamano],
+            "SELECT * FROM reserva WHERE usuario_id = ?{$donde} ORDER BY creada_en DESC, codigo LIMIT ? OFFSET ?",
+            [$usuarioId, ...$estados, $tamano, ($numero - 1) * $tamano],
         );
 
         return [array_map(self::reserva(...), $filas), $total];
+    }
+
+    /**
+     * Cuántas reservas tiene el espectador en cada estado, para la cantidad de cada pestaña de
+     * «Mis reservas» (F-02.25). Los estados en que no tiene ninguna no están.
+     *
+     * @return array<string, int> con el valor del estado como clave
+     */
+    public function cantidadesDelUsuario(string $usuarioId): array
+    {
+        $cantidades = [];
+        foreach ($this->base->filas('SELECT estado, COUNT(*) AS cantidad FROM reserva WHERE usuario_id = ? GROUP BY estado', [$usuarioId]) as $fila) {
+            $cantidades[(string) $fila['estado']] = (int) $fila['cantidad'];
+        }
+
+        return $cantidades;
     }
 
     /**

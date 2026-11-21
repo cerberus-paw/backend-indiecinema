@@ -308,6 +308,48 @@ final class FuncionesDelOrganizadorTest extends TestCase
         );
     }
 
+    /**
+     * Las pestañas por estado (F-02.25): cada una lista sólo lo suyo, en el mismo orden que «Todas»,
+     * y todas dicen cuántas tienen. La votación sin fecha es próxima: todavía no se dio.
+     */
+    public function testCadaPestanaListaSoloLasDeSuEstado(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $proxima = $this->programada($sala, '2030-09-19 20:30:00');
+        $enVotacion = $this->funcion($sala);
+        $yaPaso = $this->programada($sala, '2020-03-05 20:30:00', programadaEl: '2020-01-01');
+        $finalizada = $this->programada($sala, '2021-06-10 20:30:00', programadaEl: '2021-01-01');
+        $finalizada->finalizar();
+        $this->funciones->guardar($finalizada);
+        $cancelada = $this->programada($sala, '2030-10-03 20:30:00');
+        $cancelada->cancelar();
+        $this->funciones->guardar($cancelada);
+
+        $pestana = fn (string $ver): array => self::enLaTabla($this->pedir('GET', "/organizador/funciones?ver={$ver}", self::ORGANIZADORA)->cuerpo());
+        self::assertSame([$proxima->id, $enVotacion->id], $pestana('proximas'));
+        self::assertSame([$finalizada->id, $yaPaso->id], $pestana('pasadas'));
+        self::assertSame([$cancelada->id], $pestana('canceladas'));
+        // Una pestaña que no existe es «Todas»: es un filtro, no una página.
+        self::assertCount(5, $pestana('cualquiera'));
+
+        $cuerpo = $this->pedir('GET', '/organizador/funciones?ver=pasadas', self::ORGANIZADORA)->cuerpo();
+        self::assertMatchesRegularExpression('#<a href="/organizador/funciones\?ver=pasadas" class="pestana activa" aria-current="page">\s*Pasadas <span class="bandeja-cuenta">2</span>#', $cuerpo);
+        self::assertMatchesRegularExpression('#<a href="/organizador/funciones" class="pestana">\s*Todas <span class="bandeja-cuenta">5</span>#', $cuerpo);
+        self::assertMatchesRegularExpression('#Próximas <span class="bandeja-cuenta">2</span>#', $cuerpo);
+        self::assertMatchesRegularExpression('#Canceladas <span class="bandeja-cuenta">1</span>#', $cuerpo);
+    }
+
+    public function testUnaPestanaVaciaLoDiceSinInvitarAProgramarLaPrimera(): void
+    {
+        $this->programada($this->sala(self::ORGANIZADORA, 'El Galpón'), '2030-09-19 20:30:00');
+
+        $cuerpo = $this->pedir('GET', '/organizador/funciones?ver=canceladas', self::ORGANIZADORA)->cuerpo();
+
+        self::assertSame([], self::enLaTabla($cuerpo));
+        self::assertStringContainsString('No tenés funciones en esta pestaña.', $cuerpo);
+        self::assertStringNotContainsString('Todavía no tenés ninguna función en tus salas.', $cuerpo);
+    }
+
     public function testLaCanceladaSigueEnElPanel(): void
     {
         $funcion = $this->programada($this->sala(self::ORGANIZADORA, 'El Galpón'), '2030-09-19 20:30:00');
@@ -346,7 +388,11 @@ final class FuncionesDelOrganizadorTest extends TestCase
     {
         $this->funcion($this->sala(self::OTRO_ORGANIZADOR, 'El Sótano'));
 
-        self::assertStringContainsString('Todavía no tenés ninguna función en tus salas.', $this->pedir('GET', '/organizador/funciones', self::ORGANIZADORA)->cuerpo());
+        $cuerpo = $this->pedir('GET', '/organizador/funciones', self::ORGANIZADORA)->cuerpo();
+
+        self::assertStringContainsString('Todavía no tenés ninguna función en tus salas.', $cuerpo);
+        // Sin ninguna función no hay nada que filtrar.
+        self::assertStringNotContainsString('pestanas-estado', $cuerpo);
     }
 
     public function testUnEspectadorNoEntraYSinSesionHayQueIngresar(): void

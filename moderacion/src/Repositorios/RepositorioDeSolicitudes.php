@@ -150,6 +150,44 @@ final class RepositorioDeSolicitudes
     }
 
     /**
+     * Las que vencieron desde esa fecha (EF-22.10), para avisarles.
+     *
+     * @return list<SolicitudDeSala>
+     */
+    public function vencidasDesde(DateTimeImmutable $desde): array
+    {
+        return array_map(self::solicitud(...), $this->base->filas(
+            self::SELECT . ' WHERE estado = ? AND resuelta_en >= ? ORDER BY resuelta_en, id',
+            [EstadoSolicitud::Vencida->value, $desde],
+        ));
+    }
+
+    /**
+     * La cierra como vencida si seguía devuelta (EF-22.10): terminal, con el motivo y sin quién.
+     * Lo que quedaba pendiente de sus documentos se rechaza con ella, como al rechazarla. Todo
+     * junto o nada.
+     *
+     * @return bool false si ya no estaba devuelta: no cambia nada
+     */
+    public function vencer(string $id, string $motivo, DateTimeImmutable $cuando): bool
+    {
+        return (bool) $this->base->enTransaccion(function (BaseDeDatos $base) use ($id, $motivo, $cuando): bool {
+            $vencida = $base->ejecutar(
+                'UPDATE solicitud_sala SET estado = ?, motivo = ?, resuelta_en = ? WHERE id = ? AND estado = ?',
+                [EstadoSolicitud::Vencida->value, $motivo, $cuando, $id, EstadoSolicitud::Devuelta->value],
+            ) === 1;
+            if ($vencida) {
+                $base->ejecutar(
+                    "UPDATE documento SET estado = 'rechazado', motivo = ?, resuelto_en = ? WHERE solicitud_id = ? AND estado = 'pendiente'",
+                    [$motivo, $cuando, $id],
+                );
+            }
+
+            return $vencida;
+        });
+    }
+
+    /**
      * Cuántas hay en la lista, aunque muestre menos.
      */
     public function cuantas(bool $abiertas, ?string $texto = null): int

@@ -378,7 +378,7 @@ docker run --rm -u "$(id -u):$(id -g)" -v "$PWD/..:/app" -w /app/backend-indieci
 | http://localhost:8080/organizador/funciones | «Mis funciones»: las de sus salas, en cualquier estado y con su fecha; desde ahí se programa una función o se la abre a votación de títulos, y se proponen las franjas del acuerdo |
 | http://localhost:8080/cuenta/ | «Mi cuenta», con sesión: el nombre, el correo y los roles, y el enlace a «Mis reservas». Sin sesión, `/cuenta/ingresar` y `/cuenta/registro` |
 | http://localhost:8080/solicitar-sala | la solicitud de sala, con sesión: se guarda la sala propuesta con su seguro y su habilitación en PDF, y le llega al equipo por correo |
-| http://localhost:8080/moderacion/solicitudes | la bandeja de solicitudes de sala, para aprobarlas (publica la sala y da el rol de organizador; exige los cuatro puntos del checklist de requisitos), rechazarlas o, si un documento no sirve, devolverlas marcando cuál falta (quien la mandó lo vuelve a subir en `/solicitar-sala`; mientras tanto espera aparte, en «Esperando al solicitante»), siempre con un motivo, el historial, y retirar o volver a publicar la sala con un motivo; para el moderador (y el administrador) |
+| http://localhost:8080/moderacion/solicitudes | la bandeja de solicitudes de sala, para aprobarlas (publica la sala y da el rol de organizador; exige los cuatro puntos del checklist de requisitos), rechazarlas o, si un documento no sirve, devolverlas marcando cuál falta (quien la mandó lo vuelve a subir en `/solicitar-sala` dentro de `[solicitudes] plazo_devolucion_dias` del `config.ini`, 15 días, o la solicitud vence; mientras tanto espera aparte, en «Esperando al solicitante»), siempre con un motivo, el historial, y retirar o volver a publicar la sala con un motivo; para el moderador (y el administrador) |
 | http://localhost:8080/moderacion/documentos | la pestaña «Documentos» de la bandeja: el seguro o la habilitación nuevos que suben los organizadores, para aceptarlos (vuelve a publicar la sala si estaba suspendida sólo por ese papel) o rechazarlos con un motivo; para el moderador (y el administrador) |
 | http://localhost:8080/moderacion/salas/{id}/documentacion | la documentación de una sala para su organizador, desde «Mis salas»: por qué está suspendida, sus documentos y la renovación que sube |
 | http://localhost:8025 | el buzón de prueba (Mailpit): los correos que mandan los subsistemas, sin que salgan a nadie |
@@ -654,6 +654,11 @@ no duplica nada:
   exigible_desde` en el `config.ini` de moderación, a las salas habilitadas que no tienen los dos
   documentos les da 30 días desde esa fecha (con un aviso al empezar y otro siete días antes del
   fin) y después las suspende. Al desplegar EF-07.5, poner ahí la fecha del despliegue.
+- `vencer-devueltas` (moderación, una vez por día, después de `suspender-vencidas`): cierra como
+  vencidas las solicitudes de sala devueltas a las que se les pasó el plazo para completarlas
+  (`[solicitudes] plazo_devolucion_dias`) y se lo avisa por correo al solicitante, que después
+  pide la sala de cero. `recordatorio_devolucion_dias` antes del último día le manda un
+  recordatorio, uno por devolución.
 
 - `respaldar` (todos los días a las 4): el respaldo de la base y de los archivos (ver «Respaldos»).
 

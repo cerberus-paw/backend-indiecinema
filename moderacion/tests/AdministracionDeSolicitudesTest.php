@@ -1421,6 +1421,26 @@ final class AdministracionDeSolicitudesTest extends TestCase
         self::assertStringContainsString("La solicitud de sala {$id} quedó devuelta, pero no se le avisó a quien la mandó", $this->log());
     }
 
+    /**
+     * EF-22.10: la vencida está terminada: va al historial, como una rechazada, con su motivo.
+     */
+    public function testLaVencidaVaAlHistorial(): void
+    {
+        $id = $this->solicitar(self::ESPECTADORA, 'El Galpón');
+        $this->resolver($id, ['resolucion' => 'devolver', 'faltantes' => ['seguro'], 'motivo' => 'La póliza venció.']);
+        $this->base->ejecutar("UPDATE solicitud_sala SET estado = 'vencida', motivo = 'Venció el plazo para completar la documentación.', resuelta_en = NOW() WHERE id = ?", [$id]);
+
+        $historial = $this->pedir('GET', '/solicitudes?ver=historial');
+        self::assertSame(['El Galpón'], self::nombres($historial));
+        self::assertStringContainsString('Vencida', $historial->cuerpo());
+        self::assertStringNotContainsString('bandeja-esperando', $this->pedir('GET', '/solicitudes')->cuerpo());
+
+        $detalle = $this->pedir('GET', "/solicitudes?id={$id}")->cuerpo();
+        self::assertMatchesRegularExpression('#Vencida el [0-9/]+ [0-9:]+</p>\s*<p class="bandeja-texto">Venció el plazo para completar la documentación.</p>#', $detalle);
+        self::assertStringContainsString('La póliza venció.', $detalle);
+        self::assertStringNotContainsString("/solicitudes/{$id}/resolver", $detalle);
+    }
+
     #[DataProvider('idsQueNoExisten')]
     public function testUnaQueNoExisteDa404(string $id): void
     {

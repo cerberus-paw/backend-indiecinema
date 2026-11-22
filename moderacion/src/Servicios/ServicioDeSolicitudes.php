@@ -624,12 +624,27 @@ final class ServicioDeSolicitudes
     }
 
     /**
+     * El correo a quien la mandó cuando se resuelve, se devuelve (EF-22.10) o vence (lo manda la
+     * tarea vencer-devueltas). Cada uno dice si es un pedido de cambio de dirección.
+     *
      * @return array{string, string} el asunto y el texto
      */
-    private static function textoParaElSolicitante(SolicitudDeSala $solicitud, EstadoSolicitud $estado, string $motivo): array
+    public static function textoParaElSolicitante(SolicitudDeSala $solicitud, EstadoSolicitud $estado, string $motivo): array
     {
         $sala = $solicitud->datos->nombre;
         $cambio = $solicitud->cambio;
+        if ($estado === EstadoSolicitud::Vencida) {
+            $falta = $solicitud->devolucion?->queFalta() ?? 'la documentación';
+
+            return [$cambio ? "Venció el pedido de cambio de dirección de «{$sala}»" : "Venció la solicitud de «{$sala}»", implode("\n", [
+                ($cambio ? "Se cerró el pedido de cambio de dirección de «{$sala}»" : "Se cerró la solicitud de «{$sala}»")
+                    . ": {$motivo} Faltaba {$falta}.",
+                '',
+                ...($cambio
+                    ? ['La sala sigue publicada con la dirección de antes.', 'Si todavía querés cambiarla, podés pedirlo de nuevo desde «Mis salas» (/organizador/salas).']
+                    : ['Si todavía querés abrir la sala, podés mandar una solicitud nueva en /solicitar-sala.', 'Va a empezar de cero, con los requisitos de hoy.']),
+            ])];
+        }
         if ($estado === EstadoSolicitud::Devuelta) {
             $devolucion = $solicitud->devolucion ?? throw new LogicException('Una devuelta tiene su devolución.');
 
@@ -691,6 +706,31 @@ final class ServicioDeSolicitudes
      * @param 'nueva'|'corregida'|'completada' $como la que manda por primera vez, la rechazada que
      *                                               corrige o la devuelta que completa (EF-22.10)
      */
+    /**
+     * El recordatorio de que se termina el plazo para completar una devuelta (EF-22.10).
+     *
+     * @return array{string, string} el asunto y el texto
+     */
+    public static function textoDelRecordatorio(SolicitudDeSala $solicitud): array
+    {
+        $sala = $solicitud->datos->nombre;
+        $devolucion = $solicitud->devolucion ?? throw new LogicException('Una devuelta tiene su devolución.');
+
+        return [
+            $solicitud->cambio
+                ? "Se termina el plazo para completar el cambio de dirección de «{$sala}»"
+                : "Se termina el plazo para completar la solicitud de «{$sala}»",
+            implode("\n", [
+                "Todavía falta que vuelvas a subir {$devolucion->queFalta()} de «{$sala}», como te pidió la moderación:",
+                $devolucion->motivo,
+                '',
+                'Tenés hasta el ' . $devolucion->vence->format('d/m/Y') . ' para completarla en /solicitar-sala. Si se pasa la fecha,'
+                    . ' se cierra y hay que pedir' . ($solicitud->cambio ? ' el cambio' : ' la sala') . ' de nuevo.',
+                ...($solicitud->cambio ? ['', 'La sala sigue publicada con la dirección de antes.'] : []),
+            ]),
+        ];
+    }
+
     private function avisarAlEquipo(SolicitudDeSala $solicitud, Usuario $usuario, string $como): void
     {
         try {

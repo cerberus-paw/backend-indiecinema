@@ -1056,6 +1056,64 @@ final class SolicitudDeSalaTest extends TestCase
     }
 
     /**
+     * EF-22.10: como la deja la tarea vencer-devueltas.
+     */
+    private function vencerLaUltima(): void
+    {
+        $this->base->ejecutar("UPDATE solicitud_sala SET estado = 'vencida', motivo = 'Venció el plazo para completar la documentación.', resuelta_en = NOW() WHERE estado = 'devuelta'");
+    }
+
+    /**
+     * EF-22.10: con la última vencida ve el motivo y el formulario vacío. El pedido nuevo empieza
+     * de cero: otra sala, sin la foto ni los PDF de la vencida.
+     */
+    public function testConLaUltimaVencidaVeElMotivoYEmpiezaDeCero(): void
+    {
+        $this->enviar();
+        $vieja = (array) $this->base->fila('SELECT id, sala_id, imagen FROM solicitud_sala');
+        $this->devolverLaUltima(['seguro']);
+        $this->vencerLaUltima();
+
+        $pantalla = $this->pedir()->cuerpo();
+
+        self::assertStringContainsString('Venció la solicitud de «Cine Club El Galpón»', $pantalla);
+        self::assertStringContainsString('Venció el plazo para completar la documentación.', $pantalla);
+        self::assertStringContainsString('Podés mandar una solicitud nueva', $pantalla);
+        self::assertMatchesRegularExpression('/<input[^>]*name="nombre"[^>]*value=""/', $pantalla);
+        self::assertMatchesRegularExpression('/<input[^>]*name="imagen"[^>]*required/', $pantalla);
+        self::assertMatchesRegularExpression('/<input[^>]*name="seguro"[^>]*required/', $pantalla);
+        self::assertStringNotContainsString('/organizador/salas', $pantalla);
+
+        self::assertSame(422, $this->enviar(imagen: null)->estado(), 'La foto vuelve a ser obligatoria.');
+        self::assertSame(303, $this->enviar()->estado());
+
+        $nueva = (array) $this->base->fila("SELECT id, sala_id, imagen FROM solicitud_sala WHERE estado = 'pendiente'");
+        self::assertNotSame($vieja['sala_id'], $nueva['sala_id']);
+        self::assertNotSame($vieja['imagen'], $nueva['imagen']);
+        $archivosViejos = array_column($this->base->filas('SELECT archivo FROM documento WHERE solicitud_id = ?', [$vieja['id']]), 'archivo');
+        $archivosNuevos = array_column($this->base->filas('SELECT archivo FROM documento WHERE solicitud_id = ?', [$nueva['id']]), 'archivo');
+        self::assertCount(2, $archivosNuevos);
+        self::assertSame([], array_intersect($archivosViejos, $archivosNuevos));
+    }
+
+    /**
+     * EF-22.10: si el vencido era un pedido de cambio de dirección, se pide de nuevo desde «Mis
+     * salas».
+     */
+    public function testConUnCambioVencidoOfreceMisSalas(): void
+    {
+        $this->enviar();
+        $this->base->ejecutar('UPDATE solicitud_sala SET cambio = TRUE');
+        $this->devolverLaUltima(['habilitacion']);
+        $this->vencerLaUltima();
+
+        $pantalla = $this->pedir()->cuerpo();
+
+        self::assertStringContainsString('Venció el pedido de cambio de dirección de «Cine Club El Galpón»', $pantalla);
+        self::assertStringContainsString('href="/organizador/salas"', $pantalla);
+    }
+
+    /**
      * El log registra quién la mandó y qué sala por sus ids, sin el nombre de la persona.
      */
     public function testElLogNoGuardaDatosPersonales(): void

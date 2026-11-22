@@ -52,6 +52,29 @@ final class RepositorioDeDenuncias
         return true;
     }
 
+    /**
+     * Una denuncia de los datos de prueba (EF-22.11), con su id fijo, abierta o tomada.
+     *
+     * @param 'sala'|'funcion'                                  $tipo
+     * @param ?array{string, string, DateTimeImmutable} $tomada el motivo, quién y cuándo la tomó; null si está abierta
+     *
+     * @return bool false si ya estaba
+     */
+    public function agregarDePrueba(string $id, string $objetoId, string $tipo, string $salaId, string $titulo, string $usuarioId, CategoriaDenuncia $categoria, string $detalle, DateTimeImmutable $creadaEn, ?array $tomada): bool
+    {
+        if ($this->base->valor('SELECT 1 FROM denuncia WHERE id = ?', [$id]) !== null) {
+            return false;
+        }
+        [$motivo, $por, $cuando] = $tomada ?? [null, null, null];
+        $this->base->ejecutar(
+            'INSERT INTO denuncia (id, tipo, objeto_id, sala_id, titulo, usuario_id, categoria, gravedad, detalle, creada_en, estado, accion, motivo, resuelta_por, resuelta_en)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [$id, $tipo, $objetoId, $salaId, $titulo, $usuarioId, $categoria->value, $categoria->gravedad()->value, $detalle, $creadaEn, $tomada === null ? 'abierta' : 'resuelta', $tomada === null ? null : 'tomada', $motivo, $por, $cuando],
+        );
+
+        return true;
+    }
+
     public function tieneAbierta(TipoDenuncia $tipo, string $objetoId, string $usuarioId): bool
     {
         return $this->base->valor(

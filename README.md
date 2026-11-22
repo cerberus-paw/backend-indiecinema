@@ -513,6 +513,34 @@ La segunda vez, todo sale en «ya estaban». Para comprobar la carga en el naveg
   cuatro como `PUBLICADA`, y cada una se puede editar.
 - http://localhost:8080/cartelera muestra las quince funciones, cada una con su afiche.
 
+Después, moderación, para mostrar las reglas de las denuncias (EF-22.11). Sobre Cine Club El
+Alambique carga dos denuncias medias que la moderación ya tomó, una de Eva y otra de Elías,
+dentro del período: la sala queda a una del aviso. Carga además una denuncia alta abierta de Eva
+sobre su función de «Metrópolis», que la bandeja muestra «Para suspender». Le pide la sala y la
+función a programación, así que va después de sus datos de prueba, con programación andando; si
+no las encuentra, lo dice y no carga nada. Las fechas se cuentan hacia atrás desde el día en que
+se carga, y correrlo de nuevo no agrega nada:
+
+```
+docker compose exec moderacion php herramientas/datos-de-prueba.php
+#   agregada  00000007-0000-4000-8000-000000000001
+#   agregada  00000007-0000-4000-8000-000000000002
+#   agregada  00000007-0000-4000-8000-000000000003
+```
+
+Para disparar el aviso al organizador, con la sesión de `administrador@indiecinema.test`:
+
+1. En http://localhost:8080/moderacion/denuncias, el Alambique dice «2 de 3 para aviso».
+2. Denunciar la sala desde su ficha (http://localhost:8080/salas), con un motivo de gravedad
+   media, como «Información falsa o engañosa»: el administrador es el tercer denunciante.
+3. En la bandeja, elegir la sala, «Tomarlas» con un motivo y enviar.
+4. El correo «Tu sala acumula denuncias» le llega a Omar Organizador en el buzón de prueba
+   (http://localhost:8025).
+
+Para que la sala baje al final de la cartelera hacen falta cinco denunciantes: registrar dos
+cuentas más, o bajar `cartelera_cantidad` en la sección `[denuncias]` del `config.ini` de
+moderación.
+
 Para que los reportes de recaudación tengan qué mostrar, hay además un historial: dos meses de
 funciones que ya terminaron en tres de esas salas, con sus votaciones, sus ventas, la asistencia y
 las calificaciones. Programación carga las funciones y los votos, y funciones, lo que se vendió y

@@ -42,7 +42,7 @@ final class ServicioDeDenuncias
     }
 
     /**
-     * @return list<array{tipo: TipoDenuncia, objeto_id: string, titulo: string, cantidad: int, gravedad: GravedadDenuncia, primera: DateTimeImmutable}>
+     * @return list<array{tipo: TipoDenuncia, objeto_id: string, titulo: string, cantidad: int, gravedad: GravedadDenuncia, para_suspender: bool, primera: DateTimeImmutable}>
      */
     public function abiertas(): array
     {

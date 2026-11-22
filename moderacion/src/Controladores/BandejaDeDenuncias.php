@@ -17,8 +17,9 @@ use LogicException;
 
 /**
  * La pestaña «Denuncias» de la bandeja de moderación, en /moderacion/denuncias (EF-07.8): lo
- * denunciado con denuncias abiertas, primero lo más grave (EF-22.11), después lo que tiene más y
- * después lo que lleva más tiempo esperando. La elegida
+ * denunciado con denuncias abiertas, primero lo que queda para suspender (una sala o una función con
+ * una denuncia alta abierta), después lo más grave (EF-22.11), lo que tiene más y lo que lleva más
+ * tiempo esperando. La elegida
  * (?tipo=&id=) muestra lo denunciado, como lo da hoy su subsistema, y cada denuncia con quién la
  * hizo; se resuelven todas juntas con un motivo. Las rutas piden el rol de moderador, que el
  * administrador alcanza.
@@ -239,6 +240,12 @@ final class BandejaDeDenuncias extends Controlador
                 ?? throw ExcepcionHttp::noEncontrada();
         }
 
+        // Una sala o una función con una alta abierta viene con «Suspender» elegida, sin
+        // suspenderse sola (EF-22.11, Q9). Si volvió con errores, queda lo que eligió.
+        if ($elegida !== null && $elegida['para_suspender'] && !array_key_exists('accion', $valores)) {
+            $valores['accion'] = 'suspender';
+        }
+
         $datos = [
             'historial' => false,
             'cerradas' => [],
@@ -250,10 +257,11 @@ final class BandejaDeDenuncias extends Controlador
                 'cantidad' => $grupo['cantidad'],
                 'gravedad' => $grupo['gravedad']->value,
                 'gravedad_etiqueta' => $grupo['gravedad']->etiqueta(),
+                'para_suspender' => $grupo['para_suspender'],
                 'desde' => FechaParaMostrar::diaYHora($grupo['primera']),
                 'elegida' => $grupo === $elegida,
             ], $abiertas),
-            'elegida' => $elegida === null ? null : $this->detalle($elegida['tipo'], $elegida['objeto_id'], $elegida['titulo'], self::moderador($peticion)),
+            'elegida' => $elegida === null ? null : $this->detalle($elegida['tipo'], $elegida['objeto_id'], $elegida['titulo'], self::moderador($peticion)) + ['para_suspender' => $elegida['para_suspender']],
             'valores' => $valores,
             'errores' => $errores,
             'maximo_motivo' => self::MAXIMO_MOTIVO,

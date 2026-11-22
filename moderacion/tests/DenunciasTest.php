@@ -336,6 +336,54 @@ final class DenunciasTest extends TestCase
         self::assertSame(['Alta', 'Media', 'Media', 'Media', 'Baja', 'Alta', 'Baja'], $etiquetas[2]);
     }
 
+    /**
+     * EF-22.11: una sala o una función con una alta abierta va antes que todo, marcada «Para
+     * suspender», con «Suspender» elegida. No se suspende sola. Una alta sobre una obra sólo cuenta
+     * para el orden.
+     */
+    public function testUnaAltaSobreUnaSalaOUnaFuncionQuedaParaSuspender(): void
+    {
+        $sala = self::sala('El Galpón');
+        $funcion = self::funcion(self::sala('La Fábrica'), [self::obra('Zama')]);
+        $obra = self::obra('La flor');
+        $this->denunciada('obra', $obra, self::ESPECTADORA, '2026-11-01 10:00:00', 'ofensivo');
+        $this->denunciada('obra', $obra, self::ADMINISTRADOR, '2026-11-02 10:00:00', 'ofensivo');
+        $this->denunciada('sala', $sala, self::ESPECTADORA, '2026-11-03 10:00:00', 'falsa');
+        $this->denunciada('funcion', $funcion, self::ESPECTADORA, '2026-11-04 10:00:00', 'falsa');
+        $this->denunciada('funcion', $funcion, self::ADMINISTRADOR, '2026-11-05 10:00:00', 'no_se_hizo');
+
+        $respuesta = $this->pedir('GET', '/denuncias', 'moderador');
+
+        self::assertSame(['Zama', 'La flor', 'El Galpón'], self::titulos($respuesta));
+        // En la lista y en la elegida, que es la función.
+        self::assertSame(2, substr_count($respuesta->cuerpo(), '>Para suspender</span>'));
+        self::assertMatchesRegularExpression('#value="suspender" required checked#', $respuesta->cuerpo());
+        $deLaObra = $this->pedir('GET', "/denuncias?tipo=obra&id={$obra}", 'moderador')->cuerpo();
+        self::assertSame(1, substr_count($deLaObra, '>Para suspender</span>'));
+        $deLaSala = $this->pedir('GET', "/denuncias?tipo=sala&id={$sala}", 'moderador')->cuerpo();
+        self::assertStringNotContainsString('checked', $deLaSala);
+
+        self::assertSame([], $this->cerradas());
+        self::assertSame([], $this->suspensiones($funcion));
+        self::assertSame([], self::pedidosA('programacion'));
+    }
+
+    /**
+     * Después de un 422 queda lo que eligió el moderador, no «Suspender».
+     */
+    public function testParaSuspenderConservaLoElegidoSiVuelveConErrores(): void
+    {
+        $sala = self::sala('El Galpón');
+        $this->denunciada('sala', $sala, self::ESPECTADORA, '2026-11-01 10:00:00', 'seguridad');
+
+        $respuesta = $this->resolver('sala', $sala, ['accion' => 'desestimar', 'motivo' => ' ']);
+
+        self::assertSame(422, $respuesta->estado());
+        self::assertMatchesRegularExpression('#value="desestimar" required checked#', $respuesta->cuerpo());
+        self::assertDoesNotMatchRegularExpression('#value="suspender" required checked#', $respuesta->cuerpo());
+        self::assertSame([], $this->suspensiones($sala));
+    }
+
     public function testElHistorialMuestraLaGravedad(): void
     {
         $id = self::obra('La flor');

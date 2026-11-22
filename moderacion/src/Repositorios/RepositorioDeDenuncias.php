@@ -61,10 +61,10 @@ final class RepositorioDeDenuncias
 
     /**
      * Lo denunciado con denuncias abiertas, con el título de la última denuncia, cuántas tiene y
-     * la más grave (EF-22.11). Primero lo más grave, después lo que tiene más y después lo que
-     * lleva más tiempo esperando.
+     * la más grave (EF-22.11). Primero las salas y las funciones con una alta abierta, que quedan
+     * para suspender; después lo más grave, lo que tiene más y lo que lleva más tiempo esperando.
      *
-     * @return list<array{tipo: TipoDenuncia, objeto_id: string, titulo: string, cantidad: int, gravedad: GravedadDenuncia, primera: DateTimeImmutable}>
+     * @return list<array{tipo: TipoDenuncia, objeto_id: string, titulo: string, cantidad: int, gravedad: GravedadDenuncia, para_suspender: bool, primera: DateTimeImmutable}>
      */
     public function abiertas(): array
     {
@@ -74,13 +74,15 @@ final class RepositorioDeDenuncias
             'titulo' => (string) $fila['titulo'],
             'cantidad' => (int) $fila['cantidad'],
             'gravedad' => GravedadDenuncia::deOrden((int) $fila['gravedad']),
+            'para_suspender' => (bool) $fila['para_suspender'],
             'primera' => new DateTimeImmutable((string) $fila['primera'], new DateTimeZone('UTC')),
         ], $this->base->filas(
             // gravedad + 0: la posición en el ENUM, de menos a más grave.
-            "SELECT tipo, objeto_id, MAX(titulo) AS titulo, COUNT(*) AS cantidad, MAX(gravedad + 0) AS gravedad, MIN(creada_en) AS primera
+            "SELECT tipo, objeto_id, MAX(titulo) AS titulo, COUNT(*) AS cantidad, MAX(gravedad + 0) AS gravedad,
+                    tipo IN ('sala', 'funcion') AND MAX(gravedad = 'alta') AS para_suspender, MIN(creada_en) AS primera
              FROM denuncia WHERE estado = 'abierta'
              GROUP BY tipo, objeto_id
-             ORDER BY gravedad DESC, cantidad DESC, primera, tipo, objeto_id",
+             ORDER BY para_suspender DESC, gravedad DESC, cantidad DESC, primera, tipo, objeto_id",
         ));
     }
 

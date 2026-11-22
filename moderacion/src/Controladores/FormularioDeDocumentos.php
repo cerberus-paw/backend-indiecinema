@@ -53,8 +53,31 @@ final class FormularioDeDocumentos
      */
     public static function desdeCampos(array $campos, array $archivos, array $yaMandados = []): self
     {
+        return self::desde($campos, $archivos, TipoDocumento::cases(), $yaMandados);
+    }
+
+    /**
+     * Sólo los que le pidieron al devolverle la solicitud (EF-22.10), todos obligatorios.
+     *
+     * @param array<string, mixed>                     $campos
+     * @param array<string, array<string, mixed>|null> $archivos
+     * @param list<TipoDocumento>                      $faltantes
+     */
+    public static function desdeFaltantes(array $campos, array $archivos, array $faltantes): self
+    {
+        return self::desde($campos, $archivos, $faltantes, []);
+    }
+
+    /**
+     * @param array<string, mixed>                     $campos
+     * @param array<string, array<string, mixed>|null> $archivos
+     * @param list<TipoDocumento>                      $tipos
+     * @param list<TipoDocumento>                      $yaMandados
+     */
+    private static function desde(array $campos, array $archivos, array $tipos, array $yaMandados): self
+    {
         $formulario = new self();
-        foreach (TipoDocumento::cases() as $tipo) {
+        foreach ($tipos as $tipo) {
             [$campoArchivo, $campoFecha] = self::CAMPOS[$tipo->value];
             $fecha = $campos[$campoFecha] ?? null;
             $formulario->valores[$campoFecha] = is_string($fecha) ? trim($fecha) : '';

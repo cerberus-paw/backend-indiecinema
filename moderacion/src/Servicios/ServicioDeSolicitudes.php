@@ -101,6 +101,53 @@ final class ServicioDeSolicitudes
     }
 
     /**
+     * El solicitante completa la solicitud que le devolvieron (EF-22.10) con los documentos que le
+     * pidieron: la misma solicitud vuelve a pendiente, con los nuevos pendientes, y los rechazados
+     * quedan como historial. Al equipo le llega el correo de siempre; si falla, queda igual. Si algo
+     * falla al guardarla, los PDF que ya se movieron al volumen se borran.
+     *
+     * @param list<DocumentoSubido> $documentos los que faltaban, ya validados
+     *
+     * @throws NoSePuedeCompletar si la última no está devuelta o hoy ya pasó su fecha límite
+     */
+    public function completar(Usuario $usuario, array $documentos): SolicitudDeSala
+    {
+        $solicitud = $this->solicitudes->ultimaDe($usuario->id);
+        if ($solicitud?->estado !== EstadoSolicitud::Devuelta || $solicitud->devolucion === null) {
+            throw new NoSePuedeCompletar('La última solicitud no está devuelta.');
+        }
+        if (self::hoy() > $solicitud->devolucion->vence) {
+            throw new NoSePuedeCompletar('Venció el plazo para completarla.');
+        }
+        $pdfsNuevos = [];
+        try {
+            $ahora = self::ahora();
+            $papeles = [];
+            foreach ($documentos as $documento) {
+                if ($documento->rutaTemporal === null) {
+                    throw new LogicException('Al completarla, cada documento que falta es un PDF nuevo: el formulario lo pide.');
+                }
+                $archivo = $this->documentos->guardar($documento->rutaTemporal);
+                $pdfsNuevos[] = $archivo;
+                $papeles[] = new Documento(Uuid::nuevo(), $solicitud->salaId, $solicitud->id, $documento->tipo, $archivo, $documento->venceEn, $ahora, EstadoDocumento::Pendiente);
+            }
+            if (!$this->solicitudes->completar($solicitud->id, $papeles)) {
+                throw new NoSePuedeCompletar('La solicitud ya no estaba devuelta.');
+            }
+        } catch (Throwable $error) {
+            array_map($this->documentos->borrar(...), $pdfsNuevos);
+            throw $error;
+        }
+        $this->log->info('El usuario {usuario} completó la solicitud {solicitud} que le devolvieron.', [
+            'usuario' => $usuario->id,
+            'solicitud' => $solicitud->id,
+        ]);
+        $this->avisarAlEquipo($solicitud, $usuario, 'completada');
+
+        return $solicitud;
+    }
+
+    /**
      * Lo que programación tiene de una sala publicada, para pedir el cambio de dirección (EF-07.6):
      * sólo su organizador, y si la sala no tiene otra solicitud abierta. Para los demás, la sala no
      * existe.
@@ -199,7 +246,7 @@ final class ServicioDeSolicitudes
             'sala' => $solicitud->salaId,
             'solicitud' => $solicitud->id,
         ]);
-        $this->avisarAlEquipo($solicitud, $usuario, $corregida !== null);
+        $this->avisarAlEquipo($solicitud, $usuario, $corregida !== null ? 'corregida' : 'nueva');
 
         return $solicitud;
     }
@@ -385,9 +432,10 @@ final class ServicioDeSolicitudes
     public function requisitosVencidos(SolicitudDeSala $solicitud): array
     {
         $hoy = new DateTimeImmutable('today');
+        // Los rechazados al devolverla (EF-22.10) son historial: no cuentan.
         $vencidos = array_map(
             static fn (Documento $documento): TipoDocumento => $documento->tipo,
-            array_values(array_filter($this->documentosDe($solicitud), static fn (Documento $documento): bool => $documento->vencidoAl($hoy))),
+            array_values(array_filter($this->documentosDe($solicitud), static fn (Documento $documento): bool => $documento->estado !== EstadoDocumento::Rechazado && $documento->vencidoAl($hoy))),
         );
 
         return array_values(array_filter(RequisitoDeSala::cases(), static fn (RequisitoDeSala $requisito): bool => in_array($requisito->documento(), $vencidos, true)));
@@ -639,24 +687,38 @@ final class ServicioDeSolicitudes
         };
     }
 
-    private function avisarAlEquipo(SolicitudDeSala $solicitud, Usuario $usuario, bool $corregida): void
+    /**
+     * @param 'nueva'|'corregida'|'completada' $como la que manda por primera vez, la rechazada que
+     *                                               corrige o la devuelta que completa (EF-22.10)
+     */
+    private function avisarAlEquipo(SolicitudDeSala $solicitud, Usuario $usuario, string $como): void
     {
         try {
             $this->correo->enviar(new Correo(
                 (string) $this->configuracion->requerir('solicitudes.destino'),
-                ($corregida ? 'Solicitud de sala corregida: ' : ($solicitud->cambio ? 'Cambio de dirección: ' : 'Solicitud de sala: ')) . $solicitud->datos->nombre,
-                self::texto($solicitud->datos, $usuario, $corregida, $solicitud->cambio),
+                match (true) {
+                    $como === 'corregida' => 'Solicitud de sala corregida: ',
+                    $como === 'completada' => 'Solicitud de sala completada: ',
+                    $solicitud->cambio => 'Cambio de dirección: ',
+                    default => 'Solicitud de sala: ',
+                } . $solicitud->datos->nombre,
+                self::texto($solicitud->datos, $usuario, $como, $solicitud->cambio),
             ));
         } catch (CorreoNoEnviado) {
             $this->log->warning('La solicitud de sala {solicitud} quedó guardada, pero no se le avisó al equipo por correo.', ['solicitud' => $solicitud->id]);
         }
     }
 
-    private static function texto(DatosDeSala $datos, Usuario $usuario, bool $corregida, bool $cambio): string
+    /**
+     * @param 'nueva'|'corregida'|'completada' $como
+     */
+    private static function texto(DatosDeSala $datos, Usuario $usuario, string $como, bool $cambio): string
     {
         return implode("\n", [
             ($usuario->nombre ?? 'Un usuario') . match (true) {
-                $corregida => ' corrigió la sala que le rechazaron y la volvió a mandar.',
+                $como === 'corregida' => ' corrigió la sala que le rechazaron y la volvió a mandar.',
+                $como === 'completada' => ' completó la documentación que le pidieron al devolverle la solicitud'
+                    . ($cambio ? ' de cambio de dirección' : '') . ', que volvió a las pendientes.',
                 $cambio => ' pidió cambiar la dirección de la sala, que sigue publicada con la de antes.',
                 default => ' pidió abrir una sala en IndieCinema.',
             },

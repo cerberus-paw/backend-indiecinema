@@ -186,7 +186,8 @@ final class RepositorioDeSolicitudes
                 default => null,
             };
             if ($documentos !== null) {
-                $base->ejecutar('UPDATE documento SET estado = ? WHERE solicitud_id = ?', [$documentos->value, $id]);
+                // Los que se rechazaron al devolverla (EF-22.10) quedan como historial.
+                $base->ejecutar("UPDATE documento SET estado = ? WHERE solicitud_id = ? AND estado <> 'rechazado'", [$documentos->value, $id]);
             }
             self::registrarChecklist($base, $id, $estado, $resueltaPor, $resueltaEn, $tildados);
 
@@ -248,6 +249,39 @@ final class RepositorioDeSolicitudes
                 [$devolucion->motivo, $devolucion->devueltaPor, $devolucion->devueltaEn, $id, ...$faltantes],
             );
             self::registrarChecklist($base, $id, EstadoSolicitud::Devuelta, $devolucion->devueltaPor, $devolucion->devueltaEn, $tildados);
+
+            return true;
+        });
+    }
+
+    /**
+     * El solicitante completa la devuelta (EF-22.10): vuelve a pendiente, con los documentos nuevos,
+     * pendientes. Todo junto o nada.
+     *
+     * @param list<Documento> $documentos
+     *
+     * @return bool false si ya no estaba devuelta: no cambia nada
+     */
+    public function completar(string $id, array $documentos): bool
+    {
+        return (bool) $this->base->enTransaccion(function (BaseDeDatos $base) use ($id, $documentos): bool {
+            $completada = $base->ejecutar(
+                'UPDATE solicitud_sala SET estado = ? WHERE id = ? AND estado = ?',
+                [EstadoSolicitud::Pendiente->value, $id, EstadoSolicitud::Devuelta->value],
+            ) === 1;
+            if (!$completada) {
+                return false;
+            }
+            foreach ($documentos as $documento) {
+                $base->ejecutar(
+                    'INSERT INTO documento (id, sala_id, solicitud_id, tipo, archivo, vence_en, subido_en, estado)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                    [
+                        $documento->id, $documento->salaId, $documento->solicitudId, $documento->tipo->value,
+                        $documento->archivo, $documento->venceEn->format('Y-m-d'), $documento->subidoEn, $documento->estado->value,
+                    ],
+                );
+            }
 
             return true;
         });

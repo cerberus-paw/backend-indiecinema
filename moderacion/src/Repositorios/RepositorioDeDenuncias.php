@@ -64,7 +64,7 @@ final class RepositorioDeDenuncias
      * la más grave (EF-22.11). Primero las salas y las funciones con una alta abierta, que quedan
      * para suspender; después lo más grave, lo que tiene más y lo que lleva más tiempo esperando.
      *
-     * @return list<array{tipo: TipoDenuncia, objeto_id: string, titulo: string, cantidad: int, gravedad: GravedadDenuncia, para_suspender: bool, primera: DateTimeImmutable}>
+     * @return list<array{tipo: TipoDenuncia, objeto_id: string, titulo: string, cantidad: int, gravedad: GravedadDenuncia, para_suspender: bool, sala_id: ?string, primera: DateTimeImmutable}>
      */
     public function abiertas(): array
     {
@@ -75,11 +75,12 @@ final class RepositorioDeDenuncias
             'cantidad' => (int) $fila['cantidad'],
             'gravedad' => GravedadDenuncia::deOrden((int) $fila['gravedad']),
             'para_suspender' => (bool) $fila['para_suspender'],
+            'sala_id' => $fila['sala_id'] === null ? null : (string) $fila['sala_id'],
             'primera' => new DateTimeImmutable((string) $fila['primera'], new DateTimeZone('UTC')),
         ], $this->base->filas(
             // gravedad + 0: la posición en el ENUM, de menos a más grave.
             "SELECT tipo, objeto_id, MAX(titulo) AS titulo, COUNT(*) AS cantidad, MAX(gravedad + 0) AS gravedad,
-                    tipo IN ('sala', 'funcion') AND MAX(gravedad = 'alta') AS para_suspender, MIN(creada_en) AS primera
+                    tipo IN ('sala', 'funcion') AND MAX(gravedad = 'alta') AS para_suspender, MAX(sala_id) AS sala_id, MIN(creada_en) AS primera
              FROM denuncia WHERE estado = 'abierta'
              GROUP BY tipo, objeto_id
              ORDER BY para_suspender DESC, gravedad DESC, cantidad DESC, primera, tipo, objeto_id",
@@ -97,6 +98,7 @@ final class RepositorioDeDenuncias
             (string) $fila['id'],
             TipoDenuncia::from((string) $fila['tipo']),
             (string) $fila['objeto_id'],
+            $fila['sala_id'] === null ? null : (string) $fila['sala_id'],
             (string) $fila['titulo'],
             (string) $fila['usuario_id'],
             CategoriaDenuncia::from((string) $fila['categoria']),
@@ -104,7 +106,7 @@ final class RepositorioDeDenuncias
             $fila['detalle'] === null ? null : (string) $fila['detalle'],
             new DateTimeImmutable((string) $fila['creada_en'], new DateTimeZone('UTC')),
         ), $this->base->filas(
-            "SELECT id, tipo, objeto_id, titulo, usuario_id, categoria, gravedad, detalle, creada_en FROM denuncia
+            "SELECT id, tipo, objeto_id, sala_id, titulo, usuario_id, categoria, gravedad, detalle, creada_en FROM denuncia
              WHERE estado = 'abierta' AND tipo = ? AND objeto_id = ?
              ORDER BY gravedad + 0 DESC, creada_en, id",
             [$tipo->value, $objetoId],
@@ -151,5 +153,53 @@ final class RepositorioDeDenuncias
              ORDER BY resuelta_en DESC, creada_en DESC, id LIMIT ?",
             [$limite],
         ));
+    }
+
+    /**
+     * Las reglas (EF-22.11): por sala, cuántos denunciantes distintos tienen una denuncia media
+     * resuelta, creada desde ese momento.
+     *
+     * @param list<string> $salaIds
+     *
+     * @return array<string, int> sala => conteo, sólo las que tienen alguna
+     */
+    public function mediasResueltasPorSala(array $salaIds, DateTimeImmutable $desde): array
+    {
+        if ($salaIds === []) {
+            return [];
+        }
+        $marcas = implode(', ', array_fill(0, count($salaIds), '?'));
+        $conteos = [];
+        foreach ($this->base->filas(
+            "SELECT sala_id, COUNT(DISTINCT usuario_id) AS conteo FROM denuncia
+             WHERE sala_id IN ({$marcas}) AND estado = 'resuelta' AND gravedad = 'media' AND creada_en >= ?
+             GROUP BY sala_id",
+            [...$salaIds, $desde],
+        ) as $fila) {
+            $conteos[(string) $fila['sala_id']] = (int) $fila['conteo'];
+        }
+
+        return $conteos;
+    }
+
+    /**
+     * Las salas con al menos esa cantidad en el conteo de las reglas, de más a menos.
+     *
+     * @return array<string, int> sala => conteo
+     */
+    public function salasConMediasResueltas(int $cantidad, DateTimeImmutable $desde): array
+    {
+        $salas = [];
+        foreach ($this->base->filas(
+            "SELECT sala_id, COUNT(DISTINCT usuario_id) AS conteo FROM denuncia
+             WHERE sala_id IS NOT NULL AND estado = 'resuelta' AND gravedad = 'media' AND creada_en >= ?
+             GROUP BY sala_id HAVING conteo >= ?
+             ORDER BY conteo DESC, sala_id",
+            [$desde, $cantidad],
+        ) as $fila) {
+            $salas[(string) $fila['sala_id']] = (int) $fila['conteo'];
+        }
+
+        return $salas;
     }
 }

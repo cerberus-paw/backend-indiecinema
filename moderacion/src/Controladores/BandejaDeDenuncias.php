@@ -7,6 +7,7 @@ namespace IndieCinema\Moderacion\Controladores;
 use IndieCinema\Moderacion\Modelo\Denuncia;
 use IndieCinema\Moderacion\Modelo\Denunciado;
 use IndieCinema\Moderacion\Modelo\TipoDenuncia;
+use IndieCinema\Moderacion\Servicios\ReglasDeDenuncias;
 use IndieCinema\Moderacion\Servicios\ServicioDeDenuncias;
 use IndieCinema\Nucleo\Controlador;
 use IndieCinema\Nucleo\Http\ExcepcionHttp;
@@ -30,8 +31,10 @@ final class BandejaDeDenuncias extends Controlador
     private const MAXIMO_MOTIVO = 1000;
     private const ACCIONES = ['desestimar' => 'Desestimada', 'tomada' => 'Tomada', 'suspender' => 'Sala suspendida', 'rechazar' => 'Obra rechazada', 'ocultar' => 'Comentario oculto'];
 
-    public function __construct(private readonly ServicioDeDenuncias $servicio)
-    {
+    public function __construct(
+        private readonly ServicioDeDenuncias $servicio,
+        private readonly ReglasDeDenuncias $reglas,
+    ) {
     }
 
     /**
@@ -249,6 +252,14 @@ final class BandejaDeDenuncias extends Controlador
             $valores['accion'] = 'suspender';
         }
 
+        // Dónde está la sala de cada sala o función respecto de los límites de las reglas.
+        $conteos = $this->reglas->conteos(array_values(array_unique(array_filter(array_column($abiertas, 'sala_id')))));
+        $contador = fn (?string $salaId): ?array => $salaId === null ? null : [
+            'cantidad' => $conteos[$salaId] ?? 0,
+            'aviso' => $this->reglas->avisoCantidad(),
+            'cartelera' => $this->reglas->carteleraCantidad(),
+        ];
+
         $datos = [
             'historial' => false,
             'cerradas' => [],
@@ -261,10 +272,11 @@ final class BandejaDeDenuncias extends Controlador
                 'gravedad' => $grupo['gravedad']->value,
                 'gravedad_etiqueta' => $grupo['gravedad']->etiqueta(),
                 'para_suspender' => $grupo['para_suspender'],
+                'contador' => $contador($grupo['sala_id']),
                 'desde' => FechaParaMostrar::diaYHora($grupo['primera']),
                 'elegida' => $grupo === $elegida,
             ], $abiertas),
-            'elegida' => $elegida === null ? null : $this->detalle($elegida['tipo'], $elegida['objeto_id'], $elegida['titulo'], self::moderador($peticion)) + ['para_suspender' => $elegida['para_suspender']],
+            'elegida' => $elegida === null ? null : $this->detalle($elegida['tipo'], $elegida['objeto_id'], $elegida['titulo'], self::moderador($peticion)) + ['para_suspender' => $elegida['para_suspender'], 'contador' => $contador($elegida['sala_id'])],
             'valores' => $valores,
             'errores' => $errores,
             'maximo_motivo' => self::MAXIMO_MOTIVO,

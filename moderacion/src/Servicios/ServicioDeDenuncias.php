@@ -38,11 +38,12 @@ final class ServicioDeDenuncias
         private readonly AvisosAlOrganizador $avisos,
         private readonly SalasDeProgramacion $salas,
         private readonly CalificacionesDeFunciones $calificaciones,
+        private readonly ReglasDeDenuncias $reglas,
     ) {
     }
 
     /**
-     * @return list<array{tipo: TipoDenuncia, objeto_id: string, titulo: string, cantidad: int, gravedad: GravedadDenuncia, para_suspender: bool, primera: DateTimeImmutable}>
+     * @return list<array{tipo: TipoDenuncia, objeto_id: string, titulo: string, cantidad: int, gravedad: GravedadDenuncia, para_suspender: bool, sala_id: ?string, primera: DateTimeImmutable}>
      */
     public function abiertas(): array
     {
@@ -151,8 +152,52 @@ final class ServicioDeDenuncias
             'tomar' => 'tomada',
             default => $accion,
         };
+        // Las reglas cuentan por sala: las de función viejas no la tienen y no cuentan.
+        $salaId = array_values(array_filter(array_map(static fn (Denuncia $denuncia): ?string => $denuncia->salaId, $denuncias)))[0] ?? null;
+        $antes = $salaId === null ? 0 : $this->reglas->conteo($salaId);
+        if ($this->denuncias->cerrar($tipo, $objetoId, $guardada, $obraId, $motivo, $moderador->id, new DateTimeImmutable('now', new DateTimeZone('UTC'))) === 0) {
+            return false;
+        }
+        if ($salaId !== null) {
+            $this->aplicarLasReglas($salaId, $antes, $this->reglas->conteo($salaId), $denuncias[0]->id);
+        }
 
-        return $this->denuncias->cerrar($tipo, $objetoId, $guardada, $obraId, $motivo, $moderador->id, new DateTimeImmutable('now', new DateTimeZone('UTC'))) > 0;
+        return true;
+    }
+
+    /**
+     * Le avisa al organizador cada escalón que la resolución cruzó (pueden ser los dos), sin quién
+     * denunció ni qué escribió. La clave lleva una de las denuncias que se cerraron, así que cada
+     * resolución avisa una sola vez. Si el correo no sale, el cierre queda igual.
+     *
+     * @param string $resolucion una denuncia de las que se cerraron
+     */
+    private function aplicarLasReglas(string $salaId, int $antes, int $despues, string $resolucion): void
+    {
+        $dias = $this->reglas->dias();
+        $cartelera = $this->reglas->carteleraCantidad();
+        if ($antes < $this->reglas->avisoCantidad() && $despues >= $this->reglas->avisoCantidad()) {
+            $this->avisos->avisar($salaId, "denuncias-aviso:{$resolucion}", static fn (string $sala): array => [
+                'Tu sala acumula denuncias',
+                implode("\n", [
+                    "La moderación de IndieCinema tomó varias denuncias sobre tu sala «{$sala}» en los últimos {$dias} días.",
+                    '',
+                    "Si llegan a {$cartelera}, sus funciones se muestran al final de la cartelera hasta que las denuncias salgan de ese período.",
+                    'Revisá qué puede estar pasando en la sala y en sus funciones para corregirlo.',
+                ]),
+            ]);
+        }
+        if ($antes < $cartelera && $despues >= $cartelera) {
+            $this->avisos->avisar($salaId, "denuncias-cartelera:{$resolucion}", static fn (string $sala): array => [
+                'Tu sala baja en la cartelera',
+                implode("\n", [
+                    "La moderación de IndieCinema tomó {$despues} denuncias sobre tu sala «{$sala}» en los últimos {$dias} días.",
+                    '',
+                    'Desde ahora sus funciones se muestran al final de la cartelera.',
+                    "Vuelven a su lugar solas cuando esas denuncias salgan del período de {$dias} días: no hace falta que hagas nada más.",
+                ]),
+            ]);
+        }
     }
 
     /**

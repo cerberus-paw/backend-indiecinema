@@ -16,6 +16,8 @@ final readonly class Denuncia
         public string $id,
         public TipoDenuncia $tipo,
         public string $objetoId,
+        /** La sala denunciada o la de la función (EF-22.11); null en obras y comentarios. */
+        public ?string $salaId,
         public string $titulo,
         public string $usuarioId,
         public CategoriaDenuncia $categoria,

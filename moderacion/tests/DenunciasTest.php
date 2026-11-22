@@ -72,6 +72,7 @@ final class DenunciasTest extends TestCase
             'subsistemas' => ['cuentas' => self::$urls['cuentas'], 'programacion' => self::$urls['programacion'], 'funciones' => self::$urls['funciones']],
             'interno' => ['token' => 'token-de-moderacion'],
             'correo' => ['servidor' => self::$correo->url(), 'remitente' => 'no-responder@indiecinema.test'],
+            'denuncias' => ['aviso_cantidad' => 3, 'cartelera_cantidad' => 5, 'dias' => 30],
         ]);
     }
 
@@ -466,6 +467,204 @@ final class DenunciasTest extends TestCase
 
         self::assertSame(403, $this->resolver('sala', $sala, ['accion' => 'tomar', 'motivo' => 'Es válida.'])->estado());
         self::assertSame([], $this->cerradas());
+    }
+
+    /**
+     * Hace tantos días, en UTC como creada_en.
+     */
+    private static function haceDias(int $dias): string
+    {
+        return gmdate('Y-m-d H:i:s', time() - $dias * 86400);
+    }
+
+    /**
+     * Una denuncia ya resuelta sobre la sala (o una de sus funciones), escrita directo en la base:
+     * cuenta para las reglas sin pasar por ellas.
+     */
+    private function yaResuelta(string $salaId, string $usuario, string $gravedad = 'media', int $haceDias = 1, string $tipo = 'sala', ?string $objeto = null): void
+    {
+        $categoria = ['alta' => 'seguridad', 'media' => 'falsa', 'baja' => 'instalaciones'][$gravedad];
+        $this->base->ejecutar(
+            "INSERT INTO denuncia (id, tipo, objeto_id, sala_id, titulo, usuario_id, categoria, gravedad, creada_en, estado, accion, motivo, resuelta_por, resuelta_en)
+             VALUES (?, ?, ?, ?, 'Algo', ?, ?, ?, ?, 'resuelta', 'tomada', 'Ya.', ?, UTC_TIMESTAMP())",
+            [Uuid::nuevo(), $tipo, $objeto ?? $salaId, $salaId, $usuario, $categoria, $gravedad, self::haceDias($haceDias), self::MODERADORA],
+        );
+    }
+
+    /**
+     * Denuncia lo de la sala con un usuario nuevo y lo toma el moderador.
+     */
+    private function tomarUnaNueva(string $tipo, string $id, string $categoria = 'falsa'): void
+    {
+        $this->denunciada($tipo, $id, Uuid::nuevo(), self::haceDias(1), $categoria);
+        self::assertSame(303, $this->resolver($tipo, $id, ['accion' => 'tomar', 'motivo' => 'Es válida.'])->estado());
+    }
+
+    /**
+     * @return list<string> los asuntos de los correos que salieron
+     */
+    private static function asuntos(): array
+    {
+        return array_column(self::correosEnviados(), 'asunto');
+    }
+
+    /**
+     * EF-22.11: al tercer denunciante con una media tomada en el período, el organizador recibe
+     * el aviso, sin quién denunció ni qué escribió. Seguir arriba no lo repite.
+     */
+    public function testElAvisoSaleAlCruzarElPrimerLimiteYNoSeRepite(): void
+    {
+        $sala = self::sala('El Galpón');
+        $this->tomarUnaNueva('sala', $sala);
+        $this->tomarUnaNueva('sala', $sala);
+        self::assertSame([], self::correosEnviados());
+
+        $this->denunciada('sala', $sala, self::ESPECTADORA, self::haceDias(1), 'falsa', 'Mienten con la dirección.');
+        self::assertSame(303, $this->resolver('sala', $sala, ['accion' => 'tomar', 'motivo' => 'La dirección está mal.'])->estado());
+
+        $correos = self::correosEnviados();
+        self::assertCount(1, $correos);
+        self::assertSame('<omar@ejemplo.com>', $correos[0]['para']);
+        self::assertSame('Tu sala acumula denuncias', $correos[0]['asunto']);
+        self::assertStringContainsString('«El Galpón»', $correos[0]['texto']);
+        self::assertStringContainsString('últimos 30 días', $correos[0]['texto']);
+        self::assertStringContainsString('Si llegan a 5', $correos[0]['texto']);
+        self::assertStringNotContainsString('Mienten con la dirección.', $correos[0]['texto']);
+        self::assertStringNotContainsString('Eva', $correos[0]['texto']);
+
+        $this->tomarUnaNueva('sala', $sala);
+        self::assertCount(1, self::correosEnviados());
+    }
+
+    public function testLaCarteleraSaleAlCruzarElSegundoLimite(): void
+    {
+        $sala = self::sala('El Galpón');
+        foreach (range(1, 4) as $_) {
+            $this->yaResuelta($sala, Uuid::nuevo());
+        }
+
+        $this->tomarUnaNueva('sala', $sala);
+
+        $correos = self::correosEnviados();
+        self::assertSame(['Tu sala baja en la cartelera'], array_column($correos, 'asunto'));
+        self::assertStringContainsString('«El Galpón»', $correos[0]['texto']);
+        self::assertStringContainsString('al final de la cartelera', $correos[0]['texto']);
+        self::assertStringContainsString('salgan del período de 30 días', $correos[0]['texto']);
+    }
+
+    /**
+     * Una resolución que cierra varias puede cruzar los dos límites: salen los dos correos.
+     */
+    public function testUnaResolucionQueCruzaLosDosMandaLosDos(): void
+    {
+        $sala = self::sala('El Galpón');
+        $this->yaResuelta($sala, Uuid::nuevo());
+        $this->yaResuelta($sala, Uuid::nuevo());
+        foreach (range(1, 3) as $_) {
+            $this->denunciada('sala', $sala, Uuid::nuevo(), self::haceDias(1), 'derechos');
+        }
+
+        self::assertSame(303, $this->resolver('sala', $sala, ['accion' => 'tomar', 'motivo' => 'Son válidas.'])->estado());
+
+        self::assertSame(['Tu sala acumula denuncias', 'Tu sala baja en la cartelera'], self::asuntos());
+    }
+
+    /**
+     * Cuentan denunciantes distintos (una pelea no castiga la sala), sólo en el período, sólo las
+     * medias y sólo las resueltas: desestimar cierra pero no suma.
+     *
+     * @return iterable<string, array{callable(self, string): void}>
+     */
+    public static function loQueNoSuma(): iterable
+    {
+        yield 'el mismo denunciante' => [static function (self $prueba, string $sala): void {
+            $prueba->yaResuelta($sala, self::ESPECTADORA, haceDias: 5);
+            $prueba->denunciada('sala', $sala, self::ESPECTADORA, self::haceDias(1), 'falsa');
+            $prueba->resolver('sala', $sala, ['accion' => 'tomar', 'motivo' => 'Otra vez.']);
+        }];
+        yield 'fuera del período' => [static function (self $prueba, string $sala): void {
+            $prueba->yaResuelta($sala, Uuid::nuevo(), haceDias: 31);
+            $prueba->yaResuelta($sala, Uuid::nuevo(), haceDias: 60);
+        }];
+        yield 'una baja y una alta' => [static function (self $prueba, string $sala): void {
+            $prueba->denunciada('sala', $sala, Uuid::nuevo(), self::haceDias(1), 'instalaciones');
+            $prueba->denunciada('sala', $sala, Uuid::nuevo(), self::haceDias(1), 'seguridad');
+            $prueba->resolver('sala', $sala, ['accion' => 'tomar', 'motivo' => 'Son válidas.']);
+        }];
+        yield 'desestimada' => [static function (self $prueba, string $sala): void {
+            $prueba->denunciada('sala', $sala, Uuid::nuevo(), self::haceDias(1), 'falsa');
+            $prueba->resolver('sala', $sala, ['accion' => 'desestimar', 'motivo' => 'No es cierto.']);
+        }];
+    }
+
+    /**
+     * @param callable(self, string): void $loQueNoSuma
+     */
+    #[DataProvider('loQueNoSuma')]
+    public function testLoQueNoSumaNoLlegaAlAviso(callable $loQueNoSuma): void
+    {
+        $sala = self::sala('El Galpón');
+        $this->yaResuelta($sala, self::ESPECTADORA);
+        $this->yaResuelta($sala, self::ADMINISTRADOR);
+
+        $loQueNoSuma($this, $sala);
+
+        self::assertSame([], self::correosEnviados());
+        self::assertSame(0, (int) $this->base->valor("SELECT COUNT(*) FROM denuncia WHERE estado = 'abierta'"));
+        // Y una media de otro denunciante, sí.
+        $this->tomarUnaNueva('sala', $sala);
+        self::assertSame(['Tu sala acumula denuncias'], self::asuntos());
+    }
+
+    /**
+     * Las denuncias de una función cuentan para su sala.
+     */
+    public function testLasDeUnaFuncionSumanASuSala(): void
+    {
+        $sala = self::sala('El Galpón');
+        $funcion = self::funcion($sala, [self::obra('Zama')]);
+        $this->yaResuelta($sala, Uuid::nuevo());
+        $this->yaResuelta($sala, Uuid::nuevo(), tipo: 'funcion', objeto: Uuid::nuevo());
+
+        $this->tomarUnaNueva('funcion', $funcion, 'cambio_sin_aviso');
+
+        self::assertSame(['Tu sala acumula denuncias'], self::asuntos());
+    }
+
+    /**
+     * Si el correo no sale (cuentas no responde), las denuncias quedan cerradas igual.
+     */
+    public function testSiElAvisoNoSaleElCierreQuedaIgual(): void
+    {
+        $sala = self::sala('El Galpón');
+        $this->yaResuelta($sala, Uuid::nuevo());
+        $this->yaResuelta($sala, Uuid::nuevo());
+        $this->denunciada('sala', $sala, Uuid::nuevo(), self::haceDias(1), 'falsa');
+        self::tirar('cuentas');
+
+        self::assertSame(303, $this->resolver('sala', $sala, ['accion' => 'tomar', 'motivo' => 'Es válida.'])->estado());
+
+        self::assertSame([], self::correosEnviados());
+        self::assertSame(0, (int) $this->base->valor("SELECT COUNT(*) FROM denuncia WHERE estado = 'abierta'"));
+    }
+
+    /**
+     * En cada sala o función de la bandeja, dónde está su sala respecto de los dos límites. En una
+     * obra, no.
+     */
+    public function testLaBandejaMuestraElContadorDeLaSala(): void
+    {
+        $sala = self::sala('El Galpón');
+        $funcion = self::funcion($sala, [self::obra('Zama')]);
+        $this->yaResuelta($sala, Uuid::nuevo());
+        $this->yaResuelta($sala, Uuid::nuevo());
+        $this->denunciada('funcion', $funcion, self::ESPECTADORA, self::haceDias(1), 'falsa');
+        $this->denunciada('obra', self::obra('La flor'), self::ESPECTADORA, self::haceDias(2), 'falsa');
+
+        $pantalla = $this->pedir('GET', "/denuncias?tipo=funcion&id={$funcion}", 'moderador')->cuerpo();
+
+        self::assertSame(1, substr_count($pantalla, 'Sala: 2 de 3 para aviso · 2 de 5 para cartelera'));
+        self::assertStringContainsString('Denuncias medias resueltas de la sala en el período: 2 de 3 para aviso · 2 de 5 para cartelera.', $pantalla);
     }
 
     public function testElHistorialMuestraLaGravedad(): void

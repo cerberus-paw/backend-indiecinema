@@ -787,6 +787,6 @@ final class ServicioDeSolicitudes
      */
     public static function hoy(): DateTimeImmutable
     {
-        return new DateTimeImmutable('today', new DateTimeZone('America/Argentina/Buenos_Aires'));
+        return new DateTimeImmutable('today', new DateTimeZone(Devolucion::ZONA));
     }
 }

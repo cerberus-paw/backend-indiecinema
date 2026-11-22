@@ -435,7 +435,7 @@ final class RepositorioDeSolicitudes
                 (string) $fila['devolucion_motivo'],
                 (string) $fila['devuelta_por'],
                 self::fecha($fila['devuelta_en']),
-                new DateTimeImmutable((string) $fila['devolucion_vence']),
+                new DateTimeImmutable((string) $fila['devolucion_vence'], new DateTimeZone(Devolucion::ZONA)),
             ),
         );
     }

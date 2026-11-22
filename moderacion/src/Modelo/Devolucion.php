@@ -14,6 +14,12 @@ use DateTimeImmutable;
 final readonly class Devolucion
 {
     /**
+     * La zona de la fecha límite y del «hoy» con que se compara: los dos tienen que estar en la
+     * misma, o la medianoche de un día cae horas antes que la del otro.
+     */
+    public const ZONA = 'America/Argentina/Buenos_Aires';
+
+    /**
      * @param list<TipoDocumento> $faltantes los que marcó, en el orden de TipoDocumento
      * @param DateTimeImmutable   $vence     el último día para completarla, en Argentina
      */

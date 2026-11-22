@@ -126,6 +126,68 @@ final class MigracionesTest extends TestCase
         );
     }
 
+    /**
+     * EF-22.10: la devuelta espera al solicitante, así que sigue abierta: ocupa el lugar de la única
+     * de la sala.
+     */
+    public function testUnaSalaTieneUnaSolaAbiertaContandoLaDevuelta(): void
+    {
+        $sala = Uuid::nuevo();
+        $primera = $this->solicitar($sala);
+        $this->devolver($primera);
+
+        $this->assertRechaza(self::CLAVE_REPETIDA, fn () => $this->solicitar($sala));
+
+        $this->base->ejecutar("UPDATE solicitud_sala SET estado = 'vencida', motivo = 'Venció el plazo.', resuelta_en = NOW() WHERE id = ?", [$primera]);
+        $this->solicitar($sala);
+        self::assertSame(2, $this->base->valor('SELECT COUNT(*) FROM solicitud_sala'));
+    }
+
+    /**
+     * EF-22.10: la devolución lleva sus cinco campos juntos, y una devuelta los tiene. No está
+     * resuelta; la vencida sí, con fecha y motivo.
+     */
+    public function testLaDevueltaTieneSuDevolucionYLaVencidaEstaResuelta(): void
+    {
+        $solicitud = $this->solicitar(Uuid::nuevo());
+
+        $this->assertRechaza(self::RESTRICCION_CHECK, fn () => $this->base->ejecutar("UPDATE solicitud_sala SET estado = 'devuelta' WHERE id = ?", [$solicitud]));
+        $this->assertRechaza(self::RESTRICCION_CHECK, fn () => $this->devolver($solicitud, vence: null));
+        $this->assertRechaza(self::RESTRICCION_CHECK, fn () => $this->devolver($solicitud, faltantes: ''));
+        $this->assertRechaza(self::RESTRICCION_CHECK, fn () => $this->devolver($solicitud, estado: 'pendiente', motivo: null));
+
+        $this->devolver($solicitud);
+        $this->assertRechaza(self::RESTRICCION_CHECK, fn () => $this->base->ejecutar('UPDATE solicitud_sala SET resuelta_en = NOW() WHERE id = ?', [$solicitud]));
+        $this->assertRechaza(self::RESTRICCION_CHECK, fn () => $this->base->ejecutar("UPDATE solicitud_sala SET estado = 'vencida', motivo = 'Venció el plazo.' WHERE id = ?", [$solicitud]));
+        $this->base->ejecutar("UPDATE solicitud_sala SET estado = 'vencida', motivo = 'Venció el plazo.', resuelta_en = NOW() WHERE id = ?", [$solicitud]);
+        self::assertSame('seguro,habilitacion', $this->base->valor('SELECT devolucion_faltantes FROM solicitud_sala WHERE id = ?', [$solicitud]));
+    }
+
+    /**
+     * EF-22.10: una pendiente no tiene revisión manual, salvo que haya pasado por ella, la hayan
+     * devuelto y la hayan completado.
+     */
+    public function testUnaCompletadaDespuesDeLaRevisionVuelveAPendiente(): void
+    {
+        $solicitud = $this->solicitar(Uuid::nuevo());
+        $this->pasarARevision($solicitud);
+        $this->assertRechaza(self::RESTRICCION_CHECK, fn () => $this->base->ejecutar("UPDATE solicitud_sala SET estado = 'pendiente' WHERE id = ?", [$solicitud]));
+
+        $this->devolver($solicitud);
+        $this->base->ejecutar("UPDATE solicitud_sala SET estado = 'pendiente' WHERE id = ?", [$solicitud]);
+
+        self::assertSame('pendiente', $this->base->valor('SELECT estado FROM solicitud_sala WHERE id = ?', [$solicitud]));
+    }
+
+    private function devolver(string $solicitud, string $estado = 'devuelta', ?string $motivo = 'El seguro está vencido.', ?string $vence = '2026-12-07', string $faltantes = 'seguro,habilitacion'): void
+    {
+        $this->base->ejecutar(
+            "UPDATE solicitud_sala SET estado = ?, devolucion_motivo = ?, devuelta_por = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+                devuelta_en = NOW(), devolucion_vence = ?, devolucion_faltantes = ? WHERE id = ?",
+            [$estado, $motivo, $vence, $faltantes, $solicitud],
+        );
+    }
+
     public function testLaSalaPropuestaTieneCapacidadPeliculasYDuracion(): void
     {
         $solicitud = $this->solicitar(Uuid::nuevo());
@@ -183,6 +245,40 @@ final class MigracionesTest extends TestCase
         $this->documento(null, salaId: $sala);
         self::assertSame(2, $this->base->valor('SELECT COUNT(*) FROM documento WHERE sala_id = ?', [$sala]));
         self::assertSame('pendiente', $this->base->valor('SELECT DISTINCT estado FROM documento'));
+    }
+
+    /**
+     * EF-22.10: al devolverla, el seguro que no sirve queda rechazado como historial y la solicitud
+     * recibe otro; sigue habiendo uno solo que no está rechazado.
+     */
+    public function testUnaSolicitudTieneUnSoloDocumentoDeCadaTipoSinRechazar(): void
+    {
+        $solicitud = $this->solicitar(Uuid::nuevo());
+        $this->documento($solicitud);
+        $this->base->ejecutar("UPDATE documento SET estado = 'rechazado' WHERE solicitud_id = ?", [$solicitud]);
+
+        $this->documento($solicitud);
+        $this->assertRechaza(self::CLAVE_REPETIDA, fn () => $this->documento($solicitud));
+        $this->base->ejecutar("UPDATE documento SET estado = 'aceptado' WHERE solicitud_id = ? AND estado = 'pendiente'", [$solicitud]);
+        $this->assertRechaza(self::CLAVE_REPETIDA, fn () => $this->documento($solicitud));
+
+        self::assertSame(2, $this->base->valor('SELECT COUNT(*) FROM documento WHERE solicitud_id = ?', [$solicitud]));
+    }
+
+    /**
+     * EF-22.10: devolverla deja su fila del checklist.
+     */
+    public function testElChecklistRegistraLaDevolucion(): void
+    {
+        $solicitud = $this->solicitar(Uuid::nuevo());
+
+        $this->base->ejecutar(
+            "INSERT INTO revision_requisitos (solicitud_id, moderador_id, resolucion, revisado_en, seguro_vigente, habilitacion, capacidad, condiciones)
+             VALUES (?, 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', 'devuelta', NOW(), FALSE, TRUE, TRUE, TRUE)",
+            [$solicitud],
+        );
+
+        self::assertSame('devuelta', $this->base->valor('SELECT resolucion FROM revision_requisitos'));
     }
 
     private function suspender(string $sala, string $causa = 'retiro', ?string $tipo = null): string

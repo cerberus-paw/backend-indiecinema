@@ -97,7 +97,7 @@ final class AdministracionDeSolicitudesTest extends TestCase
             'subsistemas' => ['cuentas' => self::$urls['cuentas'], 'programacion' => self::$urls['programacion']],
             'interno' => ['token' => 'token-de-moderacion'],
             'correo' => ['servidor' => $this->servidorDeCorreo ?? self::$correo->url(), 'remitente' => 'no-responder@indiecinema.test'],
-            'solicitudes' => ['destino' => 'equipo@indiecinema.test'],
+            'solicitudes' => ['destino' => 'equipo@indiecinema.test', 'plazo_devolucion_dias' => 15, 'recordatorio_devolucion_dias' => 3],
         ]);
     }
 
@@ -118,7 +118,7 @@ final class AdministracionDeSolicitudesTest extends TestCase
      * Al aprobar, con los cuatro puntos del checklist tildados (EF-07.9), salvo que la prueba mande
      * los suyos.
      *
-     * @param array<string, string|list<string>> $campos
+     * @param array<string, mixed> $campos
      */
     private function resolver(string $id, array $campos, ?string $rol = 'administrador'): Respuesta
     {
@@ -197,7 +197,7 @@ final class AdministracionDeSolicitudesTest extends TestCase
      */
     private function estadosDeLosDocumentos(string $solicitud): array
     {
-        return array_column($this->base->filas('SELECT tipo, estado FROM documento WHERE solicitud_id = ?', [$solicitud]), 'estado', 'tipo');
+        return array_column($this->base->filas('SELECT tipo, estado FROM documento WHERE solicitud_id = ? ORDER BY tipo', [$solicitud]), 'estado', 'tipo');
     }
 
     private function estado(string $id): string
@@ -407,8 +407,8 @@ final class AdministracionDeSolicitudesTest extends TestCase
         yield 'sin motivo' => [['resolucion' => 'aprobar', 'motivo' => '   '], 'Escribí el motivo'];
         yield 'motivo de más' => [['resolucion' => 'aprobar', 'motivo' => str_repeat('a', 1001)], 'hasta 1000 caracteres'];
         yield 'revisión sin motivo' => [['resolucion' => 'revision', 'motivo' => ''], 'Escribí el motivo'];
-        yield 'sin resolución' => [['motivo' => 'Todo en orden.'], 'Elegí si la aprobás, la rechazás o la pasás a revisión manual.'];
-        yield 'otra resolución' => [['resolucion' => 'aprobar como VIP', 'motivo' => 'Todo en orden.'], 'Elegí si la aprobás, la rechazás o la pasás a revisión manual.'];
+        yield 'sin resolución' => [['motivo' => 'Todo en orden.'], 'Elegí si la aprobás, la rechazás, la devolvés o la pasás a revisión manual.'];
+        yield 'otra resolución' => [['resolucion' => 'aprobar como VIP', 'motivo' => 'Todo en orden.'], 'Elegí si la aprobás, la rechazás, la devolvés o la pasás a revisión manual.'];
     }
 
     /**
@@ -1168,6 +1168,257 @@ final class AdministracionDeSolicitudesTest extends TestCase
     {
         yield 'un id al azar' => ['0f0f0f0f-0f0f-4f0f-8f0f-0f0f0f0f0f0f'];
         yield 'un id que no es UUID' => ['1'];
+    }
+
+    /**
+     * EF-22.10: el último día para completar una devuelta hoy, como lo escribe la página.
+     */
+    private static function plazo(): string
+    {
+        return new DateTimeImmutable('today', new \DateTimeZone('America/Argentina/Buenos_Aires'))->modify('+15 days')->format('d/m/Y');
+    }
+
+    /**
+     * EF-22.10: devolver una pendiente por el seguro la deja devuelta con la fecha límite, rechaza
+     * el seguro con el motivo y deja la habilitación como estaba. Queda la fila del checklist, y al
+     * solicitante le llega qué falta, por qué y hasta cuándo.
+     */
+    public function testDevolverRechazaLosDocumentosMarcadosYLeAvisaAlSolicitante(): void
+    {
+        $id = $this->solicitar(self::ESPECTADORA, 'El Galpón');
+        $documentos = $this->conDocumentos($id);
+
+        $respuesta = $this->resolver($id, ['resolucion' => 'devolver', 'faltantes' => ['seguro'], 'motivo' => 'La póliza es de otra dirección.', 'requisitos' => ['habilitacion', 'capacidad']], 'moderador');
+
+        self::assertSame(303, $respuesta->estado(), $respuesta->cuerpo());
+        self::assertSame("/moderacion/solicitudes?devuelta={$id}", $respuesta->cabecera('Location'));
+        $fila = $this->base->fila('SELECT estado, devolucion_motivo, devuelta_por, devolucion_vence, devolucion_faltantes, resuelta_en, motivo FROM solicitud_sala WHERE id = ?', [$id]);
+        self::assertSame([
+            'estado' => 'devuelta',
+            'devolucion_motivo' => 'La póliza es de otra dirección.',
+            'devuelta_por' => self::MODERADORA,
+            'devolucion_vence' => DateTimeImmutable::createFromFormat('d/m/Y', self::plazo())->format('Y-m-d'),
+            'devolucion_faltantes' => 'seguro',
+            'resuelta_en' => null,
+            'motivo' => null,
+        ], $fila);
+        self::assertSame(
+            ['estado' => 'rechazado', 'motivo' => 'La póliza es de otra dirección.', 'resuelto_por' => self::MODERADORA],
+            $this->base->fila('SELECT estado, motivo, resuelto_por FROM documento WHERE id = ?', [$documentos['seguro']]),
+        );
+        self::assertNotNull($this->base->valor('SELECT resuelto_en FROM documento WHERE id = ?', [$documentos['seguro']]));
+        self::assertSame('pendiente', $this->base->valor('SELECT estado FROM documento WHERE id = ?', [$documentos['habilitacion']]));
+        self::assertSame([['resolucion' => 'devuelta', 'moderador' => self::MODERADORA, 'tildados' => ['habilitacion', 'capacidad']]], $this->revisiones($id));
+        self::assertSame([], self::pedidosA('programacion'));
+        self::assertStringContainsString(self::MODERADORA . " resolvió la solicitud de sala {$id}: devuelta.", $this->log());
+
+        $correos = self::correos();
+        self::assertCount(1, $correos);
+        self::assertSame('<eva@ejemplo.com>', $correos[0]['para']);
+        self::assertSame('Te devolvimos la solicitud de «El Galpón» para que la completes', $correos[0]['asunto']);
+        self::assertStringContainsString('volver a subir el seguro', $correos[0]['texto']);
+        self::assertStringContainsString('La póliza es de otra dirección.', $correos[0]['texto']);
+        self::assertStringContainsString('Tenés hasta el ' . self::plazo(), $correos[0]['texto']);
+        self::assertStringContainsString('/solicitar-sala', $correos[0]['texto']);
+
+        self::assertStringContainsString('Devolviste la solicitud de «El Galpón»', $this->pedir('GET', "/solicitudes?devuelta={$id}")->cuerpo());
+    }
+
+    public function testSeDevuelveUnaEnRevisionManualYConservaLaRevision(): void
+    {
+        $id = $this->solicitar(self::ESPECTADORA, 'El Galpón');
+        $this->conDocumentos($id);
+        $this->resolver($id, ['resolucion' => 'revision', 'motivo' => 'Coordinamos una visita.']);
+
+        $respuesta = $this->resolver($id, ['resolucion' => 'devolver', 'faltantes' => ['seguro', 'habilitacion'], 'motivo' => 'En la visita vimos que los papeles son de otro local.']);
+
+        self::assertSame(303, $respuesta->estado(), $respuesta->cuerpo());
+        self::assertSame(
+            ['estado' => 'devuelta', 'revision_motivo' => 'Coordinamos una visita.', 'devolucion_faltantes' => 'seguro,habilitacion'],
+            $this->base->fila('SELECT estado, revision_motivo, devolucion_faltantes FROM solicitud_sala WHERE id = ?', [$id]),
+        );
+        self::assertSame(['seguro' => 'rechazado', 'habilitacion' => 'rechazado'], $this->estadosDeLosDocumentos($id));
+        self::assertSame(['en_revision_manual', 'devuelta'], array_column($this->revisiones($id), 'resolucion'));
+    }
+
+    /**
+     * @return iterable<string, array{array<string, string|list<string>>, string}>
+     */
+    public static function devolucionesIncompletas(): iterable
+    {
+        yield 'sin documentos' => [['resolucion' => 'devolver', 'motivo' => 'La póliza venció.'], 'Marcá qué documento falta.'];
+        yield 'con otro documento' => [['resolucion' => 'devolver', 'faltantes' => ['foto'], 'motivo' => 'La póliza venció.'], 'Marcá qué documento falta.'];
+        yield 'faltantes que no son una lista' => [['resolucion' => 'devolver', 'faltantes' => 'seguro', 'motivo' => 'La póliza venció.'], 'Marcá qué documento falta.'];
+        yield 'sin motivo' => [['resolucion' => 'devolver', 'faltantes' => ['seguro'], 'motivo' => ''], 'Escribí el motivo'];
+    }
+
+    /**
+     * @param array<string, string|list<string>> $campos
+     */
+    #[DataProvider('devolucionesIncompletas')]
+    public function testSinDocumentosOSinMotivoNoSeDevuelve(array $campos, string $error): void
+    {
+        $id = $this->solicitar(self::ESPECTADORA, 'El Galpón');
+        $this->conDocumentos($id);
+
+        $respuesta = $this->resolver($id, $campos);
+
+        self::assertSame(422, $respuesta->estado());
+        self::assertStringContainsString($error, $respuesta->cuerpo());
+        self::assertSame('pendiente', $this->estado($id));
+        self::assertSame(['seguro' => 'pendiente', 'habilitacion' => 'pendiente'], $this->estadosDeLosDocumentos($id));
+        self::assertSame([], $this->revisiones($id));
+        self::assertSame([], self::correos());
+    }
+
+    public function testSiNoSeDevuelveConservaLoCargado(): void
+    {
+        $id = $this->solicitar(self::ESPECTADORA, 'El Galpón');
+
+        $pantalla = $this->resolver($id, ['resolucion' => 'devolver', 'faltantes' => ['habilitacion'], 'motivo' => '', 'requisitos' => ['capacidad']])->cuerpo();
+
+        self::assertMatchesRegularExpression('#value="devolver"[^>]*checked#', $pantalla);
+        self::assertMatchesRegularExpression('#name="faltantes\[\]" value="habilitacion"[^>]*checked#', $pantalla);
+        self::assertDoesNotMatchRegularExpression('#name="faltantes\[\]" value="seguro"[^>]*checked#', $pantalla);
+        self::assertMatchesRegularExpression('#name="requisitos\[\]" value="capacidad"[^>]*checked#', $pantalla);
+    }
+
+    public function testElFormularioOfreceDevolverYMarcarQueFalta(): void
+    {
+        $id = $this->solicitar(self::ESPECTADORA, 'El Galpón');
+
+        $pantalla = $this->pedir('GET', "/solicitudes?id={$id}")->cuerpo();
+
+        self::assertStringContainsString('value="devolver"', $pantalla);
+        self::assertStringContainsString('<fieldset id="faltantes"', $pantalla);
+        self::assertSame(2, preg_match_all('#<input type="checkbox" name="faltantes\[\]"#', $pantalla));
+        self::assertStringContainsString('El seguro', $pantalla);
+        self::assertStringContainsString('La habilitación', $pantalla);
+    }
+
+    public function testLosDocumentosDesconocidosYRepetidosNoCuentan(): void
+    {
+        $id = $this->solicitar(self::ESPECTADORA, 'El Galpón');
+
+        $respuesta = $this->resolver($id, ['resolucion' => 'devolver', 'faltantes' => ['seguro', 'foto', 'seguro', ['habilitacion']], 'motivo' => 'La póliza venció.']);
+
+        self::assertSame(303, $respuesta->estado(), $respuesta->cuerpo());
+        self::assertSame('seguro', $this->base->valor('SELECT devolucion_faltantes FROM solicitud_sala WHERE id = ?', [$id]));
+    }
+
+    /**
+     * EF-22.10: una mudada no tiene PDF, y el moderador igual le pide el que falta: el solicitante
+     * lo sube nuevo.
+     */
+    public function testSeDevuelveUnaMudadaPidiendoUnDocumentoQueNoTenia(): void
+    {
+        $id = $this->solicitar(self::ESPECTADORA, 'El Galpón', conFoto: false);
+
+        $respuesta = $this->resolver($id, ['resolucion' => 'devolver', 'faltantes' => ['habilitacion'], 'motivo' => 'Falta la habilitación del espacio.']);
+
+        self::assertSame(303, $respuesta->estado(), $respuesta->cuerpo());
+        self::assertSame(['estado' => 'devuelta', 'devolucion_faltantes' => 'habilitacion'], $this->base->fila('SELECT estado, devolucion_faltantes FROM solicitud_sala WHERE id = ?', [$id]));
+        self::assertSame([], $this->estadosDeLosDocumentos($id));
+    }
+
+    /**
+     * EF-22.10: mientras espera al solicitante, la devuelta no se resuelve ni se devuelve otra vez.
+     */
+    public function testUnaDevueltaNoSeResuelveNiSeDevuelveOtraVez(): void
+    {
+        $id = $this->solicitar(self::ESPECTADORA, 'El Galpón');
+        $this->conDocumentos($id);
+        $this->resolver($id, ['resolucion' => 'devolver', 'faltantes' => ['seguro'], 'motivo' => 'La póliza venció.']);
+        self::$correo->vaciar();
+
+        foreach ([
+            ['resolucion' => 'aprobar', 'motivo' => 'Todo en orden.'],
+            ['resolucion' => 'rechazar', 'motivo' => 'No va.'],
+            ['resolucion' => 'revision', 'motivo' => 'Una visita.'],
+            ['resolucion' => 'devolver', 'faltantes' => ['habilitacion'], 'motivo' => 'Otra vez.'],
+        ] as $campos) {
+            $respuesta = $this->resolver($id, $campos);
+            self::assertSame(409, $respuesta->estado(), $campos['resolucion']);
+            self::assertStringContainsString('espera que quien la mandó complete la documentación', $respuesta->cuerpo());
+        }
+
+        self::assertSame(['estado' => 'devuelta', 'devolucion_faltantes' => 'seguro'], $this->base->fila('SELECT estado, devolucion_faltantes FROM solicitud_sala WHERE id = ?', [$id]));
+        self::assertSame(['seguro' => 'rechazado', 'habilitacion' => 'pendiente'], $this->estadosDeLosDocumentos($id));
+        self::assertCount(1, $this->revisiones($id));
+        self::assertSame([], self::pedidosA('cuentas'));
+        self::assertSame([], self::correos());
+    }
+
+    public function testUnaResueltaNoSeDevuelve(): void
+    {
+        $id = $this->solicitar(self::ESPECTADORA, 'El Galpón');
+        $this->resolver($id, ['resolucion' => 'rechazar', 'motivo' => 'Falta la póliza.']);
+
+        $respuesta = $this->resolver($id, ['resolucion' => 'devolver', 'faltantes' => ['seguro'], 'motivo' => 'La póliza venció.']);
+
+        self::assertSame(409, $respuesta->estado());
+        self::assertSame('rechazada', $this->estado($id));
+        self::assertCount(1, $this->revisiones($id));
+    }
+
+    /**
+     * EF-22.10: la devuelta sale de las abiertas y espera aparte, con qué falta y hasta cuándo. Su
+     * detalle muestra la devolución y el checklist, sin el formulario de resolución.
+     */
+    public function testLaDevueltaEsperaAlSolicitanteAparteYSinAcciones(): void
+    {
+        $pendiente = $this->solicitar(self::ORGANIZADOR, 'La Terraza');
+        $id = $this->solicitar(self::ESPECTADORA, 'El Galpón');
+        $this->conDocumentos($id);
+        $this->resolver($id, ['resolucion' => 'devolver', 'faltantes' => ['seguro', 'habilitacion'], 'motivo' => 'Los papeles son de otro local.'], 'moderador');
+
+        $bandeja = $this->pedir('GET', '/solicitudes');
+        self::assertSame(['La Terraza'], self::nombres($bandeja));
+        self::assertMatchesRegularExpression('#Solicitudes de sala <span class="bandeja-cuenta">1</span>#', $bandeja->cuerpo());
+        self::assertSame(1, preg_match('#<section class="bandeja-esperando" aria-labelledby="titulo-esperando">.*?</section>#s', $bandeja->cuerpo(), $seccion));
+        self::assertStringContainsString('Esperando al solicitante', $seccion[0]);
+        self::assertStringContainsString("href=\"/moderacion/solicitudes?id={$id}\"", $seccion[0]);
+        self::assertStringContainsString('El Galpón', $seccion[0]);
+        self::assertStringContainsString('Eva Prueba', $seccion[0]);
+        self::assertStringContainsString('Falta el seguro y la habilitación', $seccion[0]);
+        self::assertStringContainsString('Hasta el ' . self::plazo(), $seccion[0]);
+        self::assertSame([], self::nombres($this->pedir('GET', '/solicitudes?ver=historial')));
+
+        $detalle = $this->pedir('GET', "/solicitudes?id={$id}")->cuerpo();
+        self::assertStringContainsString('<h2 id="titulo-solicitud" class="bandeja-detalle-titulo">El Galpón</h2>', $detalle);
+        self::assertStringContainsString('Esperando al solicitante', $detalle);
+        self::assertStringNotContainsString("/solicitudes/{$id}/resolver", $detalle);
+        self::assertStringNotContainsString('name="requisitos[]"', $detalle);
+        self::assertMatchesRegularExpression('#Devuelta el [0-9/]+ [0-9:]+ por Mora Prueba#', $detalle);
+        self::assertStringContainsString('Los papeles son de otro local.', $detalle);
+        self::assertStringContainsString('Tiene hasta el ' . self::plazo() . ' para completarla.', $detalle);
+        self::assertStringContainsString('Falta el seguro y la habilitación', $detalle);
+        self::assertStringContainsString("href=\"/moderacion/solicitudes?id={$pendiente}\"", $detalle);
+    }
+
+    public function testDevolverUnCambioDeDireccionLoDiceEnElCorreo(): void
+    {
+        $id = $this->pedirCambio();
+
+        $this->resolver($id, ['resolucion' => 'devolver', 'faltantes' => ['habilitacion'], 'motivo' => 'La habilitación es de la dirección vieja.']);
+
+        $correos = self::correos();
+        self::assertCount(1, $correos);
+        self::assertSame('Te devolvimos el cambio de dirección de «El Galpón» para que lo completes', $correos[0]['asunto']);
+        self::assertStringContainsString('volver a subir la habilitación', $correos[0]['texto']);
+        self::assertStringContainsString('La sala sigue publicada con la dirección de antes.', $correos[0]['texto']);
+    }
+
+    public function testSiFallaElCorreoLaDevolucionQueda(): void
+    {
+        $id = $this->solicitar(self::ESPECTADORA, 'El Galpón');
+        $this->servidorDeCorreo = 'smtp://127.0.0.1:1';
+
+        $respuesta = $this->resolver($id, ['resolucion' => 'devolver', 'faltantes' => ['seguro'], 'motivo' => 'La póliza venció.']);
+
+        self::assertSame(303, $respuesta->estado(), $respuesta->cuerpo());
+        self::assertSame('devuelta', $this->estado($id));
+        self::assertStringContainsString("La solicitud de sala {$id} quedó devuelta, pero no se le avisó a quien la mandó", $this->log());
     }
 
     #[DataProvider('idsQueNoExisten')]

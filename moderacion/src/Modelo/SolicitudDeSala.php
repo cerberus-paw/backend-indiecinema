@@ -22,6 +22,8 @@ final readonly class SolicitudDeSala
      *                                   de la resolución; null si no pasó
      * @param bool    $cambio            si pide cambiar la dirección de una sala ya publicada
      *                                   (EF-07.6), en lugar de abrir una
+     * @param ?Devolucion $devolucion    la última vez que se la devolvieron al solicitante
+     *                                   (EF-22.10); null si nunca
      */
     public function __construct(
         public string $id,
@@ -37,6 +39,7 @@ final readonly class SolicitudDeSala
         public ?string $revisionMotivo = null,
         public ?DateTimeImmutable $revisionEn = null,
         public bool $cambio = false,
+        public ?Devolucion $devolucion = null,
     ) {
     }
 
@@ -46,10 +49,18 @@ final readonly class SolicitudDeSala
     }
 
     /**
-     * Pendiente o en revisión manual: espera que la aprueben o la rechacen.
+     * Pendiente, en revisión manual o devuelta: todavía no terminó.
      */
     public function estaAbierta(): bool
     {
         return in_array($this->estado, EstadoSolicitud::abiertas(), true);
+    }
+
+    /**
+     * Pendiente o en revisión manual: espera que el moderador la resuelva.
+     */
+    public function estaPorResolver(): bool
+    {
+        return in_array($this->estado, EstadoSolicitud::porResolver(), true);
     }
 }

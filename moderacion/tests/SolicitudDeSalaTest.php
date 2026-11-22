@@ -98,7 +98,7 @@ final class SolicitudDeSalaTest extends TestCase
             'subsistemas' => ['cuentas' => self::$urls['cuentas'], 'programacion' => self::$urls['programacion']],
             'interno' => ['token' => 'token-de-moderacion'],
             'correo' => ['servidor' => $servidorDeCorreo ?? self::$correo->url(), 'remitente' => 'no-responder@indiecinema.test'],
-            'solicitudes' => ['destino' => self::EQUIPO],
+            'solicitudes' => ['destino' => self::EQUIPO, 'plazo_devolucion_dias' => 15, 'recordatorio_devolucion_dias' => 3],
         ]);
     }
 

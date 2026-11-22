@@ -384,6 +384,90 @@ final class DenunciasTest extends TestCase
         self::assertSame([], $this->suspensiones($sala));
     }
 
+    /**
+     * EF-22.11: «Tomar» cierra todas las abiertas de una sala o una función como resueltas, con la
+     * acción tomada y el motivo, sin pedirle nada a otro subsistema ni suspender.
+     */
+    public function testTomarCierraLasAbiertasComoTomadasSinSancionar(): void
+    {
+        $sala = self::sala('El Galpón');
+        $funcion = self::funcion($sala, [self::obra('Zama')]);
+        $this->denunciada('sala', $sala, self::ESPECTADORA, '2026-11-01 10:00:00', 'falsa');
+        $this->denunciada('sala', $sala, self::ADMINISTRADOR, '2026-11-02 10:00:00', 'instalaciones');
+        $this->denunciada('funcion', $funcion, self::ESPECTADORA, '2026-11-03 10:00:00', 'cambio_sin_aviso');
+        self::assertStringContainsString('value="tomar"', $this->pedir('GET', "/denuncias?tipo=sala&id={$sala}", 'moderador')->cuerpo());
+
+        $respuesta = $this->resolver('sala', $sala, ['accion' => 'tomar', 'motivo' => 'Las butacas están rotas.']);
+        self::assertSame(303, $respuesta->estado(), $respuesta->cuerpo());
+        self::assertSame("/moderacion/denuncias?tomadas={$sala}", $respuesta->cabecera('Location'));
+        self::assertSame(303, $this->resolver('funcion', $funcion, ['accion' => 'tomar', 'motivo' => 'Cambiaron la fecha.'])->estado());
+
+        $tomada = static fn (string $id, string $motivo): array => ['objeto_id' => $id, 'estado' => 'resuelta', 'accion' => 'tomada', 'motivo' => $motivo, 'resuelta_por' => self::MODERADORA, 'con_fecha' => 1];
+        self::assertSame([
+            $tomada($sala, 'Las butacas están rotas.'),
+            $tomada($sala, 'Las butacas están rotas.'),
+            $tomada($funcion, 'Cambiaron la fecha.'),
+        ], $this->cerradas());
+        self::assertSame([], self::pedidosA('programacion'));
+        self::assertSame([], self::pedidosA('funciones'));
+        self::assertSame([], $this->suspensiones($sala));
+        self::assertStringContainsString('Tomaste las denuncias de «El Galpón».', $this->pedir('GET', "/denuncias?tomadas={$sala}", 'moderador')->cuerpo());
+
+        $historial = $this->pedir('GET', '/denuncias?ver=historial', 'moderador')->cuerpo();
+        self::assertSame(3, substr_count($historial, '>Tomada</span>'));
+        self::assertStringContainsString('Las butacas están rotas.', $historial);
+    }
+
+    /**
+     * Las reglas no cuentan obras ni comentarios: ahí «Tomar» no se ofrece ni se acepta.
+     */
+    public function testTomarNoSeOfreceNiSeAceptaEnObrasNiComentarios(): void
+    {
+        $obra = self::obra('La flor');
+        $comentario = self::comentario(self::sala('El Galpón'), 'Un insulto.');
+        $this->denunciada('obra', $obra, self::ESPECTADORA, '2026-11-01 10:00:00');
+        $this->denunciada('calificacion', $comentario, self::ESPECTADORA, '2026-11-02 10:00:00');
+
+        foreach (['obra' => $obra, 'calificacion' => $comentario] as $tipo => $id) {
+            self::assertStringNotContainsString('value="tomar"', $this->pedir('GET', "/denuncias?tipo={$tipo}&id={$id}", 'moderador')->cuerpo());
+            $respuesta = $this->resolver($tipo, $id, ['accion' => 'tomar', 'motivo' => 'Es válida.']);
+            self::assertSame(422, $respuesta->estado());
+            self::assertStringContainsString('id="error-accion"', $respuesta->cuerpo());
+        }
+        self::assertSame([], $this->cerradas());
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function motivosQueNoSirven(): iterable
+    {
+        yield 'sin motivo' => [' '];
+        yield 'motivo de más' => [str_repeat('a', 1001)];
+    }
+
+    #[DataProvider('motivosQueNoSirven')]
+    public function testTomarPideElMotivo(string $motivo): void
+    {
+        $sala = self::sala('El Galpón');
+        $this->denunciada('sala', $sala, self::ESPECTADORA, '2026-11-01 10:00:00', 'falsa');
+
+        $respuesta = $this->resolver('sala', $sala, ['accion' => 'tomar', 'motivo' => $motivo]);
+
+        self::assertSame(422, $respuesta->estado());
+        self::assertStringContainsString('id="error-motivo"', $respuesta->cuerpo());
+        self::assertSame([], $this->cerradas());
+    }
+
+    public function testElModeradorNoTomaLasDeSuSala(): void
+    {
+        $sala = self::sala('La de Mora', self::MODERADORA);
+        $this->denunciada('sala', $sala, self::ESPECTADORA, '2026-11-01 10:00:00', 'falsa');
+
+        self::assertSame(403, $this->resolver('sala', $sala, ['accion' => 'tomar', 'motivo' => 'Es válida.'])->estado());
+        self::assertSame([], $this->cerradas());
+    }
+
     public function testElHistorialMuestraLaGravedad(): void
     {
         $id = self::obra('La flor');

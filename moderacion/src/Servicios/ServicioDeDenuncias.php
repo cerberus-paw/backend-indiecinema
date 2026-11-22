@@ -110,8 +110,8 @@ final class ServicioDeDenuncias
     }
 
     /**
-     * Cierra todas las abiertas de lo denunciado con el motivo: desestimadas, o resueltas después
-     * de actuar en el subsistema dueño (si no responde, no se cierra nada y se reintenta). Si lo
+     * Cierra todas las abiertas de lo denunciado con el motivo: desestimadas, tomadas (válidas, sin
+     * sancionar: EF-22.11), o resueltas después de actuar en el subsistema dueño (si no responde, no se cierra nada y se reintenta). Si lo
      * que resuelve ya estaba hecho, se cierran sin repetirlo (Q14).
      *
      * @param ?Denunciado $denunciado como lo da hoy su subsistema, o null si ya no existe
@@ -145,7 +145,14 @@ final class ServicioDeDenuncias
             };
         }
 
-        return $this->denuncias->cerrar($tipo, $objetoId, $accion === 'desestimar' ? null : $accion, $obraId, $motivo, $moderador->id, new DateTimeImmutable('now', new DateTimeZone('UTC'))) > 0;
+        // Tomarlas (EF-22.11) no toca otro subsistema: quedan resueltas como tomadas.
+        $guardada = match ($accion) {
+            'desestimar' => null,
+            'tomar' => 'tomada',
+            default => $accion,
+        };
+
+        return $this->denuncias->cerrar($tipo, $objetoId, $guardada, $obraId, $motivo, $moderador->id, new DateTimeImmutable('now', new DateTimeZone('UTC'))) > 0;
     }
 
     /**

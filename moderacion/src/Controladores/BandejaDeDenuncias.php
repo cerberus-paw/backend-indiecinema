@@ -28,7 +28,7 @@ final class BandejaDeDenuncias extends Controlador
 {
     /** Como la columna denuncia.motivo. */
     private const MAXIMO_MOTIVO = 1000;
-    private const ACCIONES = ['desestimar' => 'Desestimada', 'suspender' => 'Sala suspendida', 'rechazar' => 'Obra rechazada', 'ocultar' => 'Comentario oculto'];
+    private const ACCIONES = ['desestimar' => 'Desestimada', 'tomada' => 'Tomada', 'suspender' => 'Sala suspendida', 'rechazar' => 'Obra rechazada', 'ocultar' => 'Comentario oculto'];
 
     public function __construct(private readonly ServicioDeDenuncias $servicio)
     {
@@ -88,6 +88,7 @@ final class BandejaDeDenuncias extends Controlador
         $aviso = match (true) {
             !$this->servicio->resolver($tipo, $id, $denunciado, $accion, $motivo, $moderador) => 'ya_resueltas',
             $accion === 'desestimar' => 'desestimadas',
+            $accion === 'tomar' => 'tomadas',
             default => 'resueltas',
         };
 
@@ -142,6 +143,7 @@ final class BandejaDeDenuncias extends Controlador
                 'gravedad' => $cerrada['gravedad']->value,
                 'gravedad_etiqueta' => $cerrada['gravedad']->etiqueta(),
                 'desestimada' => $cerrada['estado'] === 'desestimada',
+                'tomada' => $cerrada['accion'] === 'tomada',
                 'accion' => self::ACCIONES[$cerrada['accion'] ?? 'desestimar'],
                 'motivo' => $cerrada['motivo'],
                 'resuelta' => FechaParaMostrar::diaYHora($cerrada['resuelta_en']),
@@ -179,6 +181,7 @@ final class BandejaDeDenuncias extends Controlador
         $avisos = [
             'desestimadas' => 'Desestimaste las denuncias de «%s».',
             'resueltas' => 'Resolviste las denuncias de «%s».',
+            'tomadas' => 'Tomaste las denuncias de «%s».',
             'ya_resueltas' => 'Ya no había denuncias abiertas: no se cambió nada.',
             'levantada' => 'Levantaste la suspensión de «%s».',
             'ya_levantada' => 'La sala ya no estaba suspendida por denuncia: no se cambió nada.',
@@ -323,6 +326,11 @@ final class BandejaDeDenuncias extends Controlador
     private static function acciones(?Denunciado $denunciado): array
     {
         $acciones = [['valor' => 'desestimar', 'etiqueta' => 'Desestimarlas: no hay nada que hacer']];
+        // Tomarlas (EF-22.11): son válidas y cuentan para las reglas de la sala, sin sancionar
+        // todavía. Sólo donde hay una sala: las reglas no cuentan obras ni comentarios.
+        if ($denunciado !== null && $denunciado->tipo->tieneLugar()) {
+            $acciones[] = ['valor' => 'tomar', 'etiqueta' => 'Tomarlas: son válidas y cuentan para las reglas de la sala, sin sancionar todavía'];
+        }
         if ($denunciado?->tipo === TipoDenuncia::Obra) {
             $acciones[] = ['valor' => 'rechazar', 'etiqueta' => 'Rechazar la obra: sale del catálogo y de las votaciones abiertas'];
         }

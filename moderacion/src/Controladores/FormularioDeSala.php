@@ -128,13 +128,23 @@ final class FormularioDeSala
                 'tipo' => $mensaje,
             ]];
         }
-        $reglas['imagen'] = [
-            'requerido' => $imagenObligatoria,
+        $reglas['imagen'] = self::reglaDeLaImagen($imagenObligatoria);
+
+        return $reglas;
+    }
+
+    /**
+     * La regla del campo de la foto, como la de reglas(): también la de la foto de una denuncia.
+     *
+     * @return array<string, mixed>
+     */
+    public static function reglaDeLaImagen(bool $obligatoria): array
+    {
+        return [
+            'requerido' => $obligatoria,
             'aceptar' => implode(',', array_keys(self::TIPOS_DE_IMAGEN)),
             'mensajes' => ['requerido' => self::FALTA_LA_FOTO, 'aceptar' => self::FOTO_DE_OTRO_TIPO],
         ];
-
-        return $reglas;
     }
 
     /** @return string el mismo texto que contesta el servidor cuando el campo viene vacío */
@@ -200,53 +210,59 @@ final class FormularioDeSala
     }
 
     /**
-     * La imagen se juzga por su contenido (finfo lee los primeros bytes), nunca por la extensión
-     * ni por el tipo que dice el navegador: los dos los elige quien la manda. Además tiene que
-     * poder leerse como imagen, con un tamaño razonable.
-     *
      * @param array<string, mixed>|null $archivo
      */
     private function validarImagen(?array $archivo, bool $obligatoria): void
     {
+        $imagen = self::imagenSubida($archivo);
+        if ($imagen === null && $obligatoria) {
+            $this->errores['imagen'] = self::FALTA_LA_FOTO;
+        } elseif (is_string($imagen)) {
+            $this->errores['imagen'] = $imagen;
+        } else {
+            $this->imagen = $imagen;
+        }
+    }
+
+    /**
+     * Una foto que mandó el usuario, con la validación y el límite de las fotos de las salas: la
+     * usa también la foto de una denuncia (EF-22.11).
+     *
+     * La imagen se juzga por su contenido (finfo lee los primeros bytes), nunca por la extensión
+     * ni por el tipo que dice el navegador: los dos los elige quien la manda. Además tiene que
+     * poder leerse como imagen, con un tamaño razonable.
+     *
+     * @param array<string, mixed>|null $archivo el archivo del campo, como lo arma PHP
+     *
+     * @return ImagenSubida|string|null la imagen válida, qué está mal, o null si no mandó ninguna
+     */
+    public static function imagenSubida(?array $archivo): ImagenSubida|string|null
+    {
         $error = $archivo['error'] ?? UPLOAD_ERR_NO_FILE;
         if ($error === UPLOAD_ERR_NO_FILE) {
-            if ($obligatoria) {
-                $this->errores['imagen'] = self::FALTA_LA_FOTO;
-            }
-
-            return;
+            return null;
         }
         if ($error === UPLOAD_ERR_INI_SIZE || $error === UPLOAD_ERR_FORM_SIZE) {
-            $this->errores['imagen'] = 'La foto puede pesar hasta 5 MB.';
-
-            return;
+            return 'La foto puede pesar hasta 5 MB.';
         }
         $ruta = $archivo['tmp_name'] ?? null;
         if ($error !== UPLOAD_ERR_OK || !is_string($ruta) || !is_file($ruta)) {
-            $this->errores['imagen'] = 'No pudimos recibir la foto. Probá de nuevo.';
-
-            return;
+            return 'No pudimos recibir la foto. Probá de nuevo.';
         }
         if (filesize($ruta) > self::MAXIMO_IMAGEN) {
-            $this->errores['imagen'] = 'La foto puede pesar hasta 5 MB.';
-
-            return;
+            return 'La foto puede pesar hasta 5 MB.';
         }
 
         $extension = self::TIPOS_DE_IMAGEN[(new finfo(FILEINFO_MIME_TYPE))->file($ruta)] ?? null;
         $medidas = $extension === null ? false : @getimagesize($ruta);
         if ($extension === null || $medidas === false) {
-            $this->errores['imagen'] = self::FOTO_DE_OTRO_TIPO;
-
-            return;
+            return self::FOTO_DE_OTRO_TIPO;
         }
         if ($medidas[0] > self::LADO_MAXIMO || $medidas[1] > self::LADO_MAXIMO) {
-            $this->errores['imagen'] = 'La foto puede medir hasta ' . self::LADO_MAXIMO . ' píxeles de lado.';
-
-            return;
+            return 'La foto puede medir hasta ' . self::LADO_MAXIMO . ' píxeles de lado.';
         }
 
-        $this->imagen = new ImagenSubida($ruta, $extension);
+        return new ImagenSubida($ruta, $extension);
     }
 
     /**

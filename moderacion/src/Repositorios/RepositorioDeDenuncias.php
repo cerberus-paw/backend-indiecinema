@@ -31,15 +31,16 @@ final class RepositorioDeDenuncias
      * Con la gravedad de su motivo (EF-22.11).
      *
      * @param ?string $salaId la sala denunciada o la de la función; null en obras y comentarios
+     * @param ?string $foto   el nombre de la foto guardada, en salas y funciones (EF-22.11)
      *
      * @return bool false si ese usuario ya tenía una abierta sobre eso
      */
-    public function agregar(TipoDenuncia $tipo, string $objetoId, ?string $salaId, string $titulo, string $usuarioId, CategoriaDenuncia $categoria, ?string $detalle, DateTimeImmutable $creadaEn): bool
+    public function agregar(TipoDenuncia $tipo, string $objetoId, ?string $salaId, string $titulo, string $usuarioId, CategoriaDenuncia $categoria, ?string $detalle, DateTimeImmutable $creadaEn, ?string $foto = null): bool
     {
         try {
             $this->base->ejecutar(
-                'INSERT INTO denuncia (id, tipo, objeto_id, sala_id, titulo, usuario_id, categoria, gravedad, detalle, creada_en) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                [Uuid::nuevo(), $tipo->value, $objetoId, $salaId, $titulo, $usuarioId, $categoria->value, $categoria->gravedad()->value, $detalle, $creadaEn],
+                'INSERT INTO denuncia (id, tipo, objeto_id, sala_id, titulo, usuario_id, categoria, gravedad, detalle, foto, creada_en) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                [Uuid::nuevo(), $tipo->value, $objetoId, $salaId, $titulo, $usuarioId, $categoria->value, $categoria->gravedad()->value, $detalle, $foto, $creadaEn],
             );
         } catch (PDOException $error) {
             if (($error->errorInfo[1] ?? null) === self::CLAVE_DUPLICADA) {
@@ -105,12 +106,23 @@ final class RepositorioDeDenuncias
             GravedadDenuncia::from((string) $fila['gravedad']),
             $fila['detalle'] === null ? null : (string) $fila['detalle'],
             new DateTimeImmutable((string) $fila['creada_en'], new DateTimeZone('UTC')),
+            $fila['foto'] === null ? null : (string) $fila['foto'],
         ), $this->base->filas(
-            "SELECT id, tipo, objeto_id, sala_id, titulo, usuario_id, categoria, gravedad, detalle, creada_en FROM denuncia
+            "SELECT id, tipo, objeto_id, sala_id, titulo, usuario_id, categoria, gravedad, detalle, foto, creada_en FROM denuncia
              WHERE estado = 'abierta' AND tipo = ? AND objeto_id = ?
              ORDER BY gravedad + 0 DESC, creada_en, id",
             [$tipo->value, $objetoId],
         ));
+    }
+
+    /**
+     * El nombre de la foto de una denuncia (EF-22.11), o null si no tiene o no existe.
+     */
+    public function fotoDe(string $id): ?string
+    {
+        $foto = $this->base->valor('SELECT foto FROM denuncia WHERE id = ?', [$id]);
+
+        return $foto === null ? null : (string) $foto;
     }
 
     /**

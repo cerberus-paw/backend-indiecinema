@@ -10,6 +10,7 @@ use IndieCinema\Moderacion\Controladores\DenunciasInternas;
 use IndieCinema\Moderacion\Controladores\DocumentacionDeSala;
 use IndieCinema\Moderacion\Controladores\DocumentoDeSala;
 use IndieCinema\Moderacion\Controladores\FormularioDeDenuncia;
+use IndieCinema\Moderacion\Controladores\FotoDeDenuncia;
 use IndieCinema\Moderacion\Controladores\FotoDeSolicitud;
 use IndieCinema\Moderacion\Controladores\ResumenInterno;
 use IndieCinema\Moderacion\Controladores\SolicitudDeSala;
@@ -52,6 +53,8 @@ return static function (Router $router): void {
     // La pestaña «Denuncias» de la bandeja: el moderador las desestima o actúa sobre lo denunciado.
     $router->get('/denuncias', [BandejaDeDenuncias::class, 'listar'], Rol::Moderador);
     $router->post('/denuncias/{tipo}/{id}/resolver', [BandejaDeDenuncias::class, 'resolver'], Rol::Moderador);
+    // La foto de una denuncia de sala o de función (EF-22.11), sólo para la moderación.
+    $router->get('/denuncias/{id}/foto', [FotoDeDenuncia::class, 'mostrar'], Rol::Moderador);
     // Las salas suspendidas por denuncia: la suspensión se levanta con un motivo.
     $router->post('/denuncias/salas/{id}/levantar', [BandejaDeDenuncias::class, 'levantar'], Rol::Moderador);
     // La bandeja de solicitudes de sala: aprobar una crea la sala en programación y le da el rol

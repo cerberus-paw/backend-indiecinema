@@ -24,6 +24,8 @@ final readonly class Denuncia
         public GravedadDenuncia $gravedad,
         public ?string $detalle,
         public DateTimeImmutable $creadaEn,
+        /** El nombre de la foto guardada (EF-22.11), o null si no mandó. */
+        public ?string $foto = null,
     ) {
     }
 }

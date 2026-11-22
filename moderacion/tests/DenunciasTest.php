@@ -11,6 +11,8 @@ use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Log;
 use IndieCinema\Nucleo\Pruebas\Dobles\PaginasParaValidar;
+use IndieCinema\Moderacion\Pruebas\Dobles\Documentos;
+use IndieCinema\Moderacion\Pruebas\Dobles\Imagenes;
 use IndieCinema\Nucleo\Pruebas\Dobles\ServidorSmtpDePrueba;
 use IndieCinema\Nucleo\Uuid;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -42,6 +44,9 @@ final class DenunciasTest extends TestCase
     /** @var resource */
     private $salidaDelLog;
 
+    /** El volumen de archivos de moderación: las fotos de las denuncias van a denuncias/. */
+    private string $carpeta;
+
     public static function setUpBeforeClass(): void
     {
         self::iniciarServidores();
@@ -58,15 +63,23 @@ final class DenunciasTest extends TestCase
     {
         self::reiniciarServidores();
         self::$correo->vaciar();
+        $this->carpeta = sys_get_temp_dir() . '/archivos-' . bin2hex(random_bytes(4));
         $this->base = self::baseConTablasNuevas($this->configuracion());
         $this->salidaDelLog = fopen('php://memory', 'w+');
+    }
+
+    protected function tearDown(): void
+    {
+        array_map('unlink', glob("{$this->carpeta}/denuncias/*") ?: []);
+        @rmdir("{$this->carpeta}/denuncias");
+        @rmdir($this->carpeta);
     }
 
     private function configuracion(): Configuracion
     {
         return new Configuracion([
             'app' => ['subsistema' => 'moderacion', 'prefijo' => '/moderacion', 'entorno' => 'desarrollo'],
-            'archivos' => ['carpeta' => sys_get_temp_dir() . '/sin-archivos'],
+            'archivos' => ['carpeta' => $this->carpeta],
             'base' => self::baseDePruebas(),
             'nginx' => ['secreto' => self::SECRETO],
             'subsistemas' => ['cuentas' => self::$urls['cuentas'], 'programacion' => self::$urls['programacion'], 'funciones' => self::$urls['funciones']],
@@ -80,7 +93,7 @@ final class DenunciasTest extends TestCase
     /**
      * @param array<string, mixed> $cuerpo
      */
-    private function pedir(string $metodo, string $url, ?string $rol = 'espectador', array $cuerpo = [], ?string $usuario = null): Respuesta
+    private function pedir(string $metodo, string $url, ?string $rol = 'espectador', array $cuerpo = [], ?string $usuario = null, array $archivos = []): Respuesta
     {
         $usuario ??= match ($rol) {
             'administrador' => self::ADMINISTRADOR,
@@ -91,15 +104,16 @@ final class DenunciasTest extends TestCase
         parse_str((string) parse_url($url, PHP_URL_QUERY), $consulta);
         $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion(), new Log('moderacion', $this->salidaDelLog));
 
-        return PaginasParaValidar::anotar($metodo, "/moderacion{$url}", $aplicacion->atender(new Peticion($metodo, (string) parse_url($url, PHP_URL_PATH), $consulta, $cuerpo, $cabeceras, ['csrf' => self::CSRF])));
+        return PaginasParaValidar::anotar($metodo, "/moderacion{$url}", $aplicacion->atender(new Peticion($metodo, (string) parse_url($url, PHP_URL_PATH), $consulta, $cuerpo, $cabeceras, ['csrf' => self::CSRF], $archivos)));
     }
 
     /**
-     * @param array<string, string> $campos
+     * @param array<string, string>               $campos
+     * @param array<string, array<string, mixed>> $archivos
      */
-    private function denunciar(string $tipo, string $id, array $campos, ?string $rol = 'espectador', ?string $usuario = null): Respuesta
+    private function denunciar(string $tipo, string $id, array $campos, ?string $rol = 'espectador', ?string $usuario = null, array $archivos = []): Respuesta
     {
-        return $this->pedir('POST', '/denuncias/nueva?' . http_build_query(['tipo' => $tipo, 'id' => $id]), $rol, $campos + ['_csrf' => self::CSRF], $usuario);
+        return $this->pedir('POST', '/denuncias/nueva?' . http_build_query(['tipo' => $tipo, 'id' => $id]), $rol, $campos + ['_csrf' => self::CSRF], $usuario, $archivos);
     }
 
     /**
@@ -736,6 +750,129 @@ final class DenunciasTest extends TestCase
         $caida = $this->pedir('GET', '/denuncias', 'moderador');
         self::assertSame(200, $caida->estado());
         self::assertMatchesRegularExpression('#Bajadas en la cartelera</h2>\s*<p class="bandeja-nota bandeja-nota-suelta">No pudimos consultar las salas.#', $caida->cuerpo());
+    }
+
+    /**
+     * @return list<string> las fotos guardadas en el volumen
+     */
+    private function fotosGuardadas(): array
+    {
+        return array_map('basename', glob("{$this->carpeta}/denuncias/*") ?: []);
+    }
+
+    /**
+     * EF-22.11: en una sala o una función se adjunta una foto opcional, que se guarda con un
+     * nombre al azar y que el moderador ve junto al detalle.
+     */
+    public function testLaFotoDeUnaDenunciaSeGuardaYLaVeElModerador(): void
+    {
+        $sala = self::sala('El Galpón');
+        $formulario = $this->pedir('GET', "/denuncias/nueva?tipo=sala&id={$sala}")->cuerpo();
+        self::assertStringContainsString('enctype="multipart/form-data"', $formulario);
+        self::assertMatchesRegularExpression('#<input[^>]*name="foto"#', $formulario);
+
+        $respuesta = $this->denunciar('sala', $sala, ['categoria' => 'instalaciones', 'detalle' => 'La butaca 4 está rota.'], archivos: ['foto' => Imagenes::subida('sala.webp', '../../foto.php')]);
+
+        self::assertSame(303, $respuesta->estado(), $respuesta->cuerpo());
+        $guardadas = $this->fotosGuardadas();
+        self::assertCount(1, $guardadas);
+        self::assertMatchesRegularExpression('/^[0-9a-f]{32}\.webp$/', $guardadas[0]);
+        self::assertSame(0640, fileperms("{$this->carpeta}/denuncias/{$guardadas[0]}") & 0777);
+        $id = (string) $this->base->valor('SELECT id FROM denuncia WHERE foto = ?', [$guardadas[0]]);
+
+        $bandeja = $this->pedir('GET', '/denuncias', 'moderador')->cuerpo();
+        self::assertStringContainsString("src=\"/moderacion/denuncias/{$id}/foto\"", $bandeja);
+        $foto = $this->pedir('GET', "/denuncias/{$id}/foto", 'moderador');
+        self::assertSame(200, $foto->estado());
+        self::assertSame('image/webp', $foto->cabecera('Content-Type'));
+        self::assertSame(file_get_contents(Imagenes::ruta('sala.webp')), $foto->cuerpo());
+    }
+
+    public function testSinFotoSeGuardaIgualYSuRutaDa404(): void
+    {
+        $funcion = self::funcion(self::sala('El Galpón'), [self::obra('Zama')]);
+
+        self::assertSame(303, $this->denunciar('funcion', $funcion, ['categoria' => 'no_se_hizo', 'detalle' => ''])->estado());
+
+        self::assertSame([], $this->fotosGuardadas());
+        $id = (string) $this->base->valor('SELECT id FROM denuncia');
+        self::assertStringNotContainsString('/foto"', $this->pedir('GET', '/denuncias', 'moderador')->cuerpo());
+        self::assertSame(404, $this->pedir('GET', "/denuncias/{$id}/foto", 'moderador')->estado());
+        self::assertSame(404, $this->pedir('GET', '/denuncias/' . Uuid::nuevo() . '/foto', 'moderador')->estado());
+        self::assertSame(404, $this->pedir('GET', '/denuncias/nada/foto', 'moderador')->estado());
+    }
+
+    /**
+     * @return iterable<string, array{array<string, mixed>, string}>
+     */
+    public static function fotosQueNoSirven(): iterable
+    {
+        yield 'un PDF' => [Documentos::subida('poliza.pdf'), 'La foto tiene que ser JPG, PNG o WebP.'];
+        yield 'rota' => [Imagenes::subida('roto.png'), 'La foto tiene que ser JPG, PNG o WebP.'];
+        yield 'enorme' => [Imagenes::subida('enorme.png'), 'La foto puede medir hasta 8000 píxeles de lado.'];
+        yield 'pesada' => [['name' => 'foto.jpg', 'type' => 'image/jpeg', 'tmp_name' => '', 'error' => UPLOAD_ERR_INI_SIZE, 'size' => 0], 'La foto puede pesar hasta 5 MB.'];
+    }
+
+    /**
+     * Una foto que no es una imagen válida o es grande vuelve al formulario con 422, sin perder lo
+     * que escribió.
+     *
+     * @param array<string, mixed> $foto
+     */
+    #[DataProvider('fotosQueNoSirven')]
+    public function testUnaFotoQueNoSirveVuelveAlFormulario(array $foto, string $error): void
+    {
+        $sala = self::sala('El Galpón');
+
+        $respuesta = $this->denunciar('sala', $sala, ['categoria' => 'instalaciones', 'detalle' => 'La butaca 4 está rota.'], archivos: ['foto' => $foto]);
+
+        self::assertSame(422, $respuesta->estado());
+        self::assertStringContainsString($error, $respuesta->cuerpo());
+        self::assertStringContainsString('id="error-foto"', $respuesta->cuerpo());
+        self::assertStringContainsString('La butaca 4 está rota.', $respuesta->cuerpo());
+        self::assertMatchesRegularExpression('#value="instalaciones" required checked#', $respuesta->cuerpo());
+        self::assertSame([], $this->denuncias());
+        self::assertSame([], $this->fotosGuardadas());
+    }
+
+    /**
+     * En una obra o un comentario no hay foto: no se ofrece y, si llega, se ignora.
+     */
+    public function testEnUnaObraNoSeOfreceLaFotoYSiLlegaSeIgnora(): void
+    {
+        $obra = self::obra('La flor');
+
+        $formulario = $this->pedir('GET', "/denuncias/nueva?tipo=obra&id={$obra}")->cuerpo();
+        self::assertStringNotContainsString('name="foto"', $formulario);
+        self::assertStringNotContainsString('multipart/form-data', $formulario);
+
+        self::assertSame(303, $this->denunciar('obra', $obra, ['categoria' => 'derechos', 'detalle' => ''], archivos: ['foto' => Imagenes::subida('sala.png')])->estado());
+        self::assertSame([], $this->fotosGuardadas());
+        self::assertNull($this->base->valor('SELECT foto FROM denuncia'));
+    }
+
+    /**
+     * @return iterable<string, array{?string, int}>
+     */
+    public static function quienVeLaFoto(): iterable
+    {
+        yield 'sin sesión' => [null, 401];
+        yield 'espectador' => ['espectador', 403];
+        yield 'moderador' => ['moderador', 200];
+        yield 'administrador' => ['administrador', 200];
+    }
+
+    /**
+     * Sólo la moderación: ni siquiera quien la mandó.
+     */
+    #[DataProvider('quienVeLaFoto')]
+    public function testLaFotoSoloLaVeLaModeracion(?string $rol, int $estado): void
+    {
+        $sala = self::sala('El Galpón');
+        $this->denunciar('sala', $sala, ['categoria' => 'seguridad', 'detalle' => ''], archivos: ['foto' => Imagenes::subida('sala.jpg')]);
+        $id = (string) $this->base->valor('SELECT id FROM denuncia');
+
+        self::assertSame($estado, $this->pedir('GET', "/denuncias/{$id}/foto", $rol)->estado());
     }
 
     public function testElHistorialMuestraLaGravedad(): void

@@ -339,6 +339,8 @@ final class BandejaDeDenuncias extends Controlador
                 'gravedad' => $denuncia->gravedad->value,
                 'gravedad_etiqueta' => $denuncia->gravedad->etiqueta(),
                 'detalle' => $denuncia->detalle,
+                'id' => $denuncia->id,
+                'foto' => $denuncia->foto !== null,
                 'cuando' => FechaParaMostrar::diaYHora($denuncia->creadaEn),
                 'quien' => $this->quien($denuncia->usuarioId),
             ], $denuncias),

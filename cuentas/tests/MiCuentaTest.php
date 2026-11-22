@@ -407,6 +407,50 @@ final class MiCuentaTest extends TestCase
         self::assertMatchesRegularExpression('#<a href="/solicitar-sala"[^>]*>Corregirla y reenviarla</a>#', $contenido);
     }
 
+    /**
+     * EF-22.10: la devuelta dice hasta cuándo tiene y lleva a completarla.
+     */
+    public function testUnaDevueltaLlevaACompletarLaDocumentacion(): void
+    {
+        $id = $this->agregar();
+        self::solicitudesEnModeracion([$id => ['estado' => 'devuelta', 'sala' => 'El Galpón', 'motivo' => 'La póliza venció.', 'fecha' => '2026-10-02T12:00:00+00:00', 'vence' => '2026-10-17']]);
+
+        $contenido = self::contenido($this->pedir($id));
+
+        self::assertStringContainsString('Devuelta para completar hasta el 17/10/2026', $contenido);
+        self::assertStringContainsString('La póliza venció.', $contenido);
+        self::assertMatchesRegularExpression('#<a href="/solicitar-sala"[^>]*>Completar la documentación</a>#', $contenido);
+    }
+
+    /**
+     * EF-22.10: la vencida dice cuándo venció y lleva a pedir la sala de nuevo.
+     */
+    public function testUnaVencidaLlevaAPedirLaSalaDeNuevo(): void
+    {
+        $id = $this->agregar();
+        self::solicitudesEnModeracion([$id => ['estado' => 'vencida', 'sala' => 'El Galpón', 'motivo' => 'Venció el plazo para completar la documentación.', 'fecha' => '2026-10-18T06:45:00+00:00']]);
+
+        $contenido = self::contenido($this->pedir($id));
+
+        self::assertStringContainsString('Venció el 18/10/2026', $contenido);
+        self::assertMatchesRegularExpression('#<a href="/solicitar-sala"[^>]*>Pedir la sala de nuevo</a>#', $contenido);
+    }
+
+    /**
+     * Una fecha límite que no es una fecha es una respuesta que no se entiende: «Mi cuenta» se ve
+     * sin el bloque.
+     */
+    public function testUnaFechaLimiteQueNoEsUnaFechaSeVeSinElBloque(): void
+    {
+        $id = $this->agregar();
+        self::solicitudesEnModeracion([$id => ['estado' => 'devuelta', 'sala' => 'El Galpón', 'motivo' => 'La póliza venció.', 'fecha' => '2026-10-02T12:00:00+00:00', 'vence' => 17]]);
+
+        $contenido = self::contenido($this->pedir($id));
+
+        self::assertStringContainsString('Eva Ramos', $contenido);
+        self::assertStringNotContainsString('Mi solicitud de sala', $contenido);
+    }
+
     public function testSinSolicitudNoHayBloque(): void
     {
         $contenido = self::contenido($this->pedir($this->agregar()));

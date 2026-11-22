@@ -346,7 +346,7 @@ final class ReportesTest extends TestCase
         $texto = self::texto($this->pedir(self::NOVIEMBRE . '&tema=salas', self::ADMINISTRADORA, 'administrador'));
 
         self::assertStringContainsString('Moderación y conducta', $texto);
-        self::assertStringContainsString('Solicitudes de sala 2 sin resolver; 1 aprobadas y 0 rechazadas', $texto);
+        self::assertStringContainsString('Solicitudes de sala 3 sin resolver; 1 aprobadas, 0 rechazadas y 1 vencidas', $texto);
         self::assertStringContainsString('Otras denuncias 1 de obras y calificaciones; 1 abiertas', $texto);
         // El Galpón y la que no tuvo funciones.
         self::assertStringContainsString('Salas suspendidas 2', $texto);

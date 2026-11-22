@@ -26,7 +26,9 @@ final class SolicitudesInternas extends Controlador
     /**
      * GET /interno/solicitudes/ultima/{usuario}: el estado de la última, el nombre de la sala, el
      * motivo que ve quien la mandó (el de la revisión manual mientras está en revisión, el de la
-     * resolución después; null en una pendiente) y la fecha de lo último que le pasó, en UTC.
+     * resolución después; null en una pendiente) y la fecha de lo último que le pasó, en UTC. Una
+     * devuelta (EF-22.10) trae el motivo y la fecha de la devolución, y en «vence» el último día
+     * para completarla (AAAA-MM-DD); una vencida, el motivo y la fecha del cierre.
      *
      * @throws ExcepcionHttp 404 si nunca mandó una
      */
@@ -36,6 +38,16 @@ final class SolicitudesInternas extends Controlador
         $solicitud = Uuid::esValido($usuario) ? $this->solicitudes->ultimaDe($usuario) : null;
         if ($solicitud === null) {
             throw ExcepcionHttp::noEncontrada();
+        }
+        $devolucion = $solicitud->estado === EstadoSolicitud::Devuelta ? $solicitud->devolucion : null;
+        if ($devolucion !== null) {
+            return $this->json([
+                'estado' => $solicitud->estado->value,
+                'sala' => $solicitud->datos->nombre,
+                'motivo' => $devolucion->motivo,
+                'fecha' => $devolucion->devueltaEn->format(DateTimeInterface::ATOM),
+                'vence' => $devolucion->vence->format('Y-m-d'),
+            ]);
         }
         $enRevision = $solicitud->estado === EstadoSolicitud::EnRevisionManual;
 

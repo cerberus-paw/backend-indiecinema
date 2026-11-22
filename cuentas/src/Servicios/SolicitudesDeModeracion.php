@@ -27,7 +27,9 @@ final class SolicitudesDeModeracion
      * La última que mandó, o null si nunca mandó una. Si moderación no responde, o responde otra
      * cosa, también null: «Mi cuenta» se ve igual, sin el bloque, y el log lo dice.
      *
-     * @return ?array{estado: string, sala: string, motivo: ?string, fecha: DateTimeImmutable}
+     * Una devuelta (EF-22.10) trae también «vence», el último día para completarla.
+     *
+     * @return ?array{estado: string, sala: string, motivo: ?string, fecha: DateTimeImmutable, vence: ?DateTimeImmutable}
      */
     public function ultimaDe(string $usuarioId): ?array
     {
@@ -42,12 +44,18 @@ final class SolicitudesDeModeracion
             ) {
                 throw new RuntimeException('moderación no respondió una solicitud a /interno/solicitudes/ultima/{usuario}.');
             }
+            $vence = $datos['vence'] ?? null;
+            $vence = $vence === null ? null : (is_string($vence) ? DateTimeImmutable::createFromFormat('!Y-m-d', $vence) : false);
+            if ($vence === false) {
+                throw new RuntimeException('moderación respondió una fecha límite que no es una fecha.');
+            }
 
             return [
                 'estado' => $datos['estado'],
                 'sala' => $datos['sala'],
                 'motivo' => $datos['motivo'],
                 'fecha' => new DateTimeImmutable($datos['fecha'])->setTimezone(new DateTimeZone(date_default_timezone_get())),
+                'vence' => $vence,
             ];
         } catch (Throwable $error) {
             $this->log->warning('«Mi cuenta» se muestra sin la solicitud de sala de {usuario}: {mensaje}', [

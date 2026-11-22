@@ -16,9 +16,10 @@ use IndieCinema\Nucleo\Http\Respuesta;
  * administrador (EF-22.4). Las fechas, «AAAA-MM-DD HH:MM:SS» en UTC; hasta no se incluye. Sólo
  * la llama recaudación, con su token: lo controla la ruta.
  *
- * Devuelve {denuncias: [{tipo, objeto_id, estado, cantidad}], suspendidas: [{sala_id, causa,
+ * Devuelve {denuncias: [{tipo, objeto_id, estado, gravedad, cantidad}], suspendidas: [{sala_id, causa,
  * desde}], solicitudes: {estado: cantidad}}. Lo que se denunció va por id: recaudación sabe de qué
- * sala es cada función, y moderación no.
+ * sala es cada función, y moderación no. La gravedad (alta, media o baja: EF-22.11) separa los
+ * grupos; quien no la usa suma las cantidades.
  */
 final class ResumenInterno extends Controlador
 {

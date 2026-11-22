@@ -31,6 +31,19 @@ final readonly class Denunciado
     ) {
     }
 
+    /**
+     * La sala donde pasa (EF-22.11): la misma sala, o la de la función. Null en obras y
+     * comentarios.
+     */
+    public function salaId(): ?string
+    {
+        return match ($this->tipo) {
+            TipoDenuncia::Sala => $this->id,
+            TipoDenuncia::Funcion => (string) $this->datos['sala_id'],
+            default => null,
+        };
+    }
+
     public function esDe(string $usuarioId): bool
     {
         return hash_equals($this->duenoId, $usuarioId);

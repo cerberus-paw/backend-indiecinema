@@ -328,6 +328,42 @@ final class MigracionesTest extends TestCase
     }
 
     /**
+     * EF-22.11: las denuncias que ya había toman la gravedad de su categoría, y las de sala, su
+     * sala. Las de función quedan sin sala: la sabe programación.
+     */
+    public function testLasDenunciasDeAntesTomanGravedadYSala(): void
+    {
+        $migraciones = dirname(__DIR__) . '/migraciones';
+        $this->base->ejecutar('DROP TABLE denuncia');
+        $this->base->ejecutar((string) file_get_contents("{$migraciones}/011_tabla_denuncia.sql"));
+        $sala = Uuid::nuevo();
+        $funcion = Uuid::nuevo();
+        $obra = Uuid::nuevo();
+        $filas = [['sala', $sala, 'seguridad'], ['sala', $sala, 'otro'], ['funcion', $funcion, 'ofensivo'], ['obra', $obra, 'derechos'], ['obra', $obra, 'falsa']];
+        foreach ($filas as $i => [$tipo, $objeto, $categoria]) {
+            $this->base->ejecutar(
+                "INSERT INTO denuncia (id, tipo, objeto_id, titulo, usuario_id, categoria, creada_en) VALUES (?, ?, ?, 'Algo', ?, ?, ?)",
+                [Uuid::nuevo(), $tipo, $objeto, Uuid::nuevo(), $categoria, sprintf('2026-11-0%d 10:00:00', $i + 1)],
+            );
+        }
+
+        // Las que siguen a la tabla de denuncias, como las corre migrar.sh: las de antes no la tocan.
+        foreach (glob("{$migraciones}/*.sql") ?: [] as $migracion) {
+            if (basename($migracion) >= '016') {
+                $this->base->ejecutar((string) file_get_contents($migracion));
+            }
+        }
+
+        self::assertSame([
+            ['objeto_id' => $sala, 'gravedad' => 'alta', 'sala_id' => $sala],
+            ['objeto_id' => $sala, 'gravedad' => 'baja', 'sala_id' => $sala],
+            ['objeto_id' => $funcion, 'gravedad' => 'alta', 'sala_id' => null],
+            ['objeto_id' => $obra, 'gravedad' => 'media', 'sala_id' => null],
+            ['objeto_id' => $obra, 'gravedad' => 'media', 'sala_id' => null],
+        ], $this->base->filas('SELECT objeto_id, gravedad, sala_id FROM denuncia ORDER BY creada_en'));
+    }
+
+    /**
      * EF-07.2: las solicitudes que había en programación se mudan con los datos de su sala, sin
      * foto propia, y programación se queda sin la tabla. Las de salas dadas de baja no, como no se
      * veían en la bandeja.

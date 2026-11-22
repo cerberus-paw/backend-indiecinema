@@ -17,7 +17,8 @@ use LogicException;
 
 /**
  * La pestaña «Denuncias» de la bandeja de moderación, en /moderacion/denuncias (EF-07.8): lo
- * denunciado con denuncias abiertas, primero lo que lleva más tiempo esperando. La elegida
+ * denunciado con denuncias abiertas, primero lo más grave (EF-22.11), después lo que tiene más y
+ * después lo que lleva más tiempo esperando. La elegida
  * (?tipo=&id=) muestra lo denunciado, como lo da hoy su subsistema, y cada denuncia con quién la
  * hizo; se resuelven todas juntas con un motivo. Las rutas piden el rol de moderador, que el
  * administrador alcanza.
@@ -137,6 +138,8 @@ final class BandejaDeDenuncias extends Controlador
                 'tipo_etiqueta' => $cerrada['tipo']->etiqueta(),
                 'titulo' => $cerrada['titulo'],
                 'categoria' => $cerrada['categoria']->etiqueta(),
+                'gravedad' => $cerrada['gravedad']->value,
+                'gravedad_etiqueta' => $cerrada['gravedad']->etiqueta(),
                 'desestimada' => $cerrada['estado'] === 'desestimada',
                 'accion' => self::ACCIONES[$cerrada['accion'] ?? 'desestimar'],
                 'motivo' => $cerrada['motivo'],
@@ -245,6 +248,8 @@ final class BandejaDeDenuncias extends Controlador
                 'id' => $grupo['objeto_id'],
                 'titulo' => $grupo['titulo'],
                 'cantidad' => $grupo['cantidad'],
+                'gravedad' => $grupo['gravedad']->value,
+                'gravedad_etiqueta' => $grupo['gravedad']->etiqueta(),
                 'desde' => FechaParaMostrar::diaYHora($grupo['primera']),
                 'elegida' => $grupo === $elegida,
             ], $abiertas),
@@ -291,6 +296,8 @@ final class BandejaDeDenuncias extends Controlador
             // Lo que se puede hacer depende de que siga existiendo (Q15).
             'denuncias' => array_map(fn (Denuncia $denuncia): array => [
                 'categoria' => $denuncia->categoria->etiqueta(),
+                'gravedad' => $denuncia->gravedad->value,
+                'gravedad_etiqueta' => $denuncia->gravedad->etiqueta(),
                 'detalle' => $denuncia->detalle,
                 'cuando' => FechaParaMostrar::diaYHora($denuncia->creadaEn),
                 'quien' => $this->quien($denuncia->usuarioId),

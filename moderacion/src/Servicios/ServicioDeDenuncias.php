@@ -10,6 +10,7 @@ use IndieCinema\Moderacion\Modelo\CategoriaDenuncia;
 use IndieCinema\Moderacion\Modelo\CausaSuspension;
 use IndieCinema\Moderacion\Modelo\Denuncia;
 use IndieCinema\Moderacion\Modelo\Denunciado;
+use IndieCinema\Moderacion\Modelo\GravedadDenuncia;
 use IndieCinema\Moderacion\Modelo\Suspension;
 use IndieCinema\Moderacion\Modelo\TipoDenuncia;
 use IndieCinema\Moderacion\Modelo\UsuarioDeCuentas;
@@ -41,7 +42,7 @@ final class ServicioDeDenuncias
     }
 
     /**
-     * @return list<array{tipo: TipoDenuncia, objeto_id: string, titulo: string, cantidad: int, primera: DateTimeImmutable}>
+     * @return list<array{tipo: TipoDenuncia, objeto_id: string, titulo: string, cantidad: int, gravedad: GravedadDenuncia, primera: DateTimeImmutable}>
      */
     public function abiertas(): array
     {
@@ -101,7 +102,7 @@ final class ServicioDeDenuncias
     }
 
     /**
-     * @return list<array{tipo: TipoDenuncia, objeto_id: string, titulo: string, categoria: CategoriaDenuncia, estado: string, accion: ?string, motivo: string, resuelta_por: string, resuelta_en: DateTimeImmutable}>
+     * @return list<array{tipo: TipoDenuncia, objeto_id: string, titulo: string, categoria: CategoriaDenuncia, gravedad: GravedadDenuncia, estado: string, accion: ?string, motivo: string, resuelta_por: string, resuelta_en: DateTimeImmutable}>
      */
     public function historial(): array
     {
@@ -133,7 +134,7 @@ final class ServicioDeDenuncias
         [$accion, $obraId] = str_contains($accion, ':') ? explode(':', $accion, 2) : [$accion, null];
         if ($denunciado !== null && !$denunciado->sancionado) {
             // La sala de la función, o la sala denunciada; la obra elegida, o la denunciada.
-            $salaId = $tipo === TipoDenuncia::Funcion ? (string) $denunciado->datos['sala_id'] : $denunciado->id;
+            $salaId = $denunciado->salaId() ?? $denunciado->id;
             match ($accion) {
                 // El rechazo de EF-07.7: el historial de obras y el correo al dueño. Si ya estaba
                 // rechazada, no hace nada.

@@ -109,6 +109,14 @@ final class DenunciasTest extends TestCase
     }
 
     /**
+     * @return list<array<string, mixed>> la gravedad y la sala de cada una, en orden
+     */
+    private function gravedades(): array
+    {
+        return $this->base->filas('SELECT objeto_id, categoria, gravedad, sala_id FROM denuncia ORDER BY creada_en, id');
+    }
+
+    /**
      * Una denuncia hecha en ese momento (UTC), por el formulario.
      */
     private function denunciada(string $tipo, string $id, string $usuario, string $cuando, string $categoria = 'ofensivo', string $detalle = ''): void
@@ -243,6 +251,102 @@ final class DenunciasTest extends TestCase
         return $id;
     }
 
+    /**
+     * EF-22.11: los motivos del lugar sólo se ofrecen en salas y funciones, y en una obra o un
+     * comentario no se aceptan. La gravedad no se ve ni se elige.
+     */
+    public function testCadaTipoOfreceSusMotivos(): void
+    {
+        $sala = self::sala('El Galpón');
+        $del = ['Seguridad del lugar', 'La función no se hizo', 'Cambio de horario o de lugar sin aviso', 'Instalaciones en mal estado (butacas, sonido, imagen)'];
+        $de = ['Contenido ofensivo o inapropiado', 'Información falsa o engañosa', 'Derechos de autor', 'Otro'];
+        $lugares = ["tipo=sala&id={$sala}", 'tipo=funcion&id=' . self::funcion($sala, [self::obra('Zama')])];
+        $otros = ['tipo=obra&id=' . self::obra('La flor'), 'tipo=calificacion&id=' . self::comentario($sala, 'Un insulto.')];
+
+        foreach ([...$lugares, ...$otros] as $consulta) {
+            $pantalla = $this->pedir('GET', "/denuncias/nueva?{$consulta}");
+            self::assertSame(200, $pantalla->estado(), $pantalla->cuerpo());
+            preg_match_all('#name="categoria" value="([a-z_]+)"#', $pantalla->cuerpo(), $valores);
+            $conLugar = in_array($consulta, $lugares, true);
+            self::assertSame($conLugar ? ['seguridad', 'no_se_hizo', 'ofensivo', 'falsa', 'derechos', 'cambio_sin_aviso', 'instalaciones', 'otro'] : ['ofensivo', 'falsa', 'derechos', 'otro'], $valores[1], $consulta);
+            foreach ([...$de, ...($conLugar ? $del : [])] as $motivo) {
+                self::assertStringContainsString($motivo, $pantalla->cuerpo(), $consulta);
+            }
+            self::assertStringNotContainsString('name="gravedad"', $pantalla->cuerpo());
+        }
+        foreach (['no_se_hizo', 'cambio_sin_aviso', 'instalaciones'] as $delLugar) {
+            self::assertSame(422, $this->denunciar('obra', self::obra('Otra'), ['categoria' => $delLugar, 'detalle' => ''])->estado(), $delLugar);
+        }
+        self::assertSame([], $this->denuncias());
+    }
+
+    /**
+     * EF-22.11: la gravedad la da el motivo, y la sala es la denunciada o la de la función. Una
+     * gravedad que llegue en el pedido no cambia nada.
+     */
+    public function testLaDenunciaGuardaLaGravedadDelMotivoYLaSala(): void
+    {
+        $sala = self::sala('El Galpón');
+        $funcion = self::funcion($sala, [self::obra('Zama')]);
+        $obra = self::obra('La flor');
+        $comentario = self::comentario($sala, 'Un insulto.');
+
+        $this->denunciada('sala', $sala, self::ESPECTADORA, '2026-11-01 10:00:00', 'instalaciones');
+        $this->denunciada('funcion', $funcion, self::ESPECTADORA, '2026-11-02 10:00:00', 'cambio_sin_aviso');
+        $this->denunciada('funcion', $funcion, self::ADMINISTRADOR, '2026-11-03 10:00:00', 'no_se_hizo');
+        self::assertSame(303, $this->denunciar('obra', $obra, ['categoria' => 'otro', 'detalle' => 'Algo.', 'gravedad' => 'alta'])->estado());
+        $this->base->ejecutar('UPDATE denuncia SET creada_en = ? WHERE objeto_id = ?', ['2026-11-04 10:00:00', $obra]);
+        $this->denunciada('calificacion', $comentario, self::ESPECTADORA, '2026-11-05 10:00:00', 'ofensivo');
+
+        self::assertSame([
+            ['objeto_id' => $sala, 'categoria' => 'instalaciones', 'gravedad' => 'baja', 'sala_id' => $sala],
+            ['objeto_id' => $funcion, 'categoria' => 'cambio_sin_aviso', 'gravedad' => 'media', 'sala_id' => $sala],
+            ['objeto_id' => $funcion, 'categoria' => 'no_se_hizo', 'gravedad' => 'alta', 'sala_id' => $sala],
+            ['objeto_id' => $obra, 'categoria' => 'otro', 'gravedad' => 'baja', 'sala_id' => null],
+            ['objeto_id' => $comentario, 'categoria' => 'ofensivo', 'gravedad' => 'alta', 'sala_id' => null],
+        ], $this->gravedades());
+    }
+
+    /**
+     * EF-22.11: primero lo que tiene la denuncia abierta más grave, después lo que tiene más y
+     * después lo que lleva más tiempo. Cada ítem lleva la etiqueta de su más grave, y cada
+     * denuncia la suya.
+     */
+    public function testLaBandejaOrdenaPorGravedadCantidadYAntiguedad(): void
+    {
+        $baja = self::obra('Baja y vieja');
+        $mediaVieja = self::obra('Media vieja');
+        $mediaNueva = self::obra('Media nueva');
+        $mediaDoble = self::obra('Media doble');
+        $alta = self::obra('Alta y nueva');
+        $this->denunciada('obra', $baja, self::ESPECTADORA, '2026-11-01 10:00:00', 'otro', 'Algo.');
+        $this->denunciada('obra', $mediaVieja, self::ESPECTADORA, '2026-11-02 10:00:00', 'falsa');
+        $this->denunciada('obra', $mediaNueva, self::ESPECTADORA, '2026-11-03 10:00:00', 'derechos');
+        $this->denunciada('obra', $mediaDoble, self::ESPECTADORA, '2026-11-04 10:00:00', 'falsa');
+        $this->denunciada('obra', $mediaDoble, self::ADMINISTRADOR, '2026-11-05 10:00:00', 'otro', 'Algo.');
+        $this->denunciada('obra', $alta, self::ESPECTADORA, '2026-11-06 10:00:00', 'otro', 'Algo.');
+        $this->denunciada('obra', $alta, self::ADMINISTRADOR, '2026-11-07 10:00:00', 'ofensivo');
+
+        $respuesta = $this->pedir('GET', '/denuncias', 'moderador');
+
+        self::assertSame(['Alta y nueva', 'Media doble', 'Media vieja', 'Media nueva', 'Baja y vieja'], self::titulos($respuesta));
+        preg_match_all('#class="estado-cuenta gravedad-([a-z]+)"><span class="sr-only">Gravedad </span>([A-Za-z]+)</span>#', $respuesta->cuerpo(), $etiquetas);
+        // Las cinco de la lista, y después las dos de la elegida (la alta), primero la más grave.
+        self::assertSame(['alta', 'media', 'media', 'media', 'baja', 'alta', 'baja'], $etiquetas[1]);
+        self::assertSame(['Alta', 'Media', 'Media', 'Media', 'Baja', 'Alta', 'Baja'], $etiquetas[2]);
+    }
+
+    public function testElHistorialMuestraLaGravedad(): void
+    {
+        $id = self::obra('La flor');
+        $this->denunciada('obra', $id, self::ESPECTADORA, '2026-11-01 10:00:00', 'derechos');
+        $this->resolver('obra', $id, ['accion' => 'desestimar', 'motivo' => 'Tiene los derechos.']);
+
+        $historial = $this->pedir('GET', '/denuncias?ver=historial', 'moderador')->cuerpo();
+
+        self::assertStringContainsString('<span class="estado-cuenta gravedad-media"><span class="sr-only">Gravedad </span>Media</span>', $historial);
+    }
+
     public function testElFormularioDeUnaObraMuestraQueSeDenunciaYSusCategorias(): void
     {
         $id = self::obra('La flor');
@@ -345,14 +449,14 @@ final class DenunciasTest extends TestCase
     }
 
     /**
-     * Un ítem por lo denunciado, primero el que lleva más tiempo; la elegida, con cada denuncia y
-     * quién la hizo (cuentas da el nombre y el correo).
+     * Un ítem por lo denunciado; la elegida, con cada denuncia y quién la hizo (cuentas da el
+     * nombre y el correo).
      */
     public function testLaBandejaAgrupaPorLoDenunciadoConCadaDenunciaYQuienLaHizo(): void
     {
         $nueva = self::obra('La nueva');
         $vieja = self::obra('La vieja');
-        $this->denunciada('obra', $nueva, self::ESPECTADORA, '2026-11-02 10:00:00');
+        $this->denunciada('obra', $nueva, self::ESPECTADORA, '2026-11-02 10:00:00', 'falsa');
         $this->denunciada('obra', $vieja, self::ESPECTADORA, '2026-11-01 10:00:00', 'derechos', 'No tienen los derechos.');
         $this->denunciada('obra', $vieja, self::ADMINISTRADOR, '2026-11-03 10:00:00', 'falsa');
 
@@ -632,8 +736,8 @@ final class DenunciasTest extends TestCase
         // Una que ya estaba abierta cuando la suspendieron por otro lado (desde una función): una
         // suspendida no se puede denunciar.
         $this->base->ejecutar(
-            "INSERT INTO denuncia (id, tipo, objeto_id, titulo, usuario_id, categoria, creada_en) VALUES (?, 'sala', ?, 'El Galpón', ?, 'ofensivo', '2026-11-02 10:00:00')",
-            [Uuid::nuevo(), $id, self::ADMINISTRADOR],
+            "INSERT INTO denuncia (id, tipo, objeto_id, sala_id, titulo, usuario_id, categoria, gravedad, creada_en) VALUES (?, 'sala', ?, ?, 'El Galpón', ?, 'ofensivo', 'alta', '2026-11-02 10:00:00')",
+            [Uuid::nuevo(), $id, $id, self::ADMINISTRADOR],
         );
 
         self::assertStringContainsString('Ya está suspendida por una denuncia', $this->pedir('GET', '/denuncias', 'moderador')->cuerpo());

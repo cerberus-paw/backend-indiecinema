@@ -20,7 +20,8 @@ use LogicException;
 
 /**
  * GET y POST /moderacion/denuncias/nueva?tipo=…&id=… (EF-07.8): cualquiera con sesión denuncia lo
- * publicado, salvo lo suyo, con una categoría y un detalle. La denuncia llega a la pestaña
+ * publicado, salvo lo suyo, con un motivo y un detalle. El motivo da la gravedad (EF-22.11), que no
+ * se ve ni se elige. La denuncia llega a la pestaña
  * «Denuncias» de la bandeja.
  */
 final class FormularioDeDenuncia extends Controlador
@@ -73,6 +74,7 @@ final class FormularioDeDenuncia extends Controlador
         $this->denuncias->agregar(
             $denunciado->tipo,
             $denunciado->id,
+            $denunciado->salaId(),
             mb_substr($denunciado->titulo, 0, 200),
             self::usuario($peticion)->id,
             $categoria,

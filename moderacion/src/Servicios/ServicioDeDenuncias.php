@@ -252,6 +252,26 @@ final class ServicioDeDenuncias
     }
 
     /**
+     * Las salas que bajan en la cartelera por las reglas (EF-22.11), con su conteo y su nombre
+     * según programación. Primero la que tiene más.
+     *
+     * @return list<array{sala_id: string, nombre: ?string, conteo: int}>
+     *
+     * @throws ExcepcionHttp 503 si programación no responde
+     */
+    public function castigadas(): array
+    {
+        $castigadas = $this->reglas->castigadas();
+        $salas = $this->salas->datosDeVarias(array_map(strval(...), array_keys($castigadas)));
+        $lista = [];
+        foreach ($castigadas as $salaId => $conteo) {
+            $lista[] = ['sala_id' => (string) $salaId, 'nombre' => $salas[$salaId]['nombre'] ?? null, 'conteo' => $conteo];
+        }
+
+        return $lista;
+    }
+
+    /**
      * El moderador no levanta la suspensión de su propia sala (Q1); el administrador sí.
      */
     public function laPuedeLevantar(?string $organizadorId, Usuario $moderador): bool

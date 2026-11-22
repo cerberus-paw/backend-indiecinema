@@ -133,6 +133,7 @@ final class BandejaDeDenuncias extends Controlador
         return $this->vista('administracion_denuncias.html.twig', [
             'historial' => true,
             'suspendidas' => [],
+            'castigadas' => [],
             'levantar' => null,
             'grupos' => [],
             'elegida' => null,
@@ -174,6 +175,21 @@ final class BandejaDeDenuncias extends Controlador
             'desde' => FechaParaMostrar::diaYHora($una['suspension']->desde),
             'propia' => !$this->servicio->laPuedeLevantar($una['organizador_id'], $moderador),
         ], $suspendidas);
+    }
+
+    /**
+     * Las salas bajadas en la cartelera por las reglas (EF-22.11), o false si programación no
+     * respondió. De solo lectura: se levantan solas cuando las denuncias salen del período.
+     *
+     * @return list<array{sala_id: string, nombre: ?string, conteo: int}>|false
+     */
+    private function castigadas(): array|false
+    {
+        try {
+            return $this->servicio->castigadas();
+        } catch (ExcepcionHttp) {
+            return false;
+        }
     }
 
     /**
@@ -282,6 +298,7 @@ final class BandejaDeDenuncias extends Controlador
             'maximo_motivo' => self::MAXIMO_MOTIVO,
             'suspendidas' => $this->suspendidas(self::moderador($peticion)),
             'levantar' => $levantar,
+            'castigadas' => $this->castigadas(),
         ];
         // La plantilla muestra el mensaje si la variable existe.
         if ($mensaje !== null) {

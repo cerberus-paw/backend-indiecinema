@@ -73,6 +73,7 @@ final class DenunciasTest extends TestCase
             'interno' => ['token' => 'token-de-moderacion'],
             'correo' => ['servidor' => self::$correo->url(), 'remitente' => 'no-responder@indiecinema.test'],
             'denuncias' => ['aviso_cantidad' => 3, 'cartelera_cantidad' => 5, 'dias' => 30],
+            'llamadores' => ['programacion' => hash('sha256', 'token-de-programacion'), 'cuentas' => hash('sha256', 'token-de-cuentas')],
         ]);
     }
 
@@ -665,6 +666,76 @@ final class DenunciasTest extends TestCase
 
         self::assertSame(1, substr_count($pantalla, 'Sala: 2 de 3 para aviso · 2 de 5 para cartelera'));
         self::assertStringContainsString('Denuncias medias resueltas de la sala en el período: 2 de 3 para aviso · 2 de 5 para cartelera.', $pantalla);
+    }
+
+    /**
+     * @return array<string, mixed>|Respuesta el JSON, o la respuesta si no es un 200
+     */
+    private function castigadasPor(string $llamador): array|Respuesta
+    {
+        $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion(), new Log('moderacion', $this->salidaDelLog));
+        $respuesta = $aplicacion->atender(new Peticion('GET', '/interno/denuncias/castigadas', [], [], [
+            'X-Llamador' => $llamador,
+            'Authorization' => "Bearer token-de-{$llamador}",
+        ]));
+
+        return $respuesta->estado() === 200 ? json_decode($respuesta->cuerpo(), true, 512, JSON_THROW_ON_ERROR) : $respuesta;
+    }
+
+    /**
+     * EF-22.11: programación pide las salas castigadas: las que llegan a cartelera_cantidad en el
+     * período. Cuando las denuncias salen del período, ya no.
+     */
+    public function testLaRutaInternaDaLasSalasCastigadas(): void
+    {
+        $castigada = self::sala('El Galpón');
+        $aPunto = self::sala('La Fábrica');
+        $vieja = self::sala('El Desván');
+        foreach (range(1, 5) as $_) {
+            $this->yaResuelta($castigada, Uuid::nuevo());
+            $this->yaResuelta($vieja, Uuid::nuevo(), haceDias: 31);
+        }
+        foreach (range(1, 4) as $_) {
+            $this->yaResuelta($aPunto, Uuid::nuevo());
+        }
+        $this->yaResuelta($vieja, Uuid::nuevo(), haceDias: 29);
+
+        self::assertSame(['salas' => [$castigada]], $this->castigadasPor('programacion'));
+
+        $this->base->ejecutar('UPDATE denuncia SET creada_en = ? WHERE sala_id = ?', [self::haceDias(31), $castigada]);
+        self::assertSame(['salas' => []], $this->castigadasPor('programacion'));
+    }
+
+    public function testLaRutaInternaSoloLaLlamaProgramacion(): void
+    {
+        $respuesta = $this->castigadasPor('cuentas');
+
+        self::assertInstanceOf(Respuesta::class, $respuesta);
+        self::assertSame(403, $respuesta->estado());
+    }
+
+    /**
+     * La sección «Bajadas en la cartelera», de solo lectura, con el nombre de cada sala según
+     * programación y su conteo; si programación no responde, lo dice.
+     */
+    public function testLaBandejaMuestraLasBajadasEnLaCartelera(): void
+    {
+        $sala = self::sala('El Galpón');
+        foreach (range(1, 6) as $_) {
+            $this->yaResuelta($sala, Uuid::nuevo());
+        }
+
+        $pantalla = $this->pedir('GET', '/denuncias', 'moderador')->cuerpo();
+
+        self::assertStringContainsString('Bajadas en la cartelera', $pantalla);
+        self::assertMatchesRegularExpression('#El Galpón</span>\s*<span class="estado-cuenta estado-cuenta-revision">Bajada</span>#', $pantalla);
+        self::assertStringContainsString('6 denuncias medias resueltas en el período', $pantalla);
+        self::assertStringNotContainsString("/denuncias/salas/{$sala}/levantar", $pantalla);
+
+        self::tirar('programacion');
+        $caida = $this->pedir('GET', '/denuncias', 'moderador');
+        self::assertSame(200, $caida->estado());
+        self::assertMatchesRegularExpression('#Bajadas en la cartelera</h2>\s*<p class="bandeja-nota bandeja-nota-suelta">No pudimos consultar las salas.#', $caida->cuerpo());
     }
 
     public function testElHistorialMuestraLaGravedad(): void

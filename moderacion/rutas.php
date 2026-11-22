@@ -6,6 +6,7 @@ use IndieCinema\Moderacion\Controladores\AdministracionDeSolicitudes;
 use IndieCinema\Moderacion\Controladores\BandejaDeDenuncias;
 use IndieCinema\Moderacion\Controladores\BandejaDeDocumentos;
 use IndieCinema\Moderacion\Controladores\BandejaDeObras;
+use IndieCinema\Moderacion\Controladores\DenunciasInternas;
 use IndieCinema\Moderacion\Controladores\DocumentacionDeSala;
 use IndieCinema\Moderacion\Controladores\DocumentoDeSala;
 use IndieCinema\Moderacion\Controladores\FormularioDeDenuncia;
@@ -67,6 +68,8 @@ return static function (Router $router): void {
     // Para comprobar que los otros subsistemas llegan hasta acá con su token.
     // «Mi solicitud de sala» en «Mi cuenta» (EF-07.6).
     $router->interna('GET', '/interno/solicitudes/ultima/{usuario}', [SolicitudesInternas::class, 'ultima'], ['cuentas']);
+    // Las salas que bajan al final de la cartelera por las reglas de las denuncias (EF-22.11).
+    $router->interna('GET', '/interno/denuncias/castigadas', [DenunciasInternas::class, 'castigadas'], ['programacion']);
     // La moderación del período, contada, para los reportes del administrador (EF-22.4).
     $router->interna('GET', '/interno/resumen', [ResumenInterno::class, 'mostrar'], ['recaudacion']);
     $router->interna('GET', '/interno/estado', [EstadoInterno::class, 'mostrar'], ['cuentas', 'programacion', 'funciones', 'recaudacion']);

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace IndieCinema\Programacion\Repositorios;
 
 use IndieCinema\Nucleo\BaseDeDatos;
+use IndieCinema\Programacion\Modelo\DatosDePedido;
 use IndieCinema\Programacion\Modelo\EstadoObra;
 use IndieCinema\Programacion\Modelo\Obra;
 use IndieCinema\Programacion\Modelo\OrigenCopia;
@@ -154,6 +155,63 @@ final class RepositorioDeObras
         }
 
         return array_map(static fn (array $fila): Obra => self::obra($fila, $generos[$fila['id']] ?? []), $filas);
+    }
+
+    /**
+     * Obras activas y aprobadas del catálogo cuyo título coincide exactamente al normalizarlo
+     * (sin mayúsculas, tildes ni signos o espacios de más), para evitar pedidos duplicados de
+     * películas que ya están en IndieCinema (EF-22.6).
+     *
+     * @return list<Obra>
+     */
+    public function buscarAprobadasPorTituloNormalizado(string $titulo): array
+    {
+        $normalizado = DatosDePedido::normalizarTitulo($titulo);
+        if ($normalizado === '') {
+            return [];
+        }
+
+        return array_values(array_filter(
+            $this->todas(),
+            static fn (Obra $obra): bool => DatosDePedido::normalizarTitulo($obra->titulo) === $normalizado,
+        ));
+    }
+
+    /**
+     * Títulos aprobados del catálogo que coinciden con lo escrito, para autocompletar pedidos
+     * existentes o ya cargados en IndieCinema (EF-22.6).
+     *
+     * @return list<array{id: string, titulo: string, titulo_normalizado: string, anio: int, director: string}>
+     */
+    public function sugerenciasPorTitulo(string $consulta = '', int $limite = 10): array
+    {
+        $normalizado = DatosDePedido::normalizarTitulo($consulta);
+        $filas = $this->base->filas(
+            "SELECT id, titulo, anio, director FROM obra
+             WHERE dada_de_baja_en IS NULL AND estado = 'aprobada'
+             ORDER BY titulo, anio, id",
+        );
+
+        $coincidencias = [];
+        foreach ($filas as $fila) {
+            $tituloNormalizado = DatosDePedido::normalizarTitulo((string) $fila['titulo']);
+            if ($normalizado !== '' && !str_contains($tituloNormalizado, $normalizado)) {
+                continue;
+            }
+            $coincidencias[] = [
+                'id' => (string) $fila['id'],
+                'titulo' => (string) $fila['titulo'],
+                'titulo_normalizado' => $tituloNormalizado,
+                'anio' => (int) $fila['anio'],
+                'director' => (string) $fila['director'],
+            ];
+        }
+
+        if ($normalizado !== '') {
+            usort($coincidencias, static fn (array $a, array $b): int => ($b['titulo_normalizado'] === $normalizado) <=> ($a['titulo_normalizado'] === $normalizado));
+        }
+
+        return array_slice($coincidencias, 0, max(1, $limite));
     }
 
     /**

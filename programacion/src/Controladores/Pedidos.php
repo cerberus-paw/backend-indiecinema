@@ -10,6 +10,7 @@ use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Seguridad\Usuario;
 use IndieCinema\Programacion\Modelo\EstadoPedido;
+use IndieCinema\Programacion\Modelo\Obra;
 use IndieCinema\Programacion\Modelo\PedidoDeTitulo;
 use IndieCinema\Programacion\Modelo\ReglaIncumplida;
 use IndieCinema\Programacion\Repositorios\RepositorioDePedidos;
@@ -59,9 +60,15 @@ final class Pedidos extends Controlador
         return $this->pantallaRanking($peticion, $texto, $pagina, mensajeExito: $mensajeExito);
     }
 
-    /** GET /pedidos/nuevo */
+    /** GET /pedidos/nuevo (HTML, o sugerencias de autocompletado con Accept: application/json). */
     public function nuevo(Peticion $peticion): Respuesta
     {
+        if ($peticion->aceptaJson()) {
+            $consulta = self::textoConsulta($peticion->consulta('q'));
+
+            return $this->json(['sugerencias' => $this->servicio->sugerencias($consulta)])->conCabecera('Vary', 'Accept');
+        }
+
         $usuario = self::espectador($peticion);
         $pedidoQuery = $peticion->consulta('pedido');
         $pedidoActual = is_string($pedidoQuery) && $pedidoQuery !== ''
@@ -99,6 +106,7 @@ final class Pedidos extends Controlador
             return $this->pantalla(
                 formulario: $formulario,
                 parecidos: $resultado['parecidos'],
+                obrasCatalogo: $resultado['en_catalogo'],
                 estado: 200,
             );
         }
@@ -226,10 +234,12 @@ final class Pedidos extends Controlador
 
     /**
      * @param list<PedidoDeTitulo> $parecidos
+     * @param list<Obra>           $obrasCatalogo
      */
     private function pantalla(
         ?FormularioDePedido $formulario = null,
         array $parecidos = [],
+        array $obrasCatalogo = [],
         ?PedidoDeTitulo $pedidoActual = null,
         ?string $errorGeneral = null,
         ?string $mensajeExito = null,
@@ -243,11 +253,19 @@ final class Pedidos extends Controlador
             'valores' => $formulario === null ? [] : $formulario->valores,
             'errores' => $formulario === null ? [] : $formulario->errores,
             'parecidos' => array_map(static fn (PedidoDeTitulo $pedido): array => self::datosDePedido($pedido, $umbral), $parecidos),
+            'obras_catalogo' => array_map(static fn (Obra $obra): array => [
+                'id' => $obra->id,
+                'titulo' => $obra->titulo,
+                'anio' => $obra->anio,
+                'director' => $obra->director,
+                'url' => "/obras/{$obra->id}",
+            ], $obrasCatalogo),
+            'sugerencias' => $this->servicio->sugerencias(),
             'pedido_actual' => $pedidoActual === null ? null : self::datosDePedido($pedidoActual, $umbral),
             'error_general' => $errorGeneral,
             'mensaje_exito' => $mensajeExito,
             'aviso' => $aviso,
-        ], $estado);
+        ], $estado)->conCabecera('Vary', 'Accept');
     }
 
     /**

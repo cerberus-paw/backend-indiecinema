@@ -14,7 +14,7 @@ final readonly class PedidoDeTitulo
     public function __construct(
         public string $id,
         public string $titulo,
-        public int $anio,
+        public ?int $anio,
         public string $director,
         public string $creadoPor,
         public EstadoPedido $estado,
@@ -26,6 +26,7 @@ final readonly class PedidoDeTitulo
         public ?string $obraTitulo = null,
         public ?string $tomadoPor = null,
         public ?DateTimeImmutable $tomadoEn = null,
+        public string $tituloNormalizado = '',
     ) {
     }
 }

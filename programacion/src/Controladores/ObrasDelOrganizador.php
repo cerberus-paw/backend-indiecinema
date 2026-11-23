@@ -80,7 +80,7 @@ final class ObrasDelOrganizador extends Controlador
                 return $this->formulario([
                     'valores' => [
                         'titulo' => $pedido->titulo,
-                        'anio' => (string) $pedido->anio,
+                        'anio' => $pedido->anio === null ? '' : (string) $pedido->anio,
                         'director' => $pedido->director,
                     ],
                     'pedido' => [
@@ -215,7 +215,7 @@ final class ObrasDelOrganizador extends Controlador
     }
 
     /**
-     * @param array{formulario?: FormularioDeObra, valores?: array<string, mixed>, pedido?: ?array{id: string, titulo: string, anio: int, director: string}, mensaje_exito?: ?string, error_general?: ?string} $extra
+     * @param array{formulario?: FormularioDeObra, valores?: array<string, mixed>, pedido?: ?array{id: string, titulo: string, anio: ?int, director: string}, mensaje_exito?: ?string, error_general?: ?string} $extra
      */
     private function formulario(
         array $extra,

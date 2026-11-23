@@ -21,6 +21,8 @@ final readonly class PedidoDelPublico
         public int $votaciones,
         public int $votos,
         public int $porcentaje,
+        /** la sala donde más se votó, para programarlo ahí (EF-22.17) */
+        public ?string $salaId = null,
     ) {
     }
 }

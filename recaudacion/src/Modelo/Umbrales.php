@@ -47,8 +47,14 @@ final readonly class Umbrales
          * Puede pasar de 100: con 150, sólo la que se lleva dos veces y media su costo.
          */
         public int $promocionGananciaMaxima = 40,
+        /**
+         * Cuánto le saca al precio de siempre la promoción del día flojo, en porcentaje, al abrir
+         * el alta desde el reporte (EF-22.17). El 20 es el ejemplo del profe del 11/11: «el
+         * miércoles no va nadie → 20 % de descuento».
+         */
+        public int $promocionDescuento = 20,
     ) {
-        foreach ([$diaFlojoOcupacionMaxima, $repetirOcupacionMinima, $repetirAsistenciaMinima, $pedidoVotosMinimos, $gorraDiferenciaMinima, $agotadaOcupacionMinima, $franjaDiferenciaMinima] as $porcentaje) {
+        foreach ([$diaFlojoOcupacionMaxima, $repetirOcupacionMinima, $repetirAsistenciaMinima, $pedidoVotosMinimos, $gorraDiferenciaMinima, $agotadaOcupacionMinima, $franjaDiferenciaMinima, $promocionDescuento] as $porcentaje) {
             if ($porcentaje < 0 || $porcentaje > 100) {
                 throw new RuntimeException('Los porcentajes de [reportes] van de 0 a 100.');
             }
@@ -103,6 +109,7 @@ final readonly class Umbrales
             $entero('franja_diferencia_minima', $porDefecto->franjaDiferenciaMinima),
             $entero('franja_funciones_minimas', $porDefecto->franjaFuncionesMinimas),
             $entero('promocion_ganancia_maxima', $porDefecto->promocionGananciaMaxima),
+            $entero('promocion_descuento', $porDefecto->promocionDescuento),
         );
     }
 }

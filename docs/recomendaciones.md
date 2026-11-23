@@ -73,6 +73,26 @@ El profe pidió el 18/11 «mezclar los ingredientes». Cada combinada parte de u
 - **Qué sugiere:** sumar una función de esa obra el día flojo. Si hay varias, sale la que más se agotó.
 - **Por qué:** cruza la demanda que no entró, lo que le pareció al público y el día que sobra lugar.
 
+## De la recomendación a la función (EF-22.17)
+
+El profe, el 18/11: «precargás el formulario, le das enter». Cada recomendación que se resuelve programando una función tiene un botón **Programarla**. Abre el alta de función de programación ya cargada, y alcanza con revisar y confirmar. Programación acepta esos valores por la URL, descarta lo que no sea del organizador o no esté en el catálogo y avisa que vienen del reporte.
+
+| Recomendación | Qué carga |
+|---|---|
+| Día para una promoción | Ese día, con lo que el público pidió (si hay) y `promocion_descuento` (20) por ciento menos que el precio de siempre. |
+| A la gorra o con precio | Si el público es sensible al precio, una a la gorra; si no, una con el precio de siempre. |
+| Sumá una función, títulos para repetir y lo que el público pidió | Esa obra, en la sala donde se agotó, se dio más o se votó más. |
+| Las combinadas | Lo que dice cada una: lo pedido a la gorra, la otra franja horaria o lo que se agota, el día flojo. |
+
+Lo que la recomendación no dice sale de lo que la sala hizo en el período:
+
+- **Fecha:** el próximo día de la semana que dice la recomendación. Si no dice ninguno, el día que más llena la sala.
+- **Hora:** la más repetida ese día en la sala, dentro de la franja si la recomendación la dice.
+- **Precio:** el más repetido de la sala o, si se da una obra que ya se dio, el que se pagó por ella.
+- **Cupo:** el más repetido de la sala.
+
+El botón le sale sólo al organizador de la sala: el administrador ve todas, pero no programa en las ajenas.
+
 ## Lo que queda afuera
 
 - El género y la categoría de la obra, y el perfil del espectador: programación no los manda en la API interna de finalizadas. Son el próximo ingrediente.

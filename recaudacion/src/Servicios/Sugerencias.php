@@ -7,6 +7,7 @@ namespace IndieCinema\Recaudacion\Servicios;
 use IndieCinema\Recaudacion\Modelo\DatosDelReporte;
 use IndieCinema\Recaudacion\Modelo\DiaFlojo;
 use IndieCinema\Recaudacion\Modelo\FuncionFinalizada;
+use IndieCinema\Recaudacion\Modelo\FuncionParaProgramar;
 use IndieCinema\Recaudacion\Modelo\ObraAgotada;
 use IndieCinema\Recaudacion\Modelo\PedidoDelPublico;
 use IndieCinema\Recaudacion\Modelo\PrecioDeLaEntrada;
@@ -164,9 +165,11 @@ final class Sugerencias
             }
             $calificacion = $datos->calificacionDe($funcion->id);
             foreach ($funcion->elegidas() as $obra) {
-                $acumulado = $porObra[$obra->id] ?? ['titulo' => $obra->titulo, 'funciones' => 0, 'vendidas' => 0, 'cupo' => 0, 'asistentes' => 0, 'puntos' => 0.0, 'calificaciones' => 0];
+                $acumulado = $porObra[$obra->id] ?? ['titulo' => $obra->titulo, 'salas' => [], 'funciones' => 0, 'vendidas' => 0, 'cupo' => 0, 'asistentes' => 0, 'puntos' => 0.0, 'calificaciones' => 0];
+                $acumulado['salas'][$funcion->salaId] = ($acumulado['salas'][$funcion->salaId] ?? 0) + 1;
                 $porObra[$obra->id] = [
                     'titulo' => $obra->titulo,
+                    'salas' => $acumulado['salas'],
                     'funciones' => $acumulado['funciones'] + 1,
                     'vendidas' => $acumulado['vendidas'] + $ventas->vendidas,
                     'cupo' => $acumulado['cupo'] + $funcion->cupo,
@@ -195,6 +198,7 @@ final class Sugerencias
                 self::porcentaje($obra['vendidas'], $obra['cupo']),
                 self::porcentaje($obra['asistentes'], $obra['vendidas']),
                 $promedio,
+                self::laQueMas($obra['salas']),
             );
         }
         usort($titulos, static fn (TituloParaRepetir $a, TituloParaRepetir $b): int => [$b->ocupacion, $b->promedio, $a->titulo] <=> [$a->ocupacion, $a->promedio, $b->titulo]);
@@ -238,9 +242,11 @@ final class Sugerencias
                 if ($obra->elegida || $obra->votos === 0 || $obra->votos * 100 < $this->umbrales->pedidoVotosMinimos * $total) {
                     continue;
                 }
-                $acumulado = $porObra[$obra->id] ?? ['titulo' => $obra->titulo, 'votaciones' => 0, 'votos' => 0, 'total' => 0];
+                $acumulado = $porObra[$obra->id] ?? ['titulo' => $obra->titulo, 'salas' => [], 'votaciones' => 0, 'votos' => 0, 'total' => 0];
+                $acumulado['salas'][$funcion->salaId] = ($acumulado['salas'][$funcion->salaId] ?? 0) + $obra->votos;
                 $porObra[$obra->id] = [
                     'titulo' => $obra->titulo,
+                    'salas' => $acumulado['salas'],
                     'votaciones' => $acumulado['votaciones'] + 1,
                     'votos' => $acumulado['votos'] + $obra->votos,
                     'total' => $acumulado['total'] + $total,
@@ -251,7 +257,7 @@ final class Sugerencias
         $pedidos = [];
         foreach ($porObra as $obraId => $obra) {
             if (!isset($proyectadas[$obraId])) {
-                $pedidos[] = new PedidoDelPublico((string) $obraId, $obra['titulo'], $obra['votaciones'], $obra['votos'], self::porcentaje($obra['votos'], $obra['total']));
+                $pedidos[] = new PedidoDelPublico((string) $obraId, $obra['titulo'], $obra['votaciones'], $obra['votos'], self::porcentaje($obra['votos'], $obra['total']), self::laQueMas($obra['salas']));
             }
         }
         usort($pedidos, static fn (PedidoDelPublico $a, PedidoDelPublico $b): int => [$b->votos, $b->votaciones, $a->titulo] <=> [$a->votos, $a->votaciones, $b->titulo]);
@@ -440,6 +446,7 @@ final class Sugerencias
                         "Su público lo votó y no lo vio: {$pedido->votos} " . self::plural($pedido->votos, 'voto', 'votos') . " en {$pedido->votaciones} " . self::plural($pedido->votaciones, 'votación', 'votaciones') . ", el {$pedido->porcentaje} %.",
                         "A la gorra ya funcionó en esta sala: llenó el {$precio->ocupacionGorra} % en {$precio->funcionesGorra} funciones, contra el {$precio->ocupacionPagas} % con precio.",
                     ],
+                    new FuncionParaProgramar($dia->salaId, [$pedido->obraId], $dia->dia, precio: 0),
                 );
             }
 
@@ -457,6 +464,7 @@ final class Sugerencias
                         "En esta sala, las de la {$franjas['mejor']} llenan el {$franjas['ocupacion_mejor']} % ({$franjas['funciones_mejor']} funciones) y las de la {$franjas['peor']}, el {$franjas['ocupacion_peor']} % ({$franjas['funciones_peor']}).",
                         "De las {$dia->funciones} funciones de los {$nombre}, {$franjas['el_dia_en_la_peor']} fueron a la {$franjas['peor']}.",
                     ],
+                    new FuncionParaProgramar($dia->salaId, [], $dia->dia, $franjas['mejor']),
                 );
             }
 
@@ -475,6 +483,7 @@ final class Sugerencias
                         'Gustó: ' . str_replace('.', ',', sprintf('%.1f', $promedio)) . ' de promedio.',
                         $elDiaFlojo,
                     ],
+                    new FuncionParaProgramar($dia->salaId, [$obra->obraId], $dia->dia),
                 );
                 // Una por día: la que más se agotó, que es la primera.
                 break;
@@ -549,6 +558,23 @@ final class Sugerencias
         }
 
         return array_map(static fn (array $obra): float => round($obra[0] / $obra[1], 1), $porObra);
+    }
+
+    /**
+     * La clave con el número más alto; ante un empate, la primera que apareció.
+     *
+     * @param array<string|int, int> $cuantos
+     */
+    private static function laQueMas(array $cuantos): ?string
+    {
+        $mejor = null;
+        foreach ($cuantos as $clave => $cuanto) {
+            if ($mejor === null || $cuanto > $cuantos[$mejor]) {
+                $mejor = $clave;
+            }
+        }
+
+        return $mejor === null ? null : (string) $mejor;
     }
 
     private static function plural(int $cantidad, string $uno, string $varios): string

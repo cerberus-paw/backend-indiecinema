@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace IndieCinema\Recaudacion\Pruebas;
 
+use DateTimeImmutable;
 use IndieCinema\Nucleo\Aplicacion;
 use IndieCinema\Nucleo\Configuracion;
 use IndieCinema\Nucleo\Http\Peticion;
@@ -388,6 +389,33 @@ final class ReportesTest extends TestCase
 
         // Un tema que no existe es el resumen.
         self::assertStringContainsString('Lo que más conviene', self::texto($this->pedir(self::NOVIEMBRE . '&tema=otro')));
+    }
+
+    /**
+     * EF-22.17: cada recomendación termina en un botón que abre el alta de la función ya cargada.
+     * El miércoles flojo del Galpón: el próximo miércoles, a las 21 como sus otros miércoles, con
+     * «La ciénaga» (la que su público votó y no vio) y 20 % menos que sus $ 3.500 de siempre.
+     */
+    public function testLaPromocionDelDiaFlojoAbreElAltaCargada(): void
+    {
+        $cuerpo = $this->pedir(self::NOVIEMBRE . '&tema=promociones')->cuerpo();
+
+        $esperada = '/organizador/funciones/nueva?' . http_build_query([
+            'modo' => 'programada', 'sala_id' => '10000000-0000-4000-8000-000000000001', 'obras' => [self::CIENAGA],
+            'fecha' => (new DateTimeImmutable('next wednesday'))->format('Y-m-d'), 'hora' => '21:00', 'precio' => '2800', 'cupo' => '40', 'desde' => 'reporte',
+        ]);
+        self::assertStringContainsString('<a href="' . htmlspecialchars($esperada) . '" class="boton boton-secundario">Programarla con 20 % de descuento</a>', $cuerpo);
+        // «Sumá una función» de lo que se agota y «Títulos para repetir», en la pestaña de programación.
+        self::assertStringContainsString('Programarla</a>', $this->pedir(self::NOVIEMBRE . '&tema=programacion')->cuerpo());
+    }
+
+    /** El administrador ve todas las salas pero no programa en las ajenas: sin botón. */
+    public function testElAdministradorNoRecibeElBotonDeProgramar(): void
+    {
+        $cuerpo = $this->pedir(self::NOVIEMBRE . '&tema=promociones', self::ADMINISTRADORA, 'administrador')->cuerpo();
+
+        self::assertStringContainsString('los miércoles', $cuerpo);
+        self::assertStringNotContainsString('/organizador/funciones/nueva', $cuerpo);
     }
 
     /**

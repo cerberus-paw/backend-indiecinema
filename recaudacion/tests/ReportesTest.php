@@ -391,12 +391,12 @@ final class ReportesTest extends TestCase
     }
 
     /**
-     * EF-22.13: el embudo del Galpón en noviembre. De los diez que votaron el primer miércoles, el 1
+     * EF-22.13 y EF-22.16: la conversión del Galpón en noviembre. De los diez que votaron el primer miércoles, el 1
      * reservó y no pagó, el 9 y el 10 pagaron y fueron, y el 9 calificó (Dobles/funciones.php).
      */
-    public function testElEmbudoSigueALosQueVotaronHastaQueCalificaron(): void
+    public function testLaConversionSigueALosQueVotaronHastaQueCalificaron(): void
     {
-        $respuesta = $this->pedir(self::NOVIEMBRE . '&tema=embudo');
+        $respuesta = $this->pedir(self::NOVIEMBRE . '&tema=conversion');
 
         self::assertSame(200, $respuesta->estado(), $respuesta->cuerpo());
         $texto = self::texto($respuesta);
@@ -412,15 +412,15 @@ final class ReportesTest extends TestCase
         self::assertStringNotContainsString('style="', $respuesta->cuerpo());
     }
 
-    public function testElEmbudoSoloSePideEnSuPestana(): void
+    public function testLaConversionSoloSePideEnSuPestana(): void
     {
         self::assertStringNotContainsString('De votar a calificar', self::texto($this->pedir(self::NOVIEMBRE)));
-        self::assertStringContainsString('tema=embudo" class="reporte-pestana">Embudo</a>', $this->pedir(self::NOVIEMBRE)->cuerpo());
+        self::assertStringContainsString('tema=conversion" class="reporte-pestana">Conversión</a>', $this->pedir(self::NOVIEMBRE)->cuerpo());
     }
 
-    public function testSinFuncionesElEmbudoAvisaYNoInventaNumeros(): void
+    public function testSinFuncionesLaConversionAvisaYNoInventaNumeros(): void
     {
-        $texto = self::texto($this->pedir(self::NOVIEMBRE . '&tema=embudo', subsistemas: ['funciones' => self::$caido]));
+        $texto = self::texto($this->pedir(self::NOVIEMBRE . '&tema=conversion', subsistemas: ['funciones' => self::$caido]));
 
         self::assertStringContainsString('falta hasta dónde llegó cada uno que votó', $texto);
         self::assertStringNotContainsString('De votar a calificar', $texto);

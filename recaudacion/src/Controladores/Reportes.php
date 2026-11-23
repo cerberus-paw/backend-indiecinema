@@ -51,9 +51,9 @@ use LogicException;
  * y el administrador, todas.
  *
  * - GET /recaudacion/reportes: si cada sala (y, para el administrador, la plataforma) gana o pierde
- *   plata (EF-22.1), el embudo de los que votaron (EF-22.13), qué conviene hacer (EF-09.1, EF-09.5
- *   y EF-22.3) y, para el administrador, la moderación y la conducta del período (EF-22.4). Va
- *   primero porque es lo que pidió el profe el 11/11: un reporte que sólo muestra números es una
+ *   plata (EF-22.1), la conversión de los que votaron (EF-22.13 y EF-22.16), qué conviene hacer
+ *   (EF-09.1, EF-09.5 y EF-22.3) y, para el administrador, la moderación y la conducta del período
+ *   (EF-22.4). Va primero porque es lo que pidió el profe el 11/11: un reporte que sólo muestra números es una
  *   máquina de escribir; uno que dice qué día conviene una promoción sirve para decidir.
  * - GET /recaudacion/reportes/funciones: los totales de cada mes y las funciones de uno (EF-09.2).
  * - GET /recaudacion/reportes/funciones.csv: todas las funciones del período, para una planilla.
@@ -68,7 +68,7 @@ final class Reportes extends Controlador
      * Los temas de la página de recomendaciones (EF-22.2), como pestañas que son enlaces: cada uno
      * va a lo que le interesa en vez de leer todo una cosa abajo de la otra.
      */
-    public const TEMAS = ['resumen' => 'Resumen', 'plata' => 'Plata', 'embudo' => 'Embudo', 'promociones' => 'Promociones', 'programacion' => 'Programación', 'salas' => 'Salas'];
+    public const TEMAS = ['resumen' => 'Resumen', 'plata' => 'Plata', 'conversion' => 'Conversión', 'promociones' => 'Promociones', 'programacion' => 'Programación', 'salas' => 'Salas'];
 
     /** Cómo se nombra cada paso del embudo (EF-22.13). */
     private const PASOS_DEL_EMBUDO = ['votaron' => 'Votaron', 'reservaron' => 'Reservaron', 'pagaron' => 'Pagaron', 'fueron' => 'Fueron', 'calificaron' => 'Calificaron'];
@@ -119,8 +119,8 @@ final class Reportes extends Controlador
         $plataforma = $administrador ? $this->resultados?->plataforma($datos, $resultados) : null;
         $meses = TotalesDelPeriodo::porMes($datos, $datos->funciones);
         $moderacion = $administrador && $datos->funciones !== [] ? $this->moderacion?->delPeriodo($datos) : null;
-        // El embudo le pregunta a funciones por cada función: sólo cuando se mira su pestaña.
-        $embudo = $tema === 'embudo' && $datos->funciones !== [] ? $this->embudo?->delPeriodo($datos) : null;
+        // La conversión le pregunta a funciones por cada función: sólo cuando se mira su pestaña.
+        $embudo = $tema === 'conversion' && $datos->funciones !== [] ? $this->embudo?->delPeriodo($datos) : null;
 
         return $this->vista('reportes.html.twig', [
             'periodo' => $periodoElegido,
@@ -137,7 +137,7 @@ final class Reportes extends Controlador
             'ganancias' => $this->resultados === null ? null : self::ganancias($resultados, $plataforma, $this->resultados->referencia()),
             'costo_cargado' => self::avisoDelCosto($peticion),
             'moderacion' => $moderacion === null ? null : self::moderacion($moderacion),
-            'embudo' => $embudo === null ? null : self::embudo($embudo),
+            'conversion' => $embudo === null ? null : self::embudo($embudo),
             'funciones' => count($datos->funciones),
             'sin_ventas' => $datos->ventas === null,
             'resumen' => $total === null ? null : self::rendimiento($total),

@@ -78,9 +78,9 @@ El profe pidió el 18/11 «mezclar los ingredientes». Cada combinada parte de u
 - El género y la categoría de la obra, y el perfil del espectador: programación no los manda en la API interna de finalizadas. Son el próximo ingrediente.
 - La capacidad de la sala ya está en la ocupación, que es en porcentaje de los lugares.
 
-## El embudo de conversión (EF-22.13)
+## La conversión: del voto a la plata (EF-22.13)
 
-La pestaña Embudo sigue a los que votaron títulos hasta la plata: de los que votaron en una función, cuántos la reservaron, la pagaron, fueron y la calificaron. Lo pidió el profe el 18/11, a otro grupo: «¿cuántos de esos se convirtieron en plata?». Sirve para nosotros porque el voto es lo que no tiene un cine común.
+La pestaña Conversión (hasta el 23/11 se llamó «Embudo», EF-22.16) sigue a los que votaron títulos hasta la plata: de los que votaron en una función, cuántos la reservaron, la pagaron, fueron y la calificaron. Lo pidió el profe el 18/11, a otro grupo: «¿cuántos de esos se convirtieron en plata?». Sirve para nosotros porque el voto es lo que no tiene un cine común.
 
 - **De dónde sale:** quiénes votaron lo manda programación con las funciones finalizadas. Hasta dónde llegó cada uno lo dice funciones en `GET /interno/embudo`, que también manda las reservas que se cayeron sin pagar (los cobros del reparto no las traen).
 - **Cómo cuenta:** personas por función. Quien votó en dos funciones cuenta dos veces, porque son dos decisiones de ir. A la gorra, «pagó» es que confirmó la reserva.

@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace IndieCinema\Recaudacion\Servicios;
 
-use IndieCinema\Nucleo\Http\ClienteInterno;
 use IndieCinema\Nucleo\Http\ExcepcionHttp;
 use IndieCinema\Recaudacion\Modelo\DatosDelReporte;
 use IndieCinema\Recaudacion\Modelo\Embudo;
@@ -27,14 +26,8 @@ use RuntimeException;
  */
 final class EmbudoDeConversion
 {
-    /** Lo más que acepta funciones en un pedido. */
-    private const MAXIMO_POR_PEDIDO = 100;
-
-    /** Hasta qué paso llegó: el índice en Embudo::PASOS, sin contar el voto. */
-    private const PASO = ['reservo' => 1, 'pago' => 2, 'fue' => 3, 'califico' => 4];
-
     public function __construct(
-        private readonly ClienteInterno $cliente,
+        private readonly HastaDondeLlegaron $hastaDonde,
         private readonly LoggerInterface $log,
     ) {
     }
@@ -43,7 +36,7 @@ final class EmbudoDeConversion
     {
         $avisos = [];
         try {
-            $llegadas = $this->llegadas(array_map(static fn (FuncionFinalizada $funcion): string => $funcion->id, $datos->funciones));
+            $llegadas = $this->hastaDonde->enLasFunciones(array_map(static fn (FuncionFinalizada $funcion): string => $funcion->id, $datos->funciones));
         } catch (ExcepcionHttp|RuntimeException|LogicException $error) {
             $this->log->warning('El reporte salió sin el embudo: {error}', ['error' => $error->getMessage()]);
             $llegadas = null;
@@ -89,7 +82,7 @@ final class EmbudoDeConversion
             }
             // Los que vinieron sin votar: el embudo no los cuenta, pero se dice cuántos son.
             foreach ($deLaFuncion as $usuario => $llegada) {
-                if (!isset($votantes[$usuario]) && $llegada['paso'] >= self::PASO['pago']) {
+                if (!isset($votantes[$usuario]) && $llegada['paso'] >= HastaDondeLlegaron::PASO['pago']) {
                     ++$sinVotar;
                     $sinVotarCentavos += $llegada['centavos'];
                 }
@@ -97,39 +90,5 @@ final class EmbudoDeConversion
         }
 
         return new Embudo($salaId, $nombre, $personas, $centavos, $sinVotar, $sinVotarCentavos);
-    }
-
-    /**
-     * @param list<string> $funcionesIds
-     *
-     * @return array<string, array<string, array{paso: int, centavos: int}>>
-     *
-     * @throws ExcepcionHttp|RuntimeException|LogicException si funciones no responde, responde otra
-     *                                                       cosa o falta su dirección en config.ini
-     */
-    private function llegadas(array $funcionesIds): array
-    {
-        $llegadas = [];
-        foreach (array_chunk($funcionesIds, self::MAXIMO_POR_PEDIDO) as $tanda) {
-            $respuesta = $this->cliente->get('funciones', '/interno/embudo', ['funciones' => implode(',', $tanda)]);
-            $porFuncion = is_array($respuesta) ? ($respuesta['funciones'] ?? null) : null;
-            if (!is_array($porFuncion)) {
-                throw new RuntimeException('funciones no respondió el embudo a GET /interno/embudo.');
-            }
-            foreach ($porFuncion as $funcionId => $filas) {
-                if (!is_array($filas)) {
-                    throw new RuntimeException('funciones respondió un embudo que no se entiende.');
-                }
-                foreach ($filas as $fila) {
-                    if (!is_array($fila) || !is_string($fila['usuario_id'] ?? null) || !isset(self::PASO[$fila['llego_a'] ?? ''])
-                        || !is_string($fila['total'] ?? null) || preg_match('/^\d+\.\d{2}$/D', $fila['total']) !== 1) {
-                        throw new RuntimeException('funciones respondió un embudo que no se entiende.');
-                    }
-                    $llegadas[(string) $funcionId][$fila['usuario_id']] = ['paso' => self::PASO[$fila['llego_a']], 'centavos' => Monto::centavos($fila['total'])];
-                }
-            }
-        }
-
-        return $llegadas;
     }
 }

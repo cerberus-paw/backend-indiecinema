@@ -16,6 +16,7 @@ use IndieCinema\Recaudacion\Modelo\CostosDeReferencia;
 use IndieCinema\Recaudacion\Modelo\DatosDelReporte;
 use IndieCinema\Recaudacion\Modelo\DiaFlojo;
 use IndieCinema\Recaudacion\Modelo\Embudo;
+use IndieCinema\Recaudacion\Modelo\EspectadorDeSala;
 use IndieCinema\Recaudacion\Modelo\EmbudoDelPeriodo;
 use IndieCinema\Recaudacion\Modelo\FuncionFinalizada;
 use IndieCinema\Recaudacion\Modelo\FuncionParaProgramar;
@@ -31,6 +32,7 @@ use IndieCinema\Recaudacion\Modelo\PrecioDeLaEntrada;
 use IndieCinema\Recaudacion\Modelo\RecomendacionCombinada;
 use IndieCinema\Recaudacion\Modelo\ReglaIncumplida;
 use IndieCinema\Recaudacion\Modelo\ReporteDeObra;
+use IndieCinema\Recaudacion\Modelo\RankingDeSala;
 use IndieCinema\Recaudacion\Modelo\RendimientoDeSala;
 use IndieCinema\Recaudacion\Modelo\ResultadoDePlataforma;
 use IndieCinema\Recaudacion\Modelo\ResultadoDeSala;
@@ -43,6 +45,7 @@ use IndieCinema\Recaudacion\Servicios\EmbudoDeConversion;
 use IndieCinema\Recaudacion\Servicios\ModeracionYConducta;
 use IndieCinema\Recaudacion\Servicios\ObrasDelDueno;
 use IndieCinema\Recaudacion\Servicios\Precargas;
+use IndieCinema\Recaudacion\Servicios\RankingDeEspectadores;
 use IndieCinema\Recaudacion\Servicios\ResultadosDelPeriodo;
 use IndieCinema\Recaudacion\Servicios\ServicioDeReportes;
 use IndieCinema\Recaudacion\Servicios\Sugerencias;
@@ -71,7 +74,7 @@ final class Reportes extends Controlador
      * Los temas de la página de recomendaciones (EF-22.2), como pestañas que son enlaces: cada uno
      * va a lo que le interesa en vez de leer todo una cosa abajo de la otra.
      */
-    public const TEMAS = ['resumen' => 'Resumen', 'plata' => 'Plata', 'conversion' => 'Conversión', 'promociones' => 'Promociones', 'programacion' => 'Programación', 'salas' => 'Salas'];
+    public const TEMAS = ['resumen' => 'Resumen', 'plata' => 'Plata', 'conversion' => 'Conversión', 'promociones' => 'Promociones', 'programacion' => 'Programación', 'publico' => 'Público', 'salas' => 'Salas'];
 
     /** Cómo se nombra cada paso del embudo (EF-22.13). */
     private const PASOS_DEL_EMBUDO = ['votaron' => 'Votaron', 'reservaron' => 'Reservaron', 'pagaron' => 'Pagaron', 'fueron' => 'Fueron', 'calificaron' => 'Calificaron'];
@@ -99,6 +102,7 @@ final class Reportes extends Controlador
         private readonly ?ResultadosDelPeriodo $resultados = null,
         private readonly ?ModeracionYConducta $moderacion = null,
         private readonly ?EmbudoDeConversion $embudo = null,
+        private readonly ?RankingDeEspectadores $ranking = null,
     ) {
         $this->umbrales = Umbrales::desdeConfiguracion($configuracion);
     }
@@ -124,6 +128,8 @@ final class Reportes extends Controlador
         $moderacion = $administrador && $datos->funciones !== [] ? $this->moderacion?->delPeriodo($datos) : null;
         // La conversión le pregunta a funciones por cada función: sólo cuando se mira su pestaña.
         $embudo = $tema === 'conversion' && $datos->funciones !== [] ? $this->embudo?->delPeriodo($datos) : null;
+        // El ranking le pregunta a funciones y a cuentas: también, sólo en su pestaña (EF-22.19).
+        $ranking = $tema === 'publico' && $datos->funciones !== [] ? $this->ranking?->delPeriodo($datos) : null;
         // El botón «Programarla» de cada recomendación (EF-22.17), sólo en las salas de quien mira.
         $precargas = new Precargas($datos, $usuario->id, $this->umbrales->franjaCorteHora);
         $descuento = $this->umbrales->promocionDescuento;
@@ -144,6 +150,7 @@ final class Reportes extends Controlador
             'costo_cargado' => self::avisoDelCosto($peticion),
             'moderacion' => $moderacion === null ? null : self::moderacion($moderacion),
             'conversion' => $embudo === null ? null : self::embudo($embudo),
+            'ranking' => $ranking === null ? null : self::ranking($ranking),
             'funciones' => count($datos->funciones),
             'sin_ventas' => $datos->ventas === null,
             'resumen' => $total === null ? null : self::rendimiento($total),
@@ -487,6 +494,35 @@ final class Reportes extends Controlador
     /**
      * @return array{titulo: string, votaciones: int, votos: int, porcentaje: string}
      */
+    /**
+     * El ranking de cada sala, ya escrito (EF-22.19).
+     *
+     * @param array{salas: list<RankingDeSala>, avisos: list<string>} $ranking
+     *
+     * @return array{avisos: list<string>, salas: list<array{sala: string, participaron: int, espectadores: list<array{posicion: int, nombre: string, fue: int, voto: int, califico: int, pagado: string, puntaje: int}>}>, puntos: array{ir: int, votar: int, calificar: int}}
+     */
+    private static function ranking(array $ranking): array
+    {
+        return [
+            'avisos' => $ranking['avisos'],
+            'salas' => array_map(static fn (RankingDeSala $sala): array => [
+                'sala' => $sala->salaNombre,
+                'participaron' => $sala->participaron,
+                'espectadores' => array_map(static fn (int $i, EspectadorDeSala $e): array => [
+                    'posicion' => $i + 1,
+                    // Sin el nombre, el final del id: alcanza para distinguirlos en la tabla.
+                    'nombre' => $e->nombre ?? 'Espectador …' . substr($e->usuarioId, -6),
+                    'fue' => $e->fue,
+                    'voto' => $e->voto,
+                    'califico' => $e->califico,
+                    'pagado' => self::pesos($e->pagado),
+                    'puntaje' => $e->puntaje(),
+                ], array_keys($sala->espectadores), $sala->espectadores),
+            ], $ranking['salas']),
+            'puntos' => ['ir' => EspectadorDeSala::PUNTOS_POR_IR, 'votar' => EspectadorDeSala::PUNTOS_POR_VOTAR, 'calificar' => EspectadorDeSala::PUNTOS_POR_CALIFICAR],
+        ];
+    }
+
     /**
      * Los géneros de cada sala (EF-22.18), agrupados por sala para la plantilla.
      *

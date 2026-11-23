@@ -82,8 +82,8 @@ El profe, el 18/11: «si es mayor al 25 % pero las películas son de acción, te
   1. Un día es flojo en la sala.
   2. En esa sala, las funciones de un género llenan por lo menos `genero_diferencia_minima` (20) puntos más que todas las de la sala, con al menos `genero_funciones_minimas` (2) funciones.
 - **Qué sugiere:** dar una obra de ese género ese día.
-  - Primero, la que el público de la sala votó y no vio, si es de ese género.
-  - Si no hay, la de ese género que más llenó en la sala.
+  - Primero, la que el público de la sala votó y no vio, si es de alguno de los géneros que llenan así.
+  - Si no hay, la que más llenó en la sala del género que más llena.
   - Nunca una que otra combinada ya sugirió para ese día.
 - **Por qué:** cruza el día, la ocupación, el género y la votación. Si ese día se dio sobre todo otro género, lo dice, porque eso explica que esté flojo.
 - **Dónde se ve:** la pestaña Programación muestra, por sala, cuánto llena cada género, qué parte de los votos se llevó y su promedio. Una obra con dos géneros cuenta en los dos.

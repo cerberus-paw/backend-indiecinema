@@ -574,39 +574,52 @@ final class Sugerencias
     }
 
     /**
-     * El día flojo con el género que más llena en la sala (EF-22.18), si llena bastante más que la
-     * sala en general: dar una obra de ese género ese día. La obra es la que el público de la sala
-     * votó y no vio, si es de ese género; si no, la de ese género que más llenó en la sala.
+     * El día flojo con un género que llena bastante más que la sala en general (EF-22.18): dar una
+     * obra de ese género ese día. La obra es la que el público de la sala votó y no vio, si es de
+     * alguno de esos géneros; si no, la que más llenó del género que más llena.
      *
      * @param list<GeneroDeSala> $generos  los de la sala, del que más llena al que menos
      * @param array<string, true> $yaDadas las obras que ya se sugirieron para este día
      */
     private function generoParaElDiaFlojo(DatosDelReporte $datos, DiaFlojo $dia, array $generos, array $yaDadas): ?RecomendacionCombinada
     {
-        $mejor = $generos[0] ?? null;
         $funciones = array_values(array_filter($datos->funciones, static fn (FuncionFinalizada $f): bool => $f->salaId === $dia->salaId));
         $sala = $this->rendimiento($datos, $funciones);
-        if ($mejor === null || $sala === null || $mejor->ocupacion - $sala->ocupacion < $this->umbrales->generoDiferenciaMinima) {
+        if ($sala === null) {
             return null;
         }
+        // Los géneros que llenan bastante más que la sala, del que más llena al que menos.
+        $candidatos = array_values(array_filter($generos, fn (GeneroDeSala $g): bool => $g->ocupacion - $sala->ocupacion >= $this->umbrales->generoDiferenciaMinima));
 
+        // Primero, lo que su público votó y no vio, de cualquiera de esos géneros: junta las tres
+        // cosas (el día, el género que llena y lo que piden). Si no hay, la obra que más llenó del
+        // género que más llena; si ésa ya se sugirió para el día, la del siguiente.
+        $mejor = null;
         $obra = null;
         $porQueLaObra = null;
-        foreach ($this->pedidos($datos, $dia->salaId) as $pedido) {
-            if (in_array($mejor->genero, self::generosDeLaObra($datos, $pedido->obraId), true) && !isset($yaDadas[$pedido->obraId])) {
-                $obra = [$pedido->obraId, $pedido->titulo];
-                $porQueLaObra = "«{$pedido->titulo}» es de {$mejor->genero} y su público la votó sin verla: {$pedido->votos} " . self::plural($pedido->votos, 'voto', 'votos') . '.';
-                break;
+        $pedidos = $this->pedidos($datos, $dia->salaId);
+        foreach ($candidatos as $genero) {
+            foreach ($pedidos as $pedido) {
+                if (in_array($genero->genero, self::generosDeLaObra($datos, $pedido->obraId), true) && !isset($yaDadas[$pedido->obraId])) {
+                    [$mejor, $obra] = [$genero, [$pedido->obraId, $pedido->titulo]];
+                    $porQueLaObra = "«{$pedido->titulo}» es de {$genero->genero} y su público la votó sin verla: {$pedido->votos} " . self::plural($pedido->votos, 'voto', 'votos') . '.';
+                    break 2;
+                }
             }
         }
         if ($obra === null) {
-            $laQueMasLleno = $this->laQueMasLlenoDelGenero($datos, $funciones, $mejor->genero, $yaDadas);
-            if ($laQueMasLleno === null) {
-                return null;
+            foreach ($candidatos as $genero) {
+                $laQueMasLleno = $this->laQueMasLlenoDelGenero($datos, $funciones, $genero->genero, $yaDadas);
+                if ($laQueMasLleno !== null) {
+                    [$obraId, $titulo, $ocupacion] = $laQueMasLleno;
+                    [$mejor, $obra] = [$genero, [$obraId, $titulo]];
+                    $porQueLaObra = "«{$titulo}» es de {$genero->genero} y en esta sala llenó el {$ocupacion} % de los lugares.";
+                    break;
+                }
             }
-            [$obraId, $titulo, $ocupacion] = $laQueMasLleno;
-            $obra = [$obraId, $titulo];
-            $porQueLaObra = "«{$titulo}» es de {$mejor->genero} y en esta sala llenó el {$ocupacion} % de los lugares.";
+        }
+        if ($mejor === null || $obra === null || $porQueLaObra === null) {
+            return null;
         }
 
         $nombre = self::DIAS[$dia->dia];
@@ -630,7 +643,7 @@ final class Sugerencias
             RecomendacionCombinada::GENERO_EL_DIA_FLOJO,
             $dia->salaId,
             $dia->salaNombre,
-            "Los {$nombre}, dar «{$obra[1]}» ({$mejor->genero}): es el género que más llena en esta sala.",
+            "Los {$nombre}, dar «{$obra[1]}» ({$mejor->genero}): es de lo que más llena en esta sala.",
             $porque,
             new FuncionParaProgramar($dia->salaId, [$obra[0]], $dia->dia),
         );

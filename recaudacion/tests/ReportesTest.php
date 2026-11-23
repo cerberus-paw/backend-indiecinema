@@ -417,8 +417,8 @@ final class ReportesTest extends TestCase
     {
         $texto = self::texto($this->pedir(self::NOVIEMBRE . '&tema=programacion'));
 
-        self::assertStringContainsString('Qué géneros llenan El Galpón Suspenso 93 % Drama 56 %', $texto);
-        self::assertStringContainsString('Suspenso: 2 funciones, 0 % de los votos, 4,4 de promedio; Drama: 4 funciones, 100 % de los votos', $texto);
+        self::assertMatchesRegularExpression('/Qué géneros llenan El Galpón Suspenso .* 93 % Drama 4 funciones · 100 % de los votos .* 56 %/', $texto);
+        self::assertStringContainsString('Suspenso 2 funciones · 0 % de los votos · 4,4 de promedio', $texto);
     }
 
     /** El administrador ve todas las salas pero no programa en las ajenas: sin botón. */

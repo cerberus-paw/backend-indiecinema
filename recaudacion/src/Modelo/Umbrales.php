@@ -53,13 +53,20 @@ final readonly class Umbrales
          * miércoles no va nadie → 20 % de descuento».
          */
         public int $promocionDescuento = 20,
+        /**
+         * Un género de una sala tiene que llenar estos puntos más que la sala en general para
+         * sugerirlo el día flojo (EF-22.18)…
+         */
+        public int $generoDiferenciaMinima = 20,
+        /** …en por lo menos estas funciones. */
+        public int $generoFuncionesMinimas = 2,
     ) {
-        foreach ([$diaFlojoOcupacionMaxima, $repetirOcupacionMinima, $repetirAsistenciaMinima, $pedidoVotosMinimos, $gorraDiferenciaMinima, $agotadaOcupacionMinima, $franjaDiferenciaMinima, $promocionDescuento] as $porcentaje) {
+        foreach ([$diaFlojoOcupacionMaxima, $repetirOcupacionMinima, $repetirAsistenciaMinima, $pedidoVotosMinimos, $gorraDiferenciaMinima, $agotadaOcupacionMinima, $franjaDiferenciaMinima, $promocionDescuento, $generoDiferenciaMinima] as $porcentaje) {
             if ($porcentaje < 0 || $porcentaje > 100) {
                 throw new RuntimeException('Los porcentajes de [reportes] van de 0 a 100.');
             }
         }
-        foreach (['dia_flojo_funciones_minimas' => $diaFlojoFuncionesMinimas, 'gorra_funciones_minimas' => $gorraFuncionesMinimas, 'votaron_sin_reservar_minimos' => $votaronSinReservarMinimos, 'franja_funciones_minimas' => $franjaFuncionesMinimas] as $clave => $cantidad) {
+        foreach (['dia_flojo_funciones_minimas' => $diaFlojoFuncionesMinimas, 'gorra_funciones_minimas' => $gorraFuncionesMinimas, 'votaron_sin_reservar_minimos' => $votaronSinReservarMinimos, 'franja_funciones_minimas' => $franjaFuncionesMinimas, 'genero_funciones_minimas' => $generoFuncionesMinimas] as $clave => $cantidad) {
             if ($cantidad < 1) {
                 throw new RuntimeException("{$clave} de [reportes] tiene que ser 1 o más.");
             }
@@ -110,6 +117,8 @@ final readonly class Umbrales
             $entero('franja_funciones_minimas', $porDefecto->franjaFuncionesMinimas),
             $entero('promocion_ganancia_maxima', $porDefecto->promocionGananciaMaxima),
             $entero('promocion_descuento', $porDefecto->promocionDescuento),
+            $entero('genero_diferencia_minima', $porDefecto->generoDiferenciaMinima),
+            $entero('genero_funciones_minimas', $porDefecto->generoFuncionesMinimas),
         );
     }
 }

@@ -409,6 +409,18 @@ final class ReportesTest extends TestCase
         self::assertStringContainsString('Programarla</a>', $this->pedir(self::NOVIEMBRE . '&tema=programacion')->cuerpo());
     }
 
+    /**
+     * EF-22.18: qué géneros llenan en cada sala. En el Galpón, «Rojo» (drama y suspenso) llena los
+     * sábados; los miércoles, «Zama» (drama), no. Todos los votos fueron a obras de drama.
+     */
+    public function testLaProgramacionDiceQueGenerosLlenanEnCadaSala(): void
+    {
+        $texto = self::texto($this->pedir(self::NOVIEMBRE . '&tema=programacion'));
+
+        self::assertStringContainsString('Qué géneros llenan El Galpón Suspenso 93 % Drama 56 %', $texto);
+        self::assertStringContainsString('Suspenso: 2 funciones, 0 % de los votos, 4,4 de promedio; Drama: 4 funciones, 100 % de los votos', $texto);
+    }
+
     /** El administrador ve todas las salas pero no programa en las ajenas: sin botón. */
     public function testElAdministradorNoRecibeElBotonDeProgramar(): void
     {

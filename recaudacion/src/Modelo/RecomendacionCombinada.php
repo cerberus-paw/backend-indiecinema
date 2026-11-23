@@ -20,6 +20,9 @@ final readonly class RecomendacionCombinada
     /** Lo que se agota y gusta, también el día flojo. */
     public const AGOTADA_EL_DIA_FLOJO = 'agotada_el_dia_flojo';
 
+    /** El género que más llena en la sala, el día flojo (EF-22.18). */
+    public const GENERO_EL_DIA_FLOJO = 'genero_el_dia_flojo';
+
     /**
      * @param string       $regla  una de las constantes
      * @param string       $accion qué hacer, en una oración

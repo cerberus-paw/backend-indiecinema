@@ -54,7 +54,9 @@ if ((string) parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH) !== '/interno/func
 
     return;
 }
-$obra = static fn (string $id, string $titulo, bool $elegida, int $votos = 0): array => ['id' => $id, 'titulo' => $titulo, 'dueno_id' => $id === CIENAGA ? DUENA : ORGANIZADORA, 'elegida' => $elegida, 'votos' => $votos];
+// Los géneros (EF-22.18): «Rojo», que llena los sábados, es el único de suspenso.
+$generos = [ZAMA => ['Drama'], CIENAGA => ['Drama'], ROJO => ['Drama', 'Suspenso'], FORMULA => []];
+$obra = static fn (string $id, string $titulo, bool $elegida, int $votos = 0): array => ['id' => $id, 'titulo' => $titulo, 'dueno_id' => $id === CIENAGA ? DUENA : ORGANIZADORA, 'elegida' => $elegida, 'votos' => $votos, 'generos' => $generos[$id]];
 $funcion = static fn (
     string $id,
     string $fecha,

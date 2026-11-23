@@ -449,9 +449,12 @@ final class Reportes extends Controlador
                 'espectadores' => $sala->espectadores,
             ], $moderacion->salas),
             'solicitudes' => [
-                'pendientes' => ($moderacion->solicitudes['pendiente'] ?? 0) + ($moderacion->solicitudes['en_revision_manual'] ?? 0),
+                // EF-22.10: la devuelta, que espera al solicitante, tampoco está resuelta.
+                'pendientes' => ($moderacion->solicitudes['pendiente'] ?? 0) + ($moderacion->solicitudes['en_revision_manual'] ?? 0)
+                    + ($moderacion->solicitudes['devuelta'] ?? 0),
                 'aprobadas' => $moderacion->solicitudes['aprobada'] ?? 0,
                 'rechazadas' => $moderacion->solicitudes['rechazada'] ?? 0,
+                'vencidas' => $moderacion->solicitudes['vencida'] ?? 0,
             ],
             'otras_denuncias' => $moderacion->otrasDenuncias,
             'total_otras_denuncias' => array_sum($moderacion->otrasDenuncias),

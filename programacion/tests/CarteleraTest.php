@@ -37,14 +37,51 @@ final class CarteleraTest extends TestCase
     use ConBaseDePruebas;
     use ConFuncionesDePrueba;
 
+    /** @var resource|null la moderación de mentira (Dobles/moderacion.php) */
+    private static $servidorModeracion = null;
+
+    private static string $urlModeracion;
+
+    /** Las salas castigadas que responde la moderación de mentira. */
+    private static string $castigadas;
+
     public static function setUpBeforeClass(): void
     {
         self::setUpBeforeClassFunciones();
+        self::$castigadas = (string) tempnam(sys_get_temp_dir(), 'castigadas-');
+        $socket = stream_socket_server('tcp://127.0.0.1:0');
+        $puerto = (int) substr((string) strrchr((string) stream_socket_get_name($socket, false), ':'), 1);
+        fclose($socket);
+        self::$urlModeracion = "http://127.0.0.1:{$puerto}";
+        $proceso = proc_open(
+            [PHP_BINARY, '-S', "127.0.0.1:{$puerto}", __DIR__ . '/Dobles/moderacion.php'],
+            [['pipe', 'r'], ['file', '/dev/null', 'w'], ['file', '/dev/null', 'w']],
+            $tuberias,
+            null,
+            [...getenv(), 'CASTIGADAS' => self::$castigadas],
+        );
+        self::$servidorModeracion = $proceso === false ? null : $proceso;
+        for ($intento = 0; $intento < 100; ++$intento) {
+            $conexion = @fsockopen('127.0.0.1', $puerto, $codigo, $mensaje, 0.05);
+            if ($conexion !== false) {
+                fclose($conexion);
+
+                return;
+            }
+            usleep(20_000);
+        }
+        self::fail('No arrancó la moderación de prueba.');
     }
 
     public static function tearDownAfterClass(): void
     {
         self::tearDownAfterClassFunciones();
+        if (self::$servidorModeracion !== null) {
+            proc_terminate(self::$servidorModeracion);
+            proc_close(self::$servidorModeracion);
+        }
+        @unlink(self::$castigadas);
+        @unlink(self::$castigadas . '.pedidos');
     }
 
     private const SECRETO = 'secreto-de-nginx';
@@ -59,6 +96,8 @@ final class CarteleraTest extends TestCase
     protected function setUp(): void
     {
         @unlink(sys_get_temp_dir() . '/acuerdo_estado_global.txt');
+        file_put_contents(self::$castigadas, '{"salas":[]}');
+        @unlink(self::$castigadas . '.pedidos');
         // Antes de saltearla: tearDown() corre igual y la usa.
         $this->carpeta = sys_get_temp_dir() . '/archivos-' . bin2hex(random_bytes(4));
         $this->base = self::baseConTablasNuevas($this->configuracion());
@@ -78,7 +117,7 @@ final class CarteleraTest extends TestCase
     /**
      * @param array<string, mixed> $cartelera la sección [cartelera] de config.ini
      */
-    private function configuracion(array $cartelera = []): Configuracion
+    private function configuracion(array $cartelera = [], ?string $moderacion = null): Configuracion
     {
         return new Configuracion([
             'app' => ['subsistema' => 'programacion', 'entorno' => 'desarrollo'],
@@ -89,6 +128,7 @@ final class CarteleraTest extends TestCase
             'subsistemas' => [
                 'cuentas' => 'http://127.0.0.1:1',
                 'funciones' => self::$urlFunciones,
+                'moderacion' => $moderacion ?? self::$urlModeracion,
             ],
             'interno' => ['token' => 'token-de-programacion'],
         ]);
@@ -109,10 +149,10 @@ final class CarteleraTest extends TestCase
      * @param array<string, mixed>  $cartelera
      * @param array<string, string> $cabeceras
      */
-    private function pedir(string $url, array $cartelera = [], array $cabeceras = []): Respuesta
+    private function pedir(string $url, array $cartelera = [], array $cabeceras = [], ?string $moderacion = null): Respuesta
     {
         parse_str((string) parse_url($url, PHP_URL_QUERY), $consulta);
-        $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion($cartelera), new Log('programacion', $this->salidaDelLog));
+        $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion($cartelera, $moderacion), new Log('programacion', $this->salidaDelLog));
 
         return PaginasParaValidar::anotar('GET', $url, $aplicacion->atender(new Peticion('GET', (string) parse_url($url, PHP_URL_PATH), $consulta, [], $cabeceras)));
     }
@@ -532,6 +572,72 @@ final class CarteleraTest extends TestCase
             self::assertStringContainsString("href=\"/cartelera?orden={$orden}\" class=\"boton boton-secundario boton-chico\" rel=\"prev\"", $segunda->cuerpo());
             self::assertSame("/cartelera.csv?orden={$orden}", $json['csv']);
         }
+    }
+
+    /**
+     * Las funciones de las dos páginas, en orden, como las da el JSON: [id, sala].
+     *
+     * @return list<array{string, string}>
+     */
+    private function funcionesDeLasDosPaginas(string $orden, ?string $moderacion = null): array
+    {
+        $funciones = [];
+        foreach (['', '&pagina=2'] as $pagina) {
+            $json = self::json($this->pedir("/cartelera?orden={$orden}{$pagina}", [], ['Accept' => 'application/json'], $moderacion));
+            foreach ($json['funciones'] as $funcion) {
+                $funciones[] = [$funcion['id'], $funcion['sala']];
+            }
+        }
+
+        return $funciones;
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function todosLosOrdenes(): iterable
+    {
+        foreach (['fecha_asc', 'fecha_desc', 'precio_asc', 'precio_desc', 'titulo_asc', 'titulo_desc', 'calificacion_desc'] as $orden) {
+            yield $orden => [$orden];
+        }
+    }
+
+    /**
+     * EF-22.11: las funciones de una sala castigada por las denuncias van al final en cualquier
+     * orden, y entre ellas conservan ese orden; el paginado y el CSV lo respetan. Se le pregunta a
+     * moderación una vez por página y una por lista completa.
+     */
+    #[DataProvider('todosLosOrdenes')]
+    public function testLasFuncionesDeUnaSalaCastigadaVanAlFinal(string $orden): void
+    {
+        $this->cargarDatosDePrueba();
+        $castigada = 'Cine Club El Alambique';
+        $sinCastigo = $this->funcionesDeLasDosPaginas($orden);
+        self::assertCount(15, $sinCastigo);
+        $deLaCastigada = array_values(array_filter($sinCastigo, static fn (array $funcion): bool => $funcion[1] === $castigada));
+        self::assertNotSame([], $deLaCastigada);
+        self::assertNotSame($deLaCastigada, array_slice($sinCastigo, -count($deLaCastigada)), 'La castigada ya estaba al final: la prueba no prueba nada.');
+
+        file_put_contents(self::$castigadas, json_encode(['salas' => [(string) $this->base->valor('SELECT id FROM sala WHERE nombre = ?', [$castigada])]]));
+        @unlink(self::$castigadas . '.pedidos');
+
+        $esperadas = [...array_values(array_filter($sinCastigo, static fn (array $funcion): bool => $funcion[1] !== $castigada)), ...$deLaCastigada];
+        self::assertSame($esperadas, $this->funcionesDeLasDosPaginas($orden));
+        self::assertSame(array_column($esperadas, 1), array_column(self::filasDelCsv($this->pedir("/cartelera.csv?orden={$orden}")), 3));
+        self::assertSame(3, substr_count((string) file_get_contents(self::$castigadas . '.pedidos'), "castigadas\n"));
+    }
+
+    /**
+     * Si moderación no responde, la cartelera sale igual, sin castigar a nadie.
+     */
+    public function testSinModeracionLaCarteleraSaleSinCastigo(): void
+    {
+        $this->cargarDatosDePrueba();
+        $deSiempre = $this->funcionesDeLasDosPaginas('fecha_asc');
+        file_put_contents(self::$castigadas, json_encode(['salas' => [(string) $this->base->valor("SELECT id FROM sala WHERE nombre = 'Cine Club El Alambique'")]]));
+
+        self::assertSame($deSiempre, $this->funcionesDeLasDosPaginas('fecha_asc', 'http://127.0.0.1:9'));
+        self::assertCount(15, self::filasDelCsv($this->pedir('/cartelera.csv', [], [], 'http://127.0.0.1:9')));
     }
 
     public function testFiltraPorRangoDePrecioIncluyendoLasGratuitasYLoConservaAlPaginar(): void

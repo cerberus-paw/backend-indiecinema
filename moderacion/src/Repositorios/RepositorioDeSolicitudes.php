@@ -7,11 +7,13 @@ namespace IndieCinema\Moderacion\Repositorios;
 use DateTimeImmutable;
 use DateTimeZone;
 use IndieCinema\Moderacion\Modelo\DatosDeSala;
+use IndieCinema\Moderacion\Modelo\Devolucion;
 use IndieCinema\Moderacion\Modelo\Documento;
 use IndieCinema\Moderacion\Modelo\EstadoDocumento;
 use IndieCinema\Moderacion\Modelo\EstadoSolicitud;
 use IndieCinema\Moderacion\Modelo\RequisitoDeSala;
 use IndieCinema\Moderacion\Modelo\SolicitudDeSala;
+use IndieCinema\Moderacion\Modelo\TipoDocumento;
 use IndieCinema\Moderacion\Servicios\SolicitudPendiente;
 use IndieCinema\Nucleo\BaseDeDatos;
 use PDOException;
@@ -26,7 +28,8 @@ final class RepositorioDeSolicitudes
 
     private const SELECT = 'SELECT id, sala_id, usuario_id, solicitante_nombre, nombre, descripcion, direccion, localidad,
                                    capacidad, peliculas_por_funcion, duracion_funcion, tiempo_entre_funciones, imagen,
-                                   estado, enviada_en, resuelta_en, motivo, revision_motivo, revision_en, cambio
+                                   estado, enviada_en, resuelta_en, motivo, revision_motivo, revision_en, cambio,
+                                   devolucion_motivo, devuelta_por, devuelta_en, devolucion_vence, devolucion_faltantes
                             FROM solicitud_sala';
 
     public function __construct(private readonly BaseDeDatos $base)
@@ -93,11 +96,13 @@ final class RepositorioDeSolicitudes
     }
 
     /**
-     * Si la sala tiene una abierta (pendiente o en revisión manual).
+     * Si la sala tiene una abierta (pendiente, en revisión manual o devuelta).
      */
     public function hayAbiertaDe(string $salaId): bool
     {
-        return (int) $this->base->valor('SELECT COUNT(*) FROM solicitud_sala WHERE sala_id = ? AND estado IN (?, ?)', [$salaId, ...self::abiertas()]) > 0;
+        $estados = self::valores(EstadoSolicitud::abiertas());
+
+        return (int) $this->base->valor('SELECT COUNT(*) FROM solicitud_sala WHERE sala_id = ? AND estado IN (' . self::marcas($estados) . ')', [$salaId, ...$estados]) > 0;
     }
 
     /**
@@ -111,7 +116,8 @@ final class RepositorioDeSolicitudes
     /**
      * Las que esperan una resolución (las pendientes y las que están en revisión manual), primero
      * la que lleva más tiempo esperando; o las resueltas (el historial de decisiones), primero la
-     * última que se resolvió.
+     * última que se resolvió. Las devueltas no están en ninguna de las dos: esperan al solicitante
+     * (devueltas()).
      *
      * @param ?string      $texto  si viene, sólo las que lo tienen en el nombre o la localidad de
      *                             la sala, o en el nombre de quien la mandó. Como en la cartelera,
@@ -131,6 +137,57 @@ final class RepositorioDeSolicitudes
     }
 
     /**
+     * Las que esperan al solicitante (EF-22.10), primero la que vence antes.
+     *
+     * @return list<SolicitudDeSala>
+     */
+    public function devueltas(): array
+    {
+        return array_map(self::solicitud(...), $this->base->filas(
+            self::SELECT . ' WHERE estado = ? ORDER BY devolucion_vence, devuelta_en, id',
+            [EstadoSolicitud::Devuelta->value],
+        ));
+    }
+
+    /**
+     * Las que vencieron desde esa fecha (EF-22.10), para avisarles.
+     *
+     * @return list<SolicitudDeSala>
+     */
+    public function vencidasDesde(DateTimeImmutable $desde): array
+    {
+        return array_map(self::solicitud(...), $this->base->filas(
+            self::SELECT . ' WHERE estado = ? AND resuelta_en >= ? ORDER BY resuelta_en, id',
+            [EstadoSolicitud::Vencida->value, $desde],
+        ));
+    }
+
+    /**
+     * La cierra como vencida si seguía devuelta (EF-22.10): terminal, con el motivo y sin quién.
+     * Lo que quedaba pendiente de sus documentos se rechaza con ella, como al rechazarla. Todo
+     * junto o nada.
+     *
+     * @return bool false si ya no estaba devuelta: no cambia nada
+     */
+    public function vencer(string $id, string $motivo, DateTimeImmutable $cuando): bool
+    {
+        return (bool) $this->base->enTransaccion(function (BaseDeDatos $base) use ($id, $motivo, $cuando): bool {
+            $vencida = $base->ejecutar(
+                'UPDATE solicitud_sala SET estado = ?, motivo = ?, resuelta_en = ? WHERE id = ? AND estado = ?',
+                [EstadoSolicitud::Vencida->value, $motivo, $cuando, $id, EstadoSolicitud::Devuelta->value],
+            ) === 1;
+            if ($vencida) {
+                $base->ejecutar(
+                    "UPDATE documento SET estado = 'rechazado', motivo = ?, resuelto_en = ? WHERE solicitud_id = ? AND estado = 'pendiente'",
+                    [$motivo, $cuando, $id],
+                );
+            }
+
+            return $vencida;
+        });
+    }
+
+    /**
      * Cuántas hay en la lista, aunque muestre menos.
      */
     public function cuantas(bool $abiertas, ?string $texto = null): int
@@ -147,14 +204,16 @@ final class RepositorioDeSolicitudes
      *
      * @param list<RequisitoDeSala> $tildados
      *
-     * @return bool false si ya estaba resuelta: no cambia nada
+     * @return bool false si no estaba por resolver: no cambia nada
      */
     public function resolver(string $id, EstadoSolicitud $estado, string $resueltaPor, string $motivo, DateTimeImmutable $resueltaEn, array $tildados): bool
     {
         return (bool) $this->base->enTransaccion(function (BaseDeDatos $base) use ($id, $estado, $resueltaPor, $motivo, $resueltaEn, $tildados): bool {
+            $porResolver = self::valores(EstadoSolicitud::porResolver());
             $resuelta = $base->ejecutar(
-                'UPDATE solicitud_sala SET estado = ?, resuelta_por = ?, motivo = ?, resuelta_en = ? WHERE id = ? AND estado IN (?, ?)',
-                [$estado->value, $resueltaPor, $motivo, $resueltaEn, $id, ...self::abiertas()],
+                'UPDATE solicitud_sala SET estado = ?, resuelta_por = ?, motivo = ?, resuelta_en = ?
+                 WHERE id = ? AND estado IN (' . self::marcas($porResolver) . ')',
+                [$estado->value, $resueltaPor, $motivo, $resueltaEn, $id, ...$porResolver],
             ) === 1;
             if (!$resuelta) {
                 return false;
@@ -165,7 +224,8 @@ final class RepositorioDeSolicitudes
                 default => null,
             };
             if ($documentos !== null) {
-                $base->ejecutar('UPDATE documento SET estado = ? WHERE solicitud_id = ?', [$documentos->value, $id]);
+                // Los que se rechazaron al devolverla (EF-22.10) quedan como historial.
+                $base->ejecutar("UPDATE documento SET estado = ? WHERE solicitud_id = ? AND estado <> 'rechazado'", [$documentos->value, $id]);
             }
             self::registrarChecklist($base, $id, $estado, $resueltaPor, $resueltaEn, $tildados);
 
@@ -193,6 +253,75 @@ final class RepositorioDeSolicitudes
             }
 
             return $pasada;
+        });
+    }
+
+    /**
+     * Se la devuelve al solicitante (EF-22.10) si estaba pendiente o en revisión manual: queda
+     * devuelta con la devolución, los documentos de los tipos que faltan quedan rechazados con el
+     * motivo, quién y cuándo, y el checklist que tildó, en una fila «devuelta». Todo junto o nada.
+     *
+     * @param list<RequisitoDeSala> $tildados
+     *
+     * @return bool false si no estaba por resolver: no cambia nada
+     */
+    public function devolver(string $id, Devolucion $devolucion, array $tildados): bool
+    {
+        return (bool) $this->base->enTransaccion(function (BaseDeDatos $base) use ($id, $devolucion, $tildados): bool {
+            $porResolver = self::valores(EstadoSolicitud::porResolver());
+            $faltantes = self::valores($devolucion->faltantes);
+            $devuelta = $base->ejecutar(
+                'UPDATE solicitud_sala SET estado = ?, devolucion_motivo = ?, devuelta_por = ?, devuelta_en = ?, devolucion_vence = ?,
+                    devolucion_faltantes = ? WHERE id = ? AND estado IN (' . self::marcas($porResolver) . ')',
+                [
+                    EstadoSolicitud::Devuelta->value, $devolucion->motivo, $devolucion->devueltaPor, $devolucion->devueltaEn,
+                    $devolucion->vence->format('Y-m-d'), implode(',', $faltantes), $id, ...$porResolver,
+                ],
+            ) === 1;
+            if (!$devuelta) {
+                return false;
+            }
+            $base->ejecutar(
+                "UPDATE documento SET estado = 'rechazado', motivo = ?, resuelto_por = ?, resuelto_en = ?
+                 WHERE solicitud_id = ? AND estado <> 'rechazado' AND tipo IN (" . self::marcas($faltantes) . ')',
+                [$devolucion->motivo, $devolucion->devueltaPor, $devolucion->devueltaEn, $id, ...$faltantes],
+            );
+            self::registrarChecklist($base, $id, EstadoSolicitud::Devuelta, $devolucion->devueltaPor, $devolucion->devueltaEn, $tildados);
+
+            return true;
+        });
+    }
+
+    /**
+     * El solicitante completa la devuelta (EF-22.10): vuelve a pendiente, con los documentos nuevos,
+     * pendientes. Todo junto o nada.
+     *
+     * @param list<Documento> $documentos
+     *
+     * @return bool false si ya no estaba devuelta: no cambia nada
+     */
+    public function completar(string $id, array $documentos): bool
+    {
+        return (bool) $this->base->enTransaccion(function (BaseDeDatos $base) use ($id, $documentos): bool {
+            $completada = $base->ejecutar(
+                'UPDATE solicitud_sala SET estado = ? WHERE id = ? AND estado = ?',
+                [EstadoSolicitud::Pendiente->value, $id, EstadoSolicitud::Devuelta->value],
+            ) === 1;
+            if (!$completada) {
+                return false;
+            }
+            foreach ($documentos as $documento) {
+                $base->ejecutar(
+                    'INSERT INTO documento (id, sala_id, solicitud_id, tipo, archivo, vence_en, subido_en, estado)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                    [
+                        $documento->id, $documento->salaId, $documento->solicitudId, $documento->tipo->value,
+                        $documento->archivo, $documento->venceEn->format('Y-m-d'), $documento->subidoEn, $documento->estado->value,
+                    ],
+                );
+            }
+
+            return true;
         });
     }
 
@@ -236,20 +365,34 @@ final class RepositorioDeSolicitudes
     }
 
     /**
+     * @param list<EstadoSolicitud|TipoDocumento> $casos
+     *
      * @return list<string>
      */
-    private static function abiertas(): array
+    private static function valores(array $casos): array
     {
-        return array_map(static fn (EstadoSolicitud $estado): string => $estado->value, EstadoSolicitud::abiertas());
+        return array_map(static fn (EstadoSolicitud|TipoDocumento $caso): string => $caso->value, $casos);
     }
 
     /**
+     * «?, ?, ?», una marca por valor.
+     *
+     * @param list<string> $valores
+     */
+    private static function marcas(array $valores): string
+    {
+        return implode(', ', array_fill(0, count($valores), '?'));
+    }
+
+    /**
+     * Las por resolver o las terminadas (las devueltas, en ninguna de las dos).
+     *
      * @return array{string, list<string>}
      */
     private static function filtro(bool $abiertas, ?string $texto): array
     {
-        $filtro = $abiertas ? 'estado IN (?, ?)' : 'estado NOT IN (?, ?)';
-        $parametros = self::abiertas();
+        $parametros = self::valores($abiertas ? EstadoSolicitud::porResolver() : EstadoSolicitud::abiertas());
+        $filtro = ($abiertas ? 'estado IN (' : 'estado NOT IN (') . self::marcas($parametros) . ')';
         $texto = trim((string) $texto);
         if ($texto !== '') {
             $filtro .= " AND (nombre LIKE ? ESCAPE '!' OR localidad LIKE ? ESCAPE '!' OR solicitante_nombre LIKE ? ESCAPE '!')";
@@ -287,6 +430,13 @@ final class RepositorioDeSolicitudes
             $fila['revision_motivo'] === null ? null : (string) $fila['revision_motivo'],
             $fila['revision_en'] === null ? null : self::fecha($fila['revision_en']),
             (bool) $fila['cambio'],
+            $fila['devuelta_en'] === null ? null : new Devolucion(
+                array_values(array_filter(TipoDocumento::cases(), static fn (TipoDocumento $tipo): bool => in_array($tipo->value, explode(',', (string) $fila['devolucion_faltantes']), true))),
+                (string) $fila['devolucion_motivo'],
+                (string) $fila['devuelta_por'],
+                self::fecha($fila['devuelta_en']),
+                new DateTimeImmutable((string) $fila['devolucion_vence'], new DateTimeZone(Devolucion::ZONA)),
+            ),
         );
     }
 

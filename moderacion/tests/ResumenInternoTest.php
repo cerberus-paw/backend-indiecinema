@@ -56,13 +56,14 @@ final class ResumenInternoTest extends TestCase
         ]));
     }
 
-    private function denuncia(string $tipo, string $objeto, string $creada, string $estado = 'abierta'): void
+    private function denuncia(string $tipo, string $objeto, string $creada, string $estado = 'abierta', string $gravedad = 'alta'): void
     {
         $cerrada = $estado === 'abierta' ? [null, null, null, null] : [$estado === 'resuelta' ? 'suspender' : null, 'Visto', Uuid::nuevo(), $creada];
+        $categoria = ['alta' => 'ofensivo', 'media' => 'falsa', 'baja' => 'otro'][$gravedad];
         $this->base->ejecutar(
-            'INSERT INTO denuncia (id, tipo, objeto_id, titulo, usuario_id, categoria, creada_en, estado, accion, motivo, resuelta_por, resuelta_en)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [Uuid::nuevo(), $tipo, $objeto, 'Lo denunciado', Uuid::nuevo(), 'ofensivo', $creada, $estado, ...$cerrada],
+            'INSERT INTO denuncia (id, tipo, objeto_id, titulo, usuario_id, categoria, gravedad, creada_en, estado, accion, motivo, resuelta_por, resuelta_en)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [Uuid::nuevo(), $tipo, $objeto, 'Lo denunciado', Uuid::nuevo(), $categoria, $gravedad, $creada, $estado, ...$cerrada],
         );
     }
 
@@ -97,13 +98,33 @@ final class ResumenInternoTest extends TestCase
         $json = json_decode($respuesta->cuerpo(), true);
         // En el orden del ENUM de tipo: primero las de salas.
         self::assertSame([
-            ['tipo' => 'sala', 'objeto_id' => self::SALA, 'estado' => 'abierta', 'cantidad' => 2],
-            ['tipo' => 'funcion', 'objeto_id' => self::FUNCION, 'estado' => 'desestimada', 'cantidad' => 1],
+            ['tipo' => 'sala', 'objeto_id' => self::SALA, 'estado' => 'abierta', 'gravedad' => 'alta', 'cantidad' => 2],
+            ['tipo' => 'funcion', 'objeto_id' => self::FUNCION, 'estado' => 'desestimada', 'gravedad' => 'alta', 'cantidad' => 1],
         ], $json['denuncias']);
         self::assertSame([['sala_id' => self::SALA, 'causa' => 'denuncia', 'desde' => '2026-11-06 13:00:00']], $json['suspendidas']);
         $solicitudes = $json['solicitudes'];
         ksort($solicitudes);
         self::assertSame(['aprobada' => 1, 'pendiente' => 1], $solicitudes);
+    }
+
+    /**
+     * EF-22.11: cada grupo lleva su gravedad, y las de un mismo objeto y estado se separan por
+     * ella, de más a menos grave.
+     */
+    public function testLasDenunciasSeAgrupanTambienPorGravedad(): void
+    {
+        $this->denuncia('sala', self::SALA, '2026-11-05 12:00:00', gravedad: 'baja');
+        $this->denuncia('sala', self::SALA, '2026-11-06 12:00:00', gravedad: 'media');
+        $this->denuncia('sala', self::SALA, '2026-11-07 12:00:00', gravedad: 'media');
+        $this->denuncia('sala', self::SALA, '2026-11-08 12:00:00', gravedad: 'alta');
+
+        $json = json_decode($this->pedir(['desde' => '2026-11-01 03:00:00', 'hasta' => '2026-12-01 03:00:00'])->cuerpo(), true);
+
+        self::assertSame([
+            ['tipo' => 'sala', 'objeto_id' => self::SALA, 'estado' => 'abierta', 'gravedad' => 'alta', 'cantidad' => 1],
+            ['tipo' => 'sala', 'objeto_id' => self::SALA, 'estado' => 'abierta', 'gravedad' => 'media', 'cantidad' => 2],
+            ['tipo' => 'sala', 'objeto_id' => self::SALA, 'estado' => 'abierta', 'gravedad' => 'baja', 'cantidad' => 1],
+        ], $json['denuncias']);
     }
 
     public function testConFechasQueNoSirvenDa400(): void

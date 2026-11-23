@@ -35,5 +35,6 @@ echo json_encode([
         ['sala_id' => '10000000-0000-4000-8000-000000000001', 'causa' => 'denuncia', 'desde' => '2026-11-06 13:00:00'],
         ['sala_id' => '10000000-0000-4000-8000-000000000009', 'causa' => 'vencimiento', 'desde' => '2026-11-01 03:00:00'],
     ],
-    'solicitudes' => ['pendiente' => 2, 'aprobada' => 1],
+    // EF-22.10: la devuelta espera al solicitante, sin resolver; la vencida es aparte.
+    'solicitudes' => ['pendiente' => 2, 'devuelta' => 1, 'aprobada' => 1, 'vencida' => 1],
 ]);

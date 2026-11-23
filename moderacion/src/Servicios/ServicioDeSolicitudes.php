@@ -8,6 +8,7 @@ use DateTimeImmutable;
 use DateTimeZone;
 use IndieCinema\Moderacion\Modelo\CausaSuspension;
 use IndieCinema\Moderacion\Modelo\DatosDeSala;
+use IndieCinema\Moderacion\Modelo\Devolucion;
 use IndieCinema\Moderacion\Modelo\Documento;
 use IndieCinema\Moderacion\Modelo\DocumentoSubido;
 use IndieCinema\Moderacion\Modelo\EstadoDocumento;
@@ -97,6 +98,53 @@ final class ServicioDeSolicitudes
         return $corregida === null
             ? $this->guardar($usuario, Uuid::nuevo(), $datos, $imagen, $documentos, null, false)
             : $this->guardar($usuario, $corregida->salaId, $datos, $imagen, $documentos, $corregida, $corregida->cambio);
+    }
+
+    /**
+     * El solicitante completa la solicitud que le devolvieron (EF-22.10) con los documentos que le
+     * pidieron: la misma solicitud vuelve a pendiente, con los nuevos pendientes, y los rechazados
+     * quedan como historial. Al equipo le llega el correo de siempre; si falla, queda igual. Si algo
+     * falla al guardarla, los PDF que ya se movieron al volumen se borran.
+     *
+     * @param list<DocumentoSubido> $documentos los que faltaban, ya validados
+     *
+     * @throws NoSePuedeCompletar si la última no está devuelta o hoy ya pasó su fecha límite
+     */
+    public function completar(Usuario $usuario, array $documentos): SolicitudDeSala
+    {
+        $solicitud = $this->solicitudes->ultimaDe($usuario->id);
+        if ($solicitud?->estado !== EstadoSolicitud::Devuelta || $solicitud->devolucion === null) {
+            throw new NoSePuedeCompletar('La última solicitud no está devuelta.');
+        }
+        if (self::hoy() > $solicitud->devolucion->vence) {
+            throw new NoSePuedeCompletar('Venció el plazo para completarla.');
+        }
+        $pdfsNuevos = [];
+        try {
+            $ahora = self::ahora();
+            $papeles = [];
+            foreach ($documentos as $documento) {
+                if ($documento->rutaTemporal === null) {
+                    throw new LogicException('Al completarla, cada documento que falta es un PDF nuevo: el formulario lo pide.');
+                }
+                $archivo = $this->documentos->guardar($documento->rutaTemporal);
+                $pdfsNuevos[] = $archivo;
+                $papeles[] = new Documento(Uuid::nuevo(), $solicitud->salaId, $solicitud->id, $documento->tipo, $archivo, $documento->venceEn, $ahora, EstadoDocumento::Pendiente);
+            }
+            if (!$this->solicitudes->completar($solicitud->id, $papeles)) {
+                throw new NoSePuedeCompletar('La solicitud ya no estaba devuelta.');
+            }
+        } catch (Throwable $error) {
+            array_map($this->documentos->borrar(...), $pdfsNuevos);
+            throw $error;
+        }
+        $this->log->info('El usuario {usuario} completó la solicitud {solicitud} que le devolvieron.', [
+            'usuario' => $usuario->id,
+            'solicitud' => $solicitud->id,
+        ]);
+        $this->avisarAlEquipo($solicitud, $usuario, 'completada');
+
+        return $solicitud;
     }
 
     /**
@@ -198,7 +246,7 @@ final class ServicioDeSolicitudes
             'sala' => $solicitud->salaId,
             'solicitud' => $solicitud->id,
         ]);
-        $this->avisarAlEquipo($solicitud, $usuario, $corregida !== null);
+        $this->avisarAlEquipo($solicitud, $usuario, $corregida !== null ? 'corregida' : 'nueva');
 
         return $solicitud;
     }
@@ -259,7 +307,7 @@ final class ServicioDeSolicitudes
     {
         $solicitud = $this->buscar($id);
         $this->controlarQueLaPuedeResolver($solicitud, $moderador);
-        if (!$solicitud->estaAbierta()) {
+        if (!$solicitud->estaPorResolver()) {
             return false;
         }
         if (!RequisitoDeSala::completo($tildados) || $this->requisitosVencidos($solicitud) !== []) {
@@ -313,6 +361,48 @@ final class ServicioDeSolicitudes
     }
 
     /**
+     * Se la devuelve a quien la mandó porque un documento no sirve (EF-22.10): queda devuelta, con
+     * los documentos de esos tipos rechazados con el motivo y el checklist que tildó, y tiene
+     * plazo_devolucion_dias para completarla, contados desde hoy en Argentina. Sigue siendo la
+     * misma solicitud. Se puede marcar un tipo que no tiene (una mudada): lo sube nuevo. Después le
+     * llega el correo con qué falta, por qué y hasta cuándo; si falla, la devolución queda igual.
+     *
+     * @param list<TipoDocumento>   $faltantes al menos uno: el controlador lo controla
+     * @param list<RequisitoDeSala> $tildados  los puntos del checklist que controló (EF-07.9)
+     *
+     * @return bool false si no estaba pendiente ni en revisión manual: no cambia nada
+     *
+     * @throws ExcepcionHttp 404 si no existe; 403 si es del moderador
+     */
+    public function devolver(string $id, Usuario $moderador, string $motivo, array $faltantes, array $tildados): bool
+    {
+        $solicitud = $this->buscar($id);
+        $this->controlarQueLaPuedeResolver($solicitud, $moderador);
+        if ($faltantes === []) {
+            throw new LogicException('Devolver una solicitud exige marcar qué documento falta: el controlador lo controla.');
+        }
+        $plazo = (int) $this->configuracion->requerir('solicitudes.plazo_devolucion_dias');
+        $devolucion = new Devolucion($faltantes, $motivo, $moderador->id, self::ahora(), self::hoy()->modify("+{$plazo} days"));
+        if (!$this->solicitudes->devolver($solicitud->id, $devolucion, $tildados)) {
+            return false;
+        }
+        $this->registrar($solicitud, EstadoSolicitud::Devuelta, $moderador);
+        $this->avisarAlSolicitante($this->buscar($solicitud->id), EstadoSolicitud::Devuelta, $motivo);
+
+        return true;
+    }
+
+    /**
+     * Las que esperan al solicitante (EF-22.10), primero la que vence antes.
+     *
+     * @return list<SolicitudDeSala>
+     */
+    public function devueltas(): array
+    {
+        return $this->solicitudes->devueltas();
+    }
+
+    /**
      * Lo que tildó cada moderador en cada resolución (EF-07.9), del registro más viejo al más
      * nuevo. Las resueltas antes del checklist no tienen.
      *
@@ -342,9 +432,10 @@ final class ServicioDeSolicitudes
     public function requisitosVencidos(SolicitudDeSala $solicitud): array
     {
         $hoy = new DateTimeImmutable('today');
+        // Los rechazados al devolverla (EF-22.10) son historial: no cuentan.
         $vencidos = array_map(
             static fn (Documento $documento): TipoDocumento => $documento->tipo,
-            array_values(array_filter($this->documentosDe($solicitud), static fn (Documento $documento): bool => $documento->vencidoAl($hoy))),
+            array_values(array_filter($this->documentosDe($solicitud), static fn (Documento $documento): bool => $documento->estado !== EstadoDocumento::Rechazado && $documento->vencidoAl($hoy))),
         );
 
         return array_values(array_filter(RequisitoDeSala::cases(), static fn (RequisitoDeSala $requisito): bool => in_array($requisito->documento(), $vencidos, true)));
@@ -521,7 +612,7 @@ final class ServicioDeSolicitudes
     {
         try {
             $usuario = $this->usuarios->buscar($solicitud->usuarioId) ?? throw new RuntimeException('cuentas ya no tiene al usuario.');
-            [$asunto, $texto] = self::textoParaElSolicitante($solicitud->datos->nombre, $estado, $motivo, $solicitud->cambio);
+            [$asunto, $texto] = self::textoParaElSolicitante($solicitud, $estado, $motivo);
             $this->correo->enviar(new Correo($usuario->correo, $asunto, $texto));
         } catch (Throwable $error) {
             $this->log->warning('La solicitud de sala {solicitud} quedó {estado}, pero no se le avisó a quien la mandó: {mensaje}', [
@@ -533,10 +624,43 @@ final class ServicioDeSolicitudes
     }
 
     /**
+     * El correo a quien la mandó cuando se resuelve, se devuelve (EF-22.10) o vence (lo manda la
+     * tarea vencer-devueltas). Cada uno dice si es un pedido de cambio de dirección.
+     *
      * @return array{string, string} el asunto y el texto
      */
-    private static function textoParaElSolicitante(string $sala, EstadoSolicitud $estado, string $motivo, bool $cambio): array
+    public static function textoParaElSolicitante(SolicitudDeSala $solicitud, EstadoSolicitud $estado, string $motivo): array
     {
+        $sala = $solicitud->datos->nombre;
+        $cambio = $solicitud->cambio;
+        if ($estado === EstadoSolicitud::Vencida) {
+            $falta = $solicitud->devolucion?->queFalta() ?? 'la documentación';
+
+            return [$cambio ? "Venció el pedido de cambio de dirección de «{$sala}»" : "Venció la solicitud de «{$sala}»", implode("\n", [
+                ($cambio ? "Se cerró el pedido de cambio de dirección de «{$sala}»" : "Se cerró la solicitud de «{$sala}»")
+                    . ": {$motivo} Faltaba {$falta}.",
+                '',
+                ...($cambio
+                    ? ['La sala sigue publicada con la dirección de antes.', 'Si todavía querés cambiarla, podés pedirlo de nuevo desde «Mis salas» (/organizador/salas).']
+                    : ['Si todavía querés abrir la sala, podés mandar una solicitud nueva en /solicitar-sala.', 'Va a empezar de cero, con los requisitos de hoy.']),
+            ])];
+        }
+        if ($estado === EstadoSolicitud::Devuelta) {
+            $devolucion = $solicitud->devolucion ?? throw new LogicException('Una devuelta tiene su devolución.');
+
+            return [$cambio
+                ? "Te devolvimos el cambio de dirección de «{$sala}» para que lo completes"
+                : "Te devolvimos la solicitud de «{$sala}» para que la completes", implode("\n", [
+                ($cambio ? "Revisamos el cambio de dirección de «{$sala}»" : "Revisamos la solicitud de «{$sala}»")
+                    . " y te pedimos volver a subir {$devolucion->queFalta()}, por este motivo:",
+                $motivo,
+                '',
+                'Tenés hasta el ' . $devolucion->vence->format('d/m/Y') . ' para ' . ($cambio ? 'completarlo' : 'completarla')
+                    . ' en /solicitar-sala: sólo te pedimos esos documentos. Si se pasa la fecha, se cierra y hay que pedir'
+                    . ($cambio ? ' el cambio' : ' la sala') . ' de nuevo.',
+                ...($cambio ? ['', 'La sala sigue publicada con la dirección de antes.'] : []),
+            ])];
+        }
         if ($cambio && $estado !== EstadoSolicitud::EnRevisionManual) {
             $aprobado = $estado === EstadoSolicitud::Aprobada;
 
@@ -578,24 +702,63 @@ final class ServicioDeSolicitudes
         };
     }
 
-    private function avisarAlEquipo(SolicitudDeSala $solicitud, Usuario $usuario, bool $corregida): void
+    /**
+     * @param 'nueva'|'corregida'|'completada' $como la que manda por primera vez, la rechazada que
+     *                                               corrige o la devuelta que completa (EF-22.10)
+     */
+    /**
+     * El recordatorio de que se termina el plazo para completar una devuelta (EF-22.10).
+     *
+     * @return array{string, string} el asunto y el texto
+     */
+    public static function textoDelRecordatorio(SolicitudDeSala $solicitud): array
+    {
+        $sala = $solicitud->datos->nombre;
+        $devolucion = $solicitud->devolucion ?? throw new LogicException('Una devuelta tiene su devolución.');
+
+        return [
+            $solicitud->cambio
+                ? "Se termina el plazo para completar el cambio de dirección de «{$sala}»"
+                : "Se termina el plazo para completar la solicitud de «{$sala}»",
+            implode("\n", [
+                "Todavía falta que vuelvas a subir {$devolucion->queFalta()} de «{$sala}», como te pidió la moderación:",
+                $devolucion->motivo,
+                '',
+                'Tenés hasta el ' . $devolucion->vence->format('d/m/Y') . ' para completarla en /solicitar-sala. Si se pasa la fecha,'
+                    . ' se cierra y hay que pedir' . ($solicitud->cambio ? ' el cambio' : ' la sala') . ' de nuevo.',
+                ...($solicitud->cambio ? ['', 'La sala sigue publicada con la dirección de antes.'] : []),
+            ]),
+        ];
+    }
+
+    private function avisarAlEquipo(SolicitudDeSala $solicitud, Usuario $usuario, string $como): void
     {
         try {
             $this->correo->enviar(new Correo(
                 (string) $this->configuracion->requerir('solicitudes.destino'),
-                ($corregida ? 'Solicitud de sala corregida: ' : ($solicitud->cambio ? 'Cambio de dirección: ' : 'Solicitud de sala: ')) . $solicitud->datos->nombre,
-                self::texto($solicitud->datos, $usuario, $corregida, $solicitud->cambio),
+                match (true) {
+                    $como === 'corregida' => 'Solicitud de sala corregida: ',
+                    $como === 'completada' => 'Solicitud de sala completada: ',
+                    $solicitud->cambio => 'Cambio de dirección: ',
+                    default => 'Solicitud de sala: ',
+                } . $solicitud->datos->nombre,
+                self::texto($solicitud->datos, $usuario, $como, $solicitud->cambio),
             ));
         } catch (CorreoNoEnviado) {
             $this->log->warning('La solicitud de sala {solicitud} quedó guardada, pero no se le avisó al equipo por correo.', ['solicitud' => $solicitud->id]);
         }
     }
 
-    private static function texto(DatosDeSala $datos, Usuario $usuario, bool $corregida, bool $cambio): string
+    /**
+     * @param 'nueva'|'corregida'|'completada' $como
+     */
+    private static function texto(DatosDeSala $datos, Usuario $usuario, string $como, bool $cambio): string
     {
         return implode("\n", [
             ($usuario->nombre ?? 'Un usuario') . match (true) {
-                $corregida => ' corrigió la sala que le rechazaron y la volvió a mandar.',
+                $como === 'corregida' => ' corrigió la sala que le rechazaron y la volvió a mandar.',
+                $como === 'completada' => ' completó la documentación que le pidieron al devolverle la solicitud'
+                    . ($cambio ? ' de cambio de dirección' : '') . ', que volvió a las pendientes.',
                 $cambio => ' pidió cambiar la dirección de la sala, que sigue publicada con la de antes.',
                 default => ' pidió abrir una sala en IndieCinema.',
             },
@@ -617,5 +780,13 @@ final class ServicioDeSolicitudes
     private static function ahora(): DateTimeImmutable
     {
         return new DateTimeImmutable('now', new DateTimeZone('UTC'));
+    }
+
+    /**
+     * Hoy en Argentina, el mismo día que usa la tarea que vence las devueltas (EF-22.10).
+     */
+    public static function hoy(): DateTimeImmutable
+    {
+        return new DateTimeImmutable('today', new DateTimeZone(Devolucion::ZONA));
     }
 }

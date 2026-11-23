@@ -48,14 +48,14 @@ final class RepositorioDeCartelera
     }
 
     /**
-     * @param int $numero desde 1
-     * @param int $tamano cuántas funciones entran en una página
-     *
-     * @throws InvalidArgumentException si el número o el tamaño de la página no son positivos
-     */
-    /**
+     * @param int          $numero     desde 1
+     * @param int          $tamano     cuántas funciones entran en una página
      * @param list<string> $reputacion las salas de la mejor calificada a la peor, para ordenar por
      *                                 «Mejor calificadas» (EF-04.4); sin ella, ese orden es por fecha
+     * @param list<string> $castigadas las salas castigadas por las denuncias (EF-22.11): sus
+     *                                 funciones van al final, en el mismo orden entre ellas
+     *
+     * @throws InvalidArgumentException si el número o el tamaño de la página no son positivos
      */
     public function pagina(
         FiltrosDeCartelera $filtros,
@@ -63,6 +63,7 @@ final class RepositorioDeCartelera
         int $tamano,
         DateTimeImmutable $ahora = new DateTimeImmutable(),
         array $reputacion = [],
+        array $castigadas = [],
     ): PaginaDeCartelera {
         if ($numero < 1 || $tamano < 1) {
             throw new InvalidArgumentException('El número y el tamaño de la página tienen que ser positivos.');
@@ -76,8 +77,8 @@ final class RepositorioDeCartelera
             return $pagina;
         }
 
-        [$orden, $deLaReputacion] = self::orden($filtros->orden, $reputacion);
-        $funciones = $this->funciones("{$condiciones} {$orden} LIMIT ? OFFSET ?", [...$parametros, ...$deLaReputacion, $tamano, ($numero - 1) * $tamano]);
+        [$orden, $delOrden] = self::orden($filtros->orden, $reputacion, $castigadas);
+        $funciones = $this->funciones("{$condiciones} {$orden} LIMIT ? OFFSET ?", [...$parametros, ...$delOrden, $tamano, ($numero - 1) * $tamano]);
 
         return new PaginaDeCartelera($funciones, $numero, $tamano, $total);
     }
@@ -87,15 +88,16 @@ final class RepositorioDeCartelera
      * descarga en CSV.
      *
      * @param list<string> $reputacion como en pagina()
+     * @param list<string> $castigadas como en pagina()
      *
      * @return list<FuncionEnCartelera>
      */
-    public function todas(FiltrosDeCartelera $filtros, DateTimeImmutable $ahora = new DateTimeImmutable(), array $reputacion = []): array
+    public function todas(FiltrosDeCartelera $filtros, DateTimeImmutable $ahora = new DateTimeImmutable(), array $reputacion = [], array $castigadas = []): array
     {
         [$condiciones, $parametros] = self::condiciones($filtros, $ahora);
-        [$orden, $deLaReputacion] = self::orden($filtros->orden, $reputacion);
+        [$orden, $delOrden] = self::orden($filtros->orden, $reputacion, $castigadas);
 
-        return $this->funciones("{$condiciones} {$orden}", [...$parametros, ...$deLaReputacion]);
+        return $this->funciones("{$condiciones} {$orden}", [...$parametros, ...$delOrden]);
     }
 
     /**
@@ -327,19 +329,26 @@ final class RepositorioDeCartelera
      * parámetros: FIELD() da la posición de la sala en la lista, y 0 a las que no están (sin
      * calificaciones), que por eso van al final. Sin la lista, ese orden es por fecha.
      *
+     * Las funciones de las salas castigadas por las denuncias (EF-22.11) van al final en cualquier
+     * orden, y entre ellas conservan ese orden: va primero, como parámetros.
+     *
      * @param list<string> $reputacion
+     * @param list<string> $castigadas
      *
      * @return array{string, list<string>} el ORDER BY y sus parámetros
      */
-    private static function orden(OrdenDeCartelera $orden, array $reputacion = []): array
+    private static function orden(OrdenDeCartelera $orden, array $reputacion = [], array $castigadas = []): array
     {
+        [$castigo, $deLasCastigadas] = $castigadas === []
+            ? ['', []]
+            : ['s.id IN (' . implode(', ', array_fill(0, count($castigadas), '?')) . '), ', $castigadas];
         if ($orden === OrdenDeCartelera::MejorCalificadas && $reputacion !== []) {
             $marcas = implode(', ', array_fill(0, count($reputacion), '?'));
 
-            return ["ORDER BY FIELD(s.id, {$marcas}) = 0, FIELD(s.id, {$marcas}), " . self::DESEMPATE, [...$reputacion, ...$reputacion]];
+            return ["ORDER BY {$castigo}FIELD(s.id, {$marcas}) = 0, FIELD(s.id, {$marcas}), " . self::DESEMPATE, [...$deLasCastigadas, ...$reputacion, ...$reputacion]];
         }
 
-        return ['ORDER BY ' . match ($orden) {
+        return ["ORDER BY {$castigo}" . match ($orden) {
             OrdenDeCartelera::FechaAscendente => self::DESEMPATE,
             OrdenDeCartelera::FechaDescendente => "(f.fecha_hora IS NULL), f.fecha_hora DESC, (f.estado = 'en_votacion_titulos'), s.nombre, f.id",
             OrdenDeCartelera::PrecioAscendente => 'f.precio_base ASC, ' . self::DESEMPATE,
@@ -347,7 +356,7 @@ final class RepositorioDeCartelera
             OrdenDeCartelera::TituloAscendente => self::TITULO . ' ASC, ' . self::DESEMPATE,
             OrdenDeCartelera::TituloDescendente => self::TITULO . ' DESC, ' . self::DESEMPATE,
             OrdenDeCartelera::MejorCalificadas => self::DESEMPATE,
-        }, []];
+        }, $deLasCastigadas];
     }
 
     /**

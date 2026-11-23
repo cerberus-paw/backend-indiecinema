@@ -8,6 +8,7 @@ use IndieCinema\Moderacion\Modelo\Documento;
 use IndieCinema\Moderacion\Modelo\EstadoSolicitud;
 use IndieCinema\Moderacion\Modelo\TipoDocumento;
 use IndieCinema\Moderacion\Modelo\SolicitudDeSala as Solicitud;
+use IndieCinema\Moderacion\Servicios\NoSePuedeCompletar;
 use IndieCinema\Moderacion\Servicios\ServicioDeSolicitudes;
 use IndieCinema\Moderacion\Servicios\SolicitudPendiente;
 use IndieCinema\Nucleo\Controlador;
@@ -21,7 +22,8 @@ use LogicException;
  * (solicitud-de-sala). La manda el espectador que quiere ser organizador y el organizador que
  * suma otra sala: es el mismo trámite. Con una pendiente, o en revisión manual (EF-07.6), se ve
  * su estado en lugar del formulario; si la rechazaron, el motivo y el formulario con la sala, para corregirla y volver a
- * mandarla.
+ * mandarla. Si se la devolvieron porque falta un documento (EF-22.10), el motivo, la fecha límite y
+ * un formulario sólo con esos documentos: mandarlos completa la misma solicitud.
  *
  * Con ?sala={id} es el pedido de cambio de dirección de una sala publicada (EF-07.6): el mismo
  * formulario, cargado con los datos que tiene la sala en programación, con la foto opcional y los
@@ -47,6 +49,9 @@ final class SolicitudDeSala extends Controlador
             return $this->pantallaDelCambio($sala, $datos->nombre, FormularioDeSolicitud::desdeDatos($datos));
         }
         $ultima = $this->servicio->ultimaDe(self::usuario($peticion));
+        if ($ultima?->estado === EstadoSolicitud::Devuelta) {
+            return $this->pantalla($ultima, null);
+        }
         $formulario = $ultima?->estado === EstadoSolicitud::Rechazada ? FormularioDeSolicitud::desdeDatos($ultima->datos, $this->servicio->documentosDe($ultima)) : null;
 
         return $this->pantalla($ultima, $formulario, mensaje: $peticion->consulta('enviada') === '1' ? 'La vas a ver acá hasta que te respondan.' : null);
@@ -60,6 +65,9 @@ final class SolicitudDeSala extends Controlador
         }
         $usuario = self::usuario($peticion);
         $ultima = $this->servicio->ultimaDe($usuario);
+        if ($ultima?->estado === EstadoSolicitud::Devuelta) {
+            return $this->completar($peticion, $ultima);
+        }
         if ($ultima?->estaAbierta()) {
             // Dos pestañas, o reenviar el POST: se ve la que ya está en revisión.
             return $this->pantalla($ultima, null, estado: 409);
@@ -83,6 +91,34 @@ final class SolicitudDeSala extends Controlador
         }
 
         // 303: recargar no la vuelve a mandar.
+        return Respuesta::redireccion(self::URL . '?enviada=1');
+    }
+
+    /**
+     * La devuelta (EF-22.10): sólo los documentos que le pidieron, todos obligatorios y con las
+     * mismas reglas que en la solicitud. Pasada la fecha límite, 409, aunque la tarea todavía no la
+     * haya cerrado.
+     */
+    private function completar(Peticion $peticion, Solicitud $devuelta): Respuesta
+    {
+        $archivos = [];
+        foreach (array_column(FormularioDeDocumentos::CAMPOS, 0) as $campo) {
+            $archivos[$campo] = $peticion->archivo($campo);
+        }
+        $formulario = FormularioDeDocumentos::desdeFaltantes($peticion->cuerpo(), $archivos, $devuelta->devolucion->faltantes ?? []);
+        if ($formulario->errores !== []) {
+            return $this->pantalla($devuelta, $formulario, estado: 422);
+        }
+        try {
+            $this->servicio->completar(self::usuario($peticion), $formulario->documentos);
+        } catch (NoSePuedeCompletar) {
+            $ultima = $this->servicio->ultimaDe(self::usuario($peticion));
+
+            return $this->pantalla($ultima, null, error: $ultima?->estado === EstadoSolicitud::Devuelta
+                ? 'Venció el plazo para completarla: ya no se puede mandar la documentación.'
+                : null, estado: 409);
+        }
+
         return Respuesta::redireccion(self::URL . '?enviada=1');
     }
 
@@ -136,9 +172,10 @@ final class SolicitudDeSala extends Controlador
         return $sala === null ? null : (is_string($sala) ? $sala : '');
     }
 
-    private function pantalla(?Solicitud $ultima, ?FormularioDeSolicitud $formulario, ?string $error = null, ?string $mensaje = null, int $estado = 200): Respuesta
+    private function pantalla(?Solicitud $ultima, FormularioDeSolicitud|FormularioDeDocumentos|null $formulario, ?string $error = null, ?string $mensaje = null, int $estado = 200): Respuesta
     {
         $corrigiendo = $ultima?->estado === EstadoSolicitud::Rechazada;
+        $devolucion = $ultima?->devolucion;
         $datos = [
             'reglas' => FormularioDeSolicitud::reglas(imagenObligatoria: !$corrigiendo, yaMandados: $this->yaMandados($ultima)),
             'valores' => $formulario === null ? [] : $formulario->valores,
@@ -154,6 +191,16 @@ final class SolicitudDeSala extends Controlador
                 'motivo' => $ultima->motivo,
                 // EF-07.6: por qué la pasaron a revisión manual, si pasó.
                 'revision_motivo' => $ultima->revisionMotivo,
+                // EF-22.10: mientras está devuelta, qué le pidieron y hasta cuándo tiene.
+                'devolucion' => $ultima->estado !== EstadoSolicitud::Devuelta || $devolucion === null ? null : [
+                    'motivo' => $devolucion->motivo,
+                    'fecha' => FechaParaMostrar::diaYHora($devolucion->devueltaEn),
+                    'vence' => $devolucion->vence->format('d/m/Y'),
+                    'falta' => $devolucion->queFalta(),
+                    // Los campos del formulario que tiene que mandar.
+                    'campos' => array_map(static fn (TipoDocumento $tipo): string => FormularioDeDocumentos::CAMPOS[$tipo->value][0], $devolucion->faltantes),
+                ],
+                'cambio' => $ultima->cambio,
                 'documentos' => array_map(fn (Documento $documento): array => [
                     'nombre' => $documento->tipo->nombre(),
                     // El campo del formulario, para mostrarlo junto al suyo al corregir.

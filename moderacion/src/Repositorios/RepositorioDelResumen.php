@@ -19,9 +19,10 @@ final class RepositorioDelResumen
     }
 
     /**
-     * Las denuncias que se hicieron en el período, contadas por lo denunciado y por estado.
+     * Las denuncias que se hicieron en el período, contadas por lo denunciado, por estado y por
+     * gravedad.
      *
-     * @return list<array{tipo: string, objeto_id: string, estado: string, cantidad: int}>
+     * @return list<array{tipo: string, objeto_id: string, estado: string, gravedad: string, cantidad: int}>
      */
     public function denuncias(DateTimeImmutable $desde, DateTimeImmutable $hasta): array
     {
@@ -29,13 +30,16 @@ final class RepositorioDelResumen
             'tipo' => (string) $fila['tipo'],
             'objeto_id' => (string) $fila['objeto_id'],
             'estado' => (string) $fila['estado'],
+            'gravedad' => (string) $fila['gravedad'],
             'cantidad' => (int) $fila['cantidad'],
         ], $this->base->filas(
-            'SELECT tipo, objeto_id, estado, COUNT(*) AS cantidad
+            // Con la gravedad (EF-22.11): agrupa más fino, y quien sólo suma las cantidades sigue
+            // igual. De más a menos grave.
+            'SELECT tipo, objeto_id, estado, gravedad, COUNT(*) AS cantidad
              FROM denuncia
              WHERE creada_en >= ? AND creada_en < ?
-             GROUP BY tipo, objeto_id, estado
-             ORDER BY tipo, objeto_id, estado',
+             GROUP BY tipo, objeto_id, estado, gravedad
+             ORDER BY tipo, objeto_id, estado, gravedad DESC',
             [$desde, $hasta],
         ));
     }

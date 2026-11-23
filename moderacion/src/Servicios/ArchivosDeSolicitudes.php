@@ -25,10 +25,14 @@ final class ArchivosDeSolicitudes
 
     private readonly string $carpeta;
 
-    public function __construct(Configuracion $configuracion)
+    /**
+     * @param string $subcarpeta dónde van, en el volumen: las de las denuncias (EF-22.11) se
+     *                           guardan igual, en otra carpeta
+     */
+    public function __construct(Configuracion $configuracion, string $subcarpeta = 'solicitudes')
     {
         // El volumen que monta el compose (archivos-moderacion).
-        $this->carpeta = rtrim((string) $configuracion->obtener('archivos.carpeta', '/var/indiecinema/archivos'), '/') . '/solicitudes';
+        $this->carpeta = rtrim((string) $configuracion->obtener('archivos.carpeta', '/var/indiecinema/archivos'), '/') . '/' . $subcarpeta;
     }
 
     /**
@@ -87,7 +91,7 @@ final class ArchivosDeSolicitudes
     {
         // El nombre sale de la base, pero si no tiene la forma de los que se generan acá, no se usa.
         if (preg_match(self::NOMBRE, $nombre) !== 1) {
-            throw new LogicException("«{$nombre}» no es el nombre de una foto de solicitud.");
+            throw new LogicException("«{$nombre}» no es el nombre de una foto guardada.");
         }
 
         return "{$this->carpeta}/{$nombre}";

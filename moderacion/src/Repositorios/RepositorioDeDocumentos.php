@@ -89,13 +89,14 @@ final class RepositorioDeDocumentos
     }
 
     /**
-     * Los de una solicitud, primero el seguro.
+     * Los de una solicitud, primero el seguro y, de cada tipo, del más viejo al más nuevo: los que
+     * se rechazaron al devolverla (EF-22.10) van antes del que los reemplazó.
      *
      * @return list<Documento>
      */
     public function deSolicitud(string $solicitudId): array
     {
-        return array_map(self::documento(...), $this->base->filas(self::SELECT . ' WHERE solicitud_id = ? ORDER BY tipo', [$solicitudId]));
+        return array_map(self::documento(...), $this->base->filas(self::SELECT . ' WHERE solicitud_id = ? ORDER BY tipo, subido_en, id', [$solicitudId]));
     }
 
     /**

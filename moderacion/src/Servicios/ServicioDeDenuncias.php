@@ -10,6 +10,7 @@ use IndieCinema\Moderacion\Modelo\CategoriaDenuncia;
 use IndieCinema\Moderacion\Modelo\CausaSuspension;
 use IndieCinema\Moderacion\Modelo\Denuncia;
 use IndieCinema\Moderacion\Modelo\Denunciado;
+use IndieCinema\Moderacion\Modelo\GravedadDenuncia;
 use IndieCinema\Moderacion\Modelo\Suspension;
 use IndieCinema\Moderacion\Modelo\TipoDenuncia;
 use IndieCinema\Moderacion\Modelo\UsuarioDeCuentas;
@@ -37,11 +38,12 @@ final class ServicioDeDenuncias
         private readonly AvisosAlOrganizador $avisos,
         private readonly SalasDeProgramacion $salas,
         private readonly CalificacionesDeFunciones $calificaciones,
+        private readonly ReglasDeDenuncias $reglas,
     ) {
     }
 
     /**
-     * @return list<array{tipo: TipoDenuncia, objeto_id: string, titulo: string, cantidad: int, primera: DateTimeImmutable}>
+     * @return list<array{tipo: TipoDenuncia, objeto_id: string, titulo: string, cantidad: int, gravedad: GravedadDenuncia, para_suspender: bool, sala_id: ?string, primera: DateTimeImmutable}>
      */
     public function abiertas(): array
     {
@@ -101,7 +103,7 @@ final class ServicioDeDenuncias
     }
 
     /**
-     * @return list<array{tipo: TipoDenuncia, objeto_id: string, titulo: string, categoria: CategoriaDenuncia, estado: string, accion: ?string, motivo: string, resuelta_por: string, resuelta_en: DateTimeImmutable}>
+     * @return list<array{tipo: TipoDenuncia, objeto_id: string, titulo: string, categoria: CategoriaDenuncia, gravedad: GravedadDenuncia, estado: string, accion: ?string, motivo: string, resuelta_por: string, resuelta_en: DateTimeImmutable}>
      */
     public function historial(): array
     {
@@ -109,8 +111,8 @@ final class ServicioDeDenuncias
     }
 
     /**
-     * Cierra todas las abiertas de lo denunciado con el motivo: desestimadas, o resueltas después
-     * de actuar en el subsistema dueño (si no responde, no se cierra nada y se reintenta). Si lo
+     * Cierra todas las abiertas de lo denunciado con el motivo: desestimadas, tomadas (válidas, sin
+     * sancionar: EF-22.11), o resueltas después de actuar en el subsistema dueño (si no responde, no se cierra nada y se reintenta). Si lo
      * que resuelve ya estaba hecho, se cierran sin repetirlo (Q14).
      *
      * @param ?Denunciado $denunciado como lo da hoy su subsistema, o null si ya no existe
@@ -133,7 +135,7 @@ final class ServicioDeDenuncias
         [$accion, $obraId] = str_contains($accion, ':') ? explode(':', $accion, 2) : [$accion, null];
         if ($denunciado !== null && !$denunciado->sancionado) {
             // La sala de la función, o la sala denunciada; la obra elegida, o la denunciada.
-            $salaId = $tipo === TipoDenuncia::Funcion ? (string) $denunciado->datos['sala_id'] : $denunciado->id;
+            $salaId = $denunciado->salaId() ?? $denunciado->id;
             match ($accion) {
                 // El rechazo de EF-07.7: el historial de obras y el correo al dueño. Si ya estaba
                 // rechazada, no hace nada.
@@ -144,7 +146,58 @@ final class ServicioDeDenuncias
             };
         }
 
-        return $this->denuncias->cerrar($tipo, $objetoId, $accion === 'desestimar' ? null : $accion, $obraId, $motivo, $moderador->id, new DateTimeImmutable('now', new DateTimeZone('UTC'))) > 0;
+        // Tomarlas (EF-22.11) no toca otro subsistema: quedan resueltas como tomadas.
+        $guardada = match ($accion) {
+            'desestimar' => null,
+            'tomar' => 'tomada',
+            default => $accion,
+        };
+        // Las reglas cuentan por sala: las de función viejas no la tienen y no cuentan.
+        $salaId = array_values(array_filter(array_map(static fn (Denuncia $denuncia): ?string => $denuncia->salaId, $denuncias)))[0] ?? null;
+        $antes = $salaId === null ? 0 : $this->reglas->conteo($salaId);
+        if ($this->denuncias->cerrar($tipo, $objetoId, $guardada, $obraId, $motivo, $moderador->id, new DateTimeImmutable('now', new DateTimeZone('UTC'))) === 0) {
+            return false;
+        }
+        if ($salaId !== null) {
+            $this->aplicarLasReglas($salaId, $antes, $this->reglas->conteo($salaId), $denuncias[0]->id);
+        }
+
+        return true;
+    }
+
+    /**
+     * Le avisa al organizador cada escalón que la resolución cruzó (pueden ser los dos), sin quién
+     * denunció ni qué escribió. La clave lleva una de las denuncias que se cerraron, así que cada
+     * resolución avisa una sola vez. Si el correo no sale, el cierre queda igual.
+     *
+     * @param string $resolucion una denuncia de las que se cerraron
+     */
+    private function aplicarLasReglas(string $salaId, int $antes, int $despues, string $resolucion): void
+    {
+        $dias = $this->reglas->dias();
+        $cartelera = $this->reglas->carteleraCantidad();
+        if ($antes < $this->reglas->avisoCantidad() && $despues >= $this->reglas->avisoCantidad()) {
+            $this->avisos->avisar($salaId, "denuncias-aviso:{$resolucion}", static fn (string $sala): array => [
+                'Tu sala acumula denuncias',
+                implode("\n", [
+                    "La moderación de IndieCinema tomó varias denuncias sobre tu sala «{$sala}» en los últimos {$dias} días.",
+                    '',
+                    "Si llegan a {$cartelera}, sus funciones se muestran al final de la cartelera hasta que las denuncias salgan de ese período.",
+                    'Revisá qué puede estar pasando en la sala y en sus funciones para corregirlo.',
+                ]),
+            ]);
+        }
+        if ($antes < $cartelera && $despues >= $cartelera) {
+            $this->avisos->avisar($salaId, "denuncias-cartelera:{$resolucion}", static fn (string $sala): array => [
+                'Tu sala baja en la cartelera',
+                implode("\n", [
+                    "La moderación de IndieCinema tomó {$despues} denuncias sobre tu sala «{$sala}» en los últimos {$dias} días.",
+                    '',
+                    'Desde ahora sus funciones se muestran al final de la cartelera.',
+                    "Vuelven a su lugar solas cuando esas denuncias salgan del período de {$dias} días: no hace falta que hagas nada más.",
+                ]),
+            ]);
+        }
     }
 
     /**
@@ -196,6 +249,26 @@ final class ServicioDeDenuncias
             'nombre' => $salas[$suspension->salaId]['nombre'] ?? null,
             'organizador_id' => $salas[$suspension->salaId]['organizador_id'] ?? null,
         ], $suspensiones);
+    }
+
+    /**
+     * Las salas que bajan en la cartelera por las reglas (EF-22.11), con su conteo y su nombre
+     * según programación. Primero la que tiene más.
+     *
+     * @return list<array{sala_id: string, nombre: ?string, conteo: int}>
+     *
+     * @throws ExcepcionHttp 503 si programación no responde
+     */
+    public function castigadas(): array
+    {
+        $castigadas = $this->reglas->castigadas();
+        $salas = $this->salas->datosDeVarias(array_map(strval(...), array_keys($castigadas)));
+        $lista = [];
+        foreach ($castigadas as $salaId => $conteo) {
+            $lista[] = ['sala_id' => (string) $salaId, 'nombre' => $salas[$salaId]['nombre'] ?? null, 'conteo' => $conteo];
+        }
+
+        return $lista;
     }
 
     /**

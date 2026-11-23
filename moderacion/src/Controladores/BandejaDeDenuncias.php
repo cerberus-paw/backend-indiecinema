@@ -7,6 +7,7 @@ namespace IndieCinema\Moderacion\Controladores;
 use IndieCinema\Moderacion\Modelo\Denuncia;
 use IndieCinema\Moderacion\Modelo\Denunciado;
 use IndieCinema\Moderacion\Modelo\TipoDenuncia;
+use IndieCinema\Moderacion\Servicios\ReglasDeDenuncias;
 use IndieCinema\Moderacion\Servicios\ServicioDeDenuncias;
 use IndieCinema\Nucleo\Controlador;
 use IndieCinema\Nucleo\Http\ExcepcionHttp;
@@ -17,7 +18,9 @@ use LogicException;
 
 /**
  * La pestaña «Denuncias» de la bandeja de moderación, en /moderacion/denuncias (EF-07.8): lo
- * denunciado con denuncias abiertas, primero lo que lleva más tiempo esperando. La elegida
+ * denunciado con denuncias abiertas, primero lo que queda para suspender (una sala o una función con
+ * una denuncia alta abierta), después lo más grave (EF-22.11), lo que tiene más y lo que lleva más
+ * tiempo esperando. La elegida
  * (?tipo=&id=) muestra lo denunciado, como lo da hoy su subsistema, y cada denuncia con quién la
  * hizo; se resuelven todas juntas con un motivo. Las rutas piden el rol de moderador, que el
  * administrador alcanza.
@@ -26,10 +29,12 @@ final class BandejaDeDenuncias extends Controlador
 {
     /** Como la columna denuncia.motivo. */
     private const MAXIMO_MOTIVO = 1000;
-    private const ACCIONES = ['desestimar' => 'Desestimada', 'suspender' => 'Sala suspendida', 'rechazar' => 'Obra rechazada', 'ocultar' => 'Comentario oculto'];
+    private const ACCIONES = ['desestimar' => 'Desestimada', 'tomada' => 'Tomada', 'suspender' => 'Sala suspendida', 'rechazar' => 'Obra rechazada', 'ocultar' => 'Comentario oculto'];
 
-    public function __construct(private readonly ServicioDeDenuncias $servicio)
-    {
+    public function __construct(
+        private readonly ServicioDeDenuncias $servicio,
+        private readonly ReglasDeDenuncias $reglas,
+    ) {
     }
 
     /**
@@ -86,6 +91,7 @@ final class BandejaDeDenuncias extends Controlador
         $aviso = match (true) {
             !$this->servicio->resolver($tipo, $id, $denunciado, $accion, $motivo, $moderador) => 'ya_resueltas',
             $accion === 'desestimar' => 'desestimadas',
+            $accion === 'tomar' => 'tomadas',
             default => 'resueltas',
         };
 
@@ -127,6 +133,7 @@ final class BandejaDeDenuncias extends Controlador
         return $this->vista('administracion_denuncias.html.twig', [
             'historial' => true,
             'suspendidas' => [],
+            'castigadas' => [],
             'levantar' => null,
             'grupos' => [],
             'elegida' => null,
@@ -137,7 +144,10 @@ final class BandejaDeDenuncias extends Controlador
                 'tipo_etiqueta' => $cerrada['tipo']->etiqueta(),
                 'titulo' => $cerrada['titulo'],
                 'categoria' => $cerrada['categoria']->etiqueta(),
+                'gravedad' => $cerrada['gravedad']->value,
+                'gravedad_etiqueta' => $cerrada['gravedad']->etiqueta(),
                 'desestimada' => $cerrada['estado'] === 'desestimada',
+                'tomada' => $cerrada['accion'] === 'tomada',
                 'accion' => self::ACCIONES[$cerrada['accion'] ?? 'desestimar'],
                 'motivo' => $cerrada['motivo'],
                 'resuelta' => FechaParaMostrar::diaYHora($cerrada['resuelta_en']),
@@ -168,6 +178,21 @@ final class BandejaDeDenuncias extends Controlador
     }
 
     /**
+     * Las salas bajadas en la cartelera por las reglas (EF-22.11), o false si programación no
+     * respondió. De solo lectura: se levantan solas cuando las denuncias salen del período.
+     *
+     * @return list<array{sala_id: string, nombre: ?string, conteo: int}>|false
+     */
+    private function castigadas(): array|false
+    {
+        try {
+            return $this->servicio->castigadas();
+        } catch (ExcepcionHttp) {
+            return false;
+        }
+    }
+
+    /**
      * El aviso de lo que se acaba de hacer, con el título que quedó en el historial.
      */
     private function mensaje(Peticion $peticion): ?string
@@ -175,6 +200,7 @@ final class BandejaDeDenuncias extends Controlador
         $avisos = [
             'desestimadas' => 'Desestimaste las denuncias de «%s».',
             'resueltas' => 'Resolviste las denuncias de «%s».',
+            'tomadas' => 'Tomaste las denuncias de «%s».',
             'ya_resueltas' => 'Ya no había denuncias abiertas: no se cambió nada.',
             'levantada' => 'Levantaste la suspensión de «%s».',
             'ya_levantada' => 'La sala ya no estaba suspendida por denuncia: no se cambió nada.',
@@ -236,6 +262,20 @@ final class BandejaDeDenuncias extends Controlador
                 ?? throw ExcepcionHttp::noEncontrada();
         }
 
+        // Una sala o una función con una alta abierta viene con «Suspender» elegida, sin
+        // suspenderse sola (EF-22.11, Q9). Si volvió con errores, queda lo que eligió.
+        if ($elegida !== null && $elegida['para_suspender'] && !array_key_exists('accion', $valores)) {
+            $valores['accion'] = 'suspender';
+        }
+
+        // Dónde está la sala de cada sala o función respecto de los límites de las reglas.
+        $conteos = $this->reglas->conteos(array_values(array_unique(array_filter(array_column($abiertas, 'sala_id')))));
+        $contador = fn (?string $salaId): ?array => $salaId === null ? null : [
+            'cantidad' => $conteos[$salaId] ?? 0,
+            'aviso' => $this->reglas->avisoCantidad(),
+            'cartelera' => $this->reglas->carteleraCantidad(),
+        ];
+
         $datos = [
             'historial' => false,
             'cerradas' => [],
@@ -245,15 +285,20 @@ final class BandejaDeDenuncias extends Controlador
                 'id' => $grupo['objeto_id'],
                 'titulo' => $grupo['titulo'],
                 'cantidad' => $grupo['cantidad'],
+                'gravedad' => $grupo['gravedad']->value,
+                'gravedad_etiqueta' => $grupo['gravedad']->etiqueta(),
+                'para_suspender' => $grupo['para_suspender'],
+                'contador' => $contador($grupo['sala_id']),
                 'desde' => FechaParaMostrar::diaYHora($grupo['primera']),
                 'elegida' => $grupo === $elegida,
             ], $abiertas),
-            'elegida' => $elegida === null ? null : $this->detalle($elegida['tipo'], $elegida['objeto_id'], $elegida['titulo'], self::moderador($peticion)),
+            'elegida' => $elegida === null ? null : $this->detalle($elegida['tipo'], $elegida['objeto_id'], $elegida['titulo'], self::moderador($peticion)) + ['para_suspender' => $elegida['para_suspender'], 'contador' => $contador($elegida['sala_id'])],
             'valores' => $valores,
             'errores' => $errores,
             'maximo_motivo' => self::MAXIMO_MOTIVO,
             'suspendidas' => $this->suspendidas(self::moderador($peticion)),
             'levantar' => $levantar,
+            'castigadas' => $this->castigadas(),
         ];
         // La plantilla muestra el mensaje si la variable existe.
         if ($mensaje !== null) {
@@ -291,7 +336,11 @@ final class BandejaDeDenuncias extends Controlador
             // Lo que se puede hacer depende de que siga existiendo (Q15).
             'denuncias' => array_map(fn (Denuncia $denuncia): array => [
                 'categoria' => $denuncia->categoria->etiqueta(),
+                'gravedad' => $denuncia->gravedad->value,
+                'gravedad_etiqueta' => $denuncia->gravedad->etiqueta(),
                 'detalle' => $denuncia->detalle,
+                'id' => $denuncia->id,
+                'foto' => $denuncia->foto !== null,
                 'cuando' => FechaParaMostrar::diaYHora($denuncia->creadaEn),
                 'quien' => $this->quien($denuncia->usuarioId),
             ], $denuncias),
@@ -308,6 +357,11 @@ final class BandejaDeDenuncias extends Controlador
     private static function acciones(?Denunciado $denunciado): array
     {
         $acciones = [['valor' => 'desestimar', 'etiqueta' => 'Desestimarlas: no hay nada que hacer']];
+        // Tomarlas (EF-22.11): son válidas y cuentan para las reglas de la sala, sin sancionar
+        // todavía. Sólo donde hay una sala: las reglas no cuentan obras ni comentarios.
+        if ($denunciado !== null && $denunciado->tipo->tieneLugar()) {
+            $acciones[] = ['valor' => 'tomar', 'etiqueta' => 'Tomarlas: son válidas y cuentan para las reglas de la sala, sin sancionar todavía'];
+        }
         if ($denunciado?->tipo === TipoDenuncia::Obra) {
             $acciones[] = ['valor' => 'rechazar', 'etiqueta' => 'Rechazar la obra: sale del catálogo y de las votaciones abiertas'];
         }

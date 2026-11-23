@@ -9,7 +9,9 @@ use DateTimeZone;
 use IndieCinema\Moderacion\Modelo\CategoriaDenuncia;
 use IndieCinema\Moderacion\Modelo\Denunciado;
 use IndieCinema\Moderacion\Modelo\TipoDenuncia;
+use IndieCinema\Moderacion\Modelo\ImagenSubida;
 use IndieCinema\Moderacion\Repositorios\RepositorioDeDenuncias;
+use IndieCinema\Moderacion\Servicios\ArchivosDeDenuncias;
 use IndieCinema\Moderacion\Servicios\LoDenunciado;
 use IndieCinema\Nucleo\Controlador;
 use IndieCinema\Nucleo\Http\ExcepcionHttp;
@@ -20,7 +22,8 @@ use LogicException;
 
 /**
  * GET y POST /moderacion/denuncias/nueva?tipo=…&id=… (EF-07.8): cualquiera con sesión denuncia lo
- * publicado, salvo lo suyo, con una categoría y un detalle. La denuncia llega a la pestaña
+ * publicado, salvo lo suyo, con un motivo y un detalle, y en salas y funciones una foto opcional. El
+ * motivo da la gravedad (EF-22.11), que no se ve ni se elige. La denuncia llega a la pestaña
  * «Denuncias» de la bandeja.
  */
 final class FormularioDeDenuncia extends Controlador
@@ -31,6 +34,7 @@ final class FormularioDeDenuncia extends Controlador
     public function __construct(
         private readonly LoDenunciado $denunciados,
         private readonly RepositorioDeDenuncias $denuncias,
+        private readonly ArchivosDeDenuncias $fotos,
     ) {
     }
 
@@ -64,21 +68,33 @@ final class FormularioDeDenuncia extends Controlador
         } elseif (mb_strlen($detalle) > self::MAXIMO_DETALLE) {
             $errores['detalle'] = 'El detalle puede tener hasta ' . self::MAXIMO_DETALLE . ' caracteres.';
         }
-        if ($errores !== [] || $categoria === null) {
+        // La foto, sólo donde hay un lugar (EF-22.11): en una obra o un comentario se ignora.
+        $foto = $denunciado->tipo->tieneLugar() ? FormularioDeSala::imagenSubida($peticion->archivo('foto')) : null;
+        if (is_string($foto)) {
+            $errores['foto'] = $foto;
+        }
+        if ($errores !== [] || $categoria === null || is_string($foto)) {
             $campo = $peticion->campo('categoria');
 
             return $this->formulario($denunciado, ['categoria' => is_string($campo) ? $campo : '', 'detalle' => $detalle], $errores, 422);
         }
 
-        $this->denuncias->agregar(
+        $guardada = $foto instanceof ImagenSubida ? $this->fotos->guardar($foto) : null;
+        $agregada = $this->denuncias->agregar(
             $denunciado->tipo,
             $denunciado->id,
+            $denunciado->salaId(),
             mb_substr($denunciado->titulo, 0, 200),
             self::usuario($peticion)->id,
             $categoria,
             $detalle === '' ? null : $detalle,
             new DateTimeImmutable('now', new DateTimeZone('UTC')),
+            $guardada,
         );
+        // Una repetida no suma otra, ni deja su foto.
+        if (!$agregada && $guardada !== null) {
+            $this->fotos->borrar($guardada);
+        }
 
         return $this->redirigir('/denuncias/nueva?' . http_build_query(['tipo' => $denunciado->tipo->value, 'id' => $denunciado->id, 'enviada' => '1']));
     }
@@ -129,6 +145,8 @@ final class FormularioDeDenuncia extends Controlador
             'valores' => $valores,
             'errores' => $errores,
             'maximo_detalle' => self::MAXIMO_DETALLE,
+            // La foto, opcional, sólo en salas y funciones (EF-22.11).
+            'foto' => $denunciado->tipo->tieneLugar() ? FormularioDeSala::reglaDeLaImagen(false) : null,
             'enviada' => $enviada,
             'repetida' => $repetida,
         ], $estado);

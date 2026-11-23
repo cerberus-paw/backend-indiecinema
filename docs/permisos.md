@@ -135,6 +135,7 @@ Prefijo `/moderacion`. La solicitud de sala, las denuncias y la documentación, 
 |---|---|---|
 | GET | `/denuncias` | moderador |
 | GET | `/denuncias/nueva` | espectador |
+| GET | `/denuncias/{id}/foto` | moderador |
 | POST | `/denuncias/nueva` | espectador |
 | POST | `/denuncias/salas/{id}/levantar` | moderador |
 | POST | `/denuncias/{tipo}/{id}/resolver` | moderador |

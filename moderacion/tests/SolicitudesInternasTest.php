@@ -119,6 +119,46 @@ final class SolicitudesInternasTest extends TestCase
         );
     }
 
+    /**
+     * EF-22.10: la devuelta trae el motivo de la devolución, su fecha y hasta cuándo tiene para
+     * completarla.
+     */
+    public function testUnaDevueltaTraeElMotivoYLaFechaLimite(): void
+    {
+        $this->solicitud('El Galpón', '2026-10-01 10:00:00', [
+            'estado' => 'devuelta',
+            'devolucion_motivo' => 'La póliza venció.',
+            'devuelta_por' => Uuid::nuevo(),
+            'devuelta_en' => '2026-10-02 12:00:00',
+            'devolucion_vence' => '2026-10-17',
+            'devolucion_faltantes' => 'seguro',
+        ]);
+
+        self::assertSame(
+            ['estado' => 'devuelta', 'sala' => 'El Galpón', 'motivo' => 'La póliza venció.', 'fecha' => '2026-10-02T12:00:00+00:00', 'vence' => '2026-10-17'],
+            self::json($this->pedir()),
+        );
+    }
+
+    public function testUnaVencidaTraeElMotivoYLaFechaDelCierre(): void
+    {
+        $this->solicitud('El Galpón', '2026-10-01 10:00:00', [
+            'estado' => 'vencida',
+            'motivo' => 'Venció el plazo para completar la documentación.',
+            'resuelta_en' => '2026-10-18 06:45:00',
+            'devolucion_motivo' => 'La póliza venció.',
+            'devuelta_por' => Uuid::nuevo(),
+            'devuelta_en' => '2026-10-02 12:00:00',
+            'devolucion_vence' => '2026-10-17',
+            'devolucion_faltantes' => 'seguro',
+        ]);
+
+        self::assertSame(
+            ['estado' => 'vencida', 'sala' => 'El Galpón', 'motivo' => 'Venció el plazo para completar la documentación.', 'fecha' => '2026-10-18T06:45:00+00:00'],
+            self::json($this->pedir()),
+        );
+    }
+
     public function testSinSolicitudesEs404(): void
     {
         self::assertSame(404, $this->pedir()->estado());

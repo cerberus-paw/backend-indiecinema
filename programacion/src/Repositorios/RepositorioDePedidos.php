@@ -29,7 +29,7 @@ final class RepositorioDePedidos
     public const MENSAJE_NO_ACTIVO = 'Este pedido todavía no alcanzó el umbral de activación.';
     public const MENSAJE_EN_PRIORIDAD = 'Durante las primeras 48 horas este pedido tiene prioridad para las salas mejor calificadas.';
 
-    private const COLUMNAS = 'p.id, p.titulo, p.anio, p.director, p.creado_por, p.estado, p.activado_en,
+    private const COLUMNAS = 'p.id, p.titulo, p.titulo_normalizado, p.anio, p.director, p.creado_por, p.estado, p.activado_en,
                               p.obra_id, o.titulo AS obra_titulo, p.tomado_por, p.tomado_en, p.creado_en,
                               (SELECT COUNT(*) FROM adhesion_pedido a WHERE a.pedido_id = p.id) AS adhesiones';
 
@@ -52,24 +52,76 @@ final class RepositorioDePedidos
     }
 
     /**
-     * Pedidos existentes con título parecido (la intercalación utf8mb4_0900_ai_ci compara sin tildes
-     * ni distinguir mayúsculas) y el mismo año de estreno.
+     * Pedidos abiertos o activos con el mismo título normalizado (sin mayúsculas, tildes ni
+     * espacios o signos de más) y sin distinguir el año (EF-22.6).
      *
      * @return list<PedidoDeTitulo>
      */
-    public function buscarParecidos(string $titulo, int $anio, ?string $usuarioId = null): array
+    public function buscarParecidos(string $titulo, ?string $usuarioId = null): array
     {
+        $normalizado = DatosDePedido::normalizarTitulo($titulo);
+        if ($normalizado === '') {
+            return [];
+        }
+
         [$selectAdherido, $parametrosAdherido] = self::expresionAdherido($usuarioId);
         $filas = $this->base->filas(
             'SELECT ' . self::COLUMNAS . ", {$selectAdherido}
              FROM pedido_titulo p
              LEFT JOIN obra o ON o.id = p.obra_id
-             WHERE p.titulo = ? AND p.anio = ?
-             ORDER BY (p.estado = 'tomado') ASC, adhesiones DESC, p.creado_en ASC, p.id ASC",
-            [...$parametrosAdherido, trim($titulo), $anio],
+             WHERE p.estado IN ('abierto', 'activo') AND p.titulo_normalizado = ?
+             ORDER BY adhesiones DESC, p.creado_en ASC, p.id ASC",
+            [...$parametrosAdherido, $normalizado],
         );
 
         return array_map(self::pedido(...), $filas);
+    }
+
+    /**
+     * Pedidos abiertos o activos que coinciden con lo escrito, para el autocompletado (EF-22.6).
+     *
+     * @return list<array{id: string, titulo: string, titulo_normalizado: string, anio: ?int, director: string, adhesiones: int}>
+     */
+    public function sugerencias(string $consulta = '', int $limite = 10): array
+    {
+        $normalizado = DatosDePedido::normalizarTitulo($consulta);
+        $condiciones = ["p.estado IN ('abierto', 'activo')"];
+        $parametros = [];
+        $orden = 'adhesiones DESC, p.creado_en ASC, p.id ASC';
+
+        if ($normalizado !== '') {
+            $patron = Like::contiene($normalizado);
+            $condiciones[] = "(p.titulo_normalizado LIKE ? ESCAPE '!' OR p.titulo LIKE ? ESCAPE '!')";
+            $parametros[] = $patron;
+            $parametros[] = Like::contiene(trim($consulta));
+            $orden = "(p.titulo_normalizado = ?) DESC, {$orden}";
+            $parametrosOrden = [$normalizado];
+        } else {
+            $parametrosOrden = [];
+        }
+
+        $where = implode(' AND ', $condiciones);
+        $filas = $this->base->filas(
+            "SELECT p.id, p.titulo, p.titulo_normalizado, p.anio, p.director,
+                    (SELECT COUNT(*) FROM adhesion_pedido a WHERE a.pedido_id = p.id) AS adhesiones
+             FROM pedido_titulo p
+             WHERE {$where}
+             ORDER BY {$orden}
+             LIMIT ?",
+            [...$parametros, ...$parametrosOrden, max(1, $limite)],
+        );
+
+        return array_map(
+            static fn (array $fila): array => [
+                'id' => (string) $fila['id'],
+                'titulo' => (string) $fila['titulo'],
+                'titulo_normalizado' => (string) $fila['titulo_normalizado'],
+                'anio' => $fila['anio'] === null ? null : (int) $fila['anio'],
+                'director' => (string) $fila['director'],
+                'adhesiones' => (int) $fila['adhesiones'],
+            ],
+            $filas,
+        );
     }
 
     /**
@@ -82,9 +134,9 @@ final class RepositorioDePedidos
 
         $this->base->enTransaccion(static function (BaseDeDatos $base) use ($id, $datos, $usuarioId, $estadoInicial, $umbral): void {
             $base->ejecutar(
-                'INSERT INTO pedido_titulo (id, titulo, anio, director, creado_por, estado, activado_en, creado_en)
-                 VALUES (?, ?, ?, ?, ?, ?, ' . ($umbral <= 1 ? 'UTC_TIMESTAMP()' : 'NULL') . ', UTC_TIMESTAMP())',
-                [$id, $datos->titulo, $datos->anio, $datos->director, $usuarioId, $estadoInicial],
+                'INSERT INTO pedido_titulo (id, titulo, titulo_normalizado, anio, director, creado_por, estado, activado_en, creado_en)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ' . ($umbral <= 1 ? 'UTC_TIMESTAMP()' : 'NULL') . ', UTC_TIMESTAMP())',
+                [$id, $datos->titulo, $datos->tituloNormalizado, $datos->anio, $datos->director, $usuarioId, $estadoInicial],
             );
             $base->ejecutar(
                 'INSERT INTO adhesion_pedido (pedido_id, usuario_id, creada_en) VALUES (?, ?, UTC_TIMESTAMP())',
@@ -337,7 +389,7 @@ final class RepositorioDePedidos
         return new PedidoDeTitulo(
             (string) $fila['id'],
             (string) $fila['titulo'],
-            (int) $fila['anio'],
+            $fila['anio'] === null ? null : (int) $fila['anio'],
             (string) $fila['director'],
             (string) $fila['creado_por'],
             EstadoPedido::from((string) $fila['estado']),
@@ -349,6 +401,7 @@ final class RepositorioDePedidos
             $fila['obra_titulo'] === null ? null : (string) $fila['obra_titulo'],
             $fila['tomado_por'] === null ? null : (string) $fila['tomado_por'],
             $fila['tomado_en'] === null ? null : self::fecha($fila['tomado_en']),
+            (string) ($fila['titulo_normalizado'] ?? ''),
         );
     }
 

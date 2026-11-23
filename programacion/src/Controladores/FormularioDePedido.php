@@ -60,11 +60,10 @@ final class FormularioDePedido
         }
 
         $reglas['anio'] = [
-            'requerido' => true,
+            'requerido' => false,
             'valor_minimo' => Obra::PRIMER_ANIO,
             'valor_maximo' => (int) date('Y'),
             'mensajes' => [
-                'requerido' => $anioMensaje,
                 'valor_minimo' => $anioMensaje,
                 'valor_maximo' => $anioMensaje,
                 'tipo' => $anioMensaje,
@@ -98,15 +97,20 @@ final class FormularioDePedido
 
         $anioValor = self::texto($campos['anio'] ?? null);
         $this->valores['anio'] = $anioValor;
-        $anio = filter_var($anioValor, FILTER_VALIDATE_INT, [
-            'options' => ['min_range' => Obra::PRIMER_ANIO, 'max_range' => (int) date('Y')],
-        ]);
-        if ($anio === false) {
-            $this->errores['anio'] = 'El año tiene que estar entre ' . Obra::PRIMER_ANIO . ' y el actual.';
+        $anio = null;
+        if ($anioValor !== '') {
+            $validado = filter_var($anioValor, FILTER_VALIDATE_INT, [
+                'options' => ['min_range' => Obra::PRIMER_ANIO, 'max_range' => (int) date('Y')],
+            ]);
+            if ($validado === false) {
+                $this->errores['anio'] = 'El año tiene que estar entre ' . Obra::PRIMER_ANIO . ' y el actual.';
+            } else {
+                $anio = (int) $validado;
+            }
         }
 
-        if ($this->errores === [] && $anio !== false) {
-            $this->datos = new DatosDePedido($textos['titulo'], (int) $anio, $textos['director']);
+        if ($this->errores === []) {
+            $this->datos = new DatosDePedido($textos['titulo'], $anio, $textos['director']);
         }
     }
 

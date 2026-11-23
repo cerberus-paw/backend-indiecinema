@@ -12,6 +12,8 @@ use IndieCinema\Recaudacion\Modelo\PedidoDelPublico;
 use IndieCinema\Recaudacion\Modelo\PrecioDeLaEntrada;
 use IndieCinema\Recaudacion\Modelo\RecomendacionCombinada;
 use IndieCinema\Recaudacion\Modelo\RendimientoDeSala;
+use IndieCinema\Recaudacion\Modelo\ResultadoDeSala;
+use IndieCinema\Recaudacion\Modelo\SalaSinPromocion;
 use IndieCinema\Recaudacion\Modelo\TituloParaRepetir;
 use IndieCinema\Recaudacion\Modelo\Umbrales;
 use IndieCinema\Recaudacion\Modelo\VotantesSinReserva;
@@ -24,13 +26,46 @@ use IndieCinema\Recaudacion\Modelo\VotantesSinReserva;
  *
  * Las cuentas van en enteros: un porcentaje se compara multiplicando en cruz, así una sala que
  * vendió 36 de 40 lugares está en el 90 % justo y no en 89,999.
+ *
+ * Con lo que ganó cada sala (EF-22.1), a la que gana holgado no le sugiere promociones ni
+ * descuentos (EF-22.14): no los necesita. Sí le sigue sugiriendo lo que le suma, como otra función
+ * de lo que se agota o cambiar un horario.
  */
 final class Sugerencias
 {
     private const DIAS = [1 => 'lunes', 2 => 'martes', 3 => 'miércoles', 4 => 'jueves', 5 => 'viernes', 6 => 'sábados', 7 => 'domingos'];
 
-    public function __construct(private readonly Umbrales $umbrales)
+    /** @var array<string, SalaSinPromocion> por id de sala */
+    private readonly array $sinPromocion;
+
+    /**
+     * @param list<ResultadoDeSala> $resultados si cada sala ganó o perdió en el período; sin ellos
+     *                                          (vacía) no se sabe quién gana y no se filtra nada
+     */
+    public function __construct(private readonly Umbrales $umbrales, array $resultados = [])
     {
+        $sinPromocion = [];
+        foreach ($resultados as $sala) {
+            $costo = $sala->costo();
+            // Sin costo no hay contra qué comparar: una sala que cargó 0 no gana «holgado», gana todo.
+            if ($costo > 0 && $sala->resultado() * 100 >= $this->umbrales->promocionGananciaMaxima * $costo) {
+                $sinPromocion[$sala->salaId] = new SalaSinPromocion($sala->salaId, $sala->salaNombre, $sala->resultado(), $costo, self::porcentaje($sala->resultado(), $costo));
+            }
+        }
+        $this->sinPromocion = $sinPromocion;
+    }
+
+    /**
+     * Las salas que ganan tanto que no se les sugiere promoción, para decir por qué no aparecen.
+     *
+     * @return list<SalaSinPromocion> de la que más gana sobre su costo a la que menos
+     */
+    public function sinPromocion(): array
+    {
+        $salas = array_values($this->sinPromocion);
+        usort($salas, static fn (SalaSinPromocion $a, SalaSinPromocion $b): int => [$b->sobreCosto, $a->salaNombre] <=> [$a->sobreCosto, $b->salaNombre]);
+
+        return $salas;
     }
 
     /**
@@ -42,9 +77,22 @@ final class Sugerencias
      * votó sin que ganara. Es de la sala y no de todas porque el que tiene que venir el miércoles
      * es su público, no el de otra.
      *
+     * No vienen los de las salas que ganan holgado (EF-22.14): una promoción no les hace falta.
+     *
      * @return list<DiaFlojo> de la ocupación más baja a la más alta
      */
     public function diasFlojos(DatosDelReporte $datos): array
+    {
+        return array_values(array_filter($this->todosLosDiasFlojos($datos), fn (DiaFlojo $dia): bool => !isset($this->sinPromocion[$dia->salaId])));
+    }
+
+    /**
+     * Los días flojos de todas las salas, también de las que ganan: las combinadas que no son una
+     * promoción (cambiar el horario, sumar lo que se agota) parten de ellos igual.
+     *
+     * @return list<DiaFlojo>
+     */
+    private function todosLosDiasFlojos(DatosDelReporte $datos): array
     {
         /** @var array<string, array<int, array{funciones: int, vendidas: int, cupo: int}>> $porSala */
         $porSala = [];
@@ -214,7 +262,8 @@ final class Sugerencias
     /**
      * Las salas con gente que votó y no reservó nada (EF-09.5): personas, no porcentajes, porque
      * una promoción apunta a gente. Se cuenta en todo el período y no por función: quien votó una
-     * y reservó otra de la misma sala ya vino.
+     * y reservó otra de la misma sala ya vino. Sin las que ganan holgado, que no necesitan
+     * promoción (EF-22.14).
      *
      * @return list<VotantesSinReserva> de la que más gente tiene sin reservar a la que menos
      */
@@ -239,7 +288,7 @@ final class Sugerencias
         $salas = [];
         foreach ($porSala as $salaId => $sala) {
             $sinReserva = count(array_diff_key($sala['votantes'], $sala['compradores']));
-            if ($sinReserva >= $this->umbrales->votaronSinReservarMinimos) {
+            if ($sinReserva >= $this->umbrales->votaronSinReservarMinimos && !isset($this->sinPromocion[(string) $salaId])) {
                 $salas[] = new VotantesSinReserva((string) $salaId, $sala['nombre'], count($sala['votantes']), $sinReserva);
             }
         }
@@ -251,7 +300,8 @@ final class Sugerencias
     /**
      * Las salas que dieron funciones a la gorra y con precio, cuando la diferencia dice algo
      * (EF-09.5): si a la gorra llena bastante más, un descuento puede traer gente; si con precio
-     * llena lo mismo o más, se puede cobrar. En el medio no se sugiere nada.
+     * llena lo mismo o más, se puede cobrar. En el medio no se sugiere nada. A una sala que gana
+     * holgado no se le sugiere el descuento (EF-22.14), y así tampoco sale su combinada a la gorra.
      *
      * @return list<PrecioDeLaEntrada> de la mayor diferencia a la menor
      */
@@ -281,7 +331,7 @@ final class Sugerencias
             $gorra = self::porcentaje($vendidasGorra, $cupoGorra);
             $pagas = self::porcentaje($vendidasPagas, $cupoPagas);
             $sensible = $gorra - $pagas >= $this->umbrales->gorraDiferenciaMinima;
-            if (!$sensible && $pagas < $gorra) {
+            if ((!$sensible && $pagas < $gorra) || ($sensible && isset($this->sinPromocion[(string) $salaId]))) {
                 continue;
             }
             $salas[] = new PrecioDeLaEntrada((string) $salaId, $sala['nombre'], $funcionesGorra, $gorra, $funcionesPagas, $pagas, $sensible);
@@ -346,7 +396,8 @@ final class Sugerencias
      * día flojo de una sala y le suman otra cosa que sabe el reporte de esa misma sala:
      *
      * - lo que su público votó y no vio, y que a la gorra llena más que con precio: dar ese
-     *   título a la gorra ese día, porque ya funcionó;
+     *   título a la gorra ese día, porque ya funcionó (no a la sala que gana holgado: es una
+     *   promoción, EF-22.14);
      * - la franja horaria: si las de la noche llenan bastante más que las de la tarde (o al revés)
      *   y el día flojo está en la que llena menos, cambiarle el horario;
      * - lo que se agota y gusta: sumar una función de eso el día flojo.
@@ -358,7 +409,7 @@ final class Sugerencias
      */
     public function combinadas(DatosDelReporte $datos): array
     {
-        $flojos = $this->diasFlojos($datos);
+        $flojos = $this->todosLosDiasFlojos($datos);
         if ($flojos === []) {
             return [];
         }

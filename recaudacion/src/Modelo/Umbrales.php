@@ -41,6 +41,12 @@ final readonly class Umbrales
         public int $franjaDiferenciaMinima = 20,
         /** …con por lo menos estas funciones en cada franja. */
         public int $franjaFuncionesMinimas = 2,
+        /**
+         * Una sala que se lleva este porcentaje más de lo que le cuesta abrir no necesita promoción
+         * (EF-22.14): gana holgado, y un descuento le resignaría plata sin traerle nada que le falte.
+         * Puede pasar de 100: con 150, sólo la que se lleva dos veces y media su costo.
+         */
+        public int $promocionGananciaMaxima = 40,
     ) {
         foreach ([$diaFlojoOcupacionMaxima, $repetirOcupacionMinima, $repetirAsistenciaMinima, $pedidoVotosMinimos, $gorraDiferenciaMinima, $agotadaOcupacionMinima, $franjaDiferenciaMinima] as $porcentaje) {
             if ($porcentaje < 0 || $porcentaje > 100) {
@@ -51,6 +57,9 @@ final readonly class Umbrales
             if ($cantidad < 1) {
                 throw new RuntimeException("{$clave} de [reportes] tiene que ser 1 o más.");
             }
+        }
+        if ($promocionGananciaMaxima < 0) {
+            throw new RuntimeException('promocion_ganancia_maxima de [reportes] tiene que ser 0 o más.');
         }
         if ($franjaCorteHora < 1 || $franjaCorteHora > 23) {
             throw new RuntimeException('franja_corte_hora de [reportes] va de 1 a 23.');
@@ -93,6 +102,7 @@ final readonly class Umbrales
             $entero('franja_corte_hora', $porDefecto->franjaCorteHora),
             $entero('franja_diferencia_minima', $porDefecto->franjaDiferenciaMinima),
             $entero('franja_funciones_minimas', $porDefecto->franjaFuncionesMinimas),
+            $entero('promocion_ganancia_maxima', $porDefecto->promocionGananciaMaxima),
         );
     }
 }

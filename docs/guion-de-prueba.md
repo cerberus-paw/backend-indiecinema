@@ -57,7 +57,7 @@ crean en el guion (pasos 14 y 16) se cancelan al final, así no quedan en la car
 |---|---|---|
 | 18 | (Privada) Ingresar como Eva, abrir la función del paso 16, votar una obra y después cambiar el voto a otra | «Esta es tu elección actual» sobre la obra votada. El voto se cambia sin sumar dos |
 | 19 | (Normal) Como organizador, abrir la ficha de esa función y «Cerrar votación» | Antes de cerrar ve cuántos votos lleva cada obra: 1 la última que votó Eva en el paso 18, y 0 las otras. Al cerrar quedan las más votadas que entran en la duración de la sala, tantas como películas por función tiene (en un empate, la que va primero entre las candidatas), y lleva a «Proponer franjas horarias» |
-| 20 | Proponer una franja que termina antes de empezar. Después, dos franjas de mañana en adelante con un mínimo de 1 asistente, y «Publicar franjas y abrir acuerdo» | Primero, el error junto a la opción. Después la función pasa a «En acuerdo de fecha», con las dos franjas y la fecha límite: las 23:59 del día anterior a la primera |
+| 20 | Proponer una franja que termina antes de empezar. Después, dos franjas de pasado mañana en adelante (la reserva del paso 27 se cancela hasta 24 horas antes) con un mínimo de 1 asistente, y «Publicar franjas y abrir acuerdo» | Primero, el error junto a la opción. Después la función pasa a «En acuerdo de fecha», con las dos franjas y la fecha límite: las 23:59 del día anterior a la primera |
 | 21 | (Privada) Como Eva, marcar «Me sirve» en las dos franjas; desmarcar una y volver a marcarla | Cada franja cuenta a los que la marcaron, y se puede marcar más de una |
 | 22 | (Normal) Recargar la ficha y «Confirmar franja ganadora y programar función» | Antes de confirmar, «¡La franja ganadora alcanzó el mínimo requerido!». Después la función queda programada con esa fecha, y aparece en la cartelera y en la portada |
 
@@ -69,7 +69,7 @@ crean en el guion (pasos 14 y 16) se cancelan al final, así no quedan en la car
 | 24 | En la primera pestaña, pedir 0 lugares, después 4, y después reservar 2 con «Reservar mis lugares» | 0 y 4 dan el error debajo del campo, sin mandar nada. Con 2, «Reserva confirmada» en el lugar del formulario, sin recargar, con «Ver el comprobante». La ficha pasa a «Queda 1 lugar libre» |
 | 25 | Pasar a la segunda pestaña | Sola, sin recargar, también dice «Queda 1 lugar libre», y el campo no acepta más de 1 |
 | 26 | Abrir «Mis reservas» desde el menú de la cuenta, y el comprobante de la reserva | La reserva con su código, sus lugares y «confirmada». El comprobante se puede imprimir. Al buzón llegó el correo de la reserva confirmada |
-| 27 | En el comprobante, «Cancelar reserva» y confirmar | «Reserva cancelada»: los 2 lugares vuelven a estar libres |
+| 27 | En el comprobante, «Cancelar reserva» y confirmar | Antes de cancelar, «Podés cancelarla hasta el …», 24 horas antes de la función. Después, «Reserva cancelada»: los 2 lugares vuelven a estar libres |
 | 28 | Volver a la ficha, reservar 2 lugares y después 1 más | Con el cupo lleno, la ficha dice «Función agotada», sin el formulario, y la tarjeta de la cartelera, «Agotada» |
 | 29 | Abrir otra función programada de la demo y pedir 7 lugares | «Se pueden reservar hasta 6 lugares por persona en cada función.» debajo del campo, sin mandar nada |
 

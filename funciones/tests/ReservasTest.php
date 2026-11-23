@@ -40,6 +40,8 @@ final class ReservasTest extends TestCase
     private const ELIAS = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
     private const PROXIMA = '12121212-1212-4212-8212-121212121212';
     private const EMPEZADA = '34343434-3434-4434-8434-343434343434';
+    /** Empieza en cinco horas: dentro de las 24 de la política de cancelación (EF-22.9). */
+    private const EN_CINCO_HORAS = '45454545-4545-4545-8545-454545454545';
     private const ROTA = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 
     private const SITIO = 'https://indiecinema.test';
@@ -415,6 +417,70 @@ final class ReservasTest extends TestCase
         self::assertSame(422, $respuesta->estado());
         self::assertStringContainsString('La función ya empezó: la reserva ya no se puede cancelar.', $respuesta->cuerpo());
         self::assertSame('confirmada', $this->estado($id));
+    }
+
+    // ---- Hasta cuándo se cancela (EF-22.9) ----------------------------------------------------
+
+    public function testConMenosDeLasHorasMinimasLaConfirmadaYaNoSeCancela(): void
+    {
+        $id = $this->ocupar(self::EN_CINCO_HORAS, 2, self::EVA);
+        $mensaje = 'Las reservas se cancelan hasta 24 horas antes de la función, y ya falta menos: la sala cuenta con esos lugares.';
+
+        // Ni el botón ni la pantalla: el comprobante dice por qué.
+        $comprobante = $this->pedir('GET', "/reservas/{$id}")->cuerpo();
+        self::assertStringNotContainsString('/cancelar"', $comprobante);
+        self::assertStringContainsString($mensaje, $comprobante);
+        self::assertSame(404, $this->pedir('GET', "/reservas/{$id}/cancelar")->estado());
+        // Y el POST escrito a mano tampoco pasa.
+        $respuesta = $this->cancelar($id);
+        self::assertSame(422, $respuesta->estado());
+        self::assertStringContainsString($mensaje, $respuesta->cuerpo());
+        $json = self::json($this->cancelarEnJson($id));
+        self::assertSame($mensaje, $json['error']);
+        self::assertFalse($json['reserva']['cancelable']);
+        self::assertSame('confirmada', $this->estado($id));
+    }
+
+    public function testMisReservasDiceHastaCuandoYPorQueYaNo(): void
+    {
+        $this->hecha(self::PROXIMA, '2026-10-03 10:00:00');
+        $this->hecha(self::EN_CINCO_HORAS, '2026-10-02 10:00:00');
+
+        $cuerpo = $this->pedir('GET', '/reservas')->cuerpo();
+
+        self::assertSame(1, substr_count($cuerpo, '/cancelar"'));
+        self::assertStringContainsString('Se cancela hasta el ', $cuerpo);
+        self::assertStringContainsString('Las reservas se cancelan hasta 24 horas antes de la función', $cuerpo);
+    }
+
+    public function testLaPendienteDePagoSeCancelaAunqueFaltePoco(): void
+    {
+        // No hay plata de por medio y vence sola: soltar los lugares antes es mejor para la sala.
+        $id = $this->ocupar(self::EN_CINCO_HORAS, 2, self::EVA);
+        $this->base->ejecutar("UPDATE reserva SET estado = 'pendiente_pago', vence_en = UTC_TIMESTAMP() + INTERVAL 10 MINUTE WHERE id = ?", [$id]);
+
+        self::assertSame(303, $this->cancelar($id)->estado());
+        self::assertSame('cancelada', $this->estado($id));
+    }
+
+    public function testLasHorasSonUnParametro(): void
+    {
+        $this->configurar(['reservas' => ['horas_minimas_cancelacion' => 2]]);
+        $id = $this->ocupar(self::EN_CINCO_HORAS, 2, self::EVA);
+
+        self::assertStringContainsString('Podés cancelarla hasta el ', $this->pedir('GET', "/reservas/{$id}")->cuerpo());
+        self::assertSame(303, $this->cancelar($id)->estado());
+        self::assertSame('cancelada', $this->estado($id));
+    }
+
+    public function testLaPoliticaSeLeeAntesDeReservarYEnElComprobante(): void
+    {
+        self::assertStringContainsString(
+            'Podés cancelar tu reserva hasta 24 horas antes de la función; después, ya no.',
+            $this->pedir('GET', '/reservar/' . self::PROXIMA)->cuerpo(),
+        );
+        $id = $this->reservada();
+        self::assertStringContainsString('Podés cancelarla hasta el ', $this->pedir('GET', "/reservas/{$id}")->cuerpo());
     }
 
     // ---- El correo de la reserva confirmada (E4-04.3) ---------------------------------------

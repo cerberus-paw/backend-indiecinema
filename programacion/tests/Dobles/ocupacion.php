@@ -38,6 +38,10 @@ if ($ruta === '/interno/ocupacion') {
     echo json_encode(['lugares_ocupados' => (object) array_map(static fn (string $id): int => $ocupados[$id] ?? 0, array_combine($ids, $ids))]);
 } elseif (preg_match('#^/interno/funciones/([0-9a-f-]{36})/ocupacion$#', $ruta, $partes) === 1) {
     $respuesta = ['funcion_id' => $partes[1], 'lugares_ocupados' => $ocupados[$partes[1]] ?? 0, 'maximo_por_persona' => 6];
+    // EF-22.9: la política de cancelación, si la prueba la escribió.
+    if (is_string($ocupados['politica_cancelacion'] ?? null)) {
+        $respuesta['politica_cancelacion'] = $ocupados['politica_cancelacion'];
+    }
     if (isset($_GET['usuario'])) {
         $delUsuario = is_array($ocupados[$partes[1] . ':usuario'] ?? null)
             ? ($ocupados[$partes[1] . ':usuario'][$_GET['usuario']] ?? 0)

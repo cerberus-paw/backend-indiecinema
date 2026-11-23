@@ -84,7 +84,13 @@ final class OcupacionInternaTest extends TestCase
     public function testDeUnaFuncionCuentaLasConfirmadasYLasConAsistencia(): void
     {
         self::assertSame(
-            ['funcion_id' => self::FUNCION, 'lugares_ocupados' => 5, 'maximo_por_persona' => 6],
+            [
+                'funcion_id' => self::FUNCION,
+                'lugares_ocupados' => 5,
+                'maximo_por_persona' => 6,
+                // EF-22.9: sin [reservas] en config.ini, la de 24 horas.
+                'politica_cancelacion' => 'Podés cancelar tu reserva hasta 24 horas antes de la función; después, ya no.',
+            ],
             self::json($this->pedir('/interno/funciones/' . self::FUNCION . '/ocupacion')),
         );
     }

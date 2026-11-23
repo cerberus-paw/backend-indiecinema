@@ -32,6 +32,9 @@ final class ServicioDeReservas
     /** Las reservas por página de «Mis reservas»: las funciones de una página van en un pedido. */
     public const POR_PAGINA = 20;
 
+    /** Hasta cuándo se puede cancelar (EF-22.9): la pantalla la muestra y cancelar() la cumple. */
+    public readonly PoliticaDeCancelacion $politica;
+
     /**
      * @param ?PagosDeReservas      $pagos      el cobro con Mercado Pago; sin él, como con el cobro
      *                                          apagado, toda reserva nace confirmada
@@ -45,7 +48,10 @@ final class ServicioDeReservas
         private readonly ?ServicioDeReembolsos $reembolsos = null,
         private readonly ?ServicioDeConducta $conducta = null,
         private readonly ?CuponesDeRecaudacion $cupones = null,
+        // Sin ella (en las pruebas que no la tocan), la de siempre: 24 horas.
+        ?PoliticaDeCancelacion $politica = null,
     ) {
+        $this->politica = $politica ?? PoliticaDeCancelacion::deHoras(PoliticaDeCancelacion::HORAS_MINIMAS);
     }
 
     public function activasDelUsuario(string $usuarioId, DateTimeImmutable $ahora = new DateTimeImmutable()): int
@@ -147,14 +153,13 @@ final class ServicioDeReservas
     }
 
     /**
-     * Si el espectador todavía puede cancelar la reserva: confirmada, y antes de que empiece la
-     * función. Después ya no tiene sentido soltar los lugares, y quien entró ya usó la entrada.
-     * Si programación ya no muestra la función (su sala se dio de baja), se puede.
+     * Si el espectador todavía puede cancelar la reserva: confirmada o pendiente de pago, antes de
+     * que empiece la función y, si está confirmada, hasta las horas mínimas de la política
+     * (EF-22.9). Si programación ya no muestra la función (su sala se dio de baja), se puede.
      */
-    public static function seCancela(Reserva $reserva, ?FuncionDeProgramacion $funcion, DateTimeImmutable $ahora = new DateTimeImmutable()): bool
+    public function seCancela(Reserva $reserva, ?FuncionDeProgramacion $funcion, DateTimeImmutable $ahora = new DateTimeImmutable()): bool
     {
-        return $reserva->estado->puedePasarA(EstadoReserva::Cancelada)
-            && ($funcion?->fechaHora === null || $funcion->fechaHora > $ahora);
+        return $this->politica->motivoParaNoCancelar($reserva, $funcion, $ahora) === null;
     }
 
     /**
@@ -166,7 +171,8 @@ final class ServicioDeReservas
      * otro lado, y el reembolso queda pendiente para el administrador.
      *
      * @throws ExcepcionHttp   404 si no es suya
-     * @throws ReglaIncumplida si ya no está confirmada, la función ya empezó, o cambió mientras
+     * @throws ReglaIncumplida si ya no está confirmada, la función ya empezó, falta menos de lo
+     *                         que pide la política de cancelación (EF-22.9), o cambió mientras
      *                         tanto (el organizador registró la asistencia)
      */
     public function cancelar(Usuario $espectador, string $id, DateTimeImmutable $ahora = new DateTimeImmutable()): Reserva
@@ -180,8 +186,11 @@ final class ServicioDeReservas
             // Una pendiente se cancela igual: suelta los lugares sin esperar a que venza.
             EstadoReserva::Confirmada, EstadoReserva::PendientePago => null,
         };
-        if (!self::seCancela($reserva, $funcion, $ahora)) {
-            throw new ReglaIncumplida('La función ya empezó: la reserva ya no se puede cancelar.');
+        // La función ya empezó, o falta menos de lo que pide la política (EF-22.9): el POST no
+        // pasa aunque la pantalla no haya ofrecido el botón.
+        $motivo = $this->politica->motivoParaNoCancelar($reserva, $funcion, $ahora);
+        if ($motivo !== null) {
+            throw new ReglaIncumplida($motivo);
         }
         $cancelada = $reserva->cancelar();
         if (!$this->reservas->guardarEstado($cancelada, $reserva->estado, AutorDelCambio::de($espectador, Rol::Espectador), $ahora)) {

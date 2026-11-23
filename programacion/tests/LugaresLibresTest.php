@@ -483,4 +483,27 @@ final class LugaresLibresTest extends TestCase
         self::assertStringContainsString('en preventa para espectadores con al menos 80 puntos de conducta', $cuerpo);
         self::assertStringContainsString('data-bloqueado-conducta="1"', $cuerpo);
     }
+
+    public function testLaFichaMuestraLaPoliticaDeCancelacionQueMandaFunciones(): void
+    {
+        [, $conLugar] = $this->ocuparDosFunciones();
+        $ocupacion = json_decode((string) file_get_contents(self::$ocupacion), true);
+        $ocupacion['politica_cancelacion'] = 'Podés cancelar tu reserva hasta 24 horas antes de la función; después, ya no.';
+        file_put_contents(self::$ocupacion, json_encode($ocupacion));
+
+        $cabeceras = [
+            'X-Nginx-Secreto' => 'secreto-de-nginx',
+            'X-Usuario-Id' => 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+            'X-Rol' => 'espectador',
+            'X-Correo-Verificado' => '1',
+        ];
+        $cuerpo = $this->pedir("/cartelera/{$conLugar['id']}", null, $cabeceras)->cuerpo();
+        self::assertStringContainsString('Podés cancelar tu reserva hasta 24 horas antes de la función; después, ya no.', $cuerpo);
+
+        // Sin el texto (un funciones de antes), la ficha no inventa uno.
+        unset($ocupacion['politica_cancelacion']);
+        file_put_contents(self::$ocupacion, json_encode($ocupacion));
+        $sinPolitica = $this->pedir("/cartelera/{$conLugar['id']}", null, $cabeceras)->cuerpo();
+        self::assertStringNotContainsString('Podés cancelar tu reserva', $sinPolitica);
+    }
 }

@@ -68,9 +68,10 @@ final class OcupacionDeFunciones
     /**
      * Los lugares ocupados de una función, el tope de lugares por persona y, si se pasa usuario,
      * los que ya tiene reservados ese espectador en ella (IC-463) y sus accesos por conducta
-     * (EF-22.7). El tope y los umbrales vienen de funciones, que es quien los hace cumplir.
+     * (EF-22.7) y la política de cancelación (EF-22.9). El tope, los umbrales y la política vienen
+     * de funciones, que es quien los hace cumplir.
      *
-     * @return ?array{ocupados: int, maximo_por_persona: int, del_usuario: int, tope_reservas_conducta: ?int, reservas_activas_usuario: int, tiene_beneficio_conducta: bool, umbral_beneficio_conducta: ?int, dias_preventa_conducta: int} null si funciones no responde
+     * @return ?array{ocupados: int, maximo_por_persona: int, del_usuario: int, tope_reservas_conducta: ?int, reservas_activas_usuario: int, tiene_beneficio_conducta: bool, umbral_beneficio_conducta: ?int, dias_preventa_conducta: int, politica_cancelacion: ?string} null si funciones no responde
      */
     public function deUnaParaUsuario(string $funcionId, ?string $usuarioId = null): ?array
     {
@@ -96,6 +97,7 @@ final class OcupacionDeFunciones
             $tieneBeneficio = $datos['tiene_beneficio_conducta'] ?? true;
             $umbralBeneficio = $datos['umbral_beneficio_conducta'] ?? null;
             $diasPreventa = $datos['dias_preventa_conducta'] ?? 0;
+            $politica = $datos['politica_cancelacion'] ?? null;
 
             return [
                 'ocupados' => $ocupados,
@@ -106,6 +108,8 @@ final class OcupacionDeFunciones
                 'tiene_beneficio_conducta' => is_bool($tieneBeneficio) ? $tieneBeneficio : true,
                 'umbral_beneficio_conducta' => is_int($umbralBeneficio) && $umbralBeneficio >= 1 ? $umbralBeneficio : null,
                 'dias_preventa_conducta' => is_int($diasPreventa) && $diasPreventa >= 0 ? $diasPreventa : 0,
+                // EF-22.9: sin el texto (un funciones viejo), la ficha no dice nada.
+                'politica_cancelacion' => is_string($politica) && $politica !== '' ? $politica : null,
             ];
         });
     }

@@ -1143,10 +1143,76 @@ final class ReservasTest extends TestCase
         $cuerpo = $respuesta->cuerpo();
         self::assertStringContainsString('Puntaje de conducta', $cuerpo);
         self::assertStringContainsString('bajo umbral (hasta 2 reservas a la vez)', $cuerpo);
+        self::assertStringContainsString('necesitás al menos 80 puntos para acceder a preventas anticipadas y usar cupones de descuento.', $cuerpo);
         self::assertMatchesRegularExpression('#<dt>Puntaje de conducta</dt>\s*<dd class="panel-dato-valor">60</dd>#', $cuerpo);
         self::assertMatchesRegularExpression('#<dt>Asistencias</dt>\s*<dd class="panel-dato-valor">3</dd>#', $cuerpo);
         self::assertMatchesRegularExpression('#<dt>Ausencias</dt>\s*<dd class="panel-dato-valor">4</dd>#', $cuerpo);
         self::assertMatchesRegularExpression('#<dt>Calificaciones</dt>\s*<dd class="panel-dato-valor">3</dd>\s*<dd class="panel-dato-nota">1 pos · 2 neg \(2 vig\.\) · 1 función calificada</dd>#', $cuerpo);
+    }
+
+    public function testMisReservasExplicaLosBeneficiosConBuenaConducta(): void
+    {
+        $this->configurar(['conducta' => ['umbral_beneficio' => 80, 'dias_preventa' => 7]]);
+        $buenaConducta = Uuid::nuevo();
+
+        $respuesta = $this->pedir('GET', '/reservas', $buenaConducta);
+
+        self::assertSame(200, $respuesta->estado());
+        $cuerpo = $respuesta->cuerpo();
+        self::assertStringContainsString('buena conducta (preventas y cupones de descuento habilitados)', $cuerpo);
+        self::assertStringContainsString('Con 100 puntos (al menos 80), tenés habilitados los beneficios por buena conducta', $cuerpo);
+    }
+
+    public function testBajoElUmbralDeBeneficioBloqueaPreventaYCuponEnPantalla(): void
+    {
+        $this->configurar(['conducta' => ['umbral_beneficio' => 80, 'dias_preventa' => 7]]);
+        $reciente = gmdate('Y-m-d H:i:s', strtotime('-4 days'));
+        // Tito: 2 negativas (-20) + 5 ausencias (-25) = 55 puntos (< 80).
+        for ($i = 0; $i < 2; ++$i) {
+            $id = Uuid::nuevo();
+            $this->base->ejecutar(
+                "INSERT INTO reserva (id, funcion_id, usuario_id, codigo, cantidad, total, estado, creada_en) VALUES (?, ?, ?, ?, 1, '0.00', 'asistio', ?)",
+                [$id, '13131313-1313-4313-8313-131313131313', self::EVA, strtoupper(substr(bin2hex(random_bytes(4)), 0, 8)), $reciente],
+            );
+            $this->base->ejecutar(
+                'INSERT INTO conducta (reserva_id, usuario_id, organizador_id, positiva, motivo, creada_en) VALUES (?, ?, ?, 0, ?, ?)',
+                [$id, self::EVA, Uuid::nuevo(), 'Mala conducta', $reciente],
+            );
+        }
+        for ($i = 0; $i < 5; ++$i) {
+            $this->hecha('24242424-2424-4424-8424-242424242424', $reciente, 'ausente');
+        }
+
+        // PROXIMA (+30 días) cae en preventa (dias_preventa = 7): el espectador de 55 puntos ve el motivo y no el campo.
+        $pantallaPreventa = $this->pedir('GET', '/reservar/' . self::PROXIMA);
+        self::assertSame(200, $pantallaPreventa->estado());
+        self::assertStringContainsString('Esta función está en preventa para espectadores con al menos 80 puntos de conducta (faltan más de 7 días).', $pantallaPreventa->cuerpo());
+        self::assertStringNotContainsString('name="cantidad"', $pantallaPreventa->cuerpo());
+
+        $intentoPreventa = $this->reservar('1', self::PROXIMA);
+        self::assertSame(422, $intentoPreventa->estado());
+        self::assertStringContainsString('preventa para espectadores con al menos 80 puntos', $intentoPreventa->cuerpo());
+
+        // Otro espectador con 100 puntos sí puede reservar la función en preventa y ve el campo cupón.
+        $pantallaOtro = $this->pedir('GET', '/reservar/' . self::PROXIMA, self::ELIAS);
+        self::assertSame(200, $pantallaOtro->estado());
+        self::assertStringContainsString('name="cantidad"', $pantallaOtro->cuerpo());
+        self::assertStringContainsString('name="cupon"', $pantallaOtro->cuerpo());
+
+        // Con dias_preventa = 0 (sin preventa), alguien con 55 puntos no ve el campo cupón y si lo manda por POST recibe 422.
+        $this->configurar(['conducta' => ['umbral_beneficio' => 80, 'dias_preventa' => 0]]);
+        $pantallaSinCupon = $this->pedir('GET', '/reservar/' . self::PROXIMA);
+        self::assertSame(200, $pantallaSinCupon->estado());
+        self::assertStringNotContainsString('name="cupon"', $pantallaSinCupon->cuerpo());
+        self::assertStringContainsString('necesitás al menos 80 puntos para usar cupones de descuento.', $pantallaSinCupon->cuerpo());
+
+        $postConCupon = $this->pedir('POST', '/reservar/' . self::PROXIMA, self::EVA, [
+            '_csrf' => self::CSRF,
+            'cantidad' => '1',
+            'cupon' => 'EVA23456',
+        ]);
+        self::assertSame(422, $postConCupon->estado());
+        self::assertStringContainsString('necesitás al menos 80 puntos para usar cupones de descuento.', $postConCupon->cuerpo());
     }
 
     public function testSinCorreoVerificadoNoPuedeReservarPorPaginaNiPorJson(): void

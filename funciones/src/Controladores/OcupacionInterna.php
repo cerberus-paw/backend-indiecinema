@@ -59,6 +59,11 @@ final class OcupacionInterna extends Controlador
                 $datos['tope_reservas_conducta'] = $topeConducta;
                 $datos['reservas_activas_usuario'] = $this->reservas->activasDelUsuario($usuario);
             }
+            if ($this->conducta !== null) {
+                $datos['tiene_beneficio_conducta'] = $this->conducta->tieneBeneficio($usuario);
+                $datos['umbral_beneficio_conducta'] = $this->conducta->umbralBeneficio();
+                $datos['dias_preventa_conducta'] = $this->conducta->diasPreventa();
+            }
         }
 
         return $this->json($datos);

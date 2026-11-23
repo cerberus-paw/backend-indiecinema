@@ -67,10 +67,10 @@ final class OcupacionDeFunciones
 
     /**
      * Los lugares ocupados de una función, el tope de lugares por persona y, si se pasa usuario,
-     * los que ya tiene reservados ese espectador en ella (IC-463). El tope viene de funciones, que
-     * es quien lo hace cumplir: programación no tiene su propia copia del número.
+     * los que ya tiene reservados ese espectador en ella (IC-463) y sus accesos por conducta
+     * (EF-22.7). El tope y los umbrales vienen de funciones, que es quien los hace cumplir.
      *
-     * @return ?array{ocupados: int, maximo_por_persona: int, del_usuario: int, tope_reservas_conducta: ?int, reservas_activas_usuario: int} null si funciones no responde
+     * @return ?array{ocupados: int, maximo_por_persona: int, del_usuario: int, tope_reservas_conducta: ?int, reservas_activas_usuario: int, tiene_beneficio_conducta: bool, umbral_beneficio_conducta: ?int, dias_preventa_conducta: int} null si funciones no responde
      */
     public function deUnaParaUsuario(string $funcionId, ?string $usuarioId = null): ?array
     {
@@ -93,6 +93,9 @@ final class OcupacionDeFunciones
             $delUsuario = $datos['lugares_del_usuario'] ?? 0;
             $topeConducta = $datos['tope_reservas_conducta'] ?? null;
             $activasUsuario = $datos['reservas_activas_usuario'] ?? 0;
+            $tieneBeneficio = $datos['tiene_beneficio_conducta'] ?? true;
+            $umbralBeneficio = $datos['umbral_beneficio_conducta'] ?? null;
+            $diasPreventa = $datos['dias_preventa_conducta'] ?? 0;
 
             return [
                 'ocupados' => $ocupados,
@@ -100,6 +103,9 @@ final class OcupacionDeFunciones
                 'del_usuario' => is_int($delUsuario) ? $delUsuario : 0,
                 'tope_reservas_conducta' => is_int($topeConducta) && $topeConducta >= 1 ? $topeConducta : null,
                 'reservas_activas_usuario' => is_int($activasUsuario) && $activasUsuario >= 0 ? $activasUsuario : 0,
+                'tiene_beneficio_conducta' => is_bool($tieneBeneficio) ? $tieneBeneficio : true,
+                'umbral_beneficio_conducta' => is_int($umbralBeneficio) && $umbralBeneficio >= 1 ? $umbralBeneficio : null,
+                'dias_preventa_conducta' => is_int($diasPreventa) && $diasPreventa >= 0 ? $diasPreventa : 0,
             ];
         });
     }

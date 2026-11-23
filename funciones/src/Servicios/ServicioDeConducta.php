@@ -22,6 +22,8 @@ final class ServicioDeConducta
     private readonly int $mesesVigencia;
     private readonly int $umbral;
     private readonly int $topeBajoUmbral;
+    private readonly int $umbralBeneficio;
+    private readonly int $diasPreventa;
 
     public function __construct(
         private readonly RepositorioDeConducta $conductas,
@@ -34,6 +36,9 @@ final class ServicioDeConducta
         $this->umbral = self::entero($configuracion, 'conducta.umbral', Conducta::UMBRAL);
         $tope = self::entero($configuracion, 'conducta.tope_bajo_umbral', Conducta::TOPE_BAJO_UMBRAL);
         $this->topeBajoUmbral = $tope >= 1 ? $tope : Conducta::TOPE_BAJO_UMBRAL;
+        $umbralBeneficio = self::entero($configuracion, 'conducta.umbral_beneficio', Conducta::UMBRAL_BENEFICIO);
+        $this->umbralBeneficio = $umbralBeneficio >= 1 ? $umbralBeneficio : Conducta::UMBRAL_BENEFICIO;
+        $this->diasPreventa = self::entero($configuracion, 'conducta.dias_preventa', Conducta::DIAS_PREVENTA);
     }
 
     public function puntaje(string $usuarioId, DateTimeImmutable $ahora = new DateTimeImmutable()): int
@@ -49,6 +54,37 @@ final class ServicioDeConducta
     public function umbral(): int
     {
         return $this->umbral;
+    }
+
+    public function umbralBeneficio(): int
+    {
+        return $this->umbralBeneficio;
+    }
+
+    public function diasPreventa(): int
+    {
+        return $this->diasPreventa;
+    }
+
+    public function tieneBeneficio(string $usuarioId, DateTimeImmutable $ahora = new DateTimeImmutable()): bool
+    {
+        return $this->puntaje($usuarioId, $ahora) >= $this->umbralBeneficio;
+    }
+
+    /**
+     * Indica si la función está en ventana de preventa exclusiva (faltan más de dias_preventa días)
+     * y el usuario todavía no alcanza el puntaje mínimo configurado (EF-22.7).
+     */
+    public function bloqueadoPorPreventa(
+        string $usuarioId,
+        ?DateTimeImmutable $fechaFuncion,
+        DateTimeImmutable $ahora = new DateTimeImmutable(),
+    ): bool {
+        if ($this->diasPreventa <= 0 || $fechaFuncion === null) {
+            return false;
+        }
+
+        return $fechaFuncion > $ahora->modify("+{$this->diasPreventa} days") && !$this->tieneBeneficio($usuarioId, $ahora);
     }
 
     public function bajoElUmbral(string $usuarioId, DateTimeImmutable $ahora = new DateTimeImmutable()): bool
@@ -72,6 +108,9 @@ final class ServicioDeConducta
      *     puntaje: int,
      *     puntaje_inicial: int,
      *     umbral: int,
+     *     umbral_beneficio: int,
+     *     tiene_beneficio: bool,
+     *     dias_preventa: int,
      *     bajo_umbral: bool,
      *     tope_bajo_umbral: int,
      *     asistencias: int,
@@ -92,6 +131,9 @@ final class ServicioDeConducta
             'puntaje' => $puntaje,
             'puntaje_inicial' => $this->puntajeInicial,
             'umbral' => $this->umbral,
+            'umbral_beneficio' => $this->umbralBeneficio,
+            'tiene_beneficio' => $puntaje >= $this->umbralBeneficio,
+            'dias_preventa' => $this->diasPreventa,
             'bajo_umbral' => $puntaje <= $this->umbral,
             'tope_bajo_umbral' => $this->topeBajoUmbral,
             ...$resumen,

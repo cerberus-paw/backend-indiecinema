@@ -45,8 +45,21 @@ if ($ruta === '/interno/ocupacion') {
         $respuesta['lugares_del_usuario'] = is_int($delUsuario) ? $delUsuario : 0;
         $conducta = $ocupados['conducta:' . $_GET['usuario']] ?? null;
         if (is_array($conducta)) {
-            $respuesta['tope_reservas_conducta'] = $conducta['tope'];
-            $respuesta['reservas_activas_usuario'] = $conducta['activas'];
+            if (isset($conducta['tope'])) {
+                $respuesta['tope_reservas_conducta'] = $conducta['tope'];
+            }
+            if (isset($conducta['activas'])) {
+                $respuesta['reservas_activas_usuario'] = $conducta['activas'];
+            }
+            if (isset($conducta['tiene_beneficio'])) {
+                $respuesta['tiene_beneficio_conducta'] = $conducta['tiene_beneficio'];
+            }
+            if (isset($conducta['umbral_beneficio'])) {
+                $respuesta['umbral_beneficio_conducta'] = $conducta['umbral_beneficio'];
+            }
+            if (isset($conducta['dias_preventa'])) {
+                $respuesta['dias_preventa_conducta'] = $conducta['dias_preventa'];
+            }
         }
     }
     echo json_encode($respuesta);

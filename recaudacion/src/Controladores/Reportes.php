@@ -19,6 +19,7 @@ use IndieCinema\Recaudacion\Modelo\Embudo;
 use IndieCinema\Recaudacion\Modelo\EmbudoDelPeriodo;
 use IndieCinema\Recaudacion\Modelo\FuncionFinalizada;
 use IndieCinema\Recaudacion\Modelo\FuncionParaProgramar;
+use IndieCinema\Recaudacion\Modelo\GeneroDeSala;
 use IndieCinema\Recaudacion\Modelo\ModeracionDeSala;
 use IndieCinema\Recaudacion\Modelo\ModeracionDelPeriodo;
 use IndieCinema\Recaudacion\Modelo\Monto;
@@ -202,6 +203,7 @@ final class Reportes extends Controlador
                 'asistencia' => "{$titulo->asistencia} %",
                 'promedio' => self::promedio($titulo->promedio),
             ], $sugerencias->titulosParaRepetir($datos)),
+            'generos' => self::generos($sugerencias->generosPorSala($datos)),
             'pedidos' => array_map(static fn (PedidoDelPublico $pedido): array => [
                 ...self::pedido($pedido),
                 'programar' => $pedido->salaId === null ? null : $precargas->url(new FuncionParaProgramar($pedido->salaId, [$pedido->obraId])),
@@ -218,6 +220,7 @@ final class Reportes extends Controlador
                 'agotada' => "{$this->umbrales->agotadaOcupacionMinima} %",
                 'promocion_ganancia' => "{$this->umbrales->promocionGananciaMaxima} %",
                 'descuento' => "{$this->umbrales->promocionDescuento} %",
+                'genero_funciones' => $this->umbrales->generoFuncionesMinimas,
             ],
         ]);
     }
@@ -487,6 +490,31 @@ final class Reportes extends Controlador
     /**
      * @return array{titulo: string, votaciones: int, votos: int, porcentaje: string}
      */
+    /**
+     * Los géneros de cada sala (EF-22.18), agrupados por sala para la plantilla.
+     *
+     * @param list<GeneroDeSala> $generos
+     *
+     * @return list<array{sala: string, generos: list<array{genero: string, funciones: int, ocupacion: string, ocupacion_valor: int, votos: ?string, promedio: ?string}>}>
+     */
+    private static function generos(array $generos): array
+    {
+        $porSala = [];
+        foreach ($generos as $genero) {
+            $porSala[$genero->salaId]['sala'] = $genero->salaNombre;
+            $porSala[$genero->salaId]['generos'][] = [
+                'genero' => $genero->genero,
+                'funciones' => $genero->funciones,
+                'ocupacion' => "{$genero->ocupacion} %",
+                'ocupacion_valor' => $genero->ocupacion,
+                'votos' => $genero->votos === null ? null : "{$genero->votos} %",
+                'promedio' => $genero->promedio === null ? null : self::promedio($genero->promedio),
+            ];
+        }
+
+        return array_values($porSala);
+    }
+
     private static function pedido(PedidoDelPublico $pedido): array
     {
         return [

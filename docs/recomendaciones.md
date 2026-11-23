@@ -11,6 +11,7 @@ Recaudación no guarda funciones ni reservas: las pide por la API interna y las 
 | Sala, día de la semana y hora de cada función | programación (`/interno/funciones/finalizadas`) |
 | Precio: con precio o a la gorra | programación |
 | Votación de títulos: qué obra ganó y cuántos votos sacó cada una | programación |
+| Los géneros de cada obra (EF-22.18) | programación |
 | Quiénes votaron | programación |
 | Lugares, lugares vendidos y cuántos fueron | funciones (`/interno/cobros`) |
 | Quiénes reservaron | funciones |
@@ -73,6 +74,20 @@ El profe pidió el 18/11 «mezclar los ingredientes». Cada combinada parte de u
 - **Qué sugiere:** sumar una función de esa obra el día flojo. Si hay varias, sale la que más se agotó.
 - **Por qué:** cruza la demanda que no entró, lo que le pareció al público y el día que sobra lugar.
 
+### Dar el género que más llena, el día flojo (EF-22.18)
+
+El profe, el 18/11: «si es mayor al 25 % pero las películas son de acción, tenés que hacer esto […] porcentaje de sala más tipo de película».
+
+- **Cuándo:** las dos condiciones juntas.
+  1. Un día es flojo en la sala.
+  2. En esa sala, las funciones de un género llenan por lo menos `genero_diferencia_minima` (20) puntos más que todas las de la sala, con al menos `genero_funciones_minimas` (2) funciones.
+- **Qué sugiere:** dar una obra de ese género ese día.
+  - Primero, la que el público de la sala votó y no vio, si es de alguno de los géneros que llenan así.
+  - Si no hay, la que más llenó en la sala del género que más llena.
+  - Nunca una que otra combinada ya sugirió para ese día.
+- **Por qué:** cruza el día, la ocupación, el género y la votación. Si ese día se dio sobre todo otro género, lo dice, porque eso explica que esté flojo.
+- **Dónde se ve:** la pestaña Programación muestra, por sala, cuánto llena cada género, qué parte de los votos se llevó y su promedio. Una obra con dos géneros cuenta en los dos.
+
 ## De la recomendación a la función (EF-22.17)
 
 El profe, el 18/11: «precargás el formulario, le das enter». Cada recomendación que se resuelve programando una función tiene un botón **Programarla**. Abre el alta de función de programación ya cargada, y alcanza con revisar y confirmar. Programación acepta esos valores por la URL, descarta lo que no sea del organizador o no esté en el catálogo y avisa que vienen del reporte.
@@ -95,7 +110,7 @@ El botón le sale sólo al organizador de la sala: el administrador ve todas, pe
 
 ## Lo que queda afuera
 
-- El género y la categoría de la obra, y el perfil del espectador: programación no los manda en la API interna de finalizadas. Son el próximo ingrediente.
+- El perfil del espectador. El 23/11 se decidió no clasificar a los espectadores en perfiles: el género alcanza para cruzar qué le gusta al público de cada sala.
 - La capacidad de la sala ya está en la ocupación, que es en porcentaje de los lugares.
 
 ## La conversión: del voto a la plata (EF-22.13)

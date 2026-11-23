@@ -468,7 +468,8 @@ final class RepositorioDeFunciones
         $obras = [];
         foreach ($this->base->filas(
             "SELECT fo.funcion_id, fo.estado, o.id, o.titulo, o.dueno_id,
-                    (SELECT COUNT(*) FROM voto v WHERE v.funcion_id = fo.funcion_id AND v.obra_id = o.id) AS votos
+                    (SELECT COUNT(*) FROM voto v WHERE v.funcion_id = fo.funcion_id AND v.obra_id = o.id) AS votos,
+                    (SELECT GROUP_CONCAT(g.nombre ORDER BY g.nombre SEPARATOR '\n') FROM obra_genero og JOIN genero g ON g.id = og.genero_id WHERE og.obra_id = o.id) AS generos
              FROM funcion_obra fo
              JOIN obra o ON o.id = fo.obra_id
              WHERE fo.funcion_id IN ({$marcas})
@@ -481,6 +482,9 @@ final class RepositorioDeFunciones
                 (string) $obra['dueno_id'],
                 $obra['estado'] === 'elegida',
                 (int) $obra['votos'],
+                // Los géneros, para que los reportes crucen qué tipo de película llena cada sala
+                // (EF-22.18). Un nombre de género no lleva saltos de línea: sirven de separador.
+                $obra['generos'] === null ? [] : explode("\n", (string) $obra['generos']),
             );
         }
         $votantes = [];

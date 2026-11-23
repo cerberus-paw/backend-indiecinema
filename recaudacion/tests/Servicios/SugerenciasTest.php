@@ -9,6 +9,7 @@ use IndieCinema\Recaudacion\Modelo\CalificacionDeFuncion;
 use IndieCinema\Recaudacion\Modelo\DatosDelReporte;
 use IndieCinema\Recaudacion\Modelo\FuncionFinalizada;
 use IndieCinema\Recaudacion\Modelo\FuncionParaProgramar;
+use IndieCinema\Recaudacion\Modelo\GeneroDeSala;
 use IndieCinema\Recaudacion\Modelo\ObraVotada;
 use IndieCinema\Recaudacion\Modelo\Periodo;
 use IndieCinema\Recaudacion\Modelo\RecomendacionCombinada;
@@ -73,9 +74,12 @@ final class SugerenciasTest extends TestCase
         }
     }
 
-    private static function obra(string $titulo, bool $elegida = true, int $votos = 0): ObraVotada
+    /**
+     * @param list<string> $generos
+     */
+    private static function obra(string $titulo, bool $elegida = true, int $votos = 0, array $generos = []): ObraVotada
     {
-        return new ObraVotada('obra-' . $titulo, $titulo, 'duena', $elegida, $votos);
+        return new ObraVotada('obra-' . $titulo, $titulo, 'duena', $elegida, $votos, $generos);
     }
 
     private function datos(bool $conVentas = true): DatosDelReporte
@@ -564,5 +568,110 @@ final class SugerenciasTest extends TestCase
 
         self::assertCount(1, (new Sugerencias(new Umbrales(promocionGananciaMaxima: 50), [self::galponQueSeLlevo(560)]))->diasFlojos($this->datos()));
         self::assertCount(1, (new Sugerencias(new Umbrales(), [$sinCosto]))->diasFlojos($this->datos()));
+    }
+
+    // El género (EF-22.18). Los miércoles se da comedia y se vende poco; los viernes, drama, y se
+    // vende menos todavía; los sábados, terror, y se llena. La sala llena el 42 % (100 de 240).
+
+    private function salaConGeneros(): void
+    {
+        $this->funcion('2026-11-04 21:00', 8, obras: [self::obra('Risas', generos: ['Comedia'])]);
+        $this->funcion('2026-11-11 21:00', 8, obras: [self::obra('Risas', generos: ['Comedia'])]);
+        $this->funcion('2026-11-07 21:00', 36, obras: [self::obra('Nosferatu', generos: ['Terror'])]);
+        $this->funcion('2026-11-14 21:00', 36, obras: [self::obra('Nosferatu', generos: ['Terror'])]);
+        $this->funcion('2026-11-06 21:00', 6, obras: [self::obra('Zama', generos: ['Drama'])]);
+        $this->funcion('2026-11-13 21:00', 6, obras: [self::obra('Zama', generos: ['Drama'])]);
+    }
+
+    public function testCadaSalaDiceQueGenerosLlenan(): void
+    {
+        $this->salaConGeneros();
+        // Una función sola de documental: no alcanza para decir nada del género.
+        $this->funcion('2026-11-05 21:00', 40, obras: [self::obra('Tierra', generos: ['Documental'])]);
+
+        $generos = self::sugerencias()->generosPorSala($this->datos());
+
+        self::assertSame([['Terror', 2, 90], ['Comedia', 2, 20], ['Drama', 2, 15]], array_map(
+            static fn (GeneroDeSala $g): array => [$g->genero, $g->funciones, $g->ocupacion],
+            $generos,
+        ));
+        // Nadie votó en la sala.
+        self::assertNull($generos[0]->votos);
+    }
+
+    public function testElDiaFlojoSugiereLaObraDelGeneroQueMasLlena(): void
+    {
+        $this->salaConGeneros();
+
+        $combinadas = array_values(array_filter(
+            self::sugerencias()->combinadas($this->datos()),
+            static fn (RecomendacionCombinada $r): bool => $r->regla === RecomendacionCombinada::GENERO_EL_DIA_FLOJO,
+        ));
+
+        // Los dos días flojos, del que menos vende al que más: a los dos les va el terror.
+        self::assertSame([
+            'Los viernes, dar «Nosferatu» (Terror): es de lo que más llena en esta sala.',
+            'Los miércoles, dar «Nosferatu» (Terror): es de lo que más llena en esta sala.',
+        ], array_map(static fn (RecomendacionCombinada $r): string => $r->accion, $combinadas));
+        $combinadas = [$combinadas[1]];
+        self::assertSame([
+            'Los miércoles se vendió el 20 % de los lugares, contra el 53 % del resto de la semana (2 funciones).',
+            'En esta sala, las funciones de Terror llenan el 90 % (2 funciones), contra el 42 % de todas.',
+            'Los miércoles se dio sobre todo Comedia, que en esta sala llena el 20 %.',
+            '«Nosferatu» es de Terror y en esta sala llenó el 90 % de los lugares.',
+        ], $combinadas[0]->porque);
+        self::assertEquals(new FuncionParaProgramar(self::GALPON, ['obra-Nosferatu'], 3), $combinadas[0]->programar);
+    }
+
+    public function testSiSuPublicoVotoUnaDeEseGeneroYNoLaVioVaEsa(): void
+    {
+        $this->salaConGeneros();
+        $this->funcion('2026-11-18 21:00', 8, obras: [self::obra('Risas', generos: ['Comedia']), self::obra('Drácula', false, 5, ['Terror'])]);
+
+        $combinadas = array_values(array_filter(
+            self::sugerencias()->combinadas($this->datos()),
+            static fn (RecomendacionCombinada $r): bool => $r->regla === RecomendacionCombinada::GENERO_EL_DIA_FLOJO,
+        ));
+
+        self::assertSame('Los viernes, dar «Drácula» (Terror): es de lo que más llena en esta sala.', $combinadas[0]->accion);
+        self::assertSame('«Drácula» es de Terror y su público la votó sin verla: 5 votos.', $combinadas[0]->porque[3]);
+        // Los 5 votos de la votación fueron para «Drácula»: el terror se llevó todos.
+        self::assertStringEndsWith('Su público le dio el 100 % de los votos.', $combinadas[0]->porque[1]);
+    }
+
+    public function testSinUnGeneroQueLleneBastanteMasNoSeSugiere(): void
+    {
+        // Comedia los miércoles y terror los sábados, pero el terror llena apenas un poco más.
+        $this->funcion('2026-11-04 21:00', 14, obras: [self::obra('Risas', generos: ['Comedia'])]);
+        $this->funcion('2026-11-11 21:00', 14, obras: [self::obra('Risas', generos: ['Comedia'])]);
+        $this->funcion('2026-11-07 21:00', 24, obras: [self::obra('Nosferatu', generos: ['Terror'])]);
+        $this->funcion('2026-11-14 21:00', 24, obras: [self::obra('Nosferatu', generos: ['Terror'])]);
+
+        self::assertSame([], array_filter(
+            self::sugerencias()->combinadas($this->datos()),
+            static fn (RecomendacionCombinada $r): bool => $r->regla === RecomendacionCombinada::GENERO_EL_DIA_FLOJO,
+        ));
+    }
+
+    /**
+     * Como El Alambique en la demo: la ciencia ficción llena todo, pero su única obra ya se sugiere
+     * para el miércoles porque se agota. El suspenso también llena bastante más que la sala, y su
+     * público votó «Caligari» sin verla: va ésa.
+     */
+    public function testSiLaObraDelMejorGeneroYaSeSugirioVaLaPedidaDeOtroQueTambienLlena(): void
+    {
+        $this->funcion('2026-11-04 21:00', 8, obras: [self::obra('Risas', generos: ['Comedia'])]);
+        $this->funcion('2026-11-11 21:00', 8, obras: [self::obra('Risas', generos: ['Comedia'])]);
+        $this->funcion('2026-11-07 21:00', 40, 40, [self::obra('Metrópolis', generos: ['Ciencia ficción'])], calificacion: new CalificacionDeFuncion(4.8, 10));
+        $this->funcion('2026-11-14 21:00', 40, 40, [self::obra('Metrópolis', generos: ['Ciencia ficción'])], calificacion: new CalificacionDeFuncion(4.8, 10));
+        $this->funcion('2026-11-06 21:00', 37, obras: [self::obra('Nosferatu', true, 6, ['Suspenso']), self::obra('Caligari', false, 5, ['Suspenso'])]);
+        $this->funcion('2026-11-13 21:00', 37, obras: [self::obra('Nosferatu', generos: ['Suspenso'])]);
+
+        $combinadas = self::sugerencias()->combinadas($this->datos());
+        $reglas = array_map(static fn (RecomendacionCombinada $r): string => $r->regla, $combinadas);
+
+        self::assertSame([RecomendacionCombinada::AGOTADA_EL_DIA_FLOJO, RecomendacionCombinada::GENERO_EL_DIA_FLOJO], $reglas);
+        self::assertSame('Los miércoles, dar «Caligari» (Suspenso): es de lo que más llena en esta sala.', $combinadas[1]->accion);
+        self::assertSame('«Caligari» es de Suspenso y su público la votó sin verla: 5 votos.', $combinadas[1]->porque[3]);
     }
 }

@@ -377,8 +377,8 @@ final class FuncionesInternasTest extends TestCase
         self::assertSame('2026-12-31T23:00:00', $funcion['finalizada_en']);
         self::assertSame(['id' => $this->sala->id, 'nombre' => 'Cine Club El Galpón'], $funcion['sala']);
         self::assertSame([
-            ['id' => $this->obras['La ciénaga'], 'titulo' => 'La ciénaga', 'dueno_id' => self::ORGANIZADORA, 'elegida' => false, 'votos' => 1],
-            ['id' => $this->obras['Zama'], 'titulo' => 'Zama', 'dueno_id' => self::ORGANIZADORA, 'elegida' => true, 'votos' => 2],
+            ['id' => $this->obras['La ciénaga'], 'titulo' => 'La ciénaga', 'dueno_id' => self::ORGANIZADORA, 'elegida' => false, 'votos' => 1, 'generos' => ['Drama']],
+            ['id' => $this->obras['Zama'], 'titulo' => 'Zama', 'dueno_id' => self::ORGANIZADORA, 'elegida' => true, 'votos' => 2, 'generos' => ['Drama']],
         ], $funcion['obras']);
         self::assertCount(3, $funcion['votantes_ids']);
         self::assertSame([], $datos['funciones'][1]['votantes_ids']);

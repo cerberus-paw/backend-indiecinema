@@ -118,7 +118,14 @@ final class FuncionesFinalizadas
                     throw new RuntimeException('programación respondió una obra de una función finalizada incompleta.');
                 }
 
-                return new ObraVotada($obra['id'], $obra['titulo'], $obra['dueno_id'], $obra['elegida'], $obra['votos']);
+                // Los géneros (EF-22.18) son opcionales: una programación sin desplegar no los manda,
+                // y el reporte sale igual, sin la recomendación por género.
+                $generos = $obra['generos'] ?? [];
+                if (!is_array($generos) || !array_is_list($generos) || array_filter($generos, is_string(...)) !== $generos) {
+                    throw new RuntimeException('programación respondió una obra con los géneros mal.');
+                }
+
+                return new ObraVotada($obra['id'], $obra['titulo'], $obra['dueno_id'], $obra['elegida'], $obra['votos'], $generos);
             }, $datos['obras']),
             $votantes,
         );

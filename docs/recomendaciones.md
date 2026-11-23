@@ -108,6 +108,14 @@ Lo que la recomendación no dice sale de lo que la sala hizo en el período:
 
 El botón le sale sólo al organizador de la sala: el administrador ve todas, pero no programa en las ajenas.
 
+## El ranking de espectadores por sala (EF-22.19)
+
+La pestaña Público muestra, por sala, los diez espectadores que más participan en el período. Tomás lo pidió el 23/11, con la condición de que no lo vean los otros espectadores: está en los reportes, que ven el organizador (de sus salas) y el administrador.
+
+- **Puntaje:** 3 por cada función a la que fue, 1 por cada votación de títulos en la que votó y 1 por cada función que calificó. Ir vale más porque es lo que llena la sala. Ante un empate, primero el que pagó más.
+- **De dónde sale:** quiénes votaron lo manda programación; quién fue, calificó y cuánto pagó, funciones (`GET /interno/embudo`, la misma consulta de la conversión); el nombre, cuentas.
+- **Si falta un subsistema:** sin funciones, cuenta sólo los votos; sin cuentas, muestra el final del id en lugar del nombre. Las dos veces lo avisa.
+
 ## Lo que queda afuera
 
 - El perfil del espectador. El 23/11 se decidió no clasificar a los espectadores en perfiles: el género alcanza para cruzar qué le gusta al público de cada sala.

@@ -37,6 +37,7 @@ final class ReportesTest extends TestCase
     private static string $programacion;
     private static string $funciones;
     private static string $moderacion;
+    private static string $cuentas;
 
     /** Un puerto donde no atiende nadie: un subsistema caído. */
     private static string $caido;
@@ -46,6 +47,7 @@ final class ReportesTest extends TestCase
         self::$programacion = self::levantar('programacion.php');
         self::$funciones = self::levantar('funciones.php');
         self::$moderacion = self::levantar('moderacion.php');
+        self::$cuentas = self::levantar('cuentas.php');
         self::$caido = 'http://127.0.0.1:' . self::puertoLibre();
     }
 
@@ -62,7 +64,7 @@ final class ReportesTest extends TestCase
         $configuracion = new Configuracion([
             'app' => ['subsistema' => 'recaudacion', 'prefijo' => '/recaudacion', 'entorno' => 'desarrollo'],
             'nginx' => ['secreto' => 'secreto-de-nginx'],
-            'subsistemas' => [...['programacion' => self::$programacion, 'funciones' => self::$funciones, 'moderacion' => self::$moderacion], ...$subsistemas],
+            'subsistemas' => [...['programacion' => self::$programacion, 'funciones' => self::$funciones, 'moderacion' => self::$moderacion, 'cuentas' => self::$cuentas], ...$subsistemas],
             'interno' => ['token' => 'token-de-recaudacion'],
         ]);
         $aplicacion = new Aplicacion(dirname(__DIR__), $configuracion, new Log('recaudacion', fopen('php://memory', 'w')));
@@ -419,6 +421,33 @@ final class ReportesTest extends TestCase
 
         self::assertMatchesRegularExpression('/Qué géneros llenan El Galpón Suspenso .* 93 % Drama 4 funciones · 100 % de los votos .* 56 %/', $texto);
         self::assertStringContainsString('Suspenso 2 funciones · 0 % de los votos · 4,4 de promedio', $texto);
+    }
+
+    /**
+     * EF-22.19: el ranking del Galpón en noviembre. Del 100 al 104 fueron a sus tres funciones de
+     * sábado y miércoles: 9 puntos y $ 10.500 cada uno. El 9 votó, fue y calificó: 5 puntos.
+     */
+    public function testElPublicoTieneElRankingDeCadaSala(): void
+    {
+        $respuesta = $this->pedir(self::NOVIEMBRE . '&tema=publico');
+
+        self::assertSame(200, $respuesta->estado(), $respuesta->cuerpo());
+        $texto = self::texto($respuesta);
+        self::assertStringContainsString('Los que más participan en El Galpón', $texto);
+        self::assertStringContainsString('1 Ulises Uno 3 0 0 $ 10.500 9', $texto);
+        self::assertStringContainsString('2 Espectador …000101 3 0 0 $ 10.500 9', $texto);
+        self::assertStringContainsString('Los primeros 10 de 52 espectadores que participaron.', $texto);
+        self::assertStringContainsString('Puntaje: 3 por cada función a la que fue, 1 por cada votación de títulos en la que votó y 1 por cada función que calificó.', $texto);
+        // Sólo sus salas.
+        self::assertStringNotContainsString('Cineclub Norte', $texto);
+    }
+
+    public function testSinCuentasElRankingSaleSinNombres(): void
+    {
+        $texto = self::texto($this->pedir(self::NOVIEMBRE . '&tema=publico', subsistemas: ['cuentas' => self::$caido]));
+
+        self::assertStringContainsString('Cuentas no respondió: el ranking sale sin los nombres.', $texto);
+        self::assertStringContainsString('1 Espectador …000100 3 0 0 $ 10.500 9', $texto);
     }
 
     /** El administrador ve todas las salas pero no programa en las ajenas: sin botón. */

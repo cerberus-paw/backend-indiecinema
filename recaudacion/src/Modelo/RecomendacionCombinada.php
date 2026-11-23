@@ -31,6 +31,7 @@ final readonly class RecomendacionCombinada
         public string $salaNombre,
         public string $accion,
         public array $porque,
+        public ?FuncionParaProgramar $programar = null,
     ) {
     }
 }

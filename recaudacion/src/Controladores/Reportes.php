@@ -18,6 +18,7 @@ use IndieCinema\Recaudacion\Modelo\DiaFlojo;
 use IndieCinema\Recaudacion\Modelo\Embudo;
 use IndieCinema\Recaudacion\Modelo\EmbudoDelPeriodo;
 use IndieCinema\Recaudacion\Modelo\FuncionFinalizada;
+use IndieCinema\Recaudacion\Modelo\FuncionParaProgramar;
 use IndieCinema\Recaudacion\Modelo\ModeracionDeSala;
 use IndieCinema\Recaudacion\Modelo\ModeracionDelPeriodo;
 use IndieCinema\Recaudacion\Modelo\Monto;
@@ -40,6 +41,7 @@ use IndieCinema\Recaudacion\Modelo\VotantesSinReserva;
 use IndieCinema\Recaudacion\Servicios\EmbudoDeConversion;
 use IndieCinema\Recaudacion\Servicios\ModeracionYConducta;
 use IndieCinema\Recaudacion\Servicios\ObrasDelDueno;
+use IndieCinema\Recaudacion\Servicios\Precargas;
 use IndieCinema\Recaudacion\Servicios\ResultadosDelPeriodo;
 use IndieCinema\Recaudacion\Servicios\ServicioDeReportes;
 use IndieCinema\Recaudacion\Servicios\Sugerencias;
@@ -121,6 +123,9 @@ final class Reportes extends Controlador
         $moderacion = $administrador && $datos->funciones !== [] ? $this->moderacion?->delPeriodo($datos) : null;
         // La conversión le pregunta a funciones por cada función: sólo cuando se mira su pestaña.
         $embudo = $tema === 'conversion' && $datos->funciones !== [] ? $this->embudo?->delPeriodo($datos) : null;
+        // El botón «Programarla» de cada recomendación (EF-22.17), sólo en las salas de quien mira.
+        $precargas = new Precargas($datos, $usuario->id, $this->umbrales->franjaCorteHora);
+        $descuento = $this->umbrales->promocionDescuento;
 
         return $this->vista('reportes.html.twig', [
             'periodo' => $periodoElegido,
@@ -146,8 +151,11 @@ final class Reportes extends Controlador
                 'sala' => $recomendacion->salaNombre,
                 'accion' => $recomendacion->accion,
                 'porque' => $recomendacion->porque,
+                'programar' => $precargas->url($recomendacion->programar),
             ], $sugerencias->combinadas($datos)),
             'dias_flojos' => array_map(static fn (DiaFlojo $dia): array => [
+                // La promoción: ese día, con el descuento y lo que el público pidió, si hay.
+                'programar' => $precargas->url(new FuncionParaProgramar($dia->salaId, $dia->paraDar === null ? [] : [$dia->paraDar->obraId], $dia->dia, descuento: $descuento)),
                 'sala' => $dia->salaNombre,
                 'dia' => self::DIAS[$dia->dia],
                 'funciones' => $dia->funciones,
@@ -156,6 +164,8 @@ final class Reportes extends Controlador
                 'para_dar' => $dia->paraDar === null ? null : self::pedido($dia->paraDar),
             ], $sugerencias->diasFlojos($datos)),
             'precios' => array_map(static fn (PrecioDeLaEntrada $precio): array => [
+                // Sensible al precio: una a la gorra; si no, una con el precio de siempre.
+                'programar' => $precargas->url(new FuncionParaProgramar($precio->salaId, precio: $precio->sensible ? 0 : null)),
                 'sala' => $precio->salaNombre,
                 'funciones_gorra' => $precio->funcionesGorra,
                 'gorra' => "{$precio->ocupacionGorra} %",
@@ -177,6 +187,7 @@ final class Reportes extends Controlador
                 'sin_reserva' => $sala->sinReserva,
             ], $sugerencias->votaronSinReservar($datos)),
             'agotadas' => array_map(static fn (ObraAgotada $obra): array => [
+                'programar' => $precargas->url(new FuncionParaProgramar($obra->salaId, [$obra->obraId])),
                 'titulo' => $obra->titulo,
                 'sala' => $obra->salaNombre,
                 'funciones' => $obra->funciones,
@@ -184,13 +195,17 @@ final class Reportes extends Controlador
                 'ocupacion' => "{$obra->ocupacion} %",
             ], $sugerencias->obrasAgotadas($datos)),
             'titulos' => array_map(static fn (TituloParaRepetir $titulo): array => [
+                'programar' => $titulo->salaId === null ? null : $precargas->url(new FuncionParaProgramar($titulo->salaId, [$titulo->obraId])),
                 'titulo' => $titulo->titulo,
                 'funciones' => $titulo->funciones,
                 'ocupacion' => "{$titulo->ocupacion} %",
                 'asistencia' => "{$titulo->asistencia} %",
                 'promedio' => self::promedio($titulo->promedio),
             ], $sugerencias->titulosParaRepetir($datos)),
-            'pedidos' => array_map(self::pedido(...), $sugerencias->pedidosDelPublico($datos)),
+            'pedidos' => array_map(static fn (PedidoDelPublico $pedido): array => [
+                ...self::pedido($pedido),
+                'programar' => $pedido->salaId === null ? null : $precargas->url(new FuncionParaProgramar($pedido->salaId, [$pedido->obraId])),
+            ], $sugerencias->pedidosDelPublico($datos)),
             'salas' => array_map(self::rendimiento(...), $sugerencias->salasQueRinden($datos)),
             'umbrales' => [
                 'dia_flojo' => "{$this->umbrales->diaFlojoOcupacionMaxima} %",
@@ -202,6 +217,7 @@ final class Reportes extends Controlador
                 'gorra_diferencia' => $this->umbrales->gorraDiferenciaMinima,
                 'agotada' => "{$this->umbrales->agotadaOcupacionMinima} %",
                 'promocion_ganancia' => "{$this->umbrales->promocionGananciaMaxima} %",
+                'descuento' => "{$this->umbrales->promocionDescuento} %",
             ],
         ]);
     }

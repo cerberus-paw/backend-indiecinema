@@ -8,6 +8,7 @@ use DateTimeImmutable;
 use IndieCinema\Recaudacion\Modelo\CalificacionDeFuncion;
 use IndieCinema\Recaudacion\Modelo\DatosDelReporte;
 use IndieCinema\Recaudacion\Modelo\FuncionFinalizada;
+use IndieCinema\Recaudacion\Modelo\FuncionParaProgramar;
 use IndieCinema\Recaudacion\Modelo\ObraVotada;
 use IndieCinema\Recaudacion\Modelo\Periodo;
 use IndieCinema\Recaudacion\Modelo\RecomendacionCombinada;
@@ -396,6 +397,8 @@ final class SugerenciasTest extends TestCase
         self::assertCount(1, $combinadas);
         self::assertSame(RecomendacionCombinada::PEDIDO_A_LA_GORRA, $combinadas[0]->regla);
         self::assertSame('Los miércoles, dar «La ciénaga» a la gorra.', $combinadas[0]->accion);
+        // Y lo que se programa con el botón (EF-22.17): esa obra, ese día, sin precio.
+        self::assertEquals(new FuncionParaProgramar(self::GALPON, ['obra-La ciénaga'], 3, precio: 0), $combinadas[0]->programar);
         self::assertSame([
             'Los miércoles se vendió el 25 % de los lugares, contra el 85 % del resto de la semana (2 funciones).',
             'Su público lo votó y no lo vio: 4 votos en 1 votación, el 40 %.',
@@ -426,6 +429,7 @@ final class SugerenciasTest extends TestCase
         self::assertCount(1, $combinadas);
         self::assertSame(RecomendacionCombinada::OTRO_HORARIO, $combinadas[0]->regla);
         self::assertSame('Los miércoles, pasar las funciones a la noche, desde las 20 h.', $combinadas[0]->accion);
+        self::assertEquals(new FuncionParaProgramar(self::GALPON, [], 3, 'noche'), $combinadas[0]->programar);
         self::assertSame('En esta sala, las de la noche llenan el 90 % (2 funciones) y las de la tarde, el 25 % (2).', $combinadas[0]->porque[1]);
         self::assertSame('De las 2 funciones de los miércoles, 2 fueron a la tarde.', $combinadas[0]->porque[2]);
     }
@@ -455,6 +459,7 @@ final class SugerenciasTest extends TestCase
         self::assertCount(1, $combinadas);
         self::assertSame(RecomendacionCombinada::AGOTADA_EL_DIA_FLOJO, $combinadas[0]->regla);
         self::assertSame('Sumar una función de «Rojo» los miércoles.', $combinadas[0]->accion);
+        self::assertEquals(new FuncionParaProgramar(self::GALPON, ['obra-Rojo'], 3), $combinadas[0]->programar);
         self::assertSame([
             'Se agotó en 1 de sus 2 funciones en esta sala (86 % de los lugares vendidos): hay gente que se quedó afuera.',
             'Gustó: 4,5 de promedio.',

@@ -436,6 +436,36 @@ final class FuncionesDelOrganizadorTest extends TestCase
     }
 
     /**
+     * EF-22.17: una recomendación de los reportes abre el alta ya cargada, y avisa de dónde viene.
+     * Lo que no es del organizador o no está en el catálogo no se carga: el enlace no puede
+     * programar en una sala ajena.
+     */
+    public function testElAltaLlegaPrecargadaDesdeUnaRecomendacion(): void
+    {
+        $sala = $this->sala(self::ORGANIZADORA, 'El Galpón');
+        $ajena = $this->sala(self::OTRO_ORGANIZADOR, 'Sala Ajena');
+        $zama = $this->obras['Zama'];
+
+        $cuerpo = $this->pedir('GET', '/organizador/funciones/nueva?' . http_build_query([
+            'sala_id' => $sala->id, 'obras' => [$zama, 'no-existe'], 'fecha' => '2030-12-04', 'hora' => '20:30',
+            'precio' => '0', 'cupo' => '40', 'desde' => 'reporte',
+        ]), self::ORGANIZADORA)->cuerpo();
+
+        self::assertMatchesRegularExpression('#<option value="' . $sala->id . '"[^>]*selected#', $cuerpo);
+        self::assertMatchesRegularExpression('#value="' . $zama . '"[^>]*checked#', $cuerpo);
+        self::assertStringNotContainsString('no-existe', $cuerpo);
+        foreach (['fecha' => '2030-12-04', 'hora' => '20:30', 'precio' => '0', 'cupo' => '40'] as $campo => $valor) {
+            self::assertMatchesRegularExpression('#name="' . $campo . '"[^>]*value="' . $valor . '"|value="' . $valor . '"[^>]*name="' . $campo . '"#', $cuerpo, $campo);
+        }
+        self::assertStringContainsString('Lo cargamos con la recomendación del reporte', $cuerpo);
+
+        $ajenaPedida = $this->pedir('GET', '/organizador/funciones/nueva?sala_id=' . $ajena->id . '&fecha=mañana&desde=reporte', self::ORGANIZADORA)->cuerpo();
+        self::assertDoesNotMatchRegularExpression('#<option value="[^"]+"[^>]*selected#', $ajenaPedida);
+        self::assertStringNotContainsString('mañana', $ajenaPedida);
+        self::assertStringNotContainsString('Lo cargamos con la recomendación del reporte', $ajenaPedida);
+    }
+
+    /**
      * El navegador no sugiere fechas de otras funciones (E4-10.5); y si el envío vuelve vacío, el
      * resumen lleva a cada campo, también a los grupos sin un control propio, como las obras.
      */

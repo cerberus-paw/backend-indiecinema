@@ -94,7 +94,17 @@ final class FuncionesDelOrganizador extends Controlador
         $salas = $this->servicio->salasHabilitadas($organizador);
         $obras = $this->servicio->catalogoDeObras();
 
-        return $this->formularioAlta($salas, $obras, []);
+        // Desde una recomendación de los reportes, el alta llega cargada (EF-22.17).
+        $consulta = [];
+        foreach (['sala_id', 'obras', 'modo', 'fecha', 'hora', 'precio', 'cupo'] as $campo) {
+            $consulta[$campo] = $peticion->consulta($campo);
+        }
+        $valores = FormularioDeFuncion::precarga($consulta, $salas, $obras);
+
+        return $this->formularioAlta($salas, $obras, [
+            'valores' => $valores,
+            'precargada' => $valores !== [] && $peticion->consulta('desde') === 'reporte',
+        ]);
     }
 
     public function crear(Peticion $peticion): Respuesta
@@ -444,7 +454,7 @@ final class FuncionesDelOrganizador extends Controlador
     /**
      * @param list<Sala>                                                                                        $salas
      * @param list<Obra>                                                                                        $obras
-     * @param array{formulario?: FormularioDeFuncion, valores?: array<string, mixed>, error_general?: ?string} $extra
+     * @param array{formulario?: FormularioDeFuncion, valores?: array<string, mixed>, error_general?: ?string, precargada?: bool} $extra
      */
     private function formularioAlta(
         array $salas,
@@ -472,6 +482,7 @@ final class FuncionesDelOrganizador extends Controlador
             'errores' => $formulario?->errores ?? [],
             'error_general' => $extra['error_general'] ?? null,
             'mensaje_exito' => null,
+            'precargada' => $extra['precargada'] ?? false,
         ], $estado);
     }
 

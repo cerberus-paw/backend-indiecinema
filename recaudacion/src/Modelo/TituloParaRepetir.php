@@ -20,6 +20,8 @@ final readonly class TituloParaRepetir
         public int $ocupacion,
         public int $asistencia,
         public float $promedio,
+        /** la sala donde más se dio, para programarlo ahí (EF-22.17) */
+        public ?string $salaId = null,
     ) {
     }
 }

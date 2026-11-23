@@ -166,4 +166,25 @@ final class GananciasEnReportesTest extends TestCase
 
         self::assertSame(403, $respuesta->estado());
     }
+
+    /**
+     * EF-22.15: la torta de cómo se repartió lo cobrado, con las cuatro partes en la leyenda y las
+     * porciones como atributos del SVG (la CSP no deja style="").
+     */
+    public function testLaPlataMuestraLaTortaDelReparto(): void
+    {
+        $respuesta = $this->pedir(self::NOVIEMBRE);
+
+        $texto = self::texto($respuesta);
+        self::assertStringContainsString('Cómo se repartió lo cobrado', $texto);
+        foreach (['Las salas', 'Los dueños de las obras', 'La plataforma', 'Mercado Pago'] as $parte) {
+            self::assertMatchesRegularExpression('/' . $parte . ' \$ [\d.,]+ [\d,]+ %/u', $texto);
+        }
+        self::assertSame(4, preg_match_all('/<circle class="reporte-torta-porcion /', $respuesta->cuerpo()));
+        // La primera porción empieza arriba; las porciones suman la vuelta entera.
+        self::assertMatchesRegularExpression('/stroke-dashoffset="25"/', $respuesta->cuerpo());
+        preg_match_all('/stroke-dasharray="([\d.]+) /', $respuesta->cuerpo(), $largos);
+        self::assertEqualsWithDelta(100.0, array_sum(array_map(floatval(...), $largos[1])), 0.05);
+        self::assertStringNotContainsString('style="', $respuesta->cuerpo());
+    }
 }

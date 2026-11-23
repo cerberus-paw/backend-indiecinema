@@ -269,11 +269,59 @@ final class Reportes extends Controlador
                 'resultado' => self::conSigno($plataforma->resultado()),
                 'gana' => $plataforma->resultado() >= 0,
             ],
+            'reparto' => self::reparto($salas),
             'comision' => str_replace('.', ',', rtrim(rtrim(sprintf('%.2f', $referencia->comisionCentesimos / 100), '0'), '.')) . ' %',
             'costo_funcion' => self::pesos($referencia->costoFuncionCentavos),
             'servidores_mes' => self::pesos($referencia->servidoresMesCentavos),
             'desarrollo_mes' => self::pesos($referencia->desarrolloMesCentavos),
         ];
+    }
+
+    /**
+     * Cómo se repartió lo cobrado en todas las salas juntas, para la torta de la pestaña Plata
+     * (EF-22.15): el profe pidió el 18/11 gráficos «por ejemplo, de torta». Cada porción trae dónde
+     * empieza y cuánto ocupa, en porcentaje de la vuelta, porque la torta es un SVG con atributos
+     * (la CSP no deja style=""). Vacía si no se cobró nada: una torta de cero no dice nada.
+     *
+     * @param list<ResultadoDeSala> $salas
+     *
+     * @return list<array{clave: string, nombre: string, monto: string, porcentaje: string, largo: float, inicio: float}>
+     */
+    private static function reparto(array $salas): array
+    {
+        $partes = [
+            'sala' => ['Las salas', 0],
+            'duenos' => ['Los dueños de las obras', 0],
+            'plataforma' => ['La plataforma', 0],
+            'comision' => ['Mercado Pago', 0],
+        ];
+        foreach ($salas as $sala) {
+            $partes['sala'][1] += $sala->sala;
+            $partes['duenos'][1] += $sala->duenos;
+            $partes['plataforma'][1] += $sala->plataforma;
+            $partes['comision'][1] += $sala->comision;
+        }
+        $total = array_sum(array_column($partes, 1));
+        if ($total <= 0) {
+            return [];
+        }
+
+        $porciones = [];
+        $inicio = 0.0;
+        foreach ($partes as $clave => [$nombre, $centavos]) {
+            $largo = round($centavos * 100 / $total, 2);
+            $porciones[] = [
+                'clave' => $clave,
+                'nombre' => $nombre,
+                'monto' => self::pesos($centavos),
+                'porcentaje' => str_replace('.', ',', sprintf('%.1f', $centavos * 100 / $total)) . ' %',
+                'largo' => $largo,
+                'inicio' => $inicio,
+            ];
+            $inicio = round($inicio + $largo, 2);
+        }
+
+        return $porciones;
     }
 
     /**

@@ -389,4 +389,40 @@ final class ReportesTest extends TestCase
         // Un tema que no existe es el resumen.
         self::assertStringContainsString('Lo que más conviene', self::texto($this->pedir(self::NOVIEMBRE . '&tema=otro')));
     }
+
+    /**
+     * EF-22.13: el embudo del Galpón en noviembre. De los diez que votaron el primer miércoles, el 1
+     * reservó y no pagó, el 9 y el 10 pagaron y fueron, y el 9 calificó (Dobles/funciones.php).
+     */
+    public function testElEmbudoSigueALosQueVotaronHastaQueCalificaron(): void
+    {
+        $respuesta = $this->pedir(self::NOVIEMBRE . '&tema=embudo');
+
+        self::assertSame(200, $respuesta->estado(), $respuesta->cuerpo());
+        $texto = self::texto($respuesta);
+        self::assertStringContainsString('De votar a calificar', $texto);
+        self::assertStringContainsString('Votaron 10 personas $ 35.000 si cada uno compraba una entrada', $texto);
+        self::assertStringContainsString('Reservaron 3 personas 30 % del paso anterior $ 10.500 lo que quisieron comprar', $texto);
+        self::assertStringContainsString('Pagaron 2 personas 67 % del paso anterior $ 7.000 pagado', $texto);
+        self::assertStringContainsString('Fueron 2 personas 100 % del paso anterior', $texto);
+        self::assertStringContainsString('Calificaron 1 persona 50 % del paso anterior', $texto);
+        // Termina en qué hacer donde más se pierde: entre votar y reservar.
+        self::assertStringContainsString('Donde más se pierde: de los que votaron, reservó el 30 %. Se quedaron en el camino 7 personas y $ 24.500.', $texto);
+        self::assertStringContainsString('Avisarles a los que votaron cuando se elige el título', $texto);
+        self::assertStringNotContainsString('style="', $respuesta->cuerpo());
+    }
+
+    public function testElEmbudoSoloSePideEnSuPestana(): void
+    {
+        self::assertStringNotContainsString('De votar a calificar', self::texto($this->pedir(self::NOVIEMBRE)));
+        self::assertStringContainsString('tema=embudo" class="reporte-pestana">Embudo</a>', $this->pedir(self::NOVIEMBRE)->cuerpo());
+    }
+
+    public function testSinFuncionesElEmbudoAvisaYNoInventaNumeros(): void
+    {
+        $texto = self::texto($this->pedir(self::NOVIEMBRE . '&tema=embudo', subsistemas: ['funciones' => self::$caido]));
+
+        self::assertStringContainsString('falta hasta dónde llegó cada uno que votó', $texto);
+        self::assertStringNotContainsString('De votar a calificar', $texto);
+    }
 }

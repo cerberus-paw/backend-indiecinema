@@ -15,6 +15,8 @@ use IndieCinema\Nucleo\Seguridad\Usuario;
 use IndieCinema\Recaudacion\Modelo\CostosDeReferencia;
 use IndieCinema\Recaudacion\Modelo\DatosDelReporte;
 use IndieCinema\Recaudacion\Modelo\DiaFlojo;
+use IndieCinema\Recaudacion\Modelo\Embudo;
+use IndieCinema\Recaudacion\Modelo\EmbudoDelPeriodo;
 use IndieCinema\Recaudacion\Modelo\FuncionFinalizada;
 use IndieCinema\Recaudacion\Modelo\ModeracionDeSala;
 use IndieCinema\Recaudacion\Modelo\ModeracionDelPeriodo;
@@ -34,6 +36,7 @@ use IndieCinema\Recaudacion\Modelo\TituloParaRepetir;
 use IndieCinema\Recaudacion\Modelo\TotalDeFunciones;
 use IndieCinema\Recaudacion\Modelo\Umbrales;
 use IndieCinema\Recaudacion\Modelo\VotantesSinReserva;
+use IndieCinema\Recaudacion\Servicios\EmbudoDeConversion;
 use IndieCinema\Recaudacion\Servicios\ModeracionYConducta;
 use IndieCinema\Recaudacion\Servicios\ObrasDelDueno;
 use IndieCinema\Recaudacion\Servicios\ResultadosDelPeriodo;
@@ -47,10 +50,10 @@ use LogicException;
  * y el administrador, todas.
  *
  * - GET /recaudacion/reportes: si cada sala (y, para el administrador, la plataforma) gana o pierde
- *   plata (EF-22.1), qué conviene hacer (EF-09.1, EF-09.5 y EF-22.3) y, para el administrador, la
- *   moderación y la conducta del período (EF-22.4). Va primero porque es lo que pidió el
- *   profe el 11/11: un reporte que sólo muestra números es una máquina de escribir; uno que dice
- *   qué día conviene una promoción sirve para decidir.
+ *   plata (EF-22.1), el embudo de los que votaron (EF-22.13), qué conviene hacer (EF-09.1, EF-09.5
+ *   y EF-22.3) y, para el administrador, la moderación y la conducta del período (EF-22.4). Va
+ *   primero porque es lo que pidió el profe el 11/11: un reporte que sólo muestra números es una
+ *   máquina de escribir; uno que dice qué día conviene una promoción sirve para decidir.
  * - GET /recaudacion/reportes/funciones: los totales de cada mes y las funciones de uno (EF-09.2).
  * - GET /recaudacion/reportes/funciones.csv: todas las funciones del período, para una planilla.
  * - GET /recaudacion/reportes/obras: para el dueño, cómo le fue a cada obra suya, y con ?obra= el
@@ -64,7 +67,21 @@ final class Reportes extends Controlador
      * Los temas de la página de recomendaciones (EF-22.2), como pestañas que son enlaces: cada uno
      * va a lo que le interesa en vez de leer todo una cosa abajo de la otra.
      */
-    public const TEMAS = ['resumen' => 'Resumen', 'plata' => 'Plata', 'promociones' => 'Promociones', 'programacion' => 'Programación', 'salas' => 'Salas'];
+    public const TEMAS = ['resumen' => 'Resumen', 'plata' => 'Plata', 'embudo' => 'Embudo', 'promociones' => 'Promociones', 'programacion' => 'Programación', 'salas' => 'Salas'];
+
+    /** Cómo se nombra cada paso del embudo (EF-22.13). */
+    private const PASOS_DEL_EMBUDO = ['votaron' => 'Votaron', 'reservaron' => 'Reservaron', 'pagaron' => 'Pagaron', 'fueron' => 'Fueron', 'calificaron' => 'Calificaron'];
+
+    /**
+     * Qué hacer donde más se pierde, por paso (EF-22.13): el embudo termina en una decisión, como
+     * pidió el profe el 11/11 de todos los reportes.
+     */
+    private const QUE_HACER_EN_EL_EMBUDO = [
+        'reservaron' => 'Avisarles a los que votaron cuando se elige el título, con un enlace directo para reservar.',
+        'pagaron' => 'Las reservas se vencen sin pagar: recordarles el pago antes de que venza o darles más tiempo.',
+        'fueron' => 'Pagaron y no fueron: un recordatorio el día de la función y, si no pueden ir, que cancelen y liberen el lugar.',
+        'calificaron' => 'Pedir la calificación al salir: un correo después de la función, con el enlace para calificar.',
+    ];
 
     private const MESES_CORTOS = [1 => 'ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
 
@@ -77,6 +94,7 @@ final class Reportes extends Controlador
         Configuracion $configuracion,
         private readonly ?ResultadosDelPeriodo $resultados = null,
         private readonly ?ModeracionYConducta $moderacion = null,
+        private readonly ?EmbudoDeConversion $embudo = null,
     ) {
         $this->umbrales = Umbrales::desdeConfiguracion($configuracion);
     }
@@ -99,6 +117,8 @@ final class Reportes extends Controlador
         $plataforma = $administrador ? $this->resultados?->plataforma($datos, $resultados) : null;
         $meses = TotalesDelPeriodo::porMes($datos, $datos->funciones);
         $moderacion = $administrador && $datos->funciones !== [] ? $this->moderacion?->delPeriodo($datos) : null;
+        // El embudo le pregunta a funciones por cada función: sólo cuando se mira su pestaña.
+        $embudo = $tema === 'embudo' && $datos->funciones !== [] ? $this->embudo?->delPeriodo($datos) : null;
 
         return $this->vista('reportes.html.twig', [
             'periodo' => $periodoElegido,
@@ -115,6 +135,7 @@ final class Reportes extends Controlador
             'ganancias' => $this->resultados === null ? null : self::ganancias($resultados, $plataforma, $this->resultados->referencia()),
             'costo_cargado' => self::avisoDelCosto($peticion),
             'moderacion' => $moderacion === null ? null : self::moderacion($moderacion),
+            'embudo' => $embudo === null ? null : self::embudo($embudo),
             'funciones' => count($datos->funciones),
             'sin_ventas' => $datos->ventas === null,
             'resumen' => $total === null ? null : self::rendimiento($total),
@@ -292,6 +313,61 @@ final class Reportes extends Controlador
             'ocupacion' => intdiv(200 * $acumulado[1] + $acumulado[2], 2 * $acumulado[2]),
             'funciones' => $acumulado[0],
         ], array_keys($porDia), $porDia);
+    }
+
+    /**
+     * El embudo de todas las salas y el de cada una, ya escrito (EF-22.13). Cada paso dice cuántos
+     * llegaron, qué parte de los que votaron son (el ancho de su barra) y qué parte de los del paso
+     * anterior (la conversión), con su plata.
+     *
+     * @return array<string, mixed>
+     */
+    private static function embudo(EmbudoDelPeriodo $embudo): array
+    {
+        $escrito = static function (Embudo $sala): array {
+            $votaron = $sala->personas['votaron'];
+            $pasos = [];
+            $anterior = null;
+            foreach (self::PASOS_DEL_EMBUDO as $clave => $nombre) {
+                $personas = $sala->personas[$clave];
+                $pasos[] = [
+                    'clave' => $clave,
+                    'nombre' => $nombre,
+                    'personas' => $personas,
+                    'del_total' => $votaron === 0 ? 0 : intdiv(200 * $personas + $votaron, 2 * $votaron),
+                    'conversion' => $anterior === null || $anterior === 0 ? null : intdiv(200 * $personas + $anterior, 2 * $anterior) . ' %',
+                    'monto' => self::pesos($sala->centavos[$clave]),
+                ];
+                $anterior = $personas;
+            }
+            $peor = $sala->dondeSePierdeMas();
+
+            return [
+                'nombre' => $sala->salaNombre,
+                'pasos' => $pasos,
+                'votaron' => $votaron,
+                'sin_votar' => $sala->sinVotar,
+                'sin_votar_monto' => self::pesos($sala->sinVotarCentavos),
+                'perdida' => $peor === null ? null : [
+                    'desde' => mb_strtolower(self::PASOS_DEL_EMBUDO[$peor['desde']]),
+                    'hasta' => mb_strtolower(self::PASOS_DEL_EMBUDO[$peor['hasta']]),
+                    // «de los que votaron, reservó el 60 %»: el verbo va con el porcentaje.
+                    'verbo' => ['reservaron' => 'reservó', 'pagaron' => 'pagó', 'fueron' => 'fue', 'calificaron' => 'calificó'][$peor['hasta']],
+                    'conversion' => "{$peor['conversion']} %",
+                    'personas' => $sala->personas[$peor['desde']] - $sala->personas[$peor['hasta']],
+                    'monto' => self::pesos(max(0, $sala->centavos[$peor['desde']] - $sala->centavos[$peor['hasta']])),
+                    'que_hacer' => self::QUE_HACER_EN_EL_EMBUDO[$peor['hasta']],
+                ],
+            ];
+        };
+
+        return [
+            'avisos' => $embudo->avisos,
+            'total' => $escrito($embudo->total),
+            // Las salas donde nadie votó no tienen embudo: se nombran aparte en la plantilla.
+            'salas' => array_map($escrito, array_values(array_filter($embudo->salas, static fn (Embudo $sala): bool => $sala->personas['votaron'] > 0))),
+            'sin_votacion' => array_map(static fn (Embudo $sala): string => $sala->salaNombre, array_values(array_filter($embudo->salas, static fn (Embudo $sala): bool => $sala->personas['votaron'] === 0))),
+        ];
     }
 
     /**

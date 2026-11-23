@@ -141,6 +141,33 @@ if ($ruta === '/interno/usuarios/conducta') {
 
     return;
 }
+// El embudo de los reportes (EF-22.13), sacado de las mismas reservas: la que asistió llegó a «fue»
+// y las demás en pie, a «pago». En el primer miércoles del Galpón, además, el votante 1 reservó y
+// no pagó, y el 9 calificó: de los diez que votaron, 3 reservaron, 2 pagaron, 2 fueron y 1 calificó.
+if ($ruta === '/interno/embudo') {
+    $ids = explode(',', (string) ($_GET['funciones'] ?? ''));
+    $embudo = [];
+    foreach (array_diff($ids, [ROTA, LENTA]) as $id) {
+        $filas = [];
+        foreach ($cobros($id)['reservas'] as $reserva) {
+            $filas[$reserva['usuario_id']] = [
+                'usuario_id' => $reserva['usuario_id'],
+                'llego_a' => match ($reserva['estado']) { 'asistio' => 'fue', 'cancelada' => 'reservo', default => 'pago' },
+                'total' => $reserva['total'],
+            ];
+        }
+        if ($id === '30000000-0000-4000-8000-000000000001') {
+            $filas['90000000-0000-4000-8000-000000000001'] = ['usuario_id' => '90000000-0000-4000-8000-000000000001', 'llego_a' => 'reservo', 'total' => '3500.00'];
+            $filas['90000000-0000-4000-8000-000000000009']['llego_a'] = 'califico';
+        }
+        if ($filas !== []) {
+            $embudo[$id] = array_values($filas);
+        }
+    }
+    echo json_encode(['funciones' => (object) $embudo]);
+
+    return;
+}
 if ($ruta === '/interno/cobros') {
     $ids = explode(',', (string) ($_GET['funciones'] ?? ''));
     echo json_encode(['cobros' => (object) array_combine($ids, array_map($cobros, $ids))]);

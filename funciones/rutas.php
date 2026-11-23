@@ -9,6 +9,7 @@ use IndieCinema\Funciones\Controladores\CalificacionesInternas;
 use IndieCinema\Funciones\Controladores\CancelacionDeAcuerdos;
 use IndieCinema\Funciones\Controladores\CobrosInternos;
 use IndieCinema\Funciones\Controladores\ConductaInterna;
+use IndieCinema\Funciones\Controladores\EmbudoInterno;
 use IndieCinema\Funciones\Controladores\OcupacionInterna;
 use IndieCinema\Funciones\Controladores\PuntosInternos;
 use IndieCinema\Funciones\Controladores\Reservas;
@@ -83,6 +84,8 @@ return static function (Router $router): void {
     $router->interna('GET', '/interno/usuarios/conducta', [ConductaInterna::class, 'deVarios'], ['cuentas', 'recaudacion']);
     // Las ausencias y las negativas de cada función, para los reportes del administrador (EF-22.4).
     $router->interna('GET', '/interno/conducta/funciones', [ConductaInterna::class, 'deFunciones'], ['recaudacion']);
+    // Hasta dónde llegó cada espectador en cada función, para el embudo de los reportes (EF-22.13).
+    $router->interna('GET', '/interno/embudo', [EmbudoInterno::class, 'deVarias'], ['recaudacion']);
 
     // Los puntos y los cupones de recaudación (EF-17.1): las asistencias de un espectador, que
     // suman puntos, y cuáles de sus cupones están en una reserva.

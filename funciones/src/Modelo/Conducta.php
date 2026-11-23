@@ -20,6 +20,8 @@ final readonly class Conducta
     public const MESES_VIGENCIA_NEGATIVA = 6;
     public const UMBRAL = 60;
     public const TOPE_BAJO_UMBRAL = 2;
+    public const UMBRAL_BENEFICIO = 80;
+    public const DIAS_PREVENTA = 0;
 
     public function __construct(
         public string $reservaId,
@@ -89,5 +91,15 @@ final readonly class Conducta
     public static function mensajeDeTopeBajoUmbral(int $tope = self::TOPE_BAJO_UMBRAL): string
     {
         return "Por tu historial de conducta podés tener hasta {$tope} " . ($tope === 1 ? 'reserva' : 'reservas') . ' a la vez.';
+    }
+
+    public static function mensajeDeCuponPorConducta(int $umbralBeneficio = self::UMBRAL_BENEFICIO): string
+    {
+        return "Por tu historial de conducta necesitás al menos {$umbralBeneficio} puntos para usar cupones de descuento.";
+    }
+
+    public static function mensajeDePreventaPorConducta(int $umbralBeneficio = self::UMBRAL_BENEFICIO, int $diasPreventa = 7): string
+    {
+        return "Esta función está en preventa para espectadores con al menos {$umbralBeneficio} puntos de conducta (faltan más de {$diasPreventa} días).";
     }
 }

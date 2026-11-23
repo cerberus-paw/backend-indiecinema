@@ -458,4 +458,29 @@ final class LugaresLibresTest extends TestCase
         self::assertStringContainsString('Por tu historial de conducta podés tener hasta 2 reservas a la vez.', $bloqueada);
         self::assertStringContainsString('data-bloqueado-conducta="1"', $bloqueada);
     }
+
+    public function testLaFichaAvisaCuandoFaltaConductaParaCuponOPreventa(): void
+    {
+        [, $conLugar] = $this->ocuparDosFunciones();
+        $this->base->ejecutar('UPDATE funcion SET precio_base = 3500 WHERE id = ?', [$conLugar['id']]);
+        $usuario = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+        $ocupacion = json_decode((string) file_get_contents(self::$ocupacion), true);
+        $ocupacion["conducta:{$usuario}"] = [
+            'tiene_beneficio' => false,
+            'umbral_beneficio' => 80,
+            'dias_preventa' => 1,
+        ];
+        file_put_contents(self::$ocupacion, json_encode($ocupacion));
+
+        $cabeceras = [
+            'X-Nginx-Secreto' => 'secreto-de-nginx',
+            'X-Usuario-Id' => $usuario,
+            'X-Rol' => 'espectador',
+            'X-Correo-Verificado' => '1',
+        ];
+        $cuerpo = $this->pedir("/cartelera/{$conLugar['id']}", null, $cabeceras)->cuerpo();
+        self::assertStringContainsString('necesitás al menos 80 puntos para usar cupones de descuento.', $cuerpo);
+        self::assertStringContainsString('en preventa para espectadores con al menos 80 puntos de conducta', $cuerpo);
+        self::assertStringContainsString('data-bloqueado-conducta="1"', $cuerpo);
+    }
 }

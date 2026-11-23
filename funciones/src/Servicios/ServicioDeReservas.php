@@ -305,6 +305,9 @@ final class ServicioDeReservas
         if ($reserva->total === '0.00') {
             throw new ReglaIncumplida('Esta función no se paga: no hace falta un cupón.');
         }
+        if ($this->conducta !== null && !$this->conducta->tieneBeneficio($usuarioId, $ahora)) {
+            throw new ReglaIncumplida(Conducta::mensajeDeCuponPorConducta($this->conducta->umbralBeneficio()));
+        }
         $cupon = $this->cupones?->buscar($codigo);
         // Uno ajeno se rechaza igual que uno que no existe: no se dice que el código es de otro.
         if ($cupon === null || $cupon['usuario_id'] !== $usuarioId) {
@@ -340,6 +343,9 @@ final class ServicioDeReservas
             $topeConducta = $this->conducta?->topeSimultaneoPara($reserva->usuarioId, $ahora);
             if ($topeConducta !== null && $this->reservas->activasDelUsuario($reserva->usuarioId, $ahora) >= $topeConducta) {
                 throw new ReglaIncumplida(Conducta::mensajeDeTopeBajoUmbral($topeConducta));
+            }
+            if ($this->conducta !== null && $this->conducta->bloqueadoPorPreventa($reserva->usuarioId, $funcion->fechaHora, $ahora)) {
+                throw new ReglaIncumplida(Conducta::mensajeDePreventaPorConducta($this->conducta->umbralBeneficio(), $this->conducta->diasPreventa()));
             }
             if ($reserva->cupon !== null && $this->reservas->cuponEnUso($reserva->cupon)) {
                 throw new ReglaIncumplida(RepositorioDeReservas::CUPON_EN_USO);

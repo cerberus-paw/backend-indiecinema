@@ -490,6 +490,9 @@ final class Reservas extends Controlador
         if ($error === null && $motivo === null && $usuario !== null && $topeConducta !== null && $avisoConducta !== null && $this->servicio->activasDelUsuario($usuario->id) >= $topeConducta) {
             $motivo = $avisoConducta;
         }
+        if ($error === null && $motivo === null && $usuario !== null && $this->conducta !== null && $this->conducta->bloqueadoPorPreventa($usuario->id, $funcion->fechaHora)) {
+            $motivo = Conducta::mensajeDePreventaPorConducta($this->conducta->umbralBeneficio(), $this->conducta->diasPreventa());
+        }
 
         $datos = [
             'funcion' => self::datosDeFuncion($funcion),
@@ -498,6 +501,8 @@ final class Reservas extends Controlador
             // Si ya no se puede, la página lo dice en lugar del formulario.
             'motivo' => $motivo,
             'aviso_conducta' => $error !== $avisoConducta ? $avisoConducta : null,
+            'tiene_beneficio_conducta' => $usuario === null || $this->conducta === null ? true : $this->conducta->tieneBeneficio($usuario->id),
+            'umbral_beneficio_conducta' => $this->conducta?->umbralBeneficio(),
             'reglas' => [
                 'cantidad' => [
                     'minimo' => 1,

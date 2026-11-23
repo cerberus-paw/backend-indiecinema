@@ -166,4 +166,24 @@ final class GananciasEnReportesTest extends TestCase
 
         self::assertSame(403, $respuesta->estado());
     }
+
+    /**
+     * EF-22.14: con $ 60.000 por función el Galpón pierde y tiene su promoción de los miércoles;
+     * con el de referencia ($ 20.000) gana holgado, y la promoción deja lugar a por qué no la tiene.
+     */
+    public function testALaSalaQueGanaHolgadoNoLeSugierePromocionesYDicePorQue(): void
+    {
+        $promociones = '/reportes?desde=2026-11-01&hasta=2026-11-30&tema=promociones';
+        $this->cargarCosto(['sala' => self::GALPON, 'costo' => '60000']);
+        $antes = self::texto($this->pedir($promociones));
+        self::assertStringContainsString('Probá una promoción los miércoles', $antes);
+        self::assertStringNotContainsString('No necesitan promoción', $antes);
+
+        $this->base->ejecutar('DELETE FROM costo_sala');
+
+        $despues = self::texto($this->pedir($promociones));
+        self::assertStringNotContainsString('Probá una promoción los miércoles', $despues);
+        self::assertMatchesRegularExpression('/No necesitan promoción El Galpón: ganó \+ \$ [\d.,]+ sobre \$ 80.000 de costo, un [\d.]+ % más de lo que le costó abrir\./u', $despues);
+        self::assertStringContainsString('Ningún día quedó flojo en las salas que necesitan una promoción.', $despues);
+    }
 }

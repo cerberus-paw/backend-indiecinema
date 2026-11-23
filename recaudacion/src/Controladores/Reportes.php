@@ -30,6 +30,7 @@ use IndieCinema\Recaudacion\Modelo\ReporteDeObra;
 use IndieCinema\Recaudacion\Modelo\RendimientoDeSala;
 use IndieCinema\Recaudacion\Modelo\ResultadoDePlataforma;
 use IndieCinema\Recaudacion\Modelo\ResultadoDeSala;
+use IndieCinema\Recaudacion\Modelo\SalaSinPromocion;
 use IndieCinema\Recaudacion\Modelo\TituloParaRepetir;
 use IndieCinema\Recaudacion\Modelo\TotalDeFunciones;
 use IndieCinema\Recaudacion\Modelo\Umbrales;
@@ -93,9 +94,10 @@ final class Reportes extends Controlador
         }
 
         $datos = $this->reportes->delOrganizador($periodo, $administrador ? null : $usuario->id);
-        $sugerencias = new Sugerencias($this->umbrales);
-        $total = $sugerencias->total($datos);
         $resultados = $this->resultados?->salas($datos) ?? [];
+        // Con lo que ganó cada sala, para no sugerirle promociones a la que gana holgado (EF-22.14).
+        $sugerencias = new Sugerencias($this->umbrales, $resultados);
+        $total = $sugerencias->total($datos);
         $plataforma = $administrador ? $this->resultados?->plataforma($datos, $resultados) : null;
         $meses = TotalesDelPeriodo::porMes($datos, $datos->funciones);
         $moderacion = $administrador && $datos->funciones !== [] ? $this->moderacion?->delPeriodo($datos) : null;
@@ -142,6 +144,12 @@ final class Reportes extends Controlador
                 'pagas' => "{$precio->ocupacionPagas} %",
                 'sensible' => $precio->sensible,
             ], $sugerencias->precioDeLaEntrada($datos)),
+            'sin_promocion' => array_map(static fn (SalaSinPromocion $sala): array => [
+                'sala' => $sala->salaNombre,
+                'resultado' => self::conSigno($sala->resultado),
+                'costo' => self::pesos($sala->costo),
+                'sobre_costo' => "{$sala->sobreCosto} %",
+            ], $sugerencias->sinPromocion()),
             'sin_reserva' => array_map(static fn (VotantesSinReserva $sala): array => [
                 'sala' => $sala->salaNombre,
                 'votantes' => $sala->votantes,
@@ -172,6 +180,7 @@ final class Reportes extends Controlador
                 'pedido' => "{$this->umbrales->pedidoVotosMinimos} %",
                 'gorra_diferencia' => $this->umbrales->gorraDiferenciaMinima,
                 'agotada' => "{$this->umbrales->agotadaOcupacionMinima} %",
+                'promocion_ganancia' => "{$this->umbrales->promocionGananciaMaxima} %",
             ],
         ]);
     }

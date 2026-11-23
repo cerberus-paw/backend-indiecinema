@@ -11,6 +11,7 @@ use IndieCinema\Recaudacion\Modelo\FuncionFinalizada;
 use IndieCinema\Recaudacion\Modelo\ObraVotada;
 use IndieCinema\Recaudacion\Modelo\Periodo;
 use IndieCinema\Recaudacion\Modelo\RecomendacionCombinada;
+use IndieCinema\Recaudacion\Modelo\ResultadoDeSala;
 use IndieCinema\Recaudacion\Modelo\Umbrales;
 use IndieCinema\Recaudacion\Modelo\VentasDeFuncion;
 use IndieCinema\Recaudacion\Servicios\Sugerencias;
@@ -477,5 +478,86 @@ final class SugerenciasTest extends TestCase
         $this->funcion('2026-11-14 21:00', 39, obras: [self::obra('Rojo')]);
 
         self::assertSame([], self::sugerencias()->combinadas($this->datos()));
+    }
+
+    // La sala que gana holgado (EF-22.14): con 40 % o más sobre su costo, sin promociones.
+
+    /**
+     * El Galpón con cuatro funciones de $ 100 de costo ($ 400) y lo que se llevó la sala, en pesos.
+     */
+    private static function galponQueSeLlevo(int $pesos): ResultadoDeSala
+    {
+        return new ResultadoDeSala(self::GALPON, 'El Galpón', 4, 0, 0, $pesos * 100, 0, 0, 100_00, true);
+    }
+
+    /**
+     * Los miércoles flojos, un pedido que perdió, los viernes a la gorra llenos y gente que votó y
+     * no reservó: todo lo que sugiere una promoción en el Galpón.
+     */
+    private function galponConTodasLasPromociones(): void
+    {
+        $votantes = array_map(static fn (int $n): string => "votante-{$n}", range(1, 6));
+        $this->funcion('2026-11-04 21:00', 10, votantes: $votantes);
+        $this->funcion('2026-11-11 21:00', 10);
+        $this->funcion('2026-11-07 21:00', 30, obras: [self::obra('Zama', true, 6), self::obra('La ciénaga', false, 4)]);
+        $this->funcion('2026-11-14 21:00', 30);
+        $this->funcion('2026-11-06 21:00', 38, precio: '0.00');
+        $this->funcion('2026-11-13 21:00', 38, precio: '0.00');
+    }
+
+    public function testALaSalaQueGanaHolgadoNoSeLeSugiereNingunaPromocion(): void
+    {
+        $this->galponConTodasLasPromociones();
+        // Se llevó $ 560 y le costó $ 400: ganó $ 160, justo el 40 % de su costo.
+        $sugerencias = new Sugerencias(new Umbrales(), [self::galponQueSeLlevo(560)]);
+        $datos = $this->datos();
+
+        self::assertSame([], $sugerencias->diasFlojos($datos));
+        self::assertSame([], $sugerencias->precioDeLaEntrada($datos));
+        self::assertSame([], $sugerencias->votaronSinReservar($datos));
+        self::assertSame([], $sugerencias->combinadas($datos));
+        $sinPromocion = $sugerencias->sinPromocion();
+        self::assertCount(1, $sinPromocion);
+        self::assertSame([self::GALPON, 160_00, 400_00, 40], [$sinPromocion[0]->salaId, $sinPromocion[0]->resultado, $sinPromocion[0]->costo, $sinPromocion[0]->sobreCosto]);
+    }
+
+    public function testUnPesoDebajoDelUmbralLaSalaSigueConSusPromociones(): void
+    {
+        $this->galponConTodasLasPromociones();
+        $sugerencias = new Sugerencias(new Umbrales(), [self::galponQueSeLlevo(559)]);
+        $datos = $this->datos();
+
+        self::assertCount(1, $sugerencias->diasFlojos($datos));
+        self::assertTrue($sugerencias->precioDeLaEntrada($datos)[0]->sensible);
+        self::assertCount(1, $sugerencias->votaronSinReservar($datos));
+        self::assertSame(RecomendacionCombinada::PEDIDO_A_LA_GORRA, $sugerencias->combinadas($datos)[0]->regla);
+        self::assertSame([], $sugerencias->sinPromocion());
+    }
+
+    public function testALaSalaQueGanaLeSigueSugiriendoLoQueLeSuma(): void
+    {
+        // Lo que se agota el día flojo no es una promoción: es otra función que vende.
+        $this->funcion('2026-11-04 21:00', 10);
+        $this->funcion('2026-11-11 21:00', 10);
+        $this->funcion('2026-11-07 21:00', 39, obras: [self::obra('Rojo')], calificacion: new CalificacionDeFuncion(4.5, 10));
+        $this->funcion('2026-11-14 21:00', 30, obras: [self::obra('Rojo')]);
+        // Y con precio llena más que a la gorra: cobrar tampoco es una promoción.
+        $this->funcion('2026-11-06 21:00', 5, precio: '0.00');
+        $this->funcion('2026-11-13 21:00', 5, precio: '0.00');
+        $sugerencias = new Sugerencias(new Umbrales(), [self::galponQueSeLlevo(1000)]);
+        $datos = $this->datos();
+
+        self::assertSame([], $sugerencias->diasFlojos($datos));
+        self::assertSame([RecomendacionCombinada::AGOTADA_EL_DIA_FLOJO], array_values(array_unique(array_map(static fn (RecomendacionCombinada $r): string => $r->regla, $sugerencias->combinadas($datos)))));
+        self::assertFalse($sugerencias->precioDeLaEntrada($datos)[0]->sensible);
+    }
+
+    public function testElUmbralDeLaGananciaSaleDeLaConfiguracionYUnaSalaSinCostoNoSeFiltra(): void
+    {
+        $this->galponConTodasLasPromociones();
+        $sinCosto = new ResultadoDeSala(self::GALPON, 'El Galpón', 4, 0, 0, 900_00, 0, 0, 0, true);
+
+        self::assertCount(1, (new Sugerencias(new Umbrales(promocionGananciaMaxima: 50), [self::galponQueSeLlevo(560)]))->diasFlojos($this->datos()));
+        self::assertCount(1, (new Sugerencias(new Umbrales(), [$sinCosto]))->diasFlojos($this->datos()));
     }
 }

@@ -32,6 +32,16 @@ Cada una mira una sola cosa de una sala, o de todas. Son la base de las combinad
 | Votaron y no reservaron | Personas de la sala que votaron títulos y no reservaron ninguna función. | `votaron_sin_reservar_minimos` (5) |
 | Sumá una función | Una función de la obra vendió casi todos los lugares. | `agotada_ocupacion_minima` (95) |
 
+## A la sala que gana holgado, sin promociones (EF-22.14)
+
+El profe, el 18/11: «a una sala que vende muy por encima no hace falta darle promoción». Antes de sugerir, el reporte mira si cada sala gana o pierde plata (la pestaña Plata, EF-22.1).
+
+- **Cuándo:** lo que se lleva la sala menos lo que le cuesta abrir sus funciones es por lo menos `promocion_ganancia_maxima` (40) por ciento de ese costo. Con el costo de referencia ($ 50.000 por función), una sala con 16 funciones gana holgado si le quedan $ 320.000 o más después de cubrir los $ 800.000 que le costaron.
+- **Qué deja de sugerir:** el día para una promoción, el descuento por precio («su público es sensible al precio»), la promoción para los que votaron y no reservaron y, con eso, la combinada «dar lo pedido a la gorra».
+- **Qué sigue sugiriendo:** lo que no le resigna plata: cobrar lo que hoy es a la gorra, cambiar el horario del día flojo y sumar una función de lo que se agota.
+- **Cómo se ve:** la pestaña Promociones lista esas salas con lo que ganaron sobre su costo, así queda claro por qué no aparecen. Si la sala empieza a perder (el escenario `sala-que-pierde`), sus promociones vuelven solas.
+- Sin costo cargado (0) no hay contra qué comparar y no se filtra.
+
 ## Las combinadas (EF-22.3)
 
 El profe pidió el 18/11 «mezclar los ingredientes». Cada combinada parte de un **día flojo** de una sala y le suma otra cosa de la misma sala, porque el que tiene que venir ese día es su público y no el de otra. Cada una muestra el porqué: todos los datos que la dispararon.

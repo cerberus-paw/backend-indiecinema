@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace IndieCinema\Programacion\Controladores;
 
+use DateTimeImmutable;
 use IndieCinema\Nucleo\Controlador;
 use IndieCinema\Nucleo\Http\ExcepcionHttp;
 use IndieCinema\Nucleo\Http\Peticion;
@@ -30,6 +31,13 @@ final class FuncionesDelOrganizador extends Controlador
 {
     private const PLANTILLA_ALTA = 'alta_funcion.html.twig';
 
+    /**
+     * Las pestañas de «Mis funciones» (F-02.25), en el orden en que se muestran. Con un organizador
+     * que ya dio decenas de funciones, la lista mezclaba las canceladas y las pasadas con las que
+     * vienen. «Todas» es la de siempre y sigue siendo la que abre.
+     */
+    private const PESTANAS = ['todas' => 'Todas', 'proximas' => 'Próximas', 'pasadas' => 'Pasadas', 'canceladas' => 'Canceladas'];
+
     public function __construct(
         private readonly ServicioDeFuncionesDelOrganizador $servicio,
         private readonly ReservasDeFunciones $reservas,
@@ -39,10 +47,31 @@ final class FuncionesDelOrganizador extends Controlador
 
     public function listar(Peticion $peticion): Respuesta
     {
-        $funciones = $this->servicio->listar(self::organizador($peticion));
+        $todas = $this->servicio->listar(self::organizador($peticion));
+        // Una pestaña que no existe abre «Todas», como sin ?ver=: es un filtro, no un recurso.
+        $ver = $peticion->consulta('ver');
+        $ver = is_string($ver) && isset(self::PESTANAS[$ver]) ? $ver : 'todas';
+        $ahora = new DateTimeImmutable();
+        $grupos = array_map(static fn (FuncionDelOrganizador $funcion): string => self::grupo($funcion, $ahora), $todas);
+        $cantidades = array_count_values($grupos);
+        $funciones = $ver === 'todas'
+            ? $todas
+            : array_values(array_filter($todas, static fn (FuncionDelOrganizador $funcion, int $i): bool => $grupos[$i] === $ver, ARRAY_FILTER_USE_BOTH));
         $acuerdos = $this->servicio->acuerdosDe($funciones);
 
         return $this->vista('mis_funciones.html.twig', [
+            'total' => count($todas),
+            'ver' => $ver,
+            'pestanas' => array_map(
+                static fn (string $clave, string $texto): array => [
+                    'clave' => $clave,
+                    'texto' => $texto,
+                    'cantidad' => $clave === 'todas' ? count($todas) : ($cantidades[$clave] ?? 0),
+                    'url' => '/organizador/funciones' . ($clave === 'todas' ? '' : "?ver={$clave}"),
+                ],
+                array_keys(self::PESTANAS),
+                self::PESTANAS,
+            ),
             'funciones' => array_map(
                 static fn (FuncionDelOrganizador $funcion): array => [
                     ...self::datos($funcion),
@@ -65,7 +94,17 @@ final class FuncionesDelOrganizador extends Controlador
         $salas = $this->servicio->salasHabilitadas($organizador);
         $obras = $this->servicio->catalogoDeObras();
 
-        return $this->formularioAlta($salas, $obras, []);
+        // Desde una recomendación de los reportes, el alta llega cargada (EF-22.17).
+        $consulta = [];
+        foreach (['sala_id', 'obras', 'modo', 'fecha', 'hora', 'precio', 'cupo'] as $campo) {
+            $consulta[$campo] = $peticion->consulta($campo);
+        }
+        $valores = FormularioDeFuncion::precarga($consulta, $salas, $obras);
+
+        return $this->formularioAlta($salas, $obras, [
+            'valores' => $valores,
+            'precargada' => $valores !== [] && $peticion->consulta('desde') === 'reporte',
+        ]);
     }
 
     public function crear(Peticion $peticion): Respuesta
@@ -415,7 +454,7 @@ final class FuncionesDelOrganizador extends Controlador
     /**
      * @param list<Sala>                                                                                        $salas
      * @param list<Obra>                                                                                        $obras
-     * @param array{formulario?: FormularioDeFuncion, valores?: array<string, mixed>, error_general?: ?string} $extra
+     * @param array{formulario?: FormularioDeFuncion, valores?: array<string, mixed>, error_general?: ?string, precargada?: bool} $extra
      */
     private function formularioAlta(
         array $salas,
@@ -443,6 +482,7 @@ final class FuncionesDelOrganizador extends Controlador
             'errores' => $formulario?->errores ?? [],
             'error_general' => $extra['error_general'] ?? null,
             'mensaje_exito' => null,
+            'precargada' => $extra['precargada'] ?? false,
         ], $estado);
     }
 
@@ -483,6 +523,20 @@ final class FuncionesDelOrganizador extends Controlador
      *
      * @return array{id: string, titulo: string, titulos_elegidos: bool, sala: string, sala_id: string, sala_habilitada: bool, estado: string, estado_valor: string, es_final: bool, editable: bool, cancelable: bool, cerrable: bool, fecha: ?string, precio: string, cupo: int}
      */
+    /**
+     * La pestaña de una función: cancelada; pasada, si terminó o su fecha ya pasó (como las ordena
+     * el repositorio), o próxima, que incluye las que todavía votan o no tienen fecha.
+     */
+    private static function grupo(FuncionDelOrganizador $funcion, DateTimeImmutable $ahora): string
+    {
+        return match (true) {
+            $funcion->estado === EstadoFuncion::Cancelada => 'canceladas',
+            $funcion->estado === EstadoFuncion::Finalizada,
+            $funcion->fechaHora !== null && $funcion->fechaHora <= $ahora => 'pasadas',
+            default => 'proximas',
+        };
+    }
+
     private static function datos(FuncionDelOrganizador $funcion): array
     {
         return [

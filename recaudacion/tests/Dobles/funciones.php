@@ -121,6 +121,53 @@ if ($ruta === '/interno/cupones/en-uso') {
 
     return;
 }
+// La conducta de las funciones para los reportes del administrador (EF-22.4): la del primer
+// miércoles del Galpón tuvo dos ausentes y una calificación negativa.
+if ($ruta === '/interno/conducta/funciones') {
+    $ids = explode(',', (string) ($_GET['funciones'] ?? ''));
+    echo json_encode(['funciones' => (object) array_intersect_key(['30000000-0000-4000-8000-000000000001' => ['ausentes' => 2, 'negativas' => 1]], array_flip($ids))]);
+
+    return;
+}
+// El comprador 100 está bajo el umbral de conducta.
+if ($ruta === '/interno/usuarios/conducta') {
+    $ids = explode(',', (string) ($_GET['ids'] ?? ''));
+    $conductas = [];
+    foreach ($ids as $id) {
+        $bajo = $id === '90000000-0000-4000-8000-000000000100';
+        $conductas[$id] = ['puntaje' => $bajo ? 40 : 100, 'bajo_umbral' => $bajo, 'negativas' => $bajo ? 2 : 0, 'ausencias' => 0];
+    }
+    echo json_encode(['conductas' => (object) $conductas]);
+
+    return;
+}
+// El embudo de los reportes (EF-22.13), sacado de las mismas reservas: la que asistió llegó a «fue»
+// y las demás en pie, a «pago». En el primer miércoles del Galpón, además, el votante 1 reservó y
+// no pagó, y el 9 calificó: de los diez que votaron, 3 reservaron, 2 pagaron, 2 fueron y 1 calificó.
+if ($ruta === '/interno/embudo') {
+    $ids = explode(',', (string) ($_GET['funciones'] ?? ''));
+    $embudo = [];
+    foreach (array_diff($ids, [ROTA, LENTA]) as $id) {
+        $filas = [];
+        foreach ($cobros($id)['reservas'] as $reserva) {
+            $filas[$reserva['usuario_id']] = [
+                'usuario_id' => $reserva['usuario_id'],
+                'llego_a' => match ($reserva['estado']) { 'asistio' => 'fue', 'cancelada' => 'reservo', default => 'pago' },
+                'total' => $reserva['total'],
+            ];
+        }
+        if ($id === '30000000-0000-4000-8000-000000000001') {
+            $filas['90000000-0000-4000-8000-000000000001'] = ['usuario_id' => '90000000-0000-4000-8000-000000000001', 'llego_a' => 'reservo', 'total' => '3500.00'];
+            $filas['90000000-0000-4000-8000-000000000009']['llego_a'] = 'califico';
+        }
+        if ($filas !== []) {
+            $embudo[$id] = array_values($filas);
+        }
+    }
+    echo json_encode(['funciones' => (object) $embudo]);
+
+    return;
+}
 if ($ruta === '/interno/cobros') {
     $ids = explode(',', (string) ($_GET['funciones'] ?? ''));
     echo json_encode(['cobros' => (object) array_combine($ids, array_map($cobros, $ids))]);

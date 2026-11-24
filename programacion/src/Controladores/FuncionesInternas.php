@@ -201,6 +201,7 @@ final class FuncionesInternas extends Controlador
                     'dueno_id' => $obra->duenoId,
                     'elegida' => $obra->elegida,
                     'votos' => $obra->votos,
+                    'generos' => $obra->generos,
                 ], $funcion->obras),
                 'votantes_ids' => $funcion->votantesIds,
             ], array_slice($funciones, 0, self::MAXIMAS_FINALIZADAS)),

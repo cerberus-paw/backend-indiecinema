@@ -85,6 +85,49 @@ final class FormularioDeFuncion
         return $formulario;
     }
 
+    /**
+     * Los valores con que llega el alta desde un enlace (EF-22.17): una recomendación de los
+     * reportes («los miércoles, dar X a la gorra») abre el formulario ya cargado y al organizador
+     * le alcanza con revisar y confirmar. El profe, el 18/11: «precargás el formulario, le das
+     * enter». No valida ni muestra errores, eso pasa al mandar; sólo descarta lo que no sirve para
+     * cargar un campo: una sala que no es suya, una obra que no está en el catálogo, una fecha
+     * mal escrita. Lo que no viene queda vacío, como en un alta común.
+     *
+     * @param array<string, mixed> $consulta         los parámetros de la URL
+     * @param list<Sala>           $salasHabilitadas
+     * @param list<Obra>           $obrasDisponibles
+     *
+     * @return array<string, mixed> los valores para la plantilla; vacío si no vino nada útil
+     */
+    public static function precarga(array $consulta, array $salasHabilitadas, array $obrasDisponibles): array
+    {
+        $valores = [];
+        $sala = self::texto($consulta['sala_id'] ?? null);
+        if (in_array($sala, array_map(static fn (Sala $s): string => $s->id, $salasHabilitadas), true)) {
+            $valores['sala_id'] = $sala;
+        }
+        $pedidas = $consulta['obras'] ?? [];
+        $obras = array_values(array_intersect(
+            array_unique(array_map(self::texto(...), is_array($pedidas) ? $pedidas : [$pedidas])),
+            array_map(static fn (Obra $o): string => $o->id, $obrasDisponibles),
+        ));
+        if ($obras !== []) {
+            $valores['obras'] = $obras;
+        }
+        $modo = self::texto($consulta['modo'] ?? null);
+        if (in_array($modo, [self::MODO_PROGRAMADA, self::MODO_EN_VOTACION_TITULOS], true)) {
+            $valores['modo'] = $modo;
+        }
+        foreach (['fecha' => '/^\d{4}-\d{2}-\d{2}$/D', 'hora' => '/^\d{2}:\d{2}$/D', 'precio' => self::PRECIO, 'cupo' => '/^[1-9]\d{0,4}$/D'] as $campo => $forma) {
+            $valor = self::texto($consulta[$campo] ?? null);
+            if ($valor !== '' && preg_match($forma, $valor) === 1) {
+                $valores[$campo] = $valor;
+            }
+        }
+
+        return $valores;
+    }
+
     public function esValido(): bool
     {
         return $this->errores === [];

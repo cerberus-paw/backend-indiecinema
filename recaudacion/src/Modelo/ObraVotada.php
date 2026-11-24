@@ -9,12 +9,17 @@ namespace IndieCinema\Recaudacion\Modelo;
  */
 final readonly class ObraVotada
 {
+    /**
+     * @param list<string> $generos los nombres de sus géneros (EF-22.18); vacía si programación no
+     *                              los mandó
+     */
     public function __construct(
         public string $id,
         public string $titulo,
         public string $duenoId,
         public bool $elegida,
         public int $votos,
+        public array $generos = [],
     ) {
     }
 }

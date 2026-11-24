@@ -196,4 +196,35 @@ final class RepartoTest extends TestCase
 
         new ParteDelReparto(RolDelReparto::Sala, self::ORGANIZADOR, -1);
     }
+
+    public function testLaComisionDeMercadoPagoSeDescuentaAntesDeRepartir(): void
+    {
+        // $ 10.000 con el 7,61 %: Mercado Pago se queda $ 761 y se reparten $ 9.239.
+        $reparto = Reparto::calcular(self::funcion([self::DUENA]), 1_000_000, self::parametro(), new DateTimeImmutable('2026-11-20 23:20:30'), 761);
+
+        self::assertSame(76_100, $reparto->comisionCentavos);
+        self::assertSame('761.00', $reparto->comision());
+        self::assertSame('10000.00', $reparto->cobrado());
+        self::assertSame([
+            'sala:' . self::ORGANIZADOR => 646_730,
+            'dueno:' . self::DUENA => 138_585,
+            'plataforma:sitio' => 138_585,
+        ], self::partes($reparto));
+    }
+
+    public function testLaComisionSeRedondeaAlCentavoYLasPartesCierran(): void
+    {
+        // $ 33,33 con el 7,61 %: 2,536... se redondea a $ 2,54.
+        $reparto = Reparto::calcular(self::funcion([self::DUENA, self::DUENA]), 3_333, self::parametro(), comisionCentesimos: 761);
+
+        self::assertSame(254, $reparto->comisionCentavos);
+        self::assertSame(3_333 - 254, array_sum(self::partes($reparto)));
+    }
+
+    public function testUnaComisionDelCienPorCientoNoSeAcepta(): void
+    {
+        $this->expectException(ReglaIncumplida::class);
+
+        Reparto::calcular(self::funcion([self::DUENA]), 1_000_000, self::parametro(), comisionCentesimos: 10_000);
+    }
 }

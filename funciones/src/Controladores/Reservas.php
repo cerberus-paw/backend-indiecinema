@@ -46,6 +46,19 @@ final class Reservas extends Controlador
      */
     private const ZONA = 'America/Argentina/Buenos_Aires';
 
+    /**
+     * Las pestañas de «Mis reservas» (F-02.25) y los estados de cada una. Una espectadora con
+     * muchas canceladas las veía mezcladas con las que todavía tiene que usar. «Vigentes» son las
+     * que esperan la función (pagadas o por pagar) y «Pasadas», las que ya se dieron, fuera o no.
+     * «Todas» es la de siempre y sigue siendo la que abre.
+     */
+    private const PESTANAS = [
+        'todas' => ['Todas', []],
+        'vigentes' => ['Vigentes', [EstadoReserva::Confirmada, EstadoReserva::PendientePago]],
+        'pasadas' => ['Pasadas', [EstadoReserva::Asistio, EstadoReserva::Ausente]],
+        'canceladas' => ['Canceladas', [EstadoReserva::Cancelada]],
+    ];
+
     public function __construct(
         private readonly ServicioDeReservas $servicio,
         private readonly AvisosDeReservas $avisos,
@@ -68,7 +81,10 @@ final class Reservas extends Controlador
         if ($numero === false) {
             throw ExcepcionHttp::noEncontrada();
         }
-        [$reservas, $total] = $this->servicio->pagina($espectador, $numero);
+        // Una pestaña que no existe abre «Todas», como sin ?ver=: es un filtro, no un recurso.
+        $ver = $peticion->consulta('ver');
+        $ver = is_string($ver) && isset(self::PESTANAS[$ver]) ? $ver : 'todas';
+        [$reservas, $total] = $this->servicio->pagina($espectador, $numero, self::PESTANAS[$ver][1]);
         $paginas = max(1, (int) ceil($total / ServicioDeReservas::POR_PAGINA));
         if ($numero > $paginas) {
             throw ExcepcionHttp::noEncontrada();
@@ -94,14 +110,14 @@ final class Reservas extends Controlador
 
         return $this->vista('mis_reservas.html.twig', [
             'resumen_conducta' => $this->conducta?->actividadYConducta($espectador->id),
-            'reservas' => array_map(static function (Reserva $reserva) use ($funciones, $sinProgramacion, $calificadas, $motivos): array {
+            'reservas' => array_map(function (Reserva $reserva) use ($funciones, $sinProgramacion, $calificadas, $motivos): array {
                 $funcion = $funciones[$reserva->funcionId] ?? null;
 
                 return [
-                    ...self::datosDeReserva($reserva, $funcion, $motivos[$reserva->id] ?? null),
+                    ...$this->datosDeReserva($reserva, $funcion, $motivos[$reserva->id] ?? null),
                     'estado_etiqueta' => $reserva->estado->etiqueta(),
                     // Sin programación no se sabe si empezó: el botón queda en el comprobante.
-                    'cancelable' => !$sinProgramacion && ServicioDeReservas::seCancela($reserva, $funcion),
+                    'cancelable' => !$sinProgramacion && $this->servicio->seCancela($reserva, $funcion),
                     // Sin programación tampoco se sabe si terminó: Calificacion lo decide con la función.
                     'calificable' => !isset($calificadas[$reserva->funcionId]) && Calificacion::motivoParaNoCalificar($reserva, $funcion) === null,
                     // Lo que calificó (EF-04.5), en la reserva con la que calificó: si fue con dos
@@ -114,14 +130,16 @@ final class Reservas extends Controlador
             }, $reservas),
             'sin_programacion' => $sinProgramacion,
             'calificada' => $peticion->consulta('calificada') === '1',
+            'ver' => $ver,
+            'pestanas' => self::pestanas($this->servicio->cantidades($espectador)),
             'paginado' => [
                 'numero' => $numero,
                 'total_paginas' => $paginas,
                 'total' => $total,
-                'anterior' => $numero > 1 ? self::urlDePagina($numero - 1) : null,
-                'siguiente' => $numero < $paginas ? self::urlDePagina($numero + 1) : null,
+                'anterior' => $numero > 1 ? self::urlDePagina($numero - 1, $ver) : null,
+                'siguiente' => $numero < $paginas ? self::urlDePagina($numero + 1, $ver) : null,
                 'paginas' => array_map(
-                    static fn (int $n): array => ['numero' => $n, 'url' => self::urlDePagina($n), 'actual' => $n === $numero],
+                    static fn (int $n): array => ['numero' => $n, 'url' => self::urlDePagina($n, $ver), 'actual' => $n === $numero],
                     range(1, $paginas),
                 ),
             ],
@@ -129,11 +147,38 @@ final class Reservas extends Controlador
     }
 
     /**
-     * Relativa a la página: así no depende del prefijo de funciones, que pone nginx.
+     * Las pestañas de «Mis reservas», con cuántas hay en cada una.
+     *
+     * @param array<string, int> $cantidades las de ServicioDeReservas::cantidades()
+     *
+     * @return list<array{clave: string, texto: string, cantidad: int, url: string}>
      */
-    private static function urlDePagina(int $numero): string
+    private static function pestanas(array $cantidades): array
     {
-        return $numero > 1 ? "?pagina={$numero}" : '?';
+        $pestanas = [];
+        foreach (self::PESTANAS as $clave => [$texto, $estados]) {
+            $pestanas[] = [
+                'clave' => $clave,
+                'texto' => $texto,
+                'cantidad' => $estados === []
+                    ? array_sum($cantidades)
+                    : array_sum(array_map(static fn (EstadoReserva $estado): int => $cantidades[$estado->value] ?? 0, $estados)),
+                'url' => self::urlDePagina(1, $clave),
+            ];
+        }
+
+        return $pestanas;
+    }
+
+    /**
+     * Relativa a la página: así no depende del prefijo de funciones, que pone nginx. Lleva la
+     * pestaña, para que pasar de página no la pierda.
+     */
+    private static function urlDePagina(int $numero, string $ver = 'todas'): string
+    {
+        $consulta = array_filter(['ver' => $ver === 'todas' ? null : $ver, 'pagina' => $numero > 1 ? $numero : null]);
+
+        return '?' . http_build_query($consulta);
     }
 
     public function formulario(Peticion $peticion): Respuesta
@@ -211,7 +256,7 @@ final class Reservas extends Controlador
         if ($reserva->estado === EstadoReserva::PendientePago) {
             return $enJson
                 ? $this->json([
-                    'reserva' => self::datosDeReserva($reserva, $funcion),
+                    'reserva' => $this->datosDeReserva($reserva, $funcion),
                     'url' => $this->ruta("/reservas/{$reserva->id}"),
                     ...$this->lugaresDe($funcion),
                 ], 201)
@@ -223,7 +268,7 @@ final class Reservas extends Controlador
         // quien reservó, que con fetch está mirando el número de lugares, no una página nueva.
         if ($enJson) {
             return $this->json([
-                'reserva' => self::datosDeReserva($reserva, $funcion),
+                'reserva' => $this->datosDeReserva($reserva, $funcion),
                 'url' => $this->ruta("/reservas/{$reserva->id}"),
                 ...$this->lugaresDe($funcion, $usuario),
             ], 201)->alTerminar(fn (): bool => $this->avisos->reservaConfirmada($reserva, $funcion));
@@ -240,7 +285,7 @@ final class Reservas extends Controlador
         [$reserva, $funcion] = $this->servicio->delEspectador(self::usuario($peticion), (string) $peticion->parametro('id'));
 
         return $this->vista('reserva_confirmada.html.twig', [
-            'reserva' => self::datosDeReserva($reserva, $funcion, $this->motivoDe($reserva)),
+            'reserva' => $this->datosDeReserva($reserva, $funcion, $this->motivoDe($reserva)),
             'funcion' => $funcion === null ? null : self::datosDeFuncion($funcion),
             // Los tres pasos sólo si esta reserva se cobra; las demás siguen con dos.
             'con_pago' => $reserva->preferenciaId !== null,
@@ -263,7 +308,7 @@ final class Reservas extends Controlador
         [$reserva, $funcion] = $this->servicio->delEspectador(self::usuario($peticion), (string) $peticion->parametro('id'));
 
         return $this->vista('reserva_confirmada.html.twig', [
-            'reserva' => self::datosDeReserva($reserva, $funcion, $this->motivoDe($reserva)),
+            'reserva' => $this->datosDeReserva($reserva, $funcion, $this->motivoDe($reserva)),
             'funcion' => $funcion === null ? null : self::datosDeFuncion($funcion),
             'con_pago' => $reserva->preferenciaId !== null,
             'regreso' => match ($reserva->estado) {
@@ -282,7 +327,7 @@ final class Reservas extends Controlador
     public function confirmarCancelacion(Peticion $peticion): Respuesta
     {
         [$reserva, $funcion] = $this->servicio->delEspectador(self::usuario($peticion), (string) $peticion->parametro('id'));
-        if (!ServicioDeReservas::seCancela($reserva, $funcion)) {
+        if (!$this->servicio->seCancela($reserva, $funcion)) {
             throw ExcepcionHttp::noEncontrada();
         }
 
@@ -301,7 +346,7 @@ final class Reservas extends Controlador
             [$reserva, $funcion] = $this->servicio->delEspectador($usuario, $id);
 
             return $enJson
-                ? $this->json(['error' => $error->getMessage(), 'reserva' => self::datosDeReserva($reserva, $funcion, $this->motivoDe($reserva))], 422)
+                ? $this->json(['error' => $error->getMessage(), 'reserva' => $this->datosDeReserva($reserva, $funcion, $this->motivoDe($reserva))], 422)
                 : $this->pantallaDeCancelacion($reserva, $funcion, $error->getMessage(), 422);
         }
 
@@ -311,7 +356,7 @@ final class Reservas extends Controlador
         if ($enJson) {
             return $this->json([
                 // Sin el motivo: la canceló el espectador, que está mirando la pantalla.
-                'reserva' => self::datosDeReserva($reserva, null),
+                'reserva' => $this->datosDeReserva($reserva, null),
                 'url' => $this->ruta("/reservas/{$reserva->id}?cancelada=1"),
             ]);
         }
@@ -348,7 +393,7 @@ final class Reservas extends Controlador
     private function pantallaDeCancelacion(Reserva $reserva, ?FuncionDeProgramacion $funcion, ?string $error = null, int $estado = 200): Respuesta
     {
         $datos = [
-            'reserva' => self::datosDeReserva($reserva, $funcion, $this->motivoDe($reserva)),
+            'reserva' => $this->datosDeReserva($reserva, $funcion, $this->motivoDe($reserva)),
             'funcion' => $funcion === null ? null : self::datosDeFuncion($funcion),
         ];
         // La plantilla lo muestra si la variable existe: sólo se pasa cuando hay algo que decir.
@@ -378,11 +423,19 @@ final class Reservas extends Controlador
      *
      * @param ?string $motivo el del historial, de ServicioDeReservas::motivosDeCancelacion()
      *
-     * @return array{id: string, codigo: string, cantidad: int, total: string, estado: string, cancelable: bool, enlace_de_pago: ?string, vence: ?string, motivo: ?string, reembolsada_en: ?string}
+     * @return array{id: string, codigo: string, cantidad: int, total: string, estado: string, cancelable: bool, cancelable_hasta: ?string, motivo_no_cancelable: ?string, enlace_de_pago: ?string, vence: ?string, motivo: ?string, reembolsada_en: ?string, cupon: ?string}
      */
-    private static function datosDeReserva(Reserva $reserva, ?FuncionDeProgramacion $funcion, ?string $motivo = null): array
+    private function datosDeReserva(Reserva $reserva, ?FuncionDeProgramacion $funcion, ?string $motivo = null): array
     {
         $aTiempo = $reserva->estado === EstadoReserva::PendientePago && !$reserva->vencida();
+        // EF-22.9: hasta cuándo se puede cancelar una confirmada y, pasado el límite, por qué ya no.
+        // La que ya terminó (asistió, ausente, cancelada) no dice nada: no hay botón que explicar.
+        $politica = $this->servicio->politica;
+        $abierta = $reserva->estado === EstadoReserva::Confirmada || $reserva->estado === EstadoReserva::PendientePago;
+        $noCancelable = $abierta ? $politica->motivoParaNoCancelar($reserva, $funcion) : null;
+        $limite = $reserva->estado === EstadoReserva::Confirmada && $noCancelable === null && $politica->horasMinimas > 0
+            ? $politica->limite($funcion)
+            : null;
 
         return [
             'id' => $reserva->id,
@@ -390,7 +443,9 @@ final class Reservas extends Controlador
             'cantidad' => $reserva->cantidad,
             'total' => TextoParaMostrar::monto((float) $reserva->total),
             'estado' => $reserva->estado->value,
-            'cancelable' => ServicioDeReservas::seCancela($reserva, $funcion),
+            'cancelable' => $abierta && $noCancelable === null,
+            'cancelable_hasta' => $limite === null ? null : self::fecha($limite),
+            'motivo_no_cancelable' => $noCancelable,
             'enlace_de_pago' => $aTiempo ? $reserva->enlaceDePago : null,
             'vence' => $aTiempo && $reserva->venceEn !== null ? self::hora($reserva->venceEn) : null,
             'motivo' => $reserva->estado === EstadoReserva::Cancelada ? $motivo : null,
@@ -445,6 +500,9 @@ final class Reservas extends Controlador
         if ($error === null && $motivo === null && $usuario !== null && $topeConducta !== null && $avisoConducta !== null && $this->servicio->activasDelUsuario($usuario->id) >= $topeConducta) {
             $motivo = $avisoConducta;
         }
+        if ($error === null && $motivo === null && $usuario !== null && $this->conducta !== null && $this->conducta->bloqueadoPorPreventa($usuario->id, $funcion->fechaHora)) {
+            $motivo = Conducta::mensajeDePreventaPorConducta($this->conducta->umbralBeneficio(), $this->conducta->diasPreventa());
+        }
 
         $datos = [
             'funcion' => self::datosDeFuncion($funcion),
@@ -453,6 +511,10 @@ final class Reservas extends Controlador
             // Si ya no se puede, la página lo dice en lugar del formulario.
             'motivo' => $motivo,
             'aviso_conducta' => $error !== $avisoConducta ? $avisoConducta : null,
+            'tiene_beneficio_conducta' => $usuario === null || $this->conducta === null ? true : $this->conducta->tieneBeneficio($usuario->id),
+            'umbral_beneficio_conducta' => $this->conducta?->umbralBeneficio(),
+            // EF-22.9: la política escrita antes de reservar, no recién cuando quiere cancelar.
+            'politica_cancelacion' => $this->servicio->politica->texto(),
             'reglas' => [
                 'cantidad' => [
                     'minimo' => 1,

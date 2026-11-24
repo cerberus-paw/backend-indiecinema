@@ -8,6 +8,7 @@ use DateTimeImmutable;
 use DateTimeZone;
 use IndieCinema\Moderacion\Modelo\CategoriaDenuncia;
 use IndieCinema\Moderacion\Modelo\Denuncia;
+use IndieCinema\Moderacion\Modelo\GravedadDenuncia;
 use IndieCinema\Moderacion\Modelo\TipoDenuncia;
 use IndieCinema\Nucleo\BaseDeDatos;
 use IndieCinema\Nucleo\Uuid;
@@ -27,14 +28,19 @@ final class RepositorioDeDenuncias
     }
 
     /**
+     * Con la gravedad de su motivo (EF-22.11).
+     *
+     * @param ?string $salaId la sala denunciada o la de la función; null en obras y comentarios
+     * @param ?string $foto   el nombre de la foto guardada, en salas y funciones (EF-22.11)
+     *
      * @return bool false si ese usuario ya tenía una abierta sobre eso
      */
-    public function agregar(TipoDenuncia $tipo, string $objetoId, string $titulo, string $usuarioId, CategoriaDenuncia $categoria, ?string $detalle, DateTimeImmutable $creadaEn): bool
+    public function agregar(TipoDenuncia $tipo, string $objetoId, ?string $salaId, string $titulo, string $usuarioId, CategoriaDenuncia $categoria, ?string $detalle, DateTimeImmutable $creadaEn, ?string $foto = null): bool
     {
         try {
             $this->base->ejecutar(
-                'INSERT INTO denuncia (id, tipo, objeto_id, titulo, usuario_id, categoria, detalle, creada_en) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-                [Uuid::nuevo(), $tipo->value, $objetoId, $titulo, $usuarioId, $categoria->value, $detalle, $creadaEn],
+                'INSERT INTO denuncia (id, tipo, objeto_id, sala_id, titulo, usuario_id, categoria, gravedad, detalle, foto, creada_en) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                [Uuid::nuevo(), $tipo->value, $objetoId, $salaId, $titulo, $usuarioId, $categoria->value, $categoria->gravedad()->value, $detalle, $foto, $creadaEn],
             );
         } catch (PDOException $error) {
             if (($error->errorInfo[1] ?? null) === self::CLAVE_DUPLICADA) {
@@ -42,6 +48,29 @@ final class RepositorioDeDenuncias
             }
             throw $error;
         }
+
+        return true;
+    }
+
+    /**
+     * Una denuncia de los datos de prueba (EF-22.11), con su id fijo, abierta o tomada.
+     *
+     * @param 'sala'|'funcion'                                  $tipo
+     * @param ?array{string, string, DateTimeImmutable} $tomada el motivo, quién y cuándo la tomó; null si está abierta
+     *
+     * @return bool false si ya estaba
+     */
+    public function agregarDePrueba(string $id, string $objetoId, string $tipo, string $salaId, string $titulo, string $usuarioId, CategoriaDenuncia $categoria, string $detalle, DateTimeImmutable $creadaEn, ?array $tomada): bool
+    {
+        if ($this->base->valor('SELECT 1 FROM denuncia WHERE id = ?', [$id]) !== null) {
+            return false;
+        }
+        [$motivo, $por, $cuando] = $tomada ?? [null, null, null];
+        $this->base->ejecutar(
+            'INSERT INTO denuncia (id, tipo, objeto_id, sala_id, titulo, usuario_id, categoria, gravedad, detalle, creada_en, estado, accion, motivo, resuelta_por, resuelta_en)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [$id, $tipo, $objetoId, $salaId, $titulo, $usuarioId, $categoria->value, $categoria->gravedad()->value, $detalle, $creadaEn, $tomada === null ? 'abierta' : 'resuelta', $tomada === null ? null : 'tomada', $motivo, $por, $cuando],
+        );
 
         return true;
     }
@@ -55,10 +84,11 @@ final class RepositorioDeDenuncias
     }
 
     /**
-     * Lo denunciado con denuncias abiertas, primero lo que lleva más tiempo esperando: con el
-     * título de la última denuncia y cuántas tiene.
+     * Lo denunciado con denuncias abiertas, con el título de la última denuncia, cuántas tiene y
+     * la más grave (EF-22.11). Primero las salas y las funciones con una alta abierta, que quedan
+     * para suspender; después lo más grave, lo que tiene más y lo que lleva más tiempo esperando.
      *
-     * @return list<array{tipo: TipoDenuncia, objeto_id: string, titulo: string, cantidad: int, primera: DateTimeImmutable}>
+     * @return list<array{tipo: TipoDenuncia, objeto_id: string, titulo: string, cantidad: int, gravedad: GravedadDenuncia, para_suspender: bool, sala_id: ?string, primera: DateTimeImmutable}>
      */
     public function abiertas(): array
     {
@@ -67,17 +97,22 @@ final class RepositorioDeDenuncias
             'objeto_id' => (string) $fila['objeto_id'],
             'titulo' => (string) $fila['titulo'],
             'cantidad' => (int) $fila['cantidad'],
+            'gravedad' => GravedadDenuncia::deOrden((int) $fila['gravedad']),
+            'para_suspender' => (bool) $fila['para_suspender'],
+            'sala_id' => $fila['sala_id'] === null ? null : (string) $fila['sala_id'],
             'primera' => new DateTimeImmutable((string) $fila['primera'], new DateTimeZone('UTC')),
         ], $this->base->filas(
-            "SELECT tipo, objeto_id, MAX(titulo) AS titulo, COUNT(*) AS cantidad, MIN(creada_en) AS primera
+            // gravedad + 0: la posición en el ENUM, de menos a más grave.
+            "SELECT tipo, objeto_id, MAX(titulo) AS titulo, COUNT(*) AS cantidad, MAX(gravedad + 0) AS gravedad,
+                    tipo IN ('sala', 'funcion') AND MAX(gravedad = 'alta') AS para_suspender, MAX(sala_id) AS sala_id, MIN(creada_en) AS primera
              FROM denuncia WHERE estado = 'abierta'
              GROUP BY tipo, objeto_id
-             ORDER BY primera, tipo, objeto_id",
+             ORDER BY para_suspender DESC, gravedad DESC, cantidad DESC, primera, tipo, objeto_id",
         ));
     }
 
     /**
-     * Las abiertas de lo denunciado, primero la más vieja.
+     * Las abiertas de lo denunciado, primero la más grave y después la más vieja.
      *
      * @return list<Denuncia>
      */
@@ -87,17 +122,30 @@ final class RepositorioDeDenuncias
             (string) $fila['id'],
             TipoDenuncia::from((string) $fila['tipo']),
             (string) $fila['objeto_id'],
+            $fila['sala_id'] === null ? null : (string) $fila['sala_id'],
             (string) $fila['titulo'],
             (string) $fila['usuario_id'],
             CategoriaDenuncia::from((string) $fila['categoria']),
+            GravedadDenuncia::from((string) $fila['gravedad']),
             $fila['detalle'] === null ? null : (string) $fila['detalle'],
             new DateTimeImmutable((string) $fila['creada_en'], new DateTimeZone('UTC')),
+            $fila['foto'] === null ? null : (string) $fila['foto'],
         ), $this->base->filas(
-            "SELECT id, tipo, objeto_id, titulo, usuario_id, categoria, detalle, creada_en FROM denuncia
+            "SELECT id, tipo, objeto_id, sala_id, titulo, usuario_id, categoria, gravedad, detalle, foto, creada_en FROM denuncia
              WHERE estado = 'abierta' AND tipo = ? AND objeto_id = ?
-             ORDER BY creada_en, id",
+             ORDER BY gravedad + 0 DESC, creada_en, id",
             [$tipo->value, $objetoId],
         ));
+    }
+
+    /**
+     * El nombre de la foto de una denuncia (EF-22.11), o null si no tiene o no existe.
+     */
+    public function fotoDe(string $id): ?string
+    {
+        $foto = $this->base->valor('SELECT foto FROM denuncia WHERE id = ?', [$id]);
+
+        return $foto === null ? null : (string) $foto;
     }
 
     /**
@@ -119,7 +167,7 @@ final class RepositorioDeDenuncias
      *
      * @param positive-int $limite
      *
-     * @return list<array{tipo: TipoDenuncia, objeto_id: string, titulo: string, categoria: CategoriaDenuncia, estado: string, accion: ?string, motivo: string, resuelta_por: string, resuelta_en: DateTimeImmutable}>
+     * @return list<array{tipo: TipoDenuncia, objeto_id: string, titulo: string, categoria: CategoriaDenuncia, gravedad: GravedadDenuncia, estado: string, accion: ?string, motivo: string, resuelta_por: string, resuelta_en: DateTimeImmutable}>
      */
     public function historial(int $limite): array
     {
@@ -128,16 +176,65 @@ final class RepositorioDeDenuncias
             'objeto_id' => (string) $fila['objeto_id'],
             'titulo' => (string) $fila['titulo'],
             'categoria' => CategoriaDenuncia::from((string) $fila['categoria']),
+            'gravedad' => GravedadDenuncia::from((string) $fila['gravedad']),
             'estado' => (string) $fila['estado'],
             'accion' => $fila['accion'] === null ? null : (string) $fila['accion'],
             'motivo' => (string) $fila['motivo'],
             'resuelta_por' => (string) $fila['resuelta_por'],
             'resuelta_en' => new DateTimeImmutable((string) $fila['resuelta_en'], new DateTimeZone('UTC')),
         ], $this->base->filas(
-            "SELECT tipo, objeto_id, titulo, categoria, estado, accion, motivo, resuelta_por, resuelta_en FROM denuncia
+            "SELECT tipo, objeto_id, titulo, categoria, gravedad, estado, accion, motivo, resuelta_por, resuelta_en FROM denuncia
              WHERE estado <> 'abierta'
              ORDER BY resuelta_en DESC, creada_en DESC, id LIMIT ?",
             [$limite],
         ));
+    }
+
+    /**
+     * Las reglas (EF-22.11): por sala, cuántos denunciantes distintos tienen una denuncia media
+     * resuelta, creada desde ese momento.
+     *
+     * @param list<string> $salaIds
+     *
+     * @return array<string, int> sala => conteo, sólo las que tienen alguna
+     */
+    public function mediasResueltasPorSala(array $salaIds, DateTimeImmutable $desde): array
+    {
+        if ($salaIds === []) {
+            return [];
+        }
+        $marcas = implode(', ', array_fill(0, count($salaIds), '?'));
+        $conteos = [];
+        foreach ($this->base->filas(
+            "SELECT sala_id, COUNT(DISTINCT usuario_id) AS conteo FROM denuncia
+             WHERE sala_id IN ({$marcas}) AND estado = 'resuelta' AND gravedad = 'media' AND creada_en >= ?
+             GROUP BY sala_id",
+            [...$salaIds, $desde],
+        ) as $fila) {
+            $conteos[(string) $fila['sala_id']] = (int) $fila['conteo'];
+        }
+
+        return $conteos;
+    }
+
+    /**
+     * Las salas con al menos esa cantidad en el conteo de las reglas, de más a menos.
+     *
+     * @return array<string, int> sala => conteo
+     */
+    public function salasConMediasResueltas(int $cantidad, DateTimeImmutable $desde): array
+    {
+        $salas = [];
+        foreach ($this->base->filas(
+            "SELECT sala_id, COUNT(DISTINCT usuario_id) AS conteo FROM denuncia
+             WHERE sala_id IS NOT NULL AND estado = 'resuelta' AND gravedad = 'media' AND creada_en >= ?
+             GROUP BY sala_id HAVING conteo >= ?
+             ORDER BY conteo DESC, sala_id",
+            [$desde, $cantidad],
+        ) as $fila) {
+            $salas[(string) $fila['sala_id']] = (int) $fila['conteo'];
+        }
+
+        return $salas;
     }
 }

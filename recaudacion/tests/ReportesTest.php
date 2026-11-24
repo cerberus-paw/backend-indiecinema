@@ -4,12 +4,14 @@ declare(strict_types=1);
 
 namespace IndieCinema\Recaudacion\Pruebas;
 
+use DateTimeImmutable;
 use IndieCinema\Nucleo\Aplicacion;
 use IndieCinema\Nucleo\Configuracion;
 use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Log;
 use IndieCinema\Nucleo\Pruebas\Dobles\PaginasParaValidar;
+use IndieCinema\Recaudacion\Controladores\Reportes;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -34,6 +36,8 @@ final class ReportesTest extends TestCase
 
     private static string $programacion;
     private static string $funciones;
+    private static string $moderacion;
+    private static string $cuentas;
 
     /** Un puerto donde no atiende nadie: un subsistema caído. */
     private static string $caido;
@@ -42,6 +46,8 @@ final class ReportesTest extends TestCase
     {
         self::$programacion = self::levantar('programacion.php');
         self::$funciones = self::levantar('funciones.php');
+        self::$moderacion = self::levantar('moderacion.php');
+        self::$cuentas = self::levantar('cuentas.php');
         self::$caido = 'http://127.0.0.1:' . self::puertoLibre();
     }
 
@@ -58,7 +64,7 @@ final class ReportesTest extends TestCase
         $configuracion = new Configuracion([
             'app' => ['subsistema' => 'recaudacion', 'prefijo' => '/recaudacion', 'entorno' => 'desarrollo'],
             'nginx' => ['secreto' => 'secreto-de-nginx'],
-            'subsistemas' => [...['programacion' => self::$programacion, 'funciones' => self::$funciones], ...$subsistemas],
+            'subsistemas' => [...['programacion' => self::$programacion, 'funciones' => self::$funciones, 'moderacion' => self::$moderacion, 'cuentas' => self::$cuentas], ...$subsistemas],
             'interno' => ['token' => 'token-de-recaudacion'],
         ]);
         $aplicacion = new Aplicacion(dirname(__DIR__), $configuracion, new Log('recaudacion', fopen('php://memory', 'w')));
@@ -72,6 +78,24 @@ final class ReportesTest extends TestCase
         ], [], [])));
     }
 
+    /**
+     * El texto de todos los temas de la página, uno detrás del otro: desde EF-22.2 cada tema es
+     * una pestaña.
+     *
+     * @param array<string, string> $subsistemas
+     */
+    private function todosLosTemas(string $ruta, string $usuario = self::ORGANIZADORA, string $rol = 'organizador', array $subsistemas = []): string
+    {
+        $texto = '';
+        foreach (array_keys(Reportes::TEMAS) as $tema) {
+            $respuesta = $this->pedir("{$ruta}&tema={$tema}", $usuario, $rol, $subsistemas);
+            self::assertSame(200, $respuesta->estado(), $respuesta->cuerpo());
+            $texto .= ' ' . self::texto($respuesta);
+        }
+
+        return $texto;
+    }
+
     /** El texto que se ve, sin etiquetas ni espacios de más: para buscar frases enteras. */
     private static function texto(Respuesta $respuesta): string
     {
@@ -83,7 +107,7 @@ final class ReportesTest extends TestCase
         $respuesta = $this->pedir(self::NOVIEMBRE);
 
         self::assertSame(200, $respuesta->estado(), $respuesta->cuerpo());
-        $texto = self::texto($respuesta);
+        $texto = $this->todosLosTemas(self::NOVIEMBRE);
         self::assertStringContainsString('Recomendaciones', $texto);
         self::assertStringNotContainsString('Qué conviene hacer', $texto);
         // Las tarjetas: 90 de 160 lugares, 83 de 90 fueron, (45 + 34,4 + 6) / 20.
@@ -98,6 +122,8 @@ final class ReportesTest extends TestCase
         self::assertStringContainsString('Para ese día: La ciénaga, que el público de esta sala votó y no vio (4 votos en 1 votación, el 40 %).', $texto);
         self::assertStringContainsString('El Galpón: 8 de las 10 personas que votaron no reservaron ninguna función.', $texto);
         self::assertStringContainsString('Rojo, en El Galpón: se agotó en 1 de sus 2 funciones (93 % de los lugares vendidos). La demanda llegó al cupo: sumá otra función.', $texto);
+        // La combinada (EF-22.3): Rojo se agotó y gustó, y los miércoles sobra lugar.
+        self::assertStringContainsString('Lo que más conviene El Galpón: Sumar una función de «Rojo» los miércoles. Por qué Se agotó en 1 de sus 2 funciones', $texto);
         // Todas sus funciones son pagas: no hay con qué comparar el precio.
         self::assertStringNotContainsString('A la gorra o con precio', $texto);
         // «Rojo»: 74 de 80, 70 de 74 fueron, 4,4 de promedio.
@@ -109,7 +135,7 @@ final class ReportesTest extends TestCase
         // Sólo sus salas.
         self::assertStringNotContainsString('Cineclub Norte', $texto);
         // En el panel del organizador, con «Reportes» marcado.
-        self::assertMatchesRegularExpression('#<a href="/recaudacion/reportes" class="panel-menu-enlace activo" aria-current="page">Reportes</a>#', $respuesta->cuerpo());
+        self::assertMatchesRegularExpression('#<a href="/recaudacion/reportes" class="panel-menu-enlace activo" aria-current="page">\s*<svg[^>]*>.*?</svg>\s*<span>Reportes</span>\s*</a>#s', $respuesta->cuerpo());
     }
 
     public function testElAdministradorVeTodasLasSalas(): void
@@ -117,11 +143,12 @@ final class ReportesTest extends TestCase
         $respuesta = $this->pedir(self::NOVIEMBRE, self::ADMINISTRADORA, 'administrador');
 
         self::assertSame(200, $respuesta->estado(), $respuesta->cuerpo());
-        $texto = self::texto($respuesta);
+        $texto = $this->todosLosTemas(self::NOVIEMBRE, self::ADMINISTRADORA, 'administrador');
         self::assertStringContainsString('Funciones 5 finalizadas', $texto);
         // El Galpón rinde más que el Norte: 56 % contra 50 %.
         self::assertMatchesRegularExpression('/El Galpón 4 56 %.*Cineclub Norte 1 50 % 75 % — —/', $texto);
-        self::assertStringContainsString('aria-label="Administración"', $respuesta->cuerpo());
+        // En el panel de administración, no en el del organizador (F-02.23).
+        self::assertStringContainsString('<aside class="panel-menu panel-rol-administrador" aria-label="Panel de administración">', $respuesta->cuerpo());
     }
 
     public function testSinFuncionesEnElPeriodoLoDice(): void
@@ -137,7 +164,7 @@ final class ReportesTest extends TestCase
         $respuesta = $this->pedir(self::NOVIEMBRE, subsistemas: ['funciones' => self::$caido]);
 
         self::assertSame(200, $respuesta->estado(), $respuesta->cuerpo());
-        $texto = self::texto($respuesta);
+        $texto = $this->todosLosTemas(self::NOVIEMBRE, subsistemas: ['funciones' => self::$caido]);
         self::assertStringContainsString('Funciones no respondió: faltan las ventas', $texto);
         self::assertStringContainsString('La ciénaga: 4 votos', $texto);
         self::assertStringContainsString('Sin las ventas de funciones no se puede calcular.', $texto);
@@ -315,5 +342,156 @@ final class ReportesTest extends TestCase
     public function testElAdministradorNoTieneLaPestanaDeSusObras(): void
     {
         self::assertStringNotContainsString('>Mis obras</a>', $this->pedir(self::NOVIEMBRE, self::ADMINISTRADORA, 'administrador')->cuerpo());
+    }
+
+    public function testElAdministradorVeLaModeracionYLaConductaDeCadaSala(): void
+    {
+        $texto = self::texto($this->pedir(self::NOVIEMBRE . '&tema=salas', self::ADMINISTRADORA, 'administrador'));
+
+        self::assertStringContainsString('Moderación y conducta', $texto);
+        self::assertStringContainsString('Solicitudes de sala 3 sin resolver; 1 aprobadas, 0 rechazadas y 1 vencidas', $texto);
+        self::assertStringContainsString('Otras denuncias 1 de obras y calificaciones; 1 abiertas', $texto);
+        // El Galpón y la que no tuvo funciones.
+        self::assertStringContainsString('Salas suspendidas 2', $texto);
+        self::assertMatchesRegularExpression('/El Galpón Suspendida por una denuncia 3 2 abiertas, 1 desestimadas y 0 resueltas 2 1 1 de \d+ espectadores/', $texto);
+        self::assertMatchesRegularExpression('/Cineclub Norte 0 0 0 1 de 20 espectadores/', $texto);
+    }
+
+    public function testElOrganizadorNoVeLaModeracion(): void
+    {
+        self::assertStringNotContainsString('Moderación y conducta', self::texto($this->pedir(self::NOVIEMBRE . '&tema=salas')));
+    }
+
+    public function testSiModeracionNoRespondeLoDiceYSigueConLaConducta(): void
+    {
+        $texto = self::texto($this->pedir(self::NOVIEMBRE . '&tema=salas', self::ADMINISTRADORA, 'administrador', ['moderacion' => self::$caido]));
+
+        self::assertStringContainsString('Moderación no respondió: faltan las denuncias, las salas suspendidas y las solicitudes.', $texto);
+        self::assertMatchesRegularExpression('/El Galpón 0 2 1 1 de \d+ espectadores/', $texto);
+    }
+
+    public function testLosTemasSonPestanasQueConservanElPeriodo(): void
+    {
+        $resumen = $this->pedir(self::NOVIEMBRE);
+        $texto = self::texto($resumen);
+
+        // Por defecto, el resumen: las tarjetas, lo que más conviene y los gráficos.
+        self::assertStringContainsString('Lo que más conviene', $texto);
+        self::assertStringContainsString('Ocupación por día Miércoles 20 %', $texto);
+        self::assertStringNotContainsString('Días para una promoción', $texto);
+        self::assertStringContainsString('<a href="/recaudacion/reportes?desde=2026-11-01&amp;hasta=2026-11-30&amp;tema=promociones" class="reporte-pestana">Promociones</a>', $resumen->cuerpo());
+        self::assertStringContainsString('aria-current="page">Resumen</a>', $resumen->cuerpo());
+        // Las barras son SVG con atributos: la CSP no deja estilos en línea.
+        self::assertStringContainsString('<rect class="reporte-barra-valor" width="20" height="8" rx="2"/>', $resumen->cuerpo());
+        self::assertStringNotContainsString('style="', $resumen->cuerpo());
+
+        $promociones = self::texto($this->pedir(self::NOVIEMBRE . '&tema=promociones'));
+        self::assertStringContainsString('Días para una promoción', $promociones);
+        self::assertStringNotContainsString('Títulos para repetir', $promociones);
+
+        // Un tema que no existe es el resumen.
+        self::assertStringContainsString('Lo que más conviene', self::texto($this->pedir(self::NOVIEMBRE . '&tema=otro')));
+    }
+
+    /**
+     * EF-22.17: cada recomendación termina en un botón que abre el alta de la función ya cargada.
+     * El miércoles flojo del Galpón: el próximo miércoles, a las 21 como sus otros miércoles, con
+     * «La ciénaga» (la que su público votó y no vio) y 20 % menos que sus $ 3.500 de siempre.
+     */
+    public function testLaPromocionDelDiaFlojoAbreElAltaCargada(): void
+    {
+        $cuerpo = $this->pedir(self::NOVIEMBRE . '&tema=promociones')->cuerpo();
+
+        $esperada = '/organizador/funciones/nueva?' . http_build_query([
+            'modo' => 'programada', 'sala_id' => '10000000-0000-4000-8000-000000000001', 'obras' => [self::CIENAGA],
+            'fecha' => (new DateTimeImmutable('next wednesday'))->format('Y-m-d'), 'hora' => '21:00', 'precio' => '2800', 'cupo' => '40', 'desde' => 'reporte',
+        ]);
+        self::assertStringContainsString('<a href="' . htmlspecialchars($esperada) . '" class="boton boton-secundario">Programarla con 20 % de descuento</a>', $cuerpo);
+        // «Sumá una función» de lo que se agota y «Títulos para repetir», en la pestaña de programación.
+        self::assertStringContainsString('Programarla</a>', $this->pedir(self::NOVIEMBRE . '&tema=programacion')->cuerpo());
+    }
+
+    /**
+     * EF-22.18: qué géneros llenan en cada sala. En el Galpón, «Rojo» (drama y suspenso) llena los
+     * sábados; los miércoles, «Zama» (drama), no. Todos los votos fueron a obras de drama.
+     */
+    public function testLaProgramacionDiceQueGenerosLlenanEnCadaSala(): void
+    {
+        $texto = self::texto($this->pedir(self::NOVIEMBRE . '&tema=programacion'));
+
+        self::assertMatchesRegularExpression('/Qué géneros llenan El Galpón Suspenso .* 93 % Drama 4 funciones · 100 % de los votos .* 56 %/', $texto);
+        self::assertStringContainsString('Suspenso 2 funciones · 0 % de los votos · 4,4 de promedio', $texto);
+    }
+
+    /**
+     * EF-22.19: el ranking del Galpón en noviembre. Del 100 al 104 fueron a sus tres funciones de
+     * sábado y miércoles: 9 puntos y $ 10.500 cada uno. El 9 votó, fue y calificó: 5 puntos.
+     */
+    public function testElPublicoTieneElRankingDeCadaSala(): void
+    {
+        $respuesta = $this->pedir(self::NOVIEMBRE . '&tema=publico');
+
+        self::assertSame(200, $respuesta->estado(), $respuesta->cuerpo());
+        $texto = self::texto($respuesta);
+        self::assertStringContainsString('Los que más participan en El Galpón', $texto);
+        self::assertStringContainsString('1 Ulises Uno 3 0 0 $ 10.500 9', $texto);
+        self::assertStringContainsString('2 Espectador …000101 3 0 0 $ 10.500 9', $texto);
+        self::assertStringContainsString('Los primeros 10 de 52 espectadores que participaron.', $texto);
+        self::assertStringContainsString('Puntaje: 3 por cada función a la que fue, 1 por cada votación de títulos en la que votó y 1 por cada función que calificó.', $texto);
+        // Sólo sus salas.
+        self::assertStringNotContainsString('Cineclub Norte', $texto);
+    }
+
+    public function testSinCuentasElRankingSaleSinNombres(): void
+    {
+        $texto = self::texto($this->pedir(self::NOVIEMBRE . '&tema=publico', subsistemas: ['cuentas' => self::$caido]));
+
+        self::assertStringContainsString('Cuentas no respondió: el ranking sale sin los nombres.', $texto);
+        self::assertStringContainsString('1 Espectador …000100 3 0 0 $ 10.500 9', $texto);
+    }
+
+    /** El administrador ve todas las salas pero no programa en las ajenas: sin botón. */
+    public function testElAdministradorNoRecibeElBotonDeProgramar(): void
+    {
+        $cuerpo = $this->pedir(self::NOVIEMBRE . '&tema=promociones', self::ADMINISTRADORA, 'administrador')->cuerpo();
+
+        self::assertStringContainsString('los miércoles', $cuerpo);
+        self::assertStringNotContainsString('/organizador/funciones/nueva', $cuerpo);
+    }
+
+    /**
+     * EF-22.13 y EF-22.16: la conversión del Galpón en noviembre. De los diez que votaron el primer miércoles, el 1
+     * reservó y no pagó, el 9 y el 10 pagaron y fueron, y el 9 calificó (Dobles/funciones.php).
+     */
+    public function testLaConversionSigueALosQueVotaronHastaQueCalificaron(): void
+    {
+        $respuesta = $this->pedir(self::NOVIEMBRE . '&tema=conversion');
+
+        self::assertSame(200, $respuesta->estado(), $respuesta->cuerpo());
+        $texto = self::texto($respuesta);
+        self::assertStringContainsString('De votar a calificar', $texto);
+        self::assertStringContainsString('Votaron 10 personas $ 35.000 si cada uno compraba una entrada', $texto);
+        self::assertStringContainsString('Reservaron 3 personas 30 % del paso anterior $ 10.500 lo que quisieron comprar', $texto);
+        self::assertStringContainsString('Pagaron 2 personas 67 % del paso anterior $ 7.000 pagado', $texto);
+        self::assertStringContainsString('Fueron 2 personas 100 % del paso anterior', $texto);
+        self::assertStringContainsString('Calificaron 1 persona 50 % del paso anterior', $texto);
+        // Termina en qué hacer donde más se pierde: entre votar y reservar.
+        self::assertStringContainsString('Donde más se pierde: de los que votaron, reservó el 30 %. Se quedaron en el camino 7 personas y $ 24.500.', $texto);
+        self::assertStringContainsString('Avisarles a los que votaron cuando se elige el título', $texto);
+        self::assertStringNotContainsString('style="', $respuesta->cuerpo());
+    }
+
+    public function testLaConversionSoloSePideEnSuPestana(): void
+    {
+        self::assertStringNotContainsString('De votar a calificar', self::texto($this->pedir(self::NOVIEMBRE)));
+        self::assertStringContainsString('tema=conversion" class="reporte-pestana">Conversión</a>', $this->pedir(self::NOVIEMBRE)->cuerpo());
+    }
+
+    public function testSinFuncionesLaConversionAvisaYNoInventaNumeros(): void
+    {
+        $texto = self::texto($this->pedir(self::NOVIEMBRE . '&tema=conversion', subsistemas: ['funciones' => self::$caido]));
+
+        self::assertStringContainsString('falta hasta dónde llegó cada uno que votó', $texto);
+        self::assertStringNotContainsString('De votar a calificar', $texto);
     }
 }

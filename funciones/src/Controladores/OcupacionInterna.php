@@ -6,6 +6,7 @@ namespace IndieCinema\Funciones\Controladores;
 
 use IndieCinema\Funciones\Modelo\Reserva;
 use IndieCinema\Funciones\Repositorios\RepositorioDeReservas;
+use IndieCinema\Funciones\Servicios\PoliticaDeCancelacion;
 use IndieCinema\Funciones\Servicios\ServicioDeConducta;
 use IndieCinema\Nucleo\Controlador;
 use IndieCinema\Nucleo\Http\ExcepcionHttp;
@@ -29,13 +30,14 @@ final class OcupacionInterna extends Controlador
     public function __construct(
         private readonly RepositorioDeReservas $reservas,
         private readonly ?ServicioDeConducta $conducta = null,
+        private readonly ?PoliticaDeCancelacion $politica = null,
     ) {
     }
 
     /**
      * GET /interno/funciones/{id}/ocupacion, para la ficha. Trae también el tope de lugares por
-     * persona, para que programación no tenga su propia copia del número, y si viene el usuario,
-     * cuántos lugares ya tiene reservados él (IC-463).
+     * persona y la política de cancelación (EF-22.9), para que programación no tenga su propia
+     * copia de los números, y si viene el usuario, cuántos lugares ya tiene reservados él (IC-463).
      *
      * @throws ExcepcionHttp 404 si el id no es un UUID
      */
@@ -51,6 +53,11 @@ final class OcupacionInterna extends Controlador
             'lugares_ocupados' => $this->reservas->lugaresOcupados($id),
             'maximo_por_persona' => Reserva::MAXIMO_POR_PERSONA,
         ];
+        // EF-22.9: la política de cancelación escrita, para que la ficha la muestre al reservar sin
+        // tener su propia copia del número de horas.
+        if ($this->politica !== null) {
+            $datos['politica_cancelacion'] = $this->politica->texto();
+        }
         $usuario = $peticion->consulta('usuario');
         if (is_string($usuario) && Uuid::esValido($usuario)) {
             $datos['lugares_del_usuario'] = $this->reservas->lugaresOcupadosPorUsuario($id, $usuario);
@@ -58,6 +65,11 @@ final class OcupacionInterna extends Controlador
             if ($topeConducta !== null) {
                 $datos['tope_reservas_conducta'] = $topeConducta;
                 $datos['reservas_activas_usuario'] = $this->reservas->activasDelUsuario($usuario);
+            }
+            if ($this->conducta !== null) {
+                $datos['tiene_beneficio_conducta'] = $this->conducta->tieneBeneficio($usuario);
+                $datos['umbral_beneficio_conducta'] = $this->conducta->umbralBeneficio();
+                $datos['dias_preventa_conducta'] = $this->conducta->diasPreventa();
             }
         }
 

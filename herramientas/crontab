@@ -6,3 +6,7 @@
 # A los veinte, para que las funciones que se finalizaron en la hora ya estén finalizadas.
 20 * * * * cd @BACK@ && docker compose exec -T recaudacion php bin/repartir.php
 30 3 * * * cd @BACK@ && docker compose exec -T moderacion php bin/suspender-vencidas.php
+# EF-22.10: las solicitudes devueltas que se pasaron del plazo, después de los vencimientos.
+45 3 * * * cd @BACK@ && docker compose exec -T moderacion php bin/vencer-devueltas.php
+# El respaldo diario (EF-18.5), con lo que dejó la noche ya hecho. Su salida queda en un log aparte.
+0 4 * * * cd @BACK@ && bash herramientas/respaldar.sh >> $HOME/respaldos/respaldar.log 2>&1

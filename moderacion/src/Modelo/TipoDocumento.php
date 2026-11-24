@@ -40,6 +40,23 @@ enum TipoDocumento: string
         };
     }
 
+    /**
+     * Los que marcó el moderador al devolver una solicitud (EF-22.10), de lo que mandó el
+     * formulario: como RequisitoDeSala::tildados(), lo que no es un tipo no cuenta, y uno repetido
+     * cuenta una vez.
+     *
+     * @return list<self> en el orden de los casos
+     */
+    public static function marcados(mixed $campo): array
+    {
+        if (!is_array($campo)) {
+            return [];
+        }
+        $valores = array_filter($campo, is_string(...));
+
+        return array_values(array_filter(self::cases(), static fn (self $tipo): bool => in_array($tipo->value, $valores, true)));
+    }
+
     /** «del seguro», «de la habilitación». */
     public function deQue(): string
     {

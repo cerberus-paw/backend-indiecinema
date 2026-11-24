@@ -35,16 +35,47 @@ final readonly class Umbrales
         public int $votaronSinReservarMinimos = 5,
         /** Una función que vendió este porcentaje o más de sus lugares está agotada: sumar otra. */
         public int $agotadaOcupacionMinima = 95,
+        /** La hora que separa las funciones de la tarde de las de la noche (EF-22.3). */
+        public int $franjaCorteHora = 20,
+        /** Una franja tiene que llenar estos puntos más que la otra para sugerir el cambio de horario… */
+        public int $franjaDiferenciaMinima = 20,
+        /** …con por lo menos estas funciones en cada franja. */
+        public int $franjaFuncionesMinimas = 2,
+        /**
+         * Una sala que se lleva este porcentaje más de lo que le cuesta abrir no necesita promoción
+         * (EF-22.14): gana holgado, y un descuento le resignaría plata sin traerle nada que le falte.
+         * Puede pasar de 100: con 150, sólo la que se lleva dos veces y media su costo.
+         */
+        public int $promocionGananciaMaxima = 40,
+        /**
+         * Cuánto le saca al precio de siempre la promoción del día flojo, en porcentaje, al abrir
+         * el alta desde el reporte (EF-22.17). El 20 es el ejemplo del profe del 11/11: «el
+         * miércoles no va nadie → 20 % de descuento».
+         */
+        public int $promocionDescuento = 20,
+        /**
+         * Un género de una sala tiene que llenar estos puntos más que la sala en general para
+         * sugerirlo el día flojo (EF-22.18)…
+         */
+        public int $generoDiferenciaMinima = 20,
+        /** …en por lo menos estas funciones. */
+        public int $generoFuncionesMinimas = 2,
     ) {
-        foreach ([$diaFlojoOcupacionMaxima, $repetirOcupacionMinima, $repetirAsistenciaMinima, $pedidoVotosMinimos, $gorraDiferenciaMinima, $agotadaOcupacionMinima] as $porcentaje) {
+        foreach ([$diaFlojoOcupacionMaxima, $repetirOcupacionMinima, $repetirAsistenciaMinima, $pedidoVotosMinimos, $gorraDiferenciaMinima, $agotadaOcupacionMinima, $franjaDiferenciaMinima, $promocionDescuento, $generoDiferenciaMinima] as $porcentaje) {
             if ($porcentaje < 0 || $porcentaje > 100) {
                 throw new RuntimeException('Los porcentajes de [reportes] van de 0 a 100.');
             }
         }
-        foreach (['dia_flojo_funciones_minimas' => $diaFlojoFuncionesMinimas, 'gorra_funciones_minimas' => $gorraFuncionesMinimas, 'votaron_sin_reservar_minimos' => $votaronSinReservarMinimos] as $clave => $cantidad) {
+        foreach (['dia_flojo_funciones_minimas' => $diaFlojoFuncionesMinimas, 'gorra_funciones_minimas' => $gorraFuncionesMinimas, 'votaron_sin_reservar_minimos' => $votaronSinReservarMinimos, 'franja_funciones_minimas' => $franjaFuncionesMinimas, 'genero_funciones_minimas' => $generoFuncionesMinimas] as $clave => $cantidad) {
             if ($cantidad < 1) {
                 throw new RuntimeException("{$clave} de [reportes] tiene que ser 1 o más.");
             }
+        }
+        if ($promocionGananciaMaxima < 0) {
+            throw new RuntimeException('promocion_ganancia_maxima de [reportes] tiene que ser 0 o más.');
+        }
+        if ($franjaCorteHora < 1 || $franjaCorteHora > 23) {
+            throw new RuntimeException('franja_corte_hora de [reportes] va de 1 a 23.');
         }
         if ($repetirPromedioMinimo < 1 || $repetirPromedioMinimo > 5) {
             throw new RuntimeException('repetir_promedio_minimo de [reportes] va de 1 a 5.');
@@ -81,6 +112,13 @@ final readonly class Umbrales
             $entero('gorra_funciones_minimas', $porDefecto->gorraFuncionesMinimas),
             $entero('votaron_sin_reservar_minimos', $porDefecto->votaronSinReservarMinimos),
             $entero('agotada_ocupacion_minima', $porDefecto->agotadaOcupacionMinima),
+            $entero('franja_corte_hora', $porDefecto->franjaCorteHora),
+            $entero('franja_diferencia_minima', $porDefecto->franjaDiferenciaMinima),
+            $entero('franja_funciones_minimas', $porDefecto->franjaFuncionesMinimas),
+            $entero('promocion_ganancia_maxima', $porDefecto->promocionGananciaMaxima),
+            $entero('promocion_descuento', $porDefecto->promocionDescuento),
+            $entero('genero_diferencia_minima', $porDefecto->generoDiferenciaMinima),
+            $entero('genero_funciones_minimas', $porDefecto->generoFuncionesMinimas),
         );
     }
 }

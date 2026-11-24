@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace IndieCinema\Cuentas\Servicios;
 
+use DateTimeImmutable;
+use DateTimeZone;
+use IndieCinema\Cuentas\Modelo\EstadoCuenta;
 use IndieCinema\Cuentas\Modelo\FiltrosDeUsuarios;
 use IndieCinema\Cuentas\Modelo\PaginaDeUsuarios;
 use IndieCinema\Cuentas\Modelo\ResumenDeUsuarios;
@@ -19,7 +22,8 @@ use RuntimeException;
 
 /**
  * Los usuarios para el administrador: el listado con la búsqueda y los filtros, por páginas del
- * tamaño que dice config.ini, los números de las tarjetas, y dar o quitar el rol de organizador.
+ * tamaño que dice config.ini, los números de las tarjetas, dar o quitar el rol de organizador y
+ * suspender o reactivar una cuenta.
  * Que quien pide sea administrador lo controla la ruta.
  *
  * Desde la web sólo se da y se quita el de organizador: el de moderador y el de administrador no
@@ -33,6 +37,9 @@ final class ServicioDeUsuarios
      */
     private const POR_PAGINA = 5;
     private const MAXIMO_POR_PAGINA = 100;
+
+    /** El motivo de una suspensión, como la columna cambio_estado_cuenta.motivo. */
+    public const MAXIMO_MOTIVO = 300;
 
     private readonly int $porPagina;
 
@@ -213,6 +220,97 @@ final class ServicioDeUsuarios
     /**
      * @throws ExcepcionHttp 404 si no existe, también si el id no tiene forma de id
      */
+    /**
+     * Suspende la cuenta con un motivo (EF-14.3): no ingresa más y pierde sus sesiones. Una
+     * pendiente también se suspende (una cuenta de spam que nunca verificó), y al reactivarla
+     * vuelve a pendiente. Queda en cambio_estado_cuenta y en el log.
+     *
+     * @return bool si la suspendió; false si ya estaba suspendida
+     *
+     * @throws ExcepcionHttp 404 si no existe; 400 si es la propia, la de un administrador o falta el motivo
+     */
+    public function suspender(string $id, string $motivo, Usuario $administrador, ?DateTimeImmutable $ahora = null): bool
+    {
+        $motivo = trim($motivo);
+        if ($motivo === '' || mb_strlen($motivo) > self::MAXIMO_MOTIVO) {
+            throw ExcepcionHttp::solicitudInvalida('Escribí el motivo de la suspensión, de hasta ' . self::MAXIMO_MOTIVO . ' caracteres.');
+        }
+        $usuario = $this->suspendible($id, $administrador);
+        if ($usuario->estado === EstadoCuenta::Suspendida) {
+            return false;
+        }
+        $hecho = $this->usuarios->cambiarEstadoRegistrado($id, $usuario->estado, EstadoCuenta::Suspendida, $motivo, $administrador->id, self::ahora($ahora));
+        if ($hecho) {
+            $this->log->notice('{administrador} suspendió a {usuario}: {motivo}', ['administrador' => $administrador->id, 'usuario' => $id, 'motivo' => $motivo]);
+        }
+
+        return $hecho;
+    }
+
+    /**
+     * Le levanta la suspensión: vuelve al estado que tenía antes (activa o pendiente) y, sin
+     * registro de cómo estaba, a activa. Puede volver a ingresar.
+     *
+     * @return bool si la reactivó; false si no estaba suspendida
+     *
+     * @throws ExcepcionHttp 404 si no existe; 400 si es la propia o la de un administrador
+     */
+    public function reactivar(string $id, Usuario $administrador, ?DateTimeImmutable $ahora = null): bool
+    {
+        $usuario = $this->suspendible($id, $administrador);
+        if ($usuario->estado !== EstadoCuenta::Suspendida) {
+            return false;
+        }
+        $vuelve = $this->usuarios->suspensiones([$id])[$id]['anterior'] ?? EstadoCuenta::Activa;
+        $hecho = $this->usuarios->cambiarEstadoRegistrado($id, EstadoCuenta::Suspendida, $vuelve, null, $administrador->id, self::ahora($ahora));
+        if ($hecho) {
+            $this->log->notice('{administrador} reactivó a {usuario}.', ['administrador' => $administrador->id, 'usuario' => $id]);
+        }
+
+        return $hecho;
+    }
+
+    /**
+     * El motivo y la fecha de la última suspensión de las cuentas suspendidas de la lista.
+     *
+     * @param list<string> $ids
+     *
+     * @return array<string, array{motivo: ?string, anterior: EstadoCuenta, desde: DateTimeImmutable}>
+     */
+    public function suspensiones(array $ids): array
+    {
+        return $this->usuarios->suspensiones($ids);
+    }
+
+    /**
+     * Si el administrador puede cambiarle el estado: ni a sí mismo (se quedaría afuera) ni a otro
+     * administrador, que no tiene quien lo reactive desde la web.
+     */
+    public static function sePuedeSuspender(UsuarioEnListado $usuario, Usuario $administrador): bool
+    {
+        return $usuario->id !== $administrador->id && !in_array(Rol::Administrador, $usuario->roles, true);
+    }
+
+    /**
+     * @throws ExcepcionHttp 404 si no existe; 400 si no se le puede cambiar el estado
+     */
+    private function suspendible(string $id, Usuario $administrador): UsuarioEnListado
+    {
+        $usuario = $this->buscar($id);
+        if (!self::sePuedeSuspender($usuario, $administrador)) {
+            throw ExcepcionHttp::solicitudInvalida($usuario->id === $administrador->id
+                ? 'No podés suspender tu propia cuenta.'
+                : 'A un administrador no se lo suspende desde la web.');
+        }
+
+        return $usuario;
+    }
+
+    private static function ahora(?DateTimeImmutable $ahora): DateTimeImmutable
+    {
+        return ($ahora ?? new DateTimeImmutable('now', new DateTimeZone('UTC')))->setTimezone(new DateTimeZone('UTC'));
+    }
+
     private function buscar(string $id): UsuarioEnListado
     {
         return $this->buscarEnListado($id) ?? throw ExcepcionHttp::noEncontrada();

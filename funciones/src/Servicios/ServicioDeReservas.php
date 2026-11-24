@@ -32,6 +32,9 @@ final class ServicioDeReservas
     /** Las reservas por página de «Mis reservas»: las funciones de una página van en un pedido. */
     public const POR_PAGINA = 20;
 
+    /** Hasta cuándo se puede cancelar (EF-22.9): la pantalla la muestra y cancelar() la cumple. */
+    public readonly PoliticaDeCancelacion $politica;
+
     /**
      * @param ?PagosDeReservas      $pagos      el cobro con Mercado Pago; sin él, como con el cobro
      *                                          apagado, toda reserva nace confirmada
@@ -45,7 +48,10 @@ final class ServicioDeReservas
         private readonly ?ServicioDeReembolsos $reembolsos = null,
         private readonly ?ServicioDeConducta $conducta = null,
         private readonly ?CuponesDeRecaudacion $cupones = null,
+        // Sin ella (en las pruebas que no la tocan), la de siempre: 24 horas.
+        ?PoliticaDeCancelacion $politica = null,
     ) {
+        $this->politica = $politica ?? PoliticaDeCancelacion::deHoras(PoliticaDeCancelacion::HORAS_MINIMAS);
     }
 
     public function activasDelUsuario(string $usuarioId, DateTimeImmutable $ahora = new DateTimeImmutable()): int
@@ -91,15 +97,26 @@ final class ServicioDeReservas
 
     /**
      * Una página de «Mis reservas» (E4-04.1): sólo las del espectador, de la más nueva a la más
-     * vieja y en cualquier estado.
+     * vieja, en cualquier estado o en los de una pestaña (F-02.25).
      *
-     * @param int $numero desde 1
+     * @param int                 $numero  desde 1
+     * @param list<EstadoReserva> $estados vacía, en cualquier estado
      *
      * @return array{0: list<Reserva>, 1: int} las de la página y cuántas tiene en total
      */
-    public function pagina(Usuario $espectador, int $numero): array
+    public function pagina(Usuario $espectador, int $numero, array $estados = []): array
     {
-        return $this->reservas->delUsuario($espectador->id, $numero, self::POR_PAGINA);
+        return $this->reservas->delUsuario($espectador->id, $numero, self::POR_PAGINA, $estados);
+    }
+
+    /**
+     * Cuántas reservas tiene el espectador en cada estado (F-02.25).
+     *
+     * @return array<string, int> con el valor del estado como clave
+     */
+    public function cantidades(Usuario $espectador): array
+    {
+        return $this->reservas->cantidadesDelUsuario($espectador->id);
     }
 
     /**
@@ -136,14 +153,13 @@ final class ServicioDeReservas
     }
 
     /**
-     * Si el espectador todavía puede cancelar la reserva: confirmada, y antes de que empiece la
-     * función. Después ya no tiene sentido soltar los lugares, y quien entró ya usó la entrada.
-     * Si programación ya no muestra la función (su sala se dio de baja), se puede.
+     * Si el espectador todavía puede cancelar la reserva: confirmada o pendiente de pago, antes de
+     * que empiece la función y, si está confirmada, hasta las horas mínimas de la política
+     * (EF-22.9). Si programación ya no muestra la función (su sala se dio de baja), se puede.
      */
-    public static function seCancela(Reserva $reserva, ?FuncionDeProgramacion $funcion, DateTimeImmutable $ahora = new DateTimeImmutable()): bool
+    public function seCancela(Reserva $reserva, ?FuncionDeProgramacion $funcion, DateTimeImmutable $ahora = new DateTimeImmutable()): bool
     {
-        return $reserva->estado->puedePasarA(EstadoReserva::Cancelada)
-            && ($funcion?->fechaHora === null || $funcion->fechaHora > $ahora);
+        return $this->politica->motivoParaNoCancelar($reserva, $funcion, $ahora) === null;
     }
 
     /**
@@ -155,7 +171,8 @@ final class ServicioDeReservas
      * otro lado, y el reembolso queda pendiente para el administrador.
      *
      * @throws ExcepcionHttp   404 si no es suya
-     * @throws ReglaIncumplida si ya no está confirmada, la función ya empezó, o cambió mientras
+     * @throws ReglaIncumplida si ya no está confirmada, la función ya empezó, falta menos de lo
+     *                         que pide la política de cancelación (EF-22.9), o cambió mientras
      *                         tanto (el organizador registró la asistencia)
      */
     public function cancelar(Usuario $espectador, string $id, DateTimeImmutable $ahora = new DateTimeImmutable()): Reserva
@@ -169,8 +186,11 @@ final class ServicioDeReservas
             // Una pendiente se cancela igual: suelta los lugares sin esperar a que venza.
             EstadoReserva::Confirmada, EstadoReserva::PendientePago => null,
         };
-        if (!self::seCancela($reserva, $funcion, $ahora)) {
-            throw new ReglaIncumplida('La función ya empezó: la reserva ya no se puede cancelar.');
+        // La función ya empezó, o falta menos de lo que pide la política (EF-22.9): el POST no
+        // pasa aunque la pantalla no haya ofrecido el botón.
+        $motivo = $this->politica->motivoParaNoCancelar($reserva, $funcion, $ahora);
+        if ($motivo !== null) {
+            throw new ReglaIncumplida($motivo);
         }
         $cancelada = $reserva->cancelar();
         if (!$this->reservas->guardarEstado($cancelada, $reserva->estado, AutorDelCambio::de($espectador, Rol::Espectador), $ahora)) {
@@ -294,6 +314,9 @@ final class ServicioDeReservas
         if ($reserva->total === '0.00') {
             throw new ReglaIncumplida('Esta función no se paga: no hace falta un cupón.');
         }
+        if ($this->conducta !== null && !$this->conducta->tieneBeneficio($usuarioId, $ahora)) {
+            throw new ReglaIncumplida(Conducta::mensajeDeCuponPorConducta($this->conducta->umbralBeneficio()));
+        }
         $cupon = $this->cupones?->buscar($codigo);
         // Uno ajeno se rechaza igual que uno que no existe: no se dice que el código es de otro.
         if ($cupon === null || $cupon['usuario_id'] !== $usuarioId) {
@@ -329,6 +352,9 @@ final class ServicioDeReservas
             $topeConducta = $this->conducta?->topeSimultaneoPara($reserva->usuarioId, $ahora);
             if ($topeConducta !== null && $this->reservas->activasDelUsuario($reserva->usuarioId, $ahora) >= $topeConducta) {
                 throw new ReglaIncumplida(Conducta::mensajeDeTopeBajoUmbral($topeConducta));
+            }
+            if ($this->conducta !== null && $this->conducta->bloqueadoPorPreventa($reserva->usuarioId, $funcion->fechaHora, $ahora)) {
+                throw new ReglaIncumplida(Conducta::mensajeDePreventaPorConducta($this->conducta->umbralBeneficio(), $this->conducta->diasPreventa()));
             }
             if ($reserva->cupon !== null && $this->reservas->cuponEnUso($reserva->cupon)) {
                 throw new ReglaIncumplida(RepositorioDeReservas::CUPON_EN_USO);

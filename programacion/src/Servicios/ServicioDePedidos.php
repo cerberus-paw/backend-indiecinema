@@ -18,6 +18,7 @@ use IndieCinema\Programacion\Modelo\Obra;
 use IndieCinema\Programacion\Modelo\PedidoDeTitulo;
 use IndieCinema\Programacion\Modelo\ReglaIncumplida;
 use IndieCinema\Programacion\Modelo\Sala;
+use IndieCinema\Programacion\Repositorios\RepositorioDeObras;
 use IndieCinema\Programacion\Repositorios\RepositorioDePedidos;
 use Psr\Log\LoggerInterface;
 use Throwable;
@@ -44,6 +45,7 @@ final class ServicioDePedidos
         private readonly ?CalificacionesDeFunciones $calificaciones = null,
         private readonly ?UsuariosDeCuentas $usuarios = null,
         private readonly ?ClienteSmtp $correo = null,
+        private readonly ?RepositorioDeObras $obras = null,
     ) {
     }
 
@@ -100,17 +102,19 @@ final class ServicioDePedidos
     }
 
     /**
-     * Si ya existe un pedido parecido (mismo título sin distinguir tildes ni mayúsculas y mismo
-     * año), no duplica sino que lo devuelve para ofrecer sumarse; si no, crea el pedido con la
-     * adhesión inicial del espectador.
+     * Si ya existe un pedido parecido (mismo título sin distinguir mayúsculas, tildes ni signos
+     * o espacios de más, y sin distinguir el año), no duplica sino que lo devuelve para ofrecer
+     * sumarse; si la obra ya está en el catálogo aprobado, la devuelve aparte. Si no existe en
+     * ninguno de los dos, crea el pedido con la adhesión inicial del espectador (EF-22.6).
      *
-     * @return array{creado: bool, pedido: ?PedidoDeTitulo, parecidos: list<PedidoDeTitulo>}
+     * @return array{creado: bool, pedido: ?PedidoDeTitulo, parecidos: list<PedidoDeTitulo>, en_catalogo: list<Obra>}
      */
     public function pedir(Usuario $usuario, DatosDePedido $datos): array
     {
-        $parecidos = $this->pedidos->buscarParecidos($datos->titulo, $datos->anio, $usuario->id);
-        if ($parecidos !== []) {
-            return ['creado' => false, 'pedido' => null, 'parecidos' => $parecidos];
+        $parecidos = $this->pedidos->buscarParecidos($datos->titulo, $usuario->id);
+        $enCatalogo = $this->obras?->buscarAprobadasPorTituloNormalizado($datos->titulo) ?? [];
+        if ($parecidos !== [] || $enCatalogo !== []) {
+            return ['creado' => false, 'pedido' => null, 'parecidos' => $parecidos, 'en_catalogo' => $enCatalogo];
         }
 
         $pedido = $this->pedidos->crear(Uuid::nuevo(), $datos, $usuario->id, $this->umbral());
@@ -119,7 +123,48 @@ final class ServicioDePedidos
             'usuario' => $usuario->id,
         ]);
 
-        return ['creado' => true, 'pedido' => $pedido, 'parecidos' => []];
+        return ['creado' => true, 'pedido' => $pedido, 'parecidos' => [], 'en_catalogo' => []];
+    }
+
+    /**
+     * Sugerencias para el autocompletado al pedir un título: combina obras aprobadas del catálogo
+     * y pedidos abiertos o activos existentes (EF-22.6).
+     *
+     * @return list<array{tipo: string, id: string, titulo: string, normalizado: string, anio: ?int, director: string, adhesiones: ?int, url: string}>
+     */
+    public function sugerencias(string $consulta = ''): array
+    {
+        $obras = $this->obras?->sugerenciasPorTitulo($consulta, 8) ?? [];
+        $pedidos = $this->pedidos->sugerencias($consulta, 8);
+        $lista = [];
+
+        foreach ($obras as $obra) {
+            $lista[] = [
+                'tipo' => 'obra',
+                'id' => $obra['id'],
+                'titulo' => $obra['titulo'],
+                'normalizado' => $obra['titulo_normalizado'],
+                'anio' => $obra['anio'],
+                'director' => $obra['director'],
+                'adhesiones' => null,
+                'url' => "/obras/{$obra['id']}",
+            ];
+        }
+
+        foreach ($pedidos as $pedido) {
+            $lista[] = [
+                'tipo' => 'pedido',
+                'id' => $pedido['id'],
+                'titulo' => $pedido['titulo'],
+                'normalizado' => $pedido['titulo_normalizado'],
+                'anio' => $pedido['anio'],
+                'director' => $pedido['director'],
+                'adhesiones' => $pedido['adhesiones'],
+                'url' => "/pedidos/nuevo?pedido={$pedido['id']}",
+            ];
+        }
+
+        return $lista;
     }
 
     /**
@@ -258,8 +303,9 @@ final class ServicioDePedidos
         $baseUrl = rtrim((string) $this->configuracion->obtener('sitio.url', ''), '/');
         $enlace = "{$baseUrl}/obras/{$obra->id}";
         $asunto = "Ya está en IndieCinema: {$obra->titulo}";
+        $anioPedido = $pedido->anio === null ? '' : " ({$pedido->anio})";
         $cuerpo = implode("\n", [
-            "El título «{$pedido->titulo}» ({$pedido->anio}) que pediste en IndieCinema fue tomado por una sala para programar.",
+            "El título «{$pedido->titulo}»{$anioPedido} que pediste en IndieCinema fue tomado por una sala para programar.",
             '',
             "Obra en el catálogo: {$obra->titulo} ({$obra->director})",
             "Podés ver su ficha y sus próximas funciones acá: {$enlace}",

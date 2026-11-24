@@ -757,6 +757,15 @@ final class MigracionesTest extends TestCase
             'INSERT INTO pedido_titulo (id, titulo, anio, director, creado_por) VALUES (?, ?, ?, ?, ?)',
             [$pedidoId, 'Pizza, birra, faso', 1998, 'Adrián Caetano y Bruno Stagnaro', $creador],
         );
+        // EF-22.6: el año es opcional (NULL) y existe el índice por titulo_normalizado.
+        $sinAnioId = Uuid::nuevo();
+        $this->base->ejecutar(
+            'INSERT INTO pedido_titulo (id, titulo, titulo_normalizado, anio, director, creado_por) VALUES (?, ?, ?, NULL, ?, ?)',
+            [$sinAnioId, 'Historia de lo oculto', 'historia de lo oculto', 'Cristian Ponce', $creador],
+        );
+        self::assertNull($this->base->valor('SELECT anio FROM pedido_titulo WHERE id = ?', [$sinAnioId]));
+        $indices = array_column($this->base->filas('SHOW INDEX FROM pedido_titulo'), 'Key_name');
+        self::assertContains('pedido_por_titulo_normalizado', $indices);
         $this->base->ejecutar(
             'INSERT INTO adhesion_pedido (pedido_id, usuario_id) VALUES (?, ?)',
             [$pedidoId, $creador],

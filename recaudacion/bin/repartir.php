@@ -20,6 +20,7 @@ use IndieCinema\Nucleo\BaseDeDatos;
 use IndieCinema\Nucleo\Configuracion;
 use IndieCinema\Nucleo\Http\ClienteInterno;
 use IndieCinema\Nucleo\Log;
+use IndieCinema\Recaudacion\Modelo\CostosDeReferencia;
 use IndieCinema\Recaudacion\Repositorios\RepositorioDeLiquidaciones;
 use IndieCinema\Recaudacion\Repositorios\RepositorioDeParametrosDeReparto;
 use IndieCinema\Recaudacion\Repositorios\RepositorioDeRepartos;
@@ -48,6 +49,7 @@ try {
         new CobrosDeFunciones($cliente),
         new ServicioDeParametrosDeReparto(new RepositorioDeParametrosDeReparto($base)),
         $repartos,
+        CostosDeReferencia::desdeConfiguracion($configuracion)->comisionCentesimos,
     );
     $hecho = $tarea->repartir();
     // Con lo repartido se rearman las liquidaciones de esos meses (EF-08.3): las que ya están

@@ -32,6 +32,8 @@ if ((string) parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH) !== '/interno/usua
 $nombres = [
     ORGANIZADORA => ['id' => ORGANIZADORA, 'nombre' => 'Olga Organizadora', 'correo' => 'olga@indiecinema.test'],
     DUENA => ['id' => DUENA, 'nombre' => 'Dalia Dueña', 'correo' => 'dalia@indiecinema.test'],
+    // El primero del ranking del Galpón (EF-22.19).
+    '90000000-0000-4000-8000-000000000100' => ['id' => '90000000-0000-4000-8000-000000000100', 'nombre' => 'Ulises Uno', 'correo' => 'ulises@indiecinema.test'],
 ];
 $pedidos = explode(',', (string) ($_GET['ids'] ?? ''));
 

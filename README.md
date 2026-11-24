@@ -44,6 +44,7 @@ backend-indiecinema/
 ├── docs/seguridad.md      seguridad por capa: qué protege cada una y dónde está configurado, y
 │                          las amenazas ordenadas por impacto y probabilidad
 ├── docs/guion-de-prueba.md  el recorrido de punta a punta en el sitio publicado, con cada rol
+├── docs/recomendaciones.md  con qué variables y reglas sugiere algo el reporte
 ├── nucleo/                MVC común: ruteo, middleware, base de datos, vistas y errores
 ├── cuentas/               /cuenta/   registro, ingreso, sesión, roles y usuarios del administrador
 ├── programacion/          /          obras, salas, funciones, cartelera y votación de títulos
@@ -271,6 +272,8 @@ todo el sitio se vea igual aunque lo sirvan subsistemas distintos.
   un título para repetir o lo que el público pidió está en `[reportes]` de su `config.ini`. Los
   totales van de a un mes por página, y el CSV trae todas las funciones del período. El dueño de
   una obra ve cómo le fue en cualquier sala, también en las votaciones que perdió.
+  Cómo llega a cada recomendación, también las que cruzan varias variables (EF-22.3), está en
+  [`docs/recomendaciones.md`](docs/recomendaciones.md).
 - **El reparto de lo cobrado es un parámetro con fecha de vigencia**, no una constante
   (`/recaudacion/administracion/reparto`, EF-08.1): el administrador carga con cuánto se reparte
   entre la sala, el dueño de la obra y la plataforma —70/15/15 es lo que deja la migración— y
@@ -375,7 +378,7 @@ docker run --rm -u "$(id -u):$(id -g)" -v "$PWD/..:/app" -w /app/backend-indieci
 | http://localhost:8080/organizador/funciones | «Mis funciones»: las de sus salas, en cualquier estado y con su fecha; desde ahí se programa una función o se la abre a votación de títulos, y se proponen las franjas del acuerdo |
 | http://localhost:8080/cuenta/ | «Mi cuenta», con sesión: el nombre, el correo y los roles, y el enlace a «Mis reservas». Sin sesión, `/cuenta/ingresar` y `/cuenta/registro` |
 | http://localhost:8080/solicitar-sala | la solicitud de sala, con sesión: se guarda la sala propuesta con su seguro y su habilitación en PDF, y le llega al equipo por correo |
-| http://localhost:8080/moderacion/solicitudes | la bandeja de solicitudes de sala, para aprobarlas (publica la sala y da el rol de organizador; exige los cuatro puntos del checklist de requisitos) o rechazarlas con un motivo, el historial, y retirar o volver a publicar la sala con un motivo; para el moderador (y el administrador) |
+| http://localhost:8080/moderacion/solicitudes | la bandeja de solicitudes de sala, para aprobarlas (publica la sala y da el rol de organizador; exige los cuatro puntos del checklist de requisitos), rechazarlas o, si un documento no sirve, devolverlas marcando cuál falta (quien la mandó lo vuelve a subir en `/solicitar-sala` dentro de `[solicitudes] plazo_devolucion_dias` del `config.ini`, 15 días, o la solicitud vence; mientras tanto espera aparte, en «Esperando al solicitante»), siempre con un motivo, el historial, y retirar o volver a publicar la sala con un motivo; para el moderador (y el administrador) |
 | http://localhost:8080/moderacion/documentos | la pestaña «Documentos» de la bandeja: el seguro o la habilitación nuevos que suben los organizadores, para aceptarlos (vuelve a publicar la sala si estaba suspendida sólo por ese papel) o rechazarlos con un motivo; para el moderador (y el administrador) |
 | http://localhost:8080/moderacion/salas/{id}/documentacion | la documentación de una sala para su organizador, desde «Mis salas»: por qué está suspendida, sus documentos y la renovación que sube |
 | http://localhost:8025 | el buzón de prueba (Mailpit): los correos que mandan los subsistemas, sin que salgan a nadie |
@@ -509,6 +512,34 @@ La segunda vez, todo sale en «ya estaban». Para comprobar la carga en el naveg
   http://localhost:8080/cuenta/ingresar), http://localhost:8080/organizador/salas muestra las
   cuatro como `PUBLICADA`, y cada una se puede editar.
 - http://localhost:8080/cartelera muestra las quince funciones, cada una con su afiche.
+
+Después, moderación, para mostrar las reglas de las denuncias (EF-22.11). Sobre Cine Club El
+Alambique carga dos denuncias medias que la moderación ya tomó, una de Eva y otra de Elías,
+dentro del período: la sala queda a una del aviso. Carga además una denuncia alta abierta de Eva
+sobre su función de «Metrópolis», que la bandeja muestra «Para suspender». Le pide la sala y la
+función a programación, así que va después de sus datos de prueba, con programación andando; si
+no las encuentra, lo dice y no carga nada. Las fechas se cuentan hacia atrás desde el día en que
+se carga, y correrlo de nuevo no agrega nada:
+
+```
+docker compose exec moderacion php herramientas/datos-de-prueba.php
+#   agregada  00000007-0000-4000-8000-000000000001
+#   agregada  00000007-0000-4000-8000-000000000002
+#   agregada  00000007-0000-4000-8000-000000000003
+```
+
+Para disparar el aviso al organizador, con la sesión de `administrador@indiecinema.test`:
+
+1. En http://localhost:8080/moderacion/denuncias, el Alambique dice «2 de 3 para aviso».
+2. Denunciar la sala desde su ficha (http://localhost:8080/salas), con un motivo de gravedad
+   media, como «Información falsa o engañosa»: el administrador es el tercer denunciante.
+3. En la bandeja, elegir la sala, «Tomarlas» con un motivo y enviar.
+4. El correo «Tu sala acumula denuncias» le llega a Omar Organizador en el buzón de prueba
+   (http://localhost:8025).
+
+Para que la sala baje al final de la cartelera hacen falta cinco denunciantes: registrar dos
+cuentas más, o bajar `cartelera_cantidad` en la sección `[denuncias]` del `config.ini` de
+moderación.
 
 Para que los reportes de recaudación tengan qué mostrar, hay además un historial: dos meses de
 funciones que ya terminaron en tres de esas salas, con sus votaciones, sus ventas, la asistencia y
@@ -651,9 +682,40 @@ no duplica nada:
   exigible_desde` en el `config.ini` de moderación, a las salas habilitadas que no tienen los dos
   documentos les da 30 días desde esa fecha (con un aviso al empezar y otro siete días antes del
   fin) y después las suspende. Al desplegar EF-07.5, poner ahí la fecha del despliegue.
+- `vencer-devueltas` (moderación, una vez por día, después de `suspender-vencidas`): cierra como
+  vencidas las solicitudes de sala devueltas a las que se les pasó el plazo para completarlas
+  (`[solicitudes] plazo_devolucion_dias`) y se lo avisa por correo al solicitante, que después
+  pide la sala de cero. `recordatorio_devolucion_dias` antes del último día le manda un
+  recordatorio, uno por devolución.
+
+- `respaldar` (todos los días a las 4): el respaldo de la base y de los archivos (ver «Respaldos»).
 
 En local no se instalan: se prueban a mano con el `docker compose exec` de cada línea, y los correos
 llegan a Mailpit.
+
+### Respaldos
+
+`herramientas/respaldar.sh` guarda cada día, en un solo archivo cifrado, el volcado de los cinco
+esquemas (y `control_migraciones`) y los volúmenes de archivos de programación y de moderación. Lo
+cifra con la clave pública de `~/.config/indiecinema/respaldo.asc`: en el servidor no hay con qué
+descifrarlo. Deja los últimos 14 días en `~/respaldos/diarios` y, si existe
+`~/.config/indiecinema/respaldo-destino`, copia cada uno afuera del servidor (`s3://bucket/carpeta`
+con la AWS CLI, o `usuario@host:carpeta` con scp). Lo que pasó queda en `~/respaldos/respaldar.log`.
+
+Para preparar un servidor, una vez:
+
+```
+mkdir -p ~/.config/indiecinema && chmod 700 ~/.config/indiecinema
+# la pública del grupo (gpg --armor --export respaldos@indiecinema.test), nunca la privada
+cat > ~/.config/indiecinema/respaldo.asc
+echo s3://bucket/indiecinema/produccion > ~/.config/indiecinema/respaldo-destino   # opcional
+bash herramientas/respaldar.sh
+```
+
+La clave privada la guarda el grupo fuera de los servidores. Con ella, `herramientas/restaurar.sh
+<respaldo>` lo descifra, lo carga en un MySQL descartable y muestra las filas de cada tabla para
+compararlas con las del servidor: es la restauración probada que pide la propuesta antes de cada
+entrega (en `docs/seguridad.md`, la última).
 
 ### Ramas y entornos
 

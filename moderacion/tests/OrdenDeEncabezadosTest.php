@@ -38,7 +38,7 @@ final class OrdenDeEncabezadosTest extends TestCase
             'subsistemas' => ['cuentas' => 'http://127.0.0.1:1', 'programacion' => 'http://127.0.0.1:1'],
             'interno' => ['token' => 'token-de-moderacion'],
             'correo' => ['servidor' => 'smtp://127.0.0.1:1', 'remitente' => 'no-responder@indiecinema.test'],
-            'solicitudes' => ['destino' => 'equipo@indiecinema.test'],
+            'solicitudes' => ['destino' => 'equipo@indiecinema.test', 'plazo_devolucion_dias' => 15, 'recordatorio_devolucion_dias' => 3],
         ]);
         self::baseConTablasNuevas($this->configuracion);
     }

@@ -7,6 +7,7 @@ namespace IndieCinema\Funciones\Repositorios;
 use DateTimeImmutable;
 use DateTimeZone;
 use IndieCinema\Funciones\Modelo\AutorDelCambio;
+use IndieCinema\Funciones\Modelo\CambioDeReserva;
 use IndieCinema\Funciones\Modelo\EstadoReserva;
 use IndieCinema\Funciones\Modelo\ReglaIncumplida;
 use IndieCinema\Funciones\Modelo\Reserva;
@@ -232,6 +233,31 @@ final class RepositorioDeReservas
         return $motivos;
     }
 
+    /**
+     * El historial de una reserva (EF-18.6), del primer cambio al último: cada cambio de estado con
+     * su autor, también los del sistema. Usa el índice por reserva y fecha; el id desempata dos
+     * cambios del mismo segundo.
+     *
+     * @return list<CambioDeReserva>
+     */
+    public function historial(string $reservaId): array
+    {
+        return array_map(
+            static fn (array $fila): CambioDeReserva => new CambioDeReserva(
+                EstadoReserva::from((string) $fila['estado_anterior']),
+                EstadoReserva::from((string) $fila['estado_nuevo']),
+                (string) $fila['autor_rol'],
+                $fila['autor_id'] === null ? null : (string) $fila['autor_id'],
+                $fila['motivo'] === null ? null : (string) $fila['motivo'],
+                new DateTimeImmutable((string) $fila['hecho_en'], new DateTimeZone('UTC')),
+            ),
+            $this->base->filas(
+                'SELECT estado_anterior, estado_nuevo, autor_rol, autor_id, motivo, hecho_en FROM cambio_reserva WHERE reserva_id = ? ORDER BY hecho_en, id',
+                [$reservaId],
+            ),
+        );
+    }
+
     public function buscar(string $id): ?Reserva
     {
         $fila = $this->base->fila('SELECT * FROM reserva WHERE id = ?', [$id]);
@@ -357,7 +383,7 @@ final class RepositorioDeReservas
     {
         $this->base->ejecutar(
             'INSERT INTO cambio_reserva (reserva_id, estado_anterior, estado_nuevo, autor_id, autor_rol, motivo, hecho_en) VALUES (?, ?, ?, ?, ?, ?, ?)',
-            [$reserva->id, $anterior, $reserva->estado, $autor->id, $autor->rol->value, $autor->motivo, $ahora->setTimezone(new DateTimeZone('UTC'))],
+            [$reserva->id, $anterior, $reserva->estado, $autor->id, $autor->rolEnElHistorial(), $autor->motivo, $ahora->setTimezone(new DateTimeZone('UTC'))],
         );
     }
 
@@ -471,19 +497,38 @@ final class RepositorioDeReservas
      * Las reservas de un espectador, de la más nueva a la más vieja, para «Mis reservas»
      * (E4-04.1). Usa el índice por usuario y fecha de alta.
      *
-     * @param int $numero desde 1
+     * @param int                $numero  desde 1
+     * @param list<EstadoReserva> $estados sólo las que están en alguno, para las pestañas de
+     *                                    «Mis reservas» (F-02.25); vacía, todas
      *
      * @return array{0: list<Reserva>, 1: int} las de la página y cuántas tiene en total
      */
-    public function delUsuario(string $usuarioId, int $numero, int $tamano): array
+    public function delUsuario(string $usuarioId, int $numero, int $tamano, array $estados = []): array
     {
-        $total = (int) $this->base->valor('SELECT COUNT(*) FROM reserva WHERE usuario_id = ?', [$usuarioId]);
+        $donde = $estados === [] ? '' : ' AND estado IN (' . implode(', ', array_fill(0, count($estados), '?')) . ')';
+        $total = (int) $this->base->valor("SELECT COUNT(*) FROM reserva WHERE usuario_id = ?{$donde}", [$usuarioId, ...$estados]);
         $filas = $this->base->filas(
-            'SELECT * FROM reserva WHERE usuario_id = ? ORDER BY creada_en DESC, codigo LIMIT ? OFFSET ?',
-            [$usuarioId, $tamano, ($numero - 1) * $tamano],
+            "SELECT * FROM reserva WHERE usuario_id = ?{$donde} ORDER BY creada_en DESC, codigo LIMIT ? OFFSET ?",
+            [$usuarioId, ...$estados, $tamano, ($numero - 1) * $tamano],
         );
 
         return [array_map(self::reserva(...), $filas), $total];
+    }
+
+    /**
+     * Cuántas reservas tiene el espectador en cada estado, para la cantidad de cada pestaña de
+     * «Mis reservas» (F-02.25). Los estados en que no tiene ninguna no están.
+     *
+     * @return array<string, int> con el valor del estado como clave
+     */
+    public function cantidadesDelUsuario(string $usuarioId): array
+    {
+        $cantidades = [];
+        foreach ($this->base->filas('SELECT estado, COUNT(*) AS cantidad FROM reserva WHERE usuario_id = ? GROUP BY estado', [$usuarioId]) as $fila) {
+            $cantidades[(string) $fila['estado']] = (int) $fila['cantidad'];
+        }
+
+        return $cantidades;
     }
 
     /**

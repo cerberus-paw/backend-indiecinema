@@ -309,7 +309,7 @@ final class Cartelera extends Controlador
      * están en un solo lugar (IC-463, EF-13.2). Sin el dato de funciones, todo null: la ficha deja
      * el campo hasta el cupo y la reserva la controla funciones igual.
      *
-     * @return array{lugares_libres: ?int, agotada: bool, maximo_por_persona: ?int, lugares_restantes_usuario: ?int, maximo_reserva: ?int, aviso_conducta: ?string, limite_conducta_alcanzado: bool}
+     * @return array{lugares_libres: ?int, agotada: bool, maximo_por_persona: ?int, lugares_restantes_usuario: ?int, maximo_reserva: ?int, aviso_conducta: ?string, limite_conducta_alcanzado: bool, tiene_beneficio_conducta: bool, umbral_beneficio_conducta: ?int, politica_cancelacion: ?string}
      */
     private function lugaresDe(CupoDeFuncion $funcion, ?string $usuarioId = null): array
     {
@@ -326,12 +326,28 @@ final class Cartelera extends Controlador
                 'maximo_reserva' => null,
                 'aviso_conducta' => null,
                 'limite_conducta_alcanzado' => false,
+                'tiene_beneficio_conducta' => true,
+                'umbral_beneficio_conducta' => null,
+                'politica_cancelacion' => null,
             ];
         }
 
         $maximoPorPersona = min($ocupacion['maximo_por_persona'], $funcion->cupo);
         $restantesUsuario = max(0, $maximoPorPersona - $ocupacion['del_usuario']);
         $topeConducta = $ocupacion['tope_reservas_conducta'];
+        $tieneBeneficio = $ocupacion['tiene_beneficio_conducta'];
+        $umbralBeneficio = $ocupacion['umbral_beneficio_conducta'];
+        $diasPreventa = $ocupacion['dias_preventa_conducta'];
+        $enPreventaBloqueada = $diasPreventa > 0
+            && $funcion->fechaHora !== null
+            && !$tieneBeneficio
+            && $funcion->fechaHora > new DateTimeImmutable("+{$diasPreventa} days");
+
+        $avisoConducta = match (true) {
+            $enPreventaBloqueada && $umbralBeneficio !== null => "Esta función está en preventa para espectadores con al menos {$umbralBeneficio} puntos de conducta (faltan más de {$diasPreventa} días).",
+            $topeConducta !== null => "Por tu historial de conducta podés tener hasta {$topeConducta} " . ($topeConducta === 1 ? 'reserva' : 'reservas') . ' a la vez.',
+            default => null,
+        };
 
         return [
             'lugares_libres' => $libres,
@@ -339,10 +355,12 @@ final class Cartelera extends Controlador
             'maximo_por_persona' => $maximoPorPersona,
             'lugares_restantes_usuario' => $restantesUsuario,
             'maximo_reserva' => min($libres, $restantesUsuario),
-            'aviso_conducta' => $topeConducta === null
-                ? null
-                : "Por tu historial de conducta podés tener hasta {$topeConducta} " . ($topeConducta === 1 ? 'reserva' : 'reservas') . ' a la vez.',
-            'limite_conducta_alcanzado' => $topeConducta !== null && $ocupacion['reservas_activas_usuario'] >= $topeConducta,
+            'aviso_conducta' => $avisoConducta,
+            'limite_conducta_alcanzado' => $enPreventaBloqueada || ($topeConducta !== null && $ocupacion['reservas_activas_usuario'] >= $topeConducta),
+            'tiene_beneficio_conducta' => $tieneBeneficio,
+            'umbral_beneficio_conducta' => $umbralBeneficio,
+            // EF-22.9: hasta cuándo se cancela, escrito por funciones, junto al botón de reservar.
+            'politica_cancelacion' => $ocupacion['politica_cancelacion'],
         ];
     }
 

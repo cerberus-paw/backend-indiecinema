@@ -6,10 +6,13 @@ use IndieCinema\Moderacion\Controladores\AdministracionDeSolicitudes;
 use IndieCinema\Moderacion\Controladores\BandejaDeDenuncias;
 use IndieCinema\Moderacion\Controladores\BandejaDeDocumentos;
 use IndieCinema\Moderacion\Controladores\BandejaDeObras;
+use IndieCinema\Moderacion\Controladores\DenunciasInternas;
 use IndieCinema\Moderacion\Controladores\DocumentacionDeSala;
 use IndieCinema\Moderacion\Controladores\DocumentoDeSala;
 use IndieCinema\Moderacion\Controladores\FormularioDeDenuncia;
+use IndieCinema\Moderacion\Controladores\FotoDeDenuncia;
 use IndieCinema\Moderacion\Controladores\FotoDeSolicitud;
+use IndieCinema\Moderacion\Controladores\ResumenInterno;
 use IndieCinema\Moderacion\Controladores\SolicitudDeSala;
 use IndieCinema\Moderacion\Controladores\SolicitudesInternas;
 use IndieCinema\Nucleo\Http\EstadoInterno;
@@ -50,6 +53,8 @@ return static function (Router $router): void {
     // La pestaña «Denuncias» de la bandeja: el moderador las desestima o actúa sobre lo denunciado.
     $router->get('/denuncias', [BandejaDeDenuncias::class, 'listar'], Rol::Moderador);
     $router->post('/denuncias/{tipo}/{id}/resolver', [BandejaDeDenuncias::class, 'resolver'], Rol::Moderador);
+    // La foto de una denuncia de sala o de función (EF-22.11), sólo para la moderación.
+    $router->get('/denuncias/{id}/foto', [FotoDeDenuncia::class, 'mostrar'], Rol::Moderador);
     // Las salas suspendidas por denuncia: la suspensión se levanta con un motivo.
     $router->post('/denuncias/salas/{id}/levantar', [BandejaDeDenuncias::class, 'levantar'], Rol::Moderador);
     // La bandeja de solicitudes de sala: aprobar una crea la sala en programación y le da el rol
@@ -66,5 +71,9 @@ return static function (Router $router): void {
     // Para comprobar que los otros subsistemas llegan hasta acá con su token.
     // «Mi solicitud de sala» en «Mi cuenta» (EF-07.6).
     $router->interna('GET', '/interno/solicitudes/ultima/{usuario}', [SolicitudesInternas::class, 'ultima'], ['cuentas']);
+    // Las salas que bajan al final de la cartelera por las reglas de las denuncias (EF-22.11).
+    $router->interna('GET', '/interno/denuncias/castigadas', [DenunciasInternas::class, 'castigadas'], ['programacion']);
+    // La moderación del período, contada, para los reportes del administrador (EF-22.4).
+    $router->interna('GET', '/interno/resumen', [ResumenInterno::class, 'mostrar'], ['recaudacion']);
     $router->interna('GET', '/interno/estado', [EstadoInterno::class, 'mostrar'], ['cuentas', 'programacion', 'funciones', 'recaudacion']);
 };

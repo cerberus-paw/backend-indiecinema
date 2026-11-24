@@ -98,7 +98,7 @@ final class SolicitudDeSalaTest extends TestCase
             'subsistemas' => ['cuentas' => self::$urls['cuentas'], 'programacion' => self::$urls['programacion']],
             'interno' => ['token' => 'token-de-moderacion'],
             'correo' => ['servidor' => $servidorDeCorreo ?? self::$correo->url(), 'remitente' => 'no-responder@indiecinema.test'],
-            'solicitudes' => ['destino' => self::EQUIPO],
+            'solicitudes' => ['destino' => self::EQUIPO, 'plazo_devolucion_dias' => 15, 'recordatorio_devolucion_dias' => 3],
         ]);
     }
 
@@ -798,6 +798,12 @@ final class SolicitudDeSalaTest extends TestCase
         self::assertSame(404, $this->pedir(usuario: self::OTRO, url: $url)->estado());
         self::assertSame(404, $this->pedir(url: '/solicitudes/no-es-un-id/foto')->estado());
         self::assertSame(401, $this->pedir(rol: null, url: $url)->estado());
+        // Ni con el nombre con que quedó en el volumen en lugar del id, ni con una ruta armada a
+        // mano (EF-18.2).
+        $imagen = (string) $this->base->valor('SELECT imagen FROM solicitud_sala WHERE id = ?', [$id]);
+        foreach (["/solicitudes/{$imagen}/foto", '/solicitudes/' . rawurlencode("../{$imagen}") . '/foto', '/solicitudes/..%2F..%2Fetc%2Fpasswd/foto'] as $armada) {
+            self::assertSame(404, $this->pedir(rol: 'moderador', usuario: self::OTRO, url: $armada)->estado(), $armada);
+        }
 
         // Al corregirla, la pantalla la muestra con la dirección de moderación.
         $this->rechazarLaUltima();
@@ -830,6 +836,281 @@ final class SolicitudDeSalaTest extends TestCase
         self::assertSame(303, $respuesta->estado());
         self::assertSame(1, $this->base->valor("SELECT COUNT(*) FROM solicitud_sala WHERE estado = 'pendiente'"));
         self::assertStringContainsString('quedó guardada, pero no se le avisó al equipo por correo', $this->log());
+    }
+
+    /** EF-22.10: quien devuelve las solicitudes en estas pruebas, que cuentas conoce. */
+    private const MODERADORA = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
+
+    /**
+     * EF-22.10: la moderadora le devuelve la última solicitud, por la bandeja.
+     *
+     * @param list<string> $faltantes
+     */
+    private function devolverLaUltima(array $faltantes = ['seguro'], string $motivo = 'La póliza es de otra dirección.'): string
+    {
+        $id = (string) $this->base->valor('SELECT id FROM solicitud_sala ORDER BY enviada_en DESC LIMIT 1');
+        $respuesta = $this->pedir('POST', ['_csrf' => self::CSRF, 'resolucion' => 'devolver', 'faltantes' => $faltantes, 'motivo' => $motivo], 'moderador', usuario: self::MODERADORA, url: "/solicitudes/{$id}/resolver");
+        self::assertSame(303, $respuesta->estado(), $respuesta->cuerpo());
+        self::$correo->vaciar();
+
+        return $id;
+    }
+
+    /**
+     * EF-22.10: completar la devuelta manda sólo los documentos que faltan.
+     *
+     * @param array<string, string>                           $campos
+     * @param array<string, string|array<string, mixed>|null> $documentos campo => de tests/Dobles/documentos, el archivo ya armado, o null para no mandarlo
+     */
+    private function completar(array $campos = ['vence_seguro' => '+18 months'], array $documentos = ['seguro' => 'poliza.pdf'], ?Configuracion $configuracion = null): Respuesta
+    {
+        $archivos = [];
+        foreach ($documentos as $campo => $documento) {
+            if ($documento !== null) {
+                $archivos[$campo] = is_string($documento) ? Documentos::subida($documento) : $documento;
+            }
+        }
+        $fechas = array_map(static fn (string $valor): string => str_starts_with($valor, '+') || str_starts_with($valor, '-') ? self::dentroDe($valor) : $valor, $campos);
+
+        return $this->pedir('POST', ['_csrf' => self::CSRF] + $fechas, archivos: $archivos, configuracion: $configuracion);
+    }
+
+    private static function plazo(): string
+    {
+        return new DateTimeImmutable('today', new \DateTimeZone('America/Argentina/Buenos_Aires'))->modify('+15 days')->format('d/m/Y');
+    }
+
+    /**
+     * EF-22.10: con la última devuelta, ve el motivo, hasta cuándo tiene y un formulario sólo con
+     * los documentos que le pidieron, obligatorios.
+     */
+    public function testConLaUltimaDevueltaVeElMotivoLaFechaYSoloLoQueFalta(): void
+    {
+        $this->enviar();
+        $this->devolverLaUltima(['seguro']);
+
+        $respuesta = $this->pedir();
+
+        self::assertSame(200, $respuesta->estado());
+        $pantalla = $respuesta->cuerpo();
+        self::assertStringContainsString('La póliza es de otra dirección.', $pantalla);
+        self::assertStringContainsString('Tenés hasta el ' . self::plazo(), $pantalla);
+        self::assertStringContainsString('vuelvas a subir el seguro', $pantalla);
+        self::assertMatchesRegularExpression('/<input[^>]*name="seguro"[^>]*required/', $pantalla);
+        self::assertMatchesRegularExpression('/<input[^>]*name="vence_seguro"[^>]*required/', $pantalla);
+        self::assertStringNotContainsString('name="habilitacion_pdf"', $pantalla);
+        self::assertStringNotContainsString('name="nombre"', $pantalla);
+        self::assertStringNotContainsString('name="imagen"', $pantalla);
+        self::assertStringContainsString('Mandar la documentación', $pantalla);
+    }
+
+    /**
+     * EF-22.10: completarla deja la misma solicitud pendiente, con el seguro nuevo pendiente y el
+     * rechazado como historial, y le avisa al equipo.
+     */
+    public function testCompletarlaVuelveLaMismaSolicitudAPendiente(): void
+    {
+        $this->enviar();
+        $id = $this->devolverLaUltima(['seguro']);
+
+        $respuesta = $this->completar();
+
+        self::assertSame(303, $respuesta->estado(), $respuesta->cuerpo());
+        self::assertSame(self::URL . '?enviada=1', $respuesta->cabecera('Location'));
+        self::assertSame([['id' => $id, 'estado' => 'pendiente']], $this->base->filas('SELECT id, estado FROM solicitud_sala'));
+        self::assertSame(
+            [
+                ['tipo' => 'seguro', 'vence_en' => self::dentroDe('+1 year'), 'estado' => 'rechazado'],
+                ['tipo' => 'seguro', 'vence_en' => self::dentroDe('+18 months'), 'estado' => 'pendiente'],
+                ['tipo' => 'habilitacion', 'vence_en' => self::dentroDe('+2 years'), 'estado' => 'pendiente'],
+            ],
+            $this->base->filas('SELECT tipo, vence_en, estado FROM documento WHERE solicitud_id = ? ORDER BY tipo, vence_en', [$id]),
+        );
+        self::assertCount(3, $this->documentosGuardados());
+        $correos = self::$correo->correos();
+        self::assertSame(['<' . self::EQUIPO . '>'], $correos[0]['para']);
+        self::assertStringContainsString('completó la documentación', self::textoDelCorreo());
+        self::assertStringContainsString("El usuario " . self::ESPECTADORA . " completó la solicitud {$id}", $this->log());
+        self::assertStringContainsString('Tu solicitud para «Cine Club El Galpón» está en manos del equipo', $this->pedir(url: self::URL . '?enviada=1')->cuerpo());
+    }
+
+    /**
+     * @return iterable<string, array{array<string, string>, array<string, string|null>, string, string}>
+     */
+    public static function completadasConErrores(): iterable
+    {
+        yield 'sin el PDF' => [['vence_seguro' => '+18 months'], ['seguro' => null], 'seguro', 'Falta el PDF del seguro.'];
+        yield 'con otro archivo' => [['vence_seguro' => '+18 months'], ['seguro' => 'programa.pdf'], 'seguro', 'El seguro tiene que ser un PDF.'];
+        yield 'vencido' => [['vence_seguro' => '-1 day'], ['seguro' => 'poliza.pdf'], 'vence_seguro', 'El seguro tiene que vencer después de hoy.'];
+        yield 'sin fecha' => [['vence_seguro' => ''], ['seguro' => 'poliza.pdf'], 'vence_seguro', 'Falta la fecha de vencimiento del seguro.'];
+    }
+
+    /**
+     * @param array<string, string>      $campos
+     * @param array<string, string|null> $documentos
+     */
+    #[DataProvider('completadasConErrores')]
+    public function testCompletarlaConErroresNoCambiaNadaYConservaLoCargado(array $campos, array $documentos, string $campo, string $mensaje): void
+    {
+        $this->enviar();
+        $id = $this->devolverLaUltima(['seguro']);
+
+        $respuesta = $this->completar($campos, $documentos);
+
+        self::assertSame(422, $respuesta->estado());
+        self::assertStringContainsString($mensaje, $respuesta->cuerpo());
+        self::assertStringContainsString("href=\"#{$campo}\"", $respuesta->cuerpo());
+        if ($campo === 'seguro') {
+            self::assertMatchesRegularExpression('/name="vence_seguro"[^>]*value="' . self::dentroDe('+18 months') . '"/', $respuesta->cuerpo());
+        }
+        self::assertSame('devuelta', $this->base->valor('SELECT estado FROM solicitud_sala WHERE id = ?', [$id]));
+        self::assertSame(2, $this->base->valor('SELECT COUNT(*) FROM documento'));
+        self::assertCount(2, $this->documentosGuardados());
+        self::assertSame([], self::$correo->correos());
+    }
+
+    /**
+     * EF-22.10: los dos documentos que se piden son obligatorios.
+     */
+    public function testSiFaltanLosDosLosPideALosDos(): void
+    {
+        $this->enviar();
+        $this->devolverLaUltima(['seguro', 'habilitacion']);
+
+        $respuesta = $this->completar(['vence_seguro' => '+1 year', 'vence_habilitacion' => '+1 year'], ['seguro' => 'poliza.pdf']);
+
+        self::assertSame(422, $respuesta->estado());
+        self::assertStringContainsString('Falta el PDF de la habilitación.', $respuesta->cuerpo());
+
+        self::assertSame(303, $this->completar(['vence_seguro' => '+1 year', 'vence_habilitacion' => '+1 year'], ['seguro' => 'poliza.pdf', 'habilitacion_pdf' => 'habilitacion.pdf'])->estado());
+        self::assertSame(2, $this->base->valor("SELECT COUNT(*) FROM documento WHERE estado = 'pendiente'"));
+    }
+
+    /**
+     * EF-22.10: pasada la fecha límite no se completa, aunque la tarea todavía no la haya cerrado.
+     */
+    public function testPasadaLaFechaLimiteNoSeCompleta(): void
+    {
+        $this->enviar();
+        $id = $this->devolverLaUltima(['seguro']);
+        $this->base->ejecutar('UPDATE solicitud_sala SET devolucion_vence = ? WHERE id = ?', [self::dentroDe('-1 day'), $id]);
+
+        $respuesta = $this->completar();
+
+        self::assertSame(409, $respuesta->estado());
+        self::assertStringContainsString('Venció el plazo para completarla', $respuesta->cuerpo());
+        self::assertSame('devuelta', $this->base->valor('SELECT estado FROM solicitud_sala WHERE id = ?', [$id]));
+        self::assertSame(2, $this->base->valor('SELECT COUNT(*) FROM documento'));
+        self::assertCount(2, $this->documentosGuardados());
+        self::assertSame([], self::$correo->correos());
+    }
+
+    public function testElUltimoDiaTodaviaSeCompleta(): void
+    {
+        $this->enviar();
+        $id = $this->devolverLaUltima(['seguro']);
+        $hoy = new DateTimeImmutable('today', new \DateTimeZone('America/Argentina/Buenos_Aires'))->format('Y-m-d');
+        $this->base->ejecutar('UPDATE solicitud_sala SET devolucion_vence = ? WHERE id = ?', [$hoy, $id]);
+
+        self::assertSame(303, $this->completar()->estado());
+    }
+
+    public function testSiFallaElCorreoLaCompletadaQuedaPendiente(): void
+    {
+        $this->enviar();
+        $id = $this->devolverLaUltima(['seguro']);
+
+        $respuesta = $this->completar(configuracion: $this->configuracion('smtp://127.0.0.1:1'));
+
+        self::assertSame(303, $respuesta->estado());
+        self::assertSame('pendiente', $this->base->valor('SELECT estado FROM solicitud_sala WHERE id = ?', [$id]));
+        self::assertStringContainsString('quedó guardada, pero no se le avisó al equipo por correo', $this->log());
+    }
+
+    /**
+     * EF-22.10 de punta a punta: la devuelven por el seguro, la completa y la aprueban. La sala se
+     * publica con el seguro nuevo aceptado; el rechazado queda como estaba.
+     */
+    public function testDevolverCompletarYAprobarPublicaLaSalaConElSeguroNuevo(): void
+    {
+        $this->enviar();
+        $id = $this->devolverLaUltima(['seguro']);
+        $this->completar();
+
+        $respuesta = $this->pedir('POST', [
+            '_csrf' => self::CSRF, 'resolucion' => 'aprobar', 'motivo' => 'Ahora sí.',
+            'requisitos' => ['seguro_vigente', 'habilitacion', 'capacidad', 'condiciones'],
+        ], 'moderador', usuario: self::MODERADORA, url: "/solicitudes/{$id}/resolver");
+
+        self::assertSame(303, $respuesta->estado(), $respuesta->cuerpo());
+        self::assertSame('aprobada', $this->base->valor('SELECT estado FROM solicitud_sala WHERE id = ?', [$id]));
+        self::assertSame([(string) $this->base->valor('SELECT sala_id FROM solicitud_sala WHERE id = ?', [$id])], array_keys(self::salasDeProgramacion()));
+        self::assertSame(
+            [
+                ['tipo' => 'seguro', 'vence_en' => self::dentroDe('+1 year'), 'estado' => 'rechazado'],
+                ['tipo' => 'seguro', 'vence_en' => self::dentroDe('+18 months'), 'estado' => 'aceptado'],
+                ['tipo' => 'habilitacion', 'vence_en' => self::dentroDe('+2 years'), 'estado' => 'aceptado'],
+            ],
+            $this->base->filas('SELECT tipo, vence_en, estado FROM documento WHERE solicitud_id = ? ORDER BY tipo, vence_en', [$id]),
+        );
+    }
+
+    /**
+     * EF-22.10: como la deja la tarea vencer-devueltas.
+     */
+    private function vencerLaUltima(): void
+    {
+        $this->base->ejecutar("UPDATE solicitud_sala SET estado = 'vencida', motivo = 'Venció el plazo para completar la documentación.', resuelta_en = NOW() WHERE estado = 'devuelta'");
+    }
+
+    /**
+     * EF-22.10: con la última vencida ve el motivo y el formulario vacío. El pedido nuevo empieza
+     * de cero: otra sala, sin la foto ni los PDF de la vencida.
+     */
+    public function testConLaUltimaVencidaVeElMotivoYEmpiezaDeCero(): void
+    {
+        $this->enviar();
+        $vieja = (array) $this->base->fila('SELECT id, sala_id, imagen FROM solicitud_sala');
+        $this->devolverLaUltima(['seguro']);
+        $this->vencerLaUltima();
+
+        $pantalla = $this->pedir()->cuerpo();
+
+        self::assertStringContainsString('Venció la solicitud de «Cine Club El Galpón»', $pantalla);
+        self::assertStringContainsString('Venció el plazo para completar la documentación.', $pantalla);
+        self::assertStringContainsString('Podés mandar una solicitud nueva', $pantalla);
+        self::assertMatchesRegularExpression('/<input[^>]*name="nombre"[^>]*value=""/', $pantalla);
+        self::assertMatchesRegularExpression('/<input[^>]*name="imagen"[^>]*required/', $pantalla);
+        self::assertMatchesRegularExpression('/<input[^>]*name="seguro"[^>]*required/', $pantalla);
+        self::assertStringNotContainsString('/organizador/salas', $pantalla);
+
+        self::assertSame(422, $this->enviar(imagen: null)->estado(), 'La foto vuelve a ser obligatoria.');
+        self::assertSame(303, $this->enviar()->estado());
+
+        $nueva = (array) $this->base->fila("SELECT id, sala_id, imagen FROM solicitud_sala WHERE estado = 'pendiente'");
+        self::assertNotSame($vieja['sala_id'], $nueva['sala_id']);
+        self::assertNotSame($vieja['imagen'], $nueva['imagen']);
+        $archivosViejos = array_column($this->base->filas('SELECT archivo FROM documento WHERE solicitud_id = ?', [$vieja['id']]), 'archivo');
+        $archivosNuevos = array_column($this->base->filas('SELECT archivo FROM documento WHERE solicitud_id = ?', [$nueva['id']]), 'archivo');
+        self::assertCount(2, $archivosNuevos);
+        self::assertSame([], array_intersect($archivosViejos, $archivosNuevos));
+    }
+
+    /**
+     * EF-22.10: si el vencido era un pedido de cambio de dirección, se pide de nuevo desde «Mis
+     * salas».
+     */
+    public function testConUnCambioVencidoOfreceMisSalas(): void
+    {
+        $this->enviar();
+        $this->base->ejecutar('UPDATE solicitud_sala SET cambio = TRUE');
+        $this->devolverLaUltima(['habilitacion']);
+        $this->vencerLaUltima();
+
+        $pantalla = $this->pedir()->cuerpo();
+
+        self::assertStringContainsString('Venció el pedido de cambio de dirección de «Cine Club El Galpón»', $pantalla);
+        self::assertStringContainsString('href="/organizador/salas"', $pantalla);
     }
 
     /**

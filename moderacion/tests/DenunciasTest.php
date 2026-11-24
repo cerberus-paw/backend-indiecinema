@@ -11,6 +11,8 @@ use IndieCinema\Nucleo\Http\Peticion;
 use IndieCinema\Nucleo\Http\Respuesta;
 use IndieCinema\Nucleo\Log;
 use IndieCinema\Nucleo\Pruebas\Dobles\PaginasParaValidar;
+use IndieCinema\Moderacion\Pruebas\Dobles\Documentos;
+use IndieCinema\Moderacion\Pruebas\Dobles\Imagenes;
 use IndieCinema\Nucleo\Pruebas\Dobles\ServidorSmtpDePrueba;
 use IndieCinema\Nucleo\Uuid;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -42,6 +44,9 @@ final class DenunciasTest extends TestCase
     /** @var resource */
     private $salidaDelLog;
 
+    /** El volumen de archivos de moderación: las fotos de las denuncias van a denuncias/. */
+    private string $carpeta;
+
     public static function setUpBeforeClass(): void
     {
         self::iniciarServidores();
@@ -58,27 +63,37 @@ final class DenunciasTest extends TestCase
     {
         self::reiniciarServidores();
         self::$correo->vaciar();
+        $this->carpeta = sys_get_temp_dir() . '/archivos-' . bin2hex(random_bytes(4));
         $this->base = self::baseConTablasNuevas($this->configuracion());
         $this->salidaDelLog = fopen('php://memory', 'w+');
+    }
+
+    protected function tearDown(): void
+    {
+        array_map('unlink', glob("{$this->carpeta}/denuncias/*") ?: []);
+        @rmdir("{$this->carpeta}/denuncias");
+        @rmdir($this->carpeta);
     }
 
     private function configuracion(): Configuracion
     {
         return new Configuracion([
             'app' => ['subsistema' => 'moderacion', 'prefijo' => '/moderacion', 'entorno' => 'desarrollo'],
-            'archivos' => ['carpeta' => sys_get_temp_dir() . '/sin-archivos'],
+            'archivos' => ['carpeta' => $this->carpeta],
             'base' => self::baseDePruebas(),
             'nginx' => ['secreto' => self::SECRETO],
             'subsistemas' => ['cuentas' => self::$urls['cuentas'], 'programacion' => self::$urls['programacion'], 'funciones' => self::$urls['funciones']],
             'interno' => ['token' => 'token-de-moderacion'],
             'correo' => ['servidor' => self::$correo->url(), 'remitente' => 'no-responder@indiecinema.test'],
+            'denuncias' => ['aviso_cantidad' => 3, 'cartelera_cantidad' => 5, 'dias' => 30],
+            'llamadores' => ['programacion' => hash('sha256', 'token-de-programacion'), 'cuentas' => hash('sha256', 'token-de-cuentas')],
         ]);
     }
 
     /**
      * @param array<string, mixed> $cuerpo
      */
-    private function pedir(string $metodo, string $url, ?string $rol = 'espectador', array $cuerpo = [], ?string $usuario = null): Respuesta
+    private function pedir(string $metodo, string $url, ?string $rol = 'espectador', array $cuerpo = [], ?string $usuario = null, array $archivos = []): Respuesta
     {
         $usuario ??= match ($rol) {
             'administrador' => self::ADMINISTRADOR,
@@ -89,15 +104,16 @@ final class DenunciasTest extends TestCase
         parse_str((string) parse_url($url, PHP_URL_QUERY), $consulta);
         $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion(), new Log('moderacion', $this->salidaDelLog));
 
-        return PaginasParaValidar::anotar($metodo, "/moderacion{$url}", $aplicacion->atender(new Peticion($metodo, (string) parse_url($url, PHP_URL_PATH), $consulta, $cuerpo, $cabeceras, ['csrf' => self::CSRF])));
+        return PaginasParaValidar::anotar($metodo, "/moderacion{$url}", $aplicacion->atender(new Peticion($metodo, (string) parse_url($url, PHP_URL_PATH), $consulta, $cuerpo, $cabeceras, ['csrf' => self::CSRF], $archivos)));
     }
 
     /**
-     * @param array<string, string> $campos
+     * @param array<string, string>               $campos
+     * @param array<string, array<string, mixed>> $archivos
      */
-    private function denunciar(string $tipo, string $id, array $campos, ?string $rol = 'espectador', ?string $usuario = null): Respuesta
+    private function denunciar(string $tipo, string $id, array $campos, ?string $rol = 'espectador', ?string $usuario = null, array $archivos = []): Respuesta
     {
-        return $this->pedir('POST', '/denuncias/nueva?' . http_build_query(['tipo' => $tipo, 'id' => $id]), $rol, $campos + ['_csrf' => self::CSRF], $usuario);
+        return $this->pedir('POST', '/denuncias/nueva?' . http_build_query(['tipo' => $tipo, 'id' => $id]), $rol, $campos + ['_csrf' => self::CSRF], $usuario, $archivos);
     }
 
     /**
@@ -106,6 +122,14 @@ final class DenunciasTest extends TestCase
     private function denuncias(): array
     {
         return $this->base->filas('SELECT tipo, objeto_id, titulo, usuario_id, categoria, detalle, estado FROM denuncia ORDER BY creada_en, id');
+    }
+
+    /**
+     * @return list<array<string, mixed>> la gravedad y la sala de cada una, en orden
+     */
+    private function gravedades(): array
+    {
+        return $this->base->filas('SELECT objeto_id, categoria, gravedad, sala_id FROM denuncia ORDER BY creada_en, id');
     }
 
     /**
@@ -243,6 +267,625 @@ final class DenunciasTest extends TestCase
         return $id;
     }
 
+    /**
+     * EF-22.11: los motivos del lugar sólo se ofrecen en salas y funciones, y en una obra o un
+     * comentario no se aceptan. La gravedad no se ve ni se elige.
+     */
+    public function testCadaTipoOfreceSusMotivos(): void
+    {
+        $sala = self::sala('El Galpón');
+        $del = ['Seguridad del lugar', 'La función no se hizo', 'Cambio de horario o de lugar sin aviso', 'Instalaciones en mal estado (butacas, sonido, imagen)'];
+        $de = ['Contenido ofensivo o inapropiado', 'Información falsa o engañosa', 'Derechos de autor', 'Otro'];
+        $lugares = ["tipo=sala&id={$sala}", 'tipo=funcion&id=' . self::funcion($sala, [self::obra('Zama')])];
+        $otros = ['tipo=obra&id=' . self::obra('La flor'), 'tipo=calificacion&id=' . self::comentario($sala, 'Un insulto.')];
+
+        foreach ([...$lugares, ...$otros] as $consulta) {
+            $pantalla = $this->pedir('GET', "/denuncias/nueva?{$consulta}");
+            self::assertSame(200, $pantalla->estado(), $pantalla->cuerpo());
+            preg_match_all('#name="categoria" value="([a-z_]+)"#', $pantalla->cuerpo(), $valores);
+            $conLugar = in_array($consulta, $lugares, true);
+            self::assertSame($conLugar ? ['seguridad', 'no_se_hizo', 'ofensivo', 'falsa', 'derechos', 'cambio_sin_aviso', 'instalaciones', 'otro'] : ['ofensivo', 'falsa', 'derechos', 'otro'], $valores[1], $consulta);
+            foreach ([...$de, ...($conLugar ? $del : [])] as $motivo) {
+                self::assertStringContainsString($motivo, $pantalla->cuerpo(), $consulta);
+            }
+            self::assertStringNotContainsString('name="gravedad"', $pantalla->cuerpo());
+        }
+        foreach (['no_se_hizo', 'cambio_sin_aviso', 'instalaciones'] as $delLugar) {
+            self::assertSame(422, $this->denunciar('obra', self::obra('Otra'), ['categoria' => $delLugar, 'detalle' => ''])->estado(), $delLugar);
+        }
+        self::assertSame([], $this->denuncias());
+    }
+
+    /**
+     * EF-22.11: la gravedad la da el motivo, y la sala es la denunciada o la de la función. Una
+     * gravedad que llegue en el pedido no cambia nada.
+     */
+    public function testLaDenunciaGuardaLaGravedadDelMotivoYLaSala(): void
+    {
+        $sala = self::sala('El Galpón');
+        $funcion = self::funcion($sala, [self::obra('Zama')]);
+        $obra = self::obra('La flor');
+        $comentario = self::comentario($sala, 'Un insulto.');
+
+        $this->denunciada('sala', $sala, self::ESPECTADORA, '2026-11-01 10:00:00', 'instalaciones');
+        $this->denunciada('funcion', $funcion, self::ESPECTADORA, '2026-11-02 10:00:00', 'cambio_sin_aviso');
+        $this->denunciada('funcion', $funcion, self::ADMINISTRADOR, '2026-11-03 10:00:00', 'no_se_hizo');
+        self::assertSame(303, $this->denunciar('obra', $obra, ['categoria' => 'otro', 'detalle' => 'Algo.', 'gravedad' => 'alta'])->estado());
+        $this->base->ejecutar('UPDATE denuncia SET creada_en = ? WHERE objeto_id = ?', ['2026-11-04 10:00:00', $obra]);
+        $this->denunciada('calificacion', $comentario, self::ESPECTADORA, '2026-11-05 10:00:00', 'ofensivo');
+
+        self::assertSame([
+            ['objeto_id' => $sala, 'categoria' => 'instalaciones', 'gravedad' => 'baja', 'sala_id' => $sala],
+            ['objeto_id' => $funcion, 'categoria' => 'cambio_sin_aviso', 'gravedad' => 'media', 'sala_id' => $sala],
+            ['objeto_id' => $funcion, 'categoria' => 'no_se_hizo', 'gravedad' => 'alta', 'sala_id' => $sala],
+            ['objeto_id' => $obra, 'categoria' => 'otro', 'gravedad' => 'baja', 'sala_id' => null],
+            ['objeto_id' => $comentario, 'categoria' => 'ofensivo', 'gravedad' => 'alta', 'sala_id' => null],
+        ], $this->gravedades());
+    }
+
+    /**
+     * EF-22.11: primero lo que tiene la denuncia abierta más grave, después lo que tiene más y
+     * después lo que lleva más tiempo. Cada ítem lleva la etiqueta de su más grave, y cada
+     * denuncia la suya.
+     */
+    public function testLaBandejaOrdenaPorGravedadCantidadYAntiguedad(): void
+    {
+        $baja = self::obra('Baja y vieja');
+        $mediaVieja = self::obra('Media vieja');
+        $mediaNueva = self::obra('Media nueva');
+        $mediaDoble = self::obra('Media doble');
+        $alta = self::obra('Alta y nueva');
+        $this->denunciada('obra', $baja, self::ESPECTADORA, '2026-11-01 10:00:00', 'otro', 'Algo.');
+        $this->denunciada('obra', $mediaVieja, self::ESPECTADORA, '2026-11-02 10:00:00', 'falsa');
+        $this->denunciada('obra', $mediaNueva, self::ESPECTADORA, '2026-11-03 10:00:00', 'derechos');
+        $this->denunciada('obra', $mediaDoble, self::ESPECTADORA, '2026-11-04 10:00:00', 'falsa');
+        $this->denunciada('obra', $mediaDoble, self::ADMINISTRADOR, '2026-11-05 10:00:00', 'otro', 'Algo.');
+        $this->denunciada('obra', $alta, self::ESPECTADORA, '2026-11-06 10:00:00', 'otro', 'Algo.');
+        $this->denunciada('obra', $alta, self::ADMINISTRADOR, '2026-11-07 10:00:00', 'ofensivo');
+
+        $respuesta = $this->pedir('GET', '/denuncias', 'moderador');
+
+        self::assertSame(['Alta y nueva', 'Media doble', 'Media vieja', 'Media nueva', 'Baja y vieja'], self::titulos($respuesta));
+        preg_match_all('#class="estado-cuenta gravedad-([a-z]+)"><span class="sr-only">Gravedad </span>([A-Za-z]+)</span>#', $respuesta->cuerpo(), $etiquetas);
+        // Las cinco de la lista, y después las dos de la elegida (la alta), primero la más grave.
+        self::assertSame(['alta', 'media', 'media', 'media', 'baja', 'alta', 'baja'], $etiquetas[1]);
+        self::assertSame(['Alta', 'Media', 'Media', 'Media', 'Baja', 'Alta', 'Baja'], $etiquetas[2]);
+    }
+
+    /**
+     * EF-22.11: una sala o una función con una alta abierta va antes que todo, marcada «Para
+     * suspender», con «Suspender» elegida. No se suspende sola. Una alta sobre una obra sólo cuenta
+     * para el orden.
+     */
+    public function testUnaAltaSobreUnaSalaOUnaFuncionQuedaParaSuspender(): void
+    {
+        $sala = self::sala('El Galpón');
+        $funcion = self::funcion(self::sala('La Fábrica'), [self::obra('Zama')]);
+        $obra = self::obra('La flor');
+        $this->denunciada('obra', $obra, self::ESPECTADORA, '2026-11-01 10:00:00', 'ofensivo');
+        $this->denunciada('obra', $obra, self::ADMINISTRADOR, '2026-11-02 10:00:00', 'ofensivo');
+        $this->denunciada('sala', $sala, self::ESPECTADORA, '2026-11-03 10:00:00', 'falsa');
+        $this->denunciada('funcion', $funcion, self::ESPECTADORA, '2026-11-04 10:00:00', 'falsa');
+        $this->denunciada('funcion', $funcion, self::ADMINISTRADOR, '2026-11-05 10:00:00', 'no_se_hizo');
+
+        $respuesta = $this->pedir('GET', '/denuncias', 'moderador');
+
+        self::assertSame(['Zama', 'La flor', 'El Galpón'], self::titulos($respuesta));
+        // En la lista y en la elegida, que es la función.
+        self::assertSame(2, substr_count($respuesta->cuerpo(), '>Para suspender</span>'));
+        self::assertMatchesRegularExpression('#value="suspender" required checked#', $respuesta->cuerpo());
+        $deLaObra = $this->pedir('GET', "/denuncias?tipo=obra&id={$obra}", 'moderador')->cuerpo();
+        self::assertSame(1, substr_count($deLaObra, '>Para suspender</span>'));
+        $deLaSala = $this->pedir('GET', "/denuncias?tipo=sala&id={$sala}", 'moderador')->cuerpo();
+        self::assertStringNotContainsString('checked', $deLaSala);
+
+        self::assertSame([], $this->cerradas());
+        self::assertSame([], $this->suspensiones($funcion));
+        self::assertSame([], self::pedidosA('programacion'));
+    }
+
+    /**
+     * Después de un 422 queda lo que eligió el moderador, no «Suspender».
+     */
+    public function testParaSuspenderConservaLoElegidoSiVuelveConErrores(): void
+    {
+        $sala = self::sala('El Galpón');
+        $this->denunciada('sala', $sala, self::ESPECTADORA, '2026-11-01 10:00:00', 'seguridad');
+
+        $respuesta = $this->resolver('sala', $sala, ['accion' => 'desestimar', 'motivo' => ' ']);
+
+        self::assertSame(422, $respuesta->estado());
+        self::assertMatchesRegularExpression('#value="desestimar" required checked#', $respuesta->cuerpo());
+        self::assertDoesNotMatchRegularExpression('#value="suspender" required checked#', $respuesta->cuerpo());
+        self::assertSame([], $this->suspensiones($sala));
+    }
+
+    /**
+     * EF-22.11: «Tomar» cierra todas las abiertas de una sala o una función como resueltas, con la
+     * acción tomada y el motivo, sin pedirle nada a otro subsistema ni suspender.
+     */
+    public function testTomarCierraLasAbiertasComoTomadasSinSancionar(): void
+    {
+        $sala = self::sala('El Galpón');
+        $funcion = self::funcion($sala, [self::obra('Zama')]);
+        $this->denunciada('sala', $sala, self::ESPECTADORA, '2026-11-01 10:00:00', 'falsa');
+        $this->denunciada('sala', $sala, self::ADMINISTRADOR, '2026-11-02 10:00:00', 'instalaciones');
+        $this->denunciada('funcion', $funcion, self::ESPECTADORA, '2026-11-03 10:00:00', 'cambio_sin_aviso');
+        self::assertStringContainsString('value="tomar"', $this->pedir('GET', "/denuncias?tipo=sala&id={$sala}", 'moderador')->cuerpo());
+
+        $respuesta = $this->resolver('sala', $sala, ['accion' => 'tomar', 'motivo' => 'Las butacas están rotas.']);
+        self::assertSame(303, $respuesta->estado(), $respuesta->cuerpo());
+        self::assertSame("/moderacion/denuncias?tomadas={$sala}", $respuesta->cabecera('Location'));
+        self::assertSame(303, $this->resolver('funcion', $funcion, ['accion' => 'tomar', 'motivo' => 'Cambiaron la fecha.'])->estado());
+
+        $tomada = static fn (string $id, string $motivo): array => ['objeto_id' => $id, 'estado' => 'resuelta', 'accion' => 'tomada', 'motivo' => $motivo, 'resuelta_por' => self::MODERADORA, 'con_fecha' => 1];
+        self::assertSame([
+            $tomada($sala, 'Las butacas están rotas.'),
+            $tomada($sala, 'Las butacas están rotas.'),
+            $tomada($funcion, 'Cambiaron la fecha.'),
+        ], $this->cerradas());
+        self::assertSame([], self::pedidosA('programacion'));
+        self::assertSame([], self::pedidosA('funciones'));
+        self::assertSame([], $this->suspensiones($sala));
+        self::assertStringContainsString('Tomaste las denuncias de «El Galpón».', $this->pedir('GET', "/denuncias?tomadas={$sala}", 'moderador')->cuerpo());
+
+        $historial = $this->pedir('GET', '/denuncias?ver=historial', 'moderador')->cuerpo();
+        self::assertSame(3, substr_count($historial, '>Tomada</span>'));
+        self::assertStringContainsString('Las butacas están rotas.', $historial);
+    }
+
+    /**
+     * Las reglas no cuentan obras ni comentarios: ahí «Tomar» no se ofrece ni se acepta.
+     */
+    public function testTomarNoSeOfreceNiSeAceptaEnObrasNiComentarios(): void
+    {
+        $obra = self::obra('La flor');
+        $comentario = self::comentario(self::sala('El Galpón'), 'Un insulto.');
+        $this->denunciada('obra', $obra, self::ESPECTADORA, '2026-11-01 10:00:00');
+        $this->denunciada('calificacion', $comentario, self::ESPECTADORA, '2026-11-02 10:00:00');
+
+        foreach (['obra' => $obra, 'calificacion' => $comentario] as $tipo => $id) {
+            self::assertStringNotContainsString('value="tomar"', $this->pedir('GET', "/denuncias?tipo={$tipo}&id={$id}", 'moderador')->cuerpo());
+            $respuesta = $this->resolver($tipo, $id, ['accion' => 'tomar', 'motivo' => 'Es válida.']);
+            self::assertSame(422, $respuesta->estado());
+            self::assertStringContainsString('id="error-accion"', $respuesta->cuerpo());
+        }
+        self::assertSame([], $this->cerradas());
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function motivosQueNoSirven(): iterable
+    {
+        yield 'sin motivo' => [' '];
+        yield 'motivo de más' => [str_repeat('a', 1001)];
+    }
+
+    #[DataProvider('motivosQueNoSirven')]
+    public function testTomarPideElMotivo(string $motivo): void
+    {
+        $sala = self::sala('El Galpón');
+        $this->denunciada('sala', $sala, self::ESPECTADORA, '2026-11-01 10:00:00', 'falsa');
+
+        $respuesta = $this->resolver('sala', $sala, ['accion' => 'tomar', 'motivo' => $motivo]);
+
+        self::assertSame(422, $respuesta->estado());
+        self::assertStringContainsString('id="error-motivo"', $respuesta->cuerpo());
+        self::assertSame([], $this->cerradas());
+    }
+
+    public function testElModeradorNoTomaLasDeSuSala(): void
+    {
+        $sala = self::sala('La de Mora', self::MODERADORA);
+        $this->denunciada('sala', $sala, self::ESPECTADORA, '2026-11-01 10:00:00', 'falsa');
+
+        self::assertSame(403, $this->resolver('sala', $sala, ['accion' => 'tomar', 'motivo' => 'Es válida.'])->estado());
+        self::assertSame([], $this->cerradas());
+    }
+
+    /**
+     * Hace tantos días, en UTC como creada_en.
+     */
+    private static function haceDias(int $dias): string
+    {
+        return gmdate('Y-m-d H:i:s', time() - $dias * 86400);
+    }
+
+    /**
+     * Una denuncia ya resuelta sobre la sala (o una de sus funciones), escrita directo en la base:
+     * cuenta para las reglas sin pasar por ellas.
+     */
+    private function yaResuelta(string $salaId, string $usuario, string $gravedad = 'media', int $haceDias = 1, string $tipo = 'sala', ?string $objeto = null): void
+    {
+        $categoria = ['alta' => 'seguridad', 'media' => 'falsa', 'baja' => 'instalaciones'][$gravedad];
+        $this->base->ejecutar(
+            "INSERT INTO denuncia (id, tipo, objeto_id, sala_id, titulo, usuario_id, categoria, gravedad, creada_en, estado, accion, motivo, resuelta_por, resuelta_en)
+             VALUES (?, ?, ?, ?, 'Algo', ?, ?, ?, ?, 'resuelta', 'tomada', 'Ya.', ?, UTC_TIMESTAMP())",
+            [Uuid::nuevo(), $tipo, $objeto ?? $salaId, $salaId, $usuario, $categoria, $gravedad, self::haceDias($haceDias), self::MODERADORA],
+        );
+    }
+
+    /**
+     * Denuncia lo de la sala con un usuario nuevo y lo toma el moderador.
+     */
+    private function tomarUnaNueva(string $tipo, string $id, string $categoria = 'falsa'): void
+    {
+        $this->denunciada($tipo, $id, Uuid::nuevo(), self::haceDias(1), $categoria);
+        self::assertSame(303, $this->resolver($tipo, $id, ['accion' => 'tomar', 'motivo' => 'Es válida.'])->estado());
+    }
+
+    /**
+     * @return list<string> los asuntos de los correos que salieron
+     */
+    private static function asuntos(): array
+    {
+        return array_column(self::correosEnviados(), 'asunto');
+    }
+
+    /**
+     * EF-22.11: al tercer denunciante con una media tomada en el período, el organizador recibe
+     * el aviso, sin quién denunció ni qué escribió. Seguir arriba no lo repite.
+     */
+    public function testElAvisoSaleAlCruzarElPrimerLimiteYNoSeRepite(): void
+    {
+        $sala = self::sala('El Galpón');
+        $this->tomarUnaNueva('sala', $sala);
+        $this->tomarUnaNueva('sala', $sala);
+        self::assertSame([], self::correosEnviados());
+
+        $this->denunciada('sala', $sala, self::ESPECTADORA, self::haceDias(1), 'falsa', 'Mienten con la dirección.');
+        self::assertSame(303, $this->resolver('sala', $sala, ['accion' => 'tomar', 'motivo' => 'La dirección está mal.'])->estado());
+
+        $correos = self::correosEnviados();
+        self::assertCount(1, $correos);
+        self::assertSame('<omar@ejemplo.com>', $correos[0]['para']);
+        self::assertSame('Tu sala acumula denuncias', $correos[0]['asunto']);
+        self::assertStringContainsString('«El Galpón»', $correos[0]['texto']);
+        self::assertStringContainsString('últimos 30 días', $correos[0]['texto']);
+        self::assertStringContainsString('Si llegan a 5', $correos[0]['texto']);
+        self::assertStringNotContainsString('Mienten con la dirección.', $correos[0]['texto']);
+        self::assertStringNotContainsString('Eva', $correos[0]['texto']);
+
+        $this->tomarUnaNueva('sala', $sala);
+        self::assertCount(1, self::correosEnviados());
+    }
+
+    public function testLaCarteleraSaleAlCruzarElSegundoLimite(): void
+    {
+        $sala = self::sala('El Galpón');
+        foreach (range(1, 4) as $_) {
+            $this->yaResuelta($sala, Uuid::nuevo());
+        }
+
+        $this->tomarUnaNueva('sala', $sala);
+
+        $correos = self::correosEnviados();
+        self::assertSame(['Tu sala baja en la cartelera'], array_column($correos, 'asunto'));
+        self::assertStringContainsString('«El Galpón»', $correos[0]['texto']);
+        self::assertStringContainsString('al final de la cartelera', $correos[0]['texto']);
+        self::assertStringContainsString('salgan del período de 30 días', $correos[0]['texto']);
+    }
+
+    /**
+     * Una resolución que cierra varias puede cruzar los dos límites: salen los dos correos.
+     */
+    public function testUnaResolucionQueCruzaLosDosMandaLosDos(): void
+    {
+        $sala = self::sala('El Galpón');
+        $this->yaResuelta($sala, Uuid::nuevo());
+        $this->yaResuelta($sala, Uuid::nuevo());
+        foreach (range(1, 3) as $_) {
+            $this->denunciada('sala', $sala, Uuid::nuevo(), self::haceDias(1), 'derechos');
+        }
+
+        self::assertSame(303, $this->resolver('sala', $sala, ['accion' => 'tomar', 'motivo' => 'Son válidas.'])->estado());
+
+        self::assertSame(['Tu sala acumula denuncias', 'Tu sala baja en la cartelera'], self::asuntos());
+    }
+
+    /**
+     * Cuentan denunciantes distintos (una pelea no castiga la sala), sólo en el período, sólo las
+     * medias y sólo las resueltas: desestimar cierra pero no suma.
+     *
+     * @return iterable<string, array{callable(self, string): void}>
+     */
+    public static function loQueNoSuma(): iterable
+    {
+        yield 'el mismo denunciante' => [static function (self $prueba, string $sala): void {
+            $prueba->yaResuelta($sala, self::ESPECTADORA, haceDias: 5);
+            $prueba->denunciada('sala', $sala, self::ESPECTADORA, self::haceDias(1), 'falsa');
+            $prueba->resolver('sala', $sala, ['accion' => 'tomar', 'motivo' => 'Otra vez.']);
+        }];
+        yield 'fuera del período' => [static function (self $prueba, string $sala): void {
+            $prueba->yaResuelta($sala, Uuid::nuevo(), haceDias: 31);
+            $prueba->yaResuelta($sala, Uuid::nuevo(), haceDias: 60);
+        }];
+        yield 'una baja y una alta' => [static function (self $prueba, string $sala): void {
+            $prueba->denunciada('sala', $sala, Uuid::nuevo(), self::haceDias(1), 'instalaciones');
+            $prueba->denunciada('sala', $sala, Uuid::nuevo(), self::haceDias(1), 'seguridad');
+            $prueba->resolver('sala', $sala, ['accion' => 'tomar', 'motivo' => 'Son válidas.']);
+        }];
+        yield 'desestimada' => [static function (self $prueba, string $sala): void {
+            $prueba->denunciada('sala', $sala, Uuid::nuevo(), self::haceDias(1), 'falsa');
+            $prueba->resolver('sala', $sala, ['accion' => 'desestimar', 'motivo' => 'No es cierto.']);
+        }];
+    }
+
+    /**
+     * @param callable(self, string): void $loQueNoSuma
+     */
+    #[DataProvider('loQueNoSuma')]
+    public function testLoQueNoSumaNoLlegaAlAviso(callable $loQueNoSuma): void
+    {
+        $sala = self::sala('El Galpón');
+        $this->yaResuelta($sala, self::ESPECTADORA);
+        $this->yaResuelta($sala, self::ADMINISTRADOR);
+
+        $loQueNoSuma($this, $sala);
+
+        self::assertSame([], self::correosEnviados());
+        self::assertSame(0, (int) $this->base->valor("SELECT COUNT(*) FROM denuncia WHERE estado = 'abierta'"));
+        // Y una media de otro denunciante, sí.
+        $this->tomarUnaNueva('sala', $sala);
+        self::assertSame(['Tu sala acumula denuncias'], self::asuntos());
+    }
+
+    /**
+     * Las denuncias de una función cuentan para su sala.
+     */
+    public function testLasDeUnaFuncionSumanASuSala(): void
+    {
+        $sala = self::sala('El Galpón');
+        $funcion = self::funcion($sala, [self::obra('Zama')]);
+        $this->yaResuelta($sala, Uuid::nuevo());
+        $this->yaResuelta($sala, Uuid::nuevo(), tipo: 'funcion', objeto: Uuid::nuevo());
+
+        $this->tomarUnaNueva('funcion', $funcion, 'cambio_sin_aviso');
+
+        self::assertSame(['Tu sala acumula denuncias'], self::asuntos());
+    }
+
+    /**
+     * Si el correo no sale (cuentas no responde), las denuncias quedan cerradas igual.
+     */
+    public function testSiElAvisoNoSaleElCierreQuedaIgual(): void
+    {
+        $sala = self::sala('El Galpón');
+        $this->yaResuelta($sala, Uuid::nuevo());
+        $this->yaResuelta($sala, Uuid::nuevo());
+        $this->denunciada('sala', $sala, Uuid::nuevo(), self::haceDias(1), 'falsa');
+        self::tirar('cuentas');
+
+        self::assertSame(303, $this->resolver('sala', $sala, ['accion' => 'tomar', 'motivo' => 'Es válida.'])->estado());
+
+        self::assertSame([], self::correosEnviados());
+        self::assertSame(0, (int) $this->base->valor("SELECT COUNT(*) FROM denuncia WHERE estado = 'abierta'"));
+    }
+
+    /**
+     * En cada sala o función de la bandeja, dónde está su sala respecto de los dos límites. En una
+     * obra, no.
+     */
+    public function testLaBandejaMuestraElContadorDeLaSala(): void
+    {
+        $sala = self::sala('El Galpón');
+        $funcion = self::funcion($sala, [self::obra('Zama')]);
+        $this->yaResuelta($sala, Uuid::nuevo());
+        $this->yaResuelta($sala, Uuid::nuevo());
+        $this->denunciada('funcion', $funcion, self::ESPECTADORA, self::haceDias(1), 'falsa');
+        $this->denunciada('obra', self::obra('La flor'), self::ESPECTADORA, self::haceDias(2), 'falsa');
+
+        $pantalla = $this->pedir('GET', "/denuncias?tipo=funcion&id={$funcion}", 'moderador')->cuerpo();
+
+        self::assertSame(1, substr_count($pantalla, 'Sala: 2 de 3 para aviso · 2 de 5 para cartelera'));
+        self::assertStringContainsString('Denuncias medias resueltas de la sala en el período: 2 de 3 para aviso · 2 de 5 para cartelera.', $pantalla);
+    }
+
+    /**
+     * @return array<string, mixed>|Respuesta el JSON, o la respuesta si no es un 200
+     */
+    private function castigadasPor(string $llamador): array|Respuesta
+    {
+        $aplicacion = new Aplicacion(dirname(__DIR__), $this->configuracion(), new Log('moderacion', $this->salidaDelLog));
+        $respuesta = $aplicacion->atender(new Peticion('GET', '/interno/denuncias/castigadas', [], [], [
+            'X-Llamador' => $llamador,
+            'Authorization' => "Bearer token-de-{$llamador}",
+        ]));
+
+        return $respuesta->estado() === 200 ? json_decode($respuesta->cuerpo(), true, 512, JSON_THROW_ON_ERROR) : $respuesta;
+    }
+
+    /**
+     * EF-22.11: programación pide las salas castigadas: las que llegan a cartelera_cantidad en el
+     * período. Cuando las denuncias salen del período, ya no.
+     */
+    public function testLaRutaInternaDaLasSalasCastigadas(): void
+    {
+        $castigada = self::sala('El Galpón');
+        $aPunto = self::sala('La Fábrica');
+        $vieja = self::sala('El Desván');
+        foreach (range(1, 5) as $_) {
+            $this->yaResuelta($castigada, Uuid::nuevo());
+            $this->yaResuelta($vieja, Uuid::nuevo(), haceDias: 31);
+        }
+        foreach (range(1, 4) as $_) {
+            $this->yaResuelta($aPunto, Uuid::nuevo());
+        }
+        $this->yaResuelta($vieja, Uuid::nuevo(), haceDias: 29);
+
+        self::assertSame(['salas' => [$castigada]], $this->castigadasPor('programacion'));
+
+        $this->base->ejecutar('UPDATE denuncia SET creada_en = ? WHERE sala_id = ?', [self::haceDias(31), $castigada]);
+        self::assertSame(['salas' => []], $this->castigadasPor('programacion'));
+    }
+
+    public function testLaRutaInternaSoloLaLlamaProgramacion(): void
+    {
+        $respuesta = $this->castigadasPor('cuentas');
+
+        self::assertInstanceOf(Respuesta::class, $respuesta);
+        self::assertSame(403, $respuesta->estado());
+    }
+
+    /**
+     * La sección «Bajadas en la cartelera», de solo lectura, con el nombre de cada sala según
+     * programación y su conteo; si programación no responde, lo dice.
+     */
+    public function testLaBandejaMuestraLasBajadasEnLaCartelera(): void
+    {
+        $sala = self::sala('El Galpón');
+        foreach (range(1, 6) as $_) {
+            $this->yaResuelta($sala, Uuid::nuevo());
+        }
+
+        $pantalla = $this->pedir('GET', '/denuncias', 'moderador')->cuerpo();
+
+        self::assertStringContainsString('Bajadas en la cartelera', $pantalla);
+        self::assertMatchesRegularExpression('#El Galpón</span>\s*<span class="estado-cuenta estado-cuenta-revision">Bajada</span>#', $pantalla);
+        self::assertStringContainsString('6 denuncias medias resueltas en el período', $pantalla);
+        self::assertStringNotContainsString("/denuncias/salas/{$sala}/levantar", $pantalla);
+
+        self::tirar('programacion');
+        $caida = $this->pedir('GET', '/denuncias', 'moderador');
+        self::assertSame(200, $caida->estado());
+        self::assertMatchesRegularExpression('#Bajadas en la cartelera</h2>\s*<p class="bandeja-nota bandeja-nota-suelta">No pudimos consultar las salas.#', $caida->cuerpo());
+    }
+
+    /**
+     * @return list<string> las fotos guardadas en el volumen
+     */
+    private function fotosGuardadas(): array
+    {
+        return array_map('basename', glob("{$this->carpeta}/denuncias/*") ?: []);
+    }
+
+    /**
+     * EF-22.11: en una sala o una función se adjunta una foto opcional, que se guarda con un
+     * nombre al azar y que el moderador ve junto al detalle.
+     */
+    public function testLaFotoDeUnaDenunciaSeGuardaYLaVeElModerador(): void
+    {
+        $sala = self::sala('El Galpón');
+        $formulario = $this->pedir('GET', "/denuncias/nueva?tipo=sala&id={$sala}")->cuerpo();
+        self::assertStringContainsString('enctype="multipart/form-data"', $formulario);
+        self::assertMatchesRegularExpression('#<input[^>]*name="foto"#', $formulario);
+
+        $respuesta = $this->denunciar('sala', $sala, ['categoria' => 'instalaciones', 'detalle' => 'La butaca 4 está rota.'], archivos: ['foto' => Imagenes::subida('sala.webp', '../../foto.php')]);
+
+        self::assertSame(303, $respuesta->estado(), $respuesta->cuerpo());
+        $guardadas = $this->fotosGuardadas();
+        self::assertCount(1, $guardadas);
+        self::assertMatchesRegularExpression('/^[0-9a-f]{32}\.webp$/', $guardadas[0]);
+        self::assertSame(0640, fileperms("{$this->carpeta}/denuncias/{$guardadas[0]}") & 0777);
+        $id = (string) $this->base->valor('SELECT id FROM denuncia WHERE foto = ?', [$guardadas[0]]);
+
+        $bandeja = $this->pedir('GET', '/denuncias', 'moderador')->cuerpo();
+        self::assertStringContainsString("src=\"/moderacion/denuncias/{$id}/foto\"", $bandeja);
+        $foto = $this->pedir('GET', "/denuncias/{$id}/foto", 'moderador');
+        self::assertSame(200, $foto->estado());
+        self::assertSame('image/webp', $foto->cabecera('Content-Type'));
+        self::assertSame(file_get_contents(Imagenes::ruta('sala.webp')), $foto->cuerpo());
+    }
+
+    public function testSinFotoSeGuardaIgualYSuRutaDa404(): void
+    {
+        $funcion = self::funcion(self::sala('El Galpón'), [self::obra('Zama')]);
+
+        self::assertSame(303, $this->denunciar('funcion', $funcion, ['categoria' => 'no_se_hizo', 'detalle' => ''])->estado());
+
+        self::assertSame([], $this->fotosGuardadas());
+        $id = (string) $this->base->valor('SELECT id FROM denuncia');
+        self::assertStringNotContainsString('/foto"', $this->pedir('GET', '/denuncias', 'moderador')->cuerpo());
+        self::assertSame(404, $this->pedir('GET', "/denuncias/{$id}/foto", 'moderador')->estado());
+        self::assertSame(404, $this->pedir('GET', '/denuncias/' . Uuid::nuevo() . '/foto', 'moderador')->estado());
+        self::assertSame(404, $this->pedir('GET', '/denuncias/nada/foto', 'moderador')->estado());
+    }
+
+    /**
+     * @return iterable<string, array{array<string, mixed>, string}>
+     */
+    public static function fotosQueNoSirven(): iterable
+    {
+        yield 'un PDF' => [Documentos::subida('poliza.pdf'), 'La foto tiene que ser JPG, PNG o WebP.'];
+        yield 'rota' => [Imagenes::subida('roto.png'), 'La foto tiene que ser JPG, PNG o WebP.'];
+        yield 'enorme' => [Imagenes::subida('enorme.png'), 'La foto puede medir hasta 8000 píxeles de lado.'];
+        yield 'pesada' => [['name' => 'foto.jpg', 'type' => 'image/jpeg', 'tmp_name' => '', 'error' => UPLOAD_ERR_INI_SIZE, 'size' => 0], 'La foto puede pesar hasta 5 MB.'];
+    }
+
+    /**
+     * Una foto que no es una imagen válida o es grande vuelve al formulario con 422, sin perder lo
+     * que escribió.
+     *
+     * @param array<string, mixed> $foto
+     */
+    #[DataProvider('fotosQueNoSirven')]
+    public function testUnaFotoQueNoSirveVuelveAlFormulario(array $foto, string $error): void
+    {
+        $sala = self::sala('El Galpón');
+
+        $respuesta = $this->denunciar('sala', $sala, ['categoria' => 'instalaciones', 'detalle' => 'La butaca 4 está rota.'], archivos: ['foto' => $foto]);
+
+        self::assertSame(422, $respuesta->estado());
+        self::assertStringContainsString($error, $respuesta->cuerpo());
+        self::assertStringContainsString('id="error-foto"', $respuesta->cuerpo());
+        self::assertStringContainsString('La butaca 4 está rota.', $respuesta->cuerpo());
+        self::assertMatchesRegularExpression('#value="instalaciones" required checked#', $respuesta->cuerpo());
+        self::assertSame([], $this->denuncias());
+        self::assertSame([], $this->fotosGuardadas());
+    }
+
+    /**
+     * En una obra o un comentario no hay foto: no se ofrece y, si llega, se ignora.
+     */
+    public function testEnUnaObraNoSeOfreceLaFotoYSiLlegaSeIgnora(): void
+    {
+        $obra = self::obra('La flor');
+
+        $formulario = $this->pedir('GET', "/denuncias/nueva?tipo=obra&id={$obra}")->cuerpo();
+        self::assertStringNotContainsString('name="foto"', $formulario);
+        self::assertStringNotContainsString('multipart/form-data', $formulario);
+
+        self::assertSame(303, $this->denunciar('obra', $obra, ['categoria' => 'derechos', 'detalle' => ''], archivos: ['foto' => Imagenes::subida('sala.png')])->estado());
+        self::assertSame([], $this->fotosGuardadas());
+        self::assertNull($this->base->valor('SELECT foto FROM denuncia'));
+    }
+
+    /**
+     * @return iterable<string, array{?string, int}>
+     */
+    public static function quienVeLaFoto(): iterable
+    {
+        yield 'sin sesión' => [null, 401];
+        yield 'espectador' => ['espectador', 403];
+        yield 'moderador' => ['moderador', 200];
+        yield 'administrador' => ['administrador', 200];
+    }
+
+    /**
+     * Sólo la moderación: ni siquiera quien la mandó.
+     */
+    #[DataProvider('quienVeLaFoto')]
+    public function testLaFotoSoloLaVeLaModeracion(?string $rol, int $estado): void
+    {
+        $sala = self::sala('El Galpón');
+        $this->denunciar('sala', $sala, ['categoria' => 'seguridad', 'detalle' => ''], archivos: ['foto' => Imagenes::subida('sala.jpg')]);
+        $id = (string) $this->base->valor('SELECT id FROM denuncia');
+
+        self::assertSame($estado, $this->pedir('GET', "/denuncias/{$id}/foto", $rol)->estado());
+    }
+
+    public function testElHistorialMuestraLaGravedad(): void
+    {
+        $id = self::obra('La flor');
+        $this->denunciada('obra', $id, self::ESPECTADORA, '2026-11-01 10:00:00', 'derechos');
+        $this->resolver('obra', $id, ['accion' => 'desestimar', 'motivo' => 'Tiene los derechos.']);
+
+        $historial = $this->pedir('GET', '/denuncias?ver=historial', 'moderador')->cuerpo();
+
+        self::assertStringContainsString('<span class="estado-cuenta gravedad-media"><span class="sr-only">Gravedad </span>Media</span>', $historial);
+    }
+
     public function testElFormularioDeUnaObraMuestraQueSeDenunciaYSusCategorias(): void
     {
         $id = self::obra('La flor');
@@ -345,14 +988,14 @@ final class DenunciasTest extends TestCase
     }
 
     /**
-     * Un ítem por lo denunciado, primero el que lleva más tiempo; la elegida, con cada denuncia y
-     * quién la hizo (cuentas da el nombre y el correo).
+     * Un ítem por lo denunciado; la elegida, con cada denuncia y quién la hizo (cuentas da el
+     * nombre y el correo).
      */
     public function testLaBandejaAgrupaPorLoDenunciadoConCadaDenunciaYQuienLaHizo(): void
     {
         $nueva = self::obra('La nueva');
         $vieja = self::obra('La vieja');
-        $this->denunciada('obra', $nueva, self::ESPECTADORA, '2026-11-02 10:00:00');
+        $this->denunciada('obra', $nueva, self::ESPECTADORA, '2026-11-02 10:00:00', 'falsa');
         $this->denunciada('obra', $vieja, self::ESPECTADORA, '2026-11-01 10:00:00', 'derechos', 'No tienen los derechos.');
         $this->denunciada('obra', $vieja, self::ADMINISTRADOR, '2026-11-03 10:00:00', 'falsa');
 
@@ -632,8 +1275,8 @@ final class DenunciasTest extends TestCase
         // Una que ya estaba abierta cuando la suspendieron por otro lado (desde una función): una
         // suspendida no se puede denunciar.
         $this->base->ejecutar(
-            "INSERT INTO denuncia (id, tipo, objeto_id, titulo, usuario_id, categoria, creada_en) VALUES (?, 'sala', ?, 'El Galpón', ?, 'ofensivo', '2026-11-02 10:00:00')",
-            [Uuid::nuevo(), $id, self::ADMINISTRADOR],
+            "INSERT INTO denuncia (id, tipo, objeto_id, sala_id, titulo, usuario_id, categoria, gravedad, creada_en) VALUES (?, 'sala', ?, ?, 'El Galpón', ?, 'ofensivo', 'alta', '2026-11-02 10:00:00')",
+            [Uuid::nuevo(), $id, $id, self::ADMINISTRADOR],
         );
 
         self::assertStringContainsString('Ya está suspendida por una denuncia', $this->pedir('GET', '/denuncias', 'moderador')->cuerpo());

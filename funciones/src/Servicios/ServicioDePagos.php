@@ -154,7 +154,8 @@ final class ServicioDePagos
             if (self::quedaLugar($reserva, $funcion, $ocupados, $delEspectador, $ahora)) {
                 return $this->confirmar($reserva, $pagoId, $ahora);
             }
-            $autor = new AutorDelCambio($reserva->usuarioId, Rol::Espectador, self::MOTIVO_SIN_LUGAR);
+            // La cancela el sistema al procesar el aviso, no el espectador (EF-18.6).
+            $autor = AutorDelCambio::sistema(self::MOTIVO_SIN_LUGAR);
 
             return $this->reservas->guardarEstado($reserva->cancelar(), $reserva->estado, $autor, $ahora) ? false : null;
         });

@@ -4,6 +4,10 @@ declare(strict_types=1);
 
 namespace IndieCinema\Funciones\Pruebas;
 
+use DateTimeImmutable;
+use DateTimeZone;
+use IndieCinema\Funciones\Repositorios\RepositorioDeReservas;
+use IndieCinema\Funciones\Servicios\LiberacionDeVencidas;
 use IndieCinema\Funciones\Servicios\ServicioDePanelDeReservas;
 use IndieCinema\Nucleo\Aplicacion;
 use IndieCinema\Nucleo\BaseDeDatos;
@@ -155,7 +159,8 @@ final class PanelDeReservasTest extends TestCase
      */
     private static function totalCobrado(string $cuerpo): string
     {
-        preg_match('#Total cobrado</dt>\s*<dd class="panel-dato-valor"[^>]*>(.*?)</dd>#', $cuerpo, $partes);
+        // El total es un monto: lleva además panel-dato-monto, que lo deja en una línea (IC-691).
+        preg_match('#Total cobrado</dt>\s*<dd class="panel-dato-valor[^"]*"[^>]*>(.*?)</dd>#', $cuerpo, $partes);
 
         return $partes[1] ?? 'sin la tarjeta del total';
     }
@@ -283,7 +288,7 @@ final class PanelDeReservasTest extends TestCase
         preg_match_all('#<a href="([^"]*)"[^>]*aria-current="page"#', $barra, $actuales);
 
         // Los enlaces van sin el prefijo de funciones: las pantallas del panel son de programación.
-        self::assertSame(['/', '/organizador/bloqueados', '/organizador/funciones', '/organizador/funciones/nueva', '/organizador/pedidos', '/organizador/salas', '/recaudacion/liquidaciones', '/recaudacion/reportes', '/solicitar-sala'], $enlaces);
+        self::assertSame(['/', '/organizador/bloqueados', '/organizador/funciones', '/organizador/funciones/nueva', '/organizador/obras', '/organizador/obras/nueva', '/organizador/pedidos', '/organizador/salas', '/recaudacion/liquidaciones', '/recaudacion/reportes', '/solicitar-sala'], $enlaces);
         self::assertSame(['/organizador/funciones'], $actuales[1]);
         self::assertStringContainsString('Ana Prueba', $barra);
         self::assertStringContainsString('action="/cuenta/salir"', $barra);
@@ -558,6 +563,106 @@ final class PanelDeReservasTest extends TestCase
         self::assertArrayHasKey('error', json_decode($otraVez->cuerpo(), true));
     }
 
+    // ---- El historial de la reserva (EF-18.6) ----------------------------------------------
+
+    /**
+     * El ciclo de una reserva de punta a punta, por los caminos de verdad, y lo que queda en el
+     * registro: cada cambio con su estado anterior, su autor y su hora, también los automáticos.
+     */
+    public function testElRegistroAnotaCadaCambioConSuAutorTambienLosAutomaticos(): void
+    {
+        // La que vence sin pagar: la cancela la tarea programada.
+        $vencida = $this->reserva(self::PROXIMA, 1);
+        $this->base->ejecutar("UPDATE reserva SET estado = 'pendiente_pago', vence_en = '2026-10-19 13:15:00' WHERE codigo = ?", [$vencida]);
+        (new LiberacionDeVencidas(new RepositorioDeReservas($this->base)))->liberar(new DateTimeImmutable('2026-10-19 13:20:00', new DateTimeZone('UTC')));
+        // La que no fue: queda ausente al terminar la función, y el organizador la corrige tarde.
+        $ausente = $this->reserva(self::EMPEZADA, 1);
+        $this->deProgramacion(self::EMPEZADA, [], aviso: 'finalizada');
+        $this->pedir('POST', '/organizador/funciones/' . self::EMPEZADA . '/asistencia', cuerpo: ['codigo' => $ausente], extra: self::ACEPTA_JSON);
+        // La que anula el administrador.
+        $anulada = $this->reserva(self::PROXIMA, 2);
+        $this->pedir('POST', '/administracion/reservas/' . $this->idDe($anulada) . '/anular', self::ADMINISTRADORA, 'administrador');
+
+        self::assertSame(
+            [['pendiente_pago', 'cancelada', null, 'sistema', 'Venció el plazo para pagar.']],
+            array_map(array_values(...), $this->historialDe($vencida)),
+        );
+        self::assertSame([
+            ['confirmada', 'ausente', null, 'sistema', 'La función terminó sin la asistencia registrada.'],
+            ['ausente', 'asistio', self::ORGANIZADORA, 'organizador', null],
+        ], array_map(array_values(...), $this->historialDe($ausente)));
+        self::assertSame(
+            [['confirmada', 'cancelada', self::ADMINISTRADORA, 'administrador', 'Anulada por el administrador.']],
+            array_map(array_values(...), $this->historialDe($anulada)),
+        );
+        // Y cada cambio con su hora.
+        self::assertSame(0, (int) $this->base->valor('SELECT COUNT(*) FROM cambio_reserva WHERE hecho_en IS NULL'));
+    }
+
+    public function testElDetalleMuestraElHistorialConQuienHizoCadaCambio(): void
+    {
+        $codigo = $this->reserva(self::EMPEZADA, 2);
+        $this->pagada($codigo);
+        $this->deProgramacion(self::EMPEZADA, [], aviso: 'finalizada');
+        $this->pedir('POST', '/organizador/funciones/' . self::EMPEZADA . '/asistencia', cuerpo: ['codigo' => $codigo], extra: self::ACEPTA_JSON);
+
+        $respuesta = $this->pedir('GET', '/administracion/reservas/' . $this->idDe($codigo), self::ADMINISTRADORA, 'administrador');
+
+        self::assertSame(200, $respuesta->estado(), $respuesta->cuerpo());
+        $lineas = self::lineasDelHistorial($respuesta->cuerpo());
+        // La creación, el paso a ausente del sistema y la asistencia del organizador, con su nombre.
+        self::assertCount(3, $lineas);
+        self::assertStringContainsString('Confirmada', $lineas[0]);
+        self::assertStringContainsString('La reservó.', $lineas[0]);
+        self::assertStringContainsString('El sistema', $lineas[1]);
+        self::assertStringContainsString('La función terminó sin la asistencia registrada.', $lineas[1]);
+        self::assertStringContainsString('Organizador', $lineas[2]);
+        self::assertStringContainsString('antes: no asistió', $lineas[2]);
+        self::assertStringContainsString("pago pago-{$codigo}", $respuesta->cuerpo());
+    }
+
+    public function testElDetalleMuestraLaDevolucionDelPagoComoDelSistema(): void
+    {
+        $codigo = $this->reserva(self::PROXIMA, 1);
+        $this->pedir('POST', '/administracion/reservas/' . $this->idDe($codigo) . '/anular', self::ADMINISTRADORA, 'administrador');
+        $this->pagada($codigo, '2026-10-20 12:00:00');
+
+        $lineas = self::lineasDelHistorial($this->pedir('GET', '/administracion/reservas/' . $this->idDe($codigo), self::ADMINISTRADORA, 'administrador')->cuerpo());
+
+        self::assertCount(3, $lineas);
+        self::assertStringContainsString('Administrador', $lineas[1]);
+        self::assertStringContainsString('Anulada por el administrador.', $lineas[1]);
+        self::assertStringContainsString('Reembolsada', $lineas[2]);
+        self::assertStringContainsString("reembolso-{$codigo}", $lineas[2]);
+    }
+
+    public function testElCodigoDeLaListaLlevaAlDetalle(): void
+    {
+        $codigo = $this->reserva(self::PROXIMA, 1);
+
+        $cuerpo = $this->pedir('GET', '/administracion/reservas', self::ADMINISTRADORA, 'administrador')->cuerpo();
+
+        self::assertStringContainsString('href="/funcion/administracion/reservas/' . $this->idDe($codigo) . '"', $cuerpo);
+    }
+
+    private function idDe(string $codigo): string
+    {
+        return (string) $this->base->valor('SELECT id FROM reserva WHERE codigo = ?', [$codigo]);
+    }
+
+    /**
+     * El texto de cada fila del historial, sin etiquetas.
+     *
+     * @return list<string>
+     */
+    private static function lineasDelHistorial(string $cuerpo): array
+    {
+        self::assertSame(1, preg_match('#aria-label="Historial de la reserva">.*?<tbody>(.*?)</tbody>#s', $cuerpo, $tabla));
+        preg_match_all('#<tr>(.*?)</tr>#s', $tabla[1], $filas);
+
+        return array_map(static fn (string $fila): string => (string) preg_replace('/\s+/', ' ', strip_tags($fila)), $filas[1]);
+    }
+
     // ---- Cancelar la función cancela sus reservas (E4-03.4) ---------------------------------
 
     public function testCancelarLaFuncionCancelaLasConfirmadasYAvisaPorCorreo(): void
@@ -626,8 +731,9 @@ final class PanelDeReservasTest extends TestCase
         self::assertSame([
             'estado_anterior' => 'confirmada',
             'estado_nuevo' => 'ausente',
-            'autor_id' => self::ORGANIZADORA,
-            'autor_rol' => 'organizador',
+            // Nadie la marcó: pasó al terminar la función, y queda como del sistema (EF-18.6).
+            'autor_id' => null,
+            'autor_rol' => 'sistema',
             'motivo' => 'La función terminó sin la asistencia registrada.',
         ], $this->historialDe($deEva)[0]);
 
@@ -635,12 +741,14 @@ final class PanelDeReservasTest extends TestCase
         self::assertSame(['ausentes' => 0], json_decode($this->deProgramacion(self::EMPEZADA, ['organizador_id' => self::ORGANIZADORA], aviso: 'finalizada')->cuerpo(), true));
     }
 
-    public function testElAvisoDeQueTerminoPideElOrganizadorYSoloLoMandaProgramacion(): void
+    /**
+     * Ya no hace falta el organizador (EF-18.6): el autor del paso a ausente es el sistema.
+     * Programación lo sigue mandando y no molesta.
+     */
+    public function testElAvisoDeQueTerminoSoloLoMandaProgramacion(): void
     {
         $codigo = $this->reserva(self::EMPEZADA, 1);
 
-        self::assertSame(400, $this->deProgramacion(self::EMPEZADA, [], aviso: 'finalizada')->estado());
-        self::assertSame(400, $this->deProgramacion(self::EMPEZADA, ['organizador_id' => 'no-es-un-uuid'], aviso: 'finalizada')->estado());
         self::assertSame(404, $this->deProgramacion('no-es-un-uuid', ['organizador_id' => self::ORGANIZADORA], aviso: 'finalizada')->estado());
         self::assertSame(403, $this->deProgramacion(self::EMPEZADA, ['organizador_id' => self::ORGANIZADORA], 'otro-token', 'finalizada')->estado());
         self::assertSame('confirmada', $this->estadoDe($codigo));
@@ -703,12 +811,14 @@ final class PanelDeReservasTest extends TestCase
     {
         $id = (string) $this->base->valor('SELECT id FROM reserva WHERE codigo = ?', [$this->reserva(self::PROXIMA, 1)]);
 
-        foreach ([['GET', '/administracion/reservas'], ['POST', "/administracion/reservas/{$id}/anular"]] as [$metodo, $ruta]) {
+        foreach ([['GET', '/administracion/reservas'], ['GET', "/administracion/reservas/{$id}"], ['POST', "/administracion/reservas/{$id}/anular"]] as [$metodo, $ruta]) {
             self::assertSame(401, $this->pedir($metodo, $ruta, null)->estado());
             self::assertSame(403, $this->pedir($metodo, $ruta, self::EVA, 'espectador')->estado());
             self::assertSame(403, $this->pedir($metodo, $ruta, self::ORGANIZADORA, 'organizador')->estado());
         }
         self::assertSame(404, $this->pedir('POST', '/administracion/reservas/' . Uuid::nuevo() . '/anular', self::ADMINISTRADORA, 'administrador')->estado());
+        self::assertSame(404, $this->pedir('GET', '/administracion/reservas/' . Uuid::nuevo(), self::ADMINISTRADORA, 'administrador')->estado());
+        self::assertSame(404, $this->pedir('GET', '/administracion/reservas/no-es-un-uuid', self::ADMINISTRADORA, 'administrador')->estado());
     }
 
     public function testSinTokenCsrfNoSeRegistraNiSeAnula(): void

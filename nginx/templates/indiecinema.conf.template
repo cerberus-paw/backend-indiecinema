@@ -35,6 +35,10 @@ limit_req_zone $ip_si_es_post zone=denuncia:10m rate=2r/m;
 # La reserva de una función: nadie reserva diez veces por minuto, y un script que reserva sin parar
 # le pega a funciones y a programación en cada una.
 limit_req_zone $ip_si_es_post zone=reserva:10m rate=10r/m;
+# Los votos de la cartelera (el título, la franja y la fecha del acuerdo), como prometió la propuesta
+# (EF-18.1): cambiar el voto vale, así que se vota varias veces, pero no cientos por minuto. Un voto
+# repetido no suma (la base guarda uno por usuario), así que esto cuida a programación y a la base.
+limit_req_zone $ip_si_es_post zone=voto:10m rate=20r/m;
 
 # Contra el abuso de la búsqueda: muchos listados seguidos desde una IP, cada uno una consulta a la
 # base. Cuentan las lecturas, con o sin texto y filtros, porque la cartelera sin filtros también

@@ -19,11 +19,13 @@ use PHPUnit\Framework\TestCase;
  *
  * Los roles son acumulativos en las rutas (Rol::alcanza()), pero no en los menús: el moderador
  * puede entrar a las pantallas del organizador, pero no le sirven, así que ve sólo lo suyo, la
- * moderación (IC-662). La solicitud de sala la ven el espectador como «Abrir una sala» y el
- * organizador como «Publicar una sala», que es el mismo trámite. El administrador no usa el sitio público,
- * como el wireframe de su panel: ve sólo el logo y sus secciones, sin la cartelera, las salas ni
- * «Mi cuenta». Se comparan los enlaces completos, así una opción de más (o una que lleva a una
- * pantalla que no existe) rompe la prueba.
+ * moderación (IC-662). Quien tiene un panel (organizador, moderador o administrador) ve un solo
+ * enlace a él, en el menú de la cuenta y en el pie, y no sus secciones sueltas: esas están en la
+ * barra del panel (F-02.23). La solicitud de sala la ve el espectador como «Abrir una sala»; el
+ * organizador la tiene en su panel. El administrador no usa el sitio público, como el wireframe
+ * de su panel: ve sólo el logo y el enlace a su panel, sin la cartelera, las salas ni «Mi cuenta».
+ * Se comparan los enlaces completos, así una opción de más (o una que lleva a una pantalla que no
+ * existe) rompe la prueba.
  *
  * El menú de usuario es un desplegable de enlaces, no un menú de aplicación (IC-301): sin roles
  * de menú, con el summary sólo con contenido de frase y una lista de enlaces por sección.
@@ -39,9 +41,10 @@ final class MenuSegunElRolTest extends TestCase
     private const SIN_SESION = ['/cuenta/ingresar', '/cuenta/registro'];
     private const CON_SESION = ['/cuenta/', '/funcion/reservas'];
     private const DEL_ESPECTADOR = ['/solicitar-sala'];
-    private const DEL_ORGANIZADOR = ['/organizador/salas', '/organizador/obras', '/organizador/obras/nueva', '/organizador/funciones', '/organizador/funciones/nueva', '/recaudacion/reportes', '/solicitar-sala'];
-    private const DEL_MODERADOR = ['/moderacion/solicitudes', '/moderacion/documentos', '/moderacion/obras', '/moderacion/denuncias'];
-    private const DEL_ADMINISTRADOR = ['/cuenta/administracion/usuarios', '/recaudacion/reportes', '/moderacion/solicitudes'];
+    /** El enlace al panel de cada rol, el único suyo en el encabezado y en el pie (F-02.23). */
+    private const DEL_ORGANIZADOR = ['/organizador/salas'];
+    private const DEL_MODERADOR = ['/moderacion/solicitudes'];
+    private const DEL_ADMINISTRADOR = ['/cuenta/administracion/usuarios'];
 
     /**
      * El encabezado y el pie de /acerca-de, por separado.
@@ -199,14 +202,12 @@ final class MenuSegunElRolTest extends TestCase
      */
     public static function secciones(): iterable
     {
-        $organizador = [
-            'Mi cuenta' => ['/cuenta/', '/funcion/reservas'],
-            'Panel del Organizador' => ['/organizador/salas', '/organizador/obras', '/organizador/obras/nueva', '/organizador/funciones', '/organizador/funciones/nueva', '/recaudacion/reportes', '/solicitar-sala'],
-        ];
-        yield 'espectador' => ['espectador', ['Mi cuenta' => ['/cuenta/', '/funcion/reservas', '/solicitar-sala']]];
-        yield 'organizador' => ['organizador', $organizador];
-        yield 'moderador' => ['moderador', ['Mi cuenta' => ['/cuenta/', '/funcion/reservas'], 'Moderación' => self::DEL_MODERADOR]];
-        yield 'administrador' => ['administrador', ['Administración' => ['/cuenta/administracion/usuarios', '/recaudacion/reportes', '/moderacion/solicitudes']]];
+        $cuenta = ['/cuenta/', '/funcion/reservas'];
+        yield 'espectador' => ['espectador', ['Mi cuenta' => [...$cuenta, '/solicitar-sala']]];
+        // El panel, arriba de todo; sin las secciones sueltas, que están en su barra (F-02.23).
+        yield 'organizador' => ['organizador', ['Tu panel' => self::DEL_ORGANIZADOR, 'Mi cuenta' => $cuenta]];
+        yield 'moderador' => ['moderador', ['Tu panel' => self::DEL_MODERADOR, 'Mi cuenta' => $cuenta]];
+        yield 'administrador' => ['administrador', ['Tu panel' => self::DEL_ADMINISTRADOR]];
     }
 
     /**
@@ -221,12 +222,15 @@ final class MenuSegunElRolTest extends TestCase
 
         $secciones = [];
         foreach ($menu->querySelectorAll('ul') as $lista) {
+            // El nombre de la lista: el título que la nombra o, la del panel, que no lo muestra, su aria-label.
             $titulo = $documento->getElementById((string) $lista->getAttribute('aria-labelledby'));
+            $nombre = $titulo !== null ? trim((string) $titulo->textContent) : (string) $lista->getAttribute('aria-label');
+            self::assertNotSame('', $nombre, 'Cada lista del menú tiene nombre.');
             $enlaces = [];
             foreach ($lista->querySelectorAll('li > a') as $enlace) {
                 $enlaces[] = (string) $enlace->getAttribute('href');
             }
-            $secciones[trim((string) $titulo?->textContent)] = $enlaces;
+            $secciones[$nombre] = $enlaces;
         }
         self::assertSame($esperadas, $secciones);
         // Ningún enlace suelto, fuera de las listas.
@@ -237,29 +241,46 @@ final class MenuSegunElRolTest extends TestCase
     }
 
     /**
-     * El moderador tiene en la barra el acceso a su bandeja, en lugar de «Mis salas».
+     * @return iterable<string, array{string, string}>
      */
-    public function testElModeradorTieneModeracionEnLaBarra(): void
+    public static function paneles(): iterable
     {
-        preg_match('#<nav class="navegacion-principal".*?</nav>#s', $this->pedir('moderador')['encabezado'], $barra);
-
-        self::assertStringContainsString('href="/moderacion/solicitudes"', $barra[0] ?? '');
-        self::assertStringNotContainsString('href="/organizador/salas"', $barra[0] ?? '');
+        yield 'organizador' => ['organizador', 'Panel del organizador'];
+        yield 'moderador' => ['moderador', 'Panel de moderación'];
+        yield 'administrador' => ['administrador', 'Panel de administración'];
     }
 
     /**
-     * Además del menú de usuario, «Mis salas» tiene acceso directo en la barra.
+     * El enlace al panel dice a cuál lleva y tiene el color de ese panel, el mismo de su barra.
+     */
+    #[DataProvider('paneles')]
+    public function testElMenuNombraElPanelDeCadaRol(string $rol, string $nombre): void
+    {
+        $documento = HTMLDocument::createFromString($this->pedir($rol)['encabezado'], LIBXML_NOERROR);
+        $enlace = $documento->querySelector('#menu-usuario .menu-item-panel');
+
+        self::assertNotNull($enlace);
+        self::assertSame($nombre, trim((string) $enlace->textContent));
+        self::assertStringContainsString("panel-rol-{$rol}", (string) $enlace->getAttribute('class'));
+    }
+
+    /**
+     * La barra de navegación es sólo del sitio público: sin el acceso directo «Mis salas» o
+     * «Moderación» que tenía, porque el panel está en el menú de la cuenta (F-02.23). El
+     * administrador, que no usa el sitio público, no la tiene.
      *
      * @param list<string> $propios
      */
     #[DataProvider('roles')]
-    public function testMisSalasEnLaBarraDesdeElOrganizador(?string $rol, array $propios): void
+    public function testLaBarraDeNavegacionEsSoloDelSitioPublico(?string $rol, array $propios): void
     {
-        preg_match('#<nav class="navegacion-principal".*?</nav>#s', $this->pedir($rol)['encabezado'], $barra);
+        $encontrada = preg_match('#<nav class="navegacion-principal".*?</nav>#s', $this->pedir($rol)['encabezado'], $barra);
 
-        self::assertSame(
-            in_array('/organizador/salas', $propios, true),
-            str_contains($barra[0] ?? '', 'href="/organizador/salas"'),
-        );
+        if ($rol === 'administrador') {
+            self::assertSame(0, $encontrada);
+
+            return;
+        }
+        self::assertSame(['/acerca-de', '/cartelera', '/como-funciona', '/obras', '/salas'], self::enlaces($barra[0] ?? ''));
     }
 }

@@ -40,6 +40,8 @@ final class ReservasTest extends TestCase
     private const ELIAS = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
     private const PROXIMA = '12121212-1212-4212-8212-121212121212';
     private const EMPEZADA = '34343434-3434-4434-8434-343434343434';
+    /** Empieza en cinco horas: dentro de las 24 de la política de cancelación (EF-22.9). */
+    private const EN_CINCO_HORAS = '45454545-4545-4545-8545-454545454545';
     private const ROTA = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 
     private const SITIO = 'https://indiecinema.test';
@@ -417,6 +419,70 @@ final class ReservasTest extends TestCase
         self::assertSame('confirmada', $this->estado($id));
     }
 
+    // ---- Hasta cuándo se cancela (EF-22.9) ----------------------------------------------------
+
+    public function testConMenosDeLasHorasMinimasLaConfirmadaYaNoSeCancela(): void
+    {
+        $id = $this->ocupar(self::EN_CINCO_HORAS, 2, self::EVA);
+        $mensaje = 'Las reservas se cancelan hasta 24 horas antes de la función, y ya falta menos: la sala cuenta con esos lugares.';
+
+        // Ni el botón ni la pantalla: el comprobante dice por qué.
+        $comprobante = $this->pedir('GET', "/reservas/{$id}")->cuerpo();
+        self::assertStringNotContainsString('/cancelar"', $comprobante);
+        self::assertStringContainsString($mensaje, $comprobante);
+        self::assertSame(404, $this->pedir('GET', "/reservas/{$id}/cancelar")->estado());
+        // Y el POST escrito a mano tampoco pasa.
+        $respuesta = $this->cancelar($id);
+        self::assertSame(422, $respuesta->estado());
+        self::assertStringContainsString($mensaje, $respuesta->cuerpo());
+        $json = self::json($this->cancelarEnJson($id));
+        self::assertSame($mensaje, $json['error']);
+        self::assertFalse($json['reserva']['cancelable']);
+        self::assertSame('confirmada', $this->estado($id));
+    }
+
+    public function testMisReservasDiceHastaCuandoYPorQueYaNo(): void
+    {
+        $this->hecha(self::PROXIMA, '2026-10-03 10:00:00');
+        $this->hecha(self::EN_CINCO_HORAS, '2026-10-02 10:00:00');
+
+        $cuerpo = $this->pedir('GET', '/reservas')->cuerpo();
+
+        self::assertSame(1, substr_count($cuerpo, '/cancelar"'));
+        self::assertStringContainsString('Se cancela hasta el ', $cuerpo);
+        self::assertStringContainsString('Las reservas se cancelan hasta 24 horas antes de la función', $cuerpo);
+    }
+
+    public function testLaPendienteDePagoSeCancelaAunqueFaltePoco(): void
+    {
+        // No hay plata de por medio y vence sola: soltar los lugares antes es mejor para la sala.
+        $id = $this->ocupar(self::EN_CINCO_HORAS, 2, self::EVA);
+        $this->base->ejecutar("UPDATE reserva SET estado = 'pendiente_pago', vence_en = UTC_TIMESTAMP() + INTERVAL 10 MINUTE WHERE id = ?", [$id]);
+
+        self::assertSame(303, $this->cancelar($id)->estado());
+        self::assertSame('cancelada', $this->estado($id));
+    }
+
+    public function testLasHorasSonUnParametro(): void
+    {
+        $this->configurar(['reservas' => ['horas_minimas_cancelacion' => 2]]);
+        $id = $this->ocupar(self::EN_CINCO_HORAS, 2, self::EVA);
+
+        self::assertStringContainsString('Podés cancelarla hasta el ', $this->pedir('GET', "/reservas/{$id}")->cuerpo());
+        self::assertSame(303, $this->cancelar($id)->estado());
+        self::assertSame('cancelada', $this->estado($id));
+    }
+
+    public function testLaPoliticaSeLeeAntesDeReservarYEnElComprobante(): void
+    {
+        self::assertStringContainsString(
+            'Podés cancelar tu reserva hasta 24 horas antes de la función; después, ya no.',
+            $this->pedir('GET', '/reservar/' . self::PROXIMA)->cuerpo(),
+        );
+        $id = $this->reservada();
+        self::assertStringContainsString('Podés cancelarla hasta el ', $this->pedir('GET', "/reservas/{$id}")->cuerpo());
+    }
+
     // ---- El correo de la reserva confirmada (E4-04.3) ---------------------------------------
 
     /**
@@ -647,6 +713,53 @@ final class ReservasTest extends TestCase
     }
 
     /**
+     * Las pestañas por estado (F-02.25): vigentes (pagadas o por pagar), pasadas (fue o no fue) y
+     * canceladas, cada una con su cantidad. «Todas» sigue abriendo.
+     */
+    public function testMisReservasFiltraPorPestana(): void
+    {
+        $confirmada = $this->hecha(self::PROXIMA, '2026-10-01 10:00:00');
+        $porPagar = $this->hecha(self::PROXIMA, '2026-10-02 10:00:00');
+        // Una pendiente lleva su vencimiento: lo pide la base.
+        $this->base->ejecutar("UPDATE reserva SET estado = 'pendiente_pago', vence_en = '2030-01-01 00:00:00' WHERE codigo = ?", [$porPagar]);
+        $asistio = $this->hecha(self::PROXIMA, '2026-10-03 10:00:00', 'asistio');
+        $ausente = $this->hecha(self::PROXIMA, '2026-10-04 10:00:00', 'ausente');
+        $cancelada = $this->hecha(self::PROXIMA, '2026-10-05 10:00:00', 'cancelada');
+
+        $codigos = function (string $consulta): array {
+            preg_match_all('#<span class="panel-reservas-codigo">([A-Z0-9]{4})-([A-Z0-9]{4})</span>#', $this->pedir('GET', "/reservas{$consulta}")->cuerpo(), $partes);
+
+            return array_map(static fn (string $a, string $b): string => $a . $b, $partes[1], $partes[2]);
+        };
+        self::assertSame([$porPagar, $confirmada], $codigos('?ver=vigentes'));
+        self::assertSame([$ausente, $asistio], $codigos('?ver=pasadas'));
+        self::assertSame([$cancelada], $codigos('?ver=canceladas'));
+        self::assertCount(5, $codigos(''));
+        self::assertCount(5, $codigos('?ver=cualquiera'));
+
+        $cuerpo = $this->pedir('GET', '/reservas?ver=canceladas')->cuerpo();
+        self::assertMatchesRegularExpression('#<a href="\?ver=canceladas" class="pestana activa" aria-current="page">\s*Canceladas <span class="bandeja-cuenta">1</span>#', $cuerpo);
+        self::assertMatchesRegularExpression('#<a href="\?" class="pestana">\s*Todas <span class="bandeja-cuenta">5</span>#', $cuerpo);
+        self::assertMatchesRegularExpression('#Vigentes <span class="bandeja-cuenta">2</span>#', $cuerpo);
+        self::assertMatchesRegularExpression('#Pasadas <span class="bandeja-cuenta">2</span>#', $cuerpo);
+    }
+
+    public function testMisReservasConLaPestanaVaciaLoDiceYElPaginadoLaConserva(): void
+    {
+        for ($i = 1; $i <= 21; ++$i) {
+            $this->hecha(self::PROXIMA, sprintf('2026-10-%02d 10:00:00', $i), 'cancelada');
+        }
+
+        $vigentes = $this->pedir('GET', '/reservas?ver=vigentes')->cuerpo();
+        $canceladas = $this->pedir('GET', '/reservas?ver=canceladas')->cuerpo();
+
+        self::assertStringContainsString('No tenés reservas en esta pestaña.', $vigentes);
+        self::assertStringNotContainsString('Todavía no reservaste lugares', $vigentes);
+        self::assertStringContainsString('href="?ver=canceladas&amp;pagina=2"', $canceladas);
+        self::assertSame(1, substr_count($this->pedir('GET', '/reservas?ver=canceladas&pagina=2')->cuerpo(), 'data-reserva='));
+    }
+
+    /**
      * Si programación no responde, las reservas y sus códigos se ven igual, con un aviso.
      */
     public function testMisReservasSinProgramacionMuestraLosCodigosYUnAviso(): void
@@ -704,7 +817,9 @@ final class ReservasTest extends TestCase
         $cuerpo = $this->pedir('GET', '/reservas')->cuerpo();
 
         self::assertSame(1, substr_count($cuerpo, '/cancelar"'));
-        self::assertSame(3, substr_count($cuerpo, 'Ver comprobante'));
+        // La cancelada ya no sirve para entrar: su página es el detalle (IC-693).
+        self::assertSame(2, substr_count($cuerpo, 'Ver comprobante'));
+        self::assertSame(1, substr_count($cuerpo, 'Ver detalle'));
     }
 
     /**
@@ -1094,10 +1209,76 @@ final class ReservasTest extends TestCase
         $cuerpo = $respuesta->cuerpo();
         self::assertStringContainsString('Puntaje de conducta', $cuerpo);
         self::assertStringContainsString('bajo umbral (hasta 2 reservas a la vez)', $cuerpo);
+        self::assertStringContainsString('necesitás al menos 80 puntos para acceder a preventas anticipadas y usar cupones de descuento.', $cuerpo);
         self::assertMatchesRegularExpression('#<dt>Puntaje de conducta</dt>\s*<dd class="panel-dato-valor">60</dd>#', $cuerpo);
         self::assertMatchesRegularExpression('#<dt>Asistencias</dt>\s*<dd class="panel-dato-valor">3</dd>#', $cuerpo);
         self::assertMatchesRegularExpression('#<dt>Ausencias</dt>\s*<dd class="panel-dato-valor">4</dd>#', $cuerpo);
         self::assertMatchesRegularExpression('#<dt>Calificaciones</dt>\s*<dd class="panel-dato-valor">3</dd>\s*<dd class="panel-dato-nota">1 pos · 2 neg \(2 vig\.\) · 1 función calificada</dd>#', $cuerpo);
+    }
+
+    public function testMisReservasExplicaLosBeneficiosConBuenaConducta(): void
+    {
+        $this->configurar(['conducta' => ['umbral_beneficio' => 80, 'dias_preventa' => 7]]);
+        $buenaConducta = Uuid::nuevo();
+
+        $respuesta = $this->pedir('GET', '/reservas', $buenaConducta);
+
+        self::assertSame(200, $respuesta->estado());
+        $cuerpo = $respuesta->cuerpo();
+        self::assertStringContainsString('buena conducta (preventas y cupones de descuento habilitados)', $cuerpo);
+        self::assertStringContainsString('Con 100 puntos (al menos 80), tenés habilitados los beneficios por buena conducta', $cuerpo);
+    }
+
+    public function testBajoElUmbralDeBeneficioBloqueaPreventaYCuponEnPantalla(): void
+    {
+        $this->configurar(['conducta' => ['umbral_beneficio' => 80, 'dias_preventa' => 7]]);
+        $reciente = gmdate('Y-m-d H:i:s', strtotime('-4 days'));
+        // Tito: 2 negativas (-20) + 5 ausencias (-25) = 55 puntos (< 80).
+        for ($i = 0; $i < 2; ++$i) {
+            $id = Uuid::nuevo();
+            $this->base->ejecutar(
+                "INSERT INTO reserva (id, funcion_id, usuario_id, codigo, cantidad, total, estado, creada_en) VALUES (?, ?, ?, ?, 1, '0.00', 'asistio', ?)",
+                [$id, '13131313-1313-4313-8313-131313131313', self::EVA, strtoupper(substr(bin2hex(random_bytes(4)), 0, 8)), $reciente],
+            );
+            $this->base->ejecutar(
+                'INSERT INTO conducta (reserva_id, usuario_id, organizador_id, positiva, motivo, creada_en) VALUES (?, ?, ?, 0, ?, ?)',
+                [$id, self::EVA, Uuid::nuevo(), 'Mala conducta', $reciente],
+            );
+        }
+        for ($i = 0; $i < 5; ++$i) {
+            $this->hecha('24242424-2424-4424-8424-242424242424', $reciente, 'ausente');
+        }
+
+        // PROXIMA (+30 días) cae en preventa (dias_preventa = 7): el espectador de 55 puntos ve el motivo y no el campo.
+        $pantallaPreventa = $this->pedir('GET', '/reservar/' . self::PROXIMA);
+        self::assertSame(200, $pantallaPreventa->estado());
+        self::assertStringContainsString('Esta función está en preventa para espectadores con al menos 80 puntos de conducta (faltan más de 7 días).', $pantallaPreventa->cuerpo());
+        self::assertStringNotContainsString('name="cantidad"', $pantallaPreventa->cuerpo());
+
+        $intentoPreventa = $this->reservar('1', self::PROXIMA);
+        self::assertSame(422, $intentoPreventa->estado());
+        self::assertStringContainsString('preventa para espectadores con al menos 80 puntos', $intentoPreventa->cuerpo());
+
+        // Otro espectador con 100 puntos sí puede reservar la función en preventa y ve el campo cupón.
+        $pantallaOtro = $this->pedir('GET', '/reservar/' . self::PROXIMA, self::ELIAS);
+        self::assertSame(200, $pantallaOtro->estado());
+        self::assertStringContainsString('name="cantidad"', $pantallaOtro->cuerpo());
+        self::assertStringContainsString('name="cupon"', $pantallaOtro->cuerpo());
+
+        // Con dias_preventa = 0 (sin preventa), alguien con 55 puntos no ve el campo cupón y si lo manda por POST recibe 422.
+        $this->configurar(['conducta' => ['umbral_beneficio' => 80, 'dias_preventa' => 0]]);
+        $pantallaSinCupon = $this->pedir('GET', '/reservar/' . self::PROXIMA);
+        self::assertSame(200, $pantallaSinCupon->estado());
+        self::assertStringNotContainsString('name="cupon"', $pantallaSinCupon->cuerpo());
+        self::assertStringContainsString('necesitás al menos 80 puntos para usar cupones de descuento.', $pantallaSinCupon->cuerpo());
+
+        $postConCupon = $this->pedir('POST', '/reservar/' . self::PROXIMA, self::EVA, [
+            '_csrf' => self::CSRF,
+            'cantidad' => '1',
+            'cupon' => 'EVA23456',
+        ]);
+        self::assertSame(422, $postConCupon->estado());
+        self::assertStringContainsString('necesitás al menos 80 puntos para usar cupones de descuento.', $postConCupon->cuerpo());
     }
 
     public function testSinCorreoVerificadoNoPuedeReservarPorPaginaNiPorJson(): void

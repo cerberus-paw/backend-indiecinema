@@ -12,11 +12,13 @@ use IndieCinema\Funciones\Pruebas\ConBaseDePruebas;
 use IndieCinema\Funciones\Pruebas\ConProgramacionDePrueba;
 use IndieCinema\Funciones\Repositorios\RepositorioDeConducta;
 use IndieCinema\Funciones\Repositorios\RepositorioDeReservas;
+use IndieCinema\Funciones\Servicios\CuponesDeRecaudacion;
 use IndieCinema\Funciones\Servicios\ServicioDeConducta;
 use IndieCinema\Funciones\Servicios\ServicioDeReservas;
 use IndieCinema\Nucleo\BaseDeDatos;
 use IndieCinema\Nucleo\Configuracion;
 use IndieCinema\Nucleo\Http\ExcepcionHttp;
+use IndieCinema\Nucleo\Log;
 use IndieCinema\Nucleo\Seguridad\Rol;
 use IndieCinema\Nucleo\Seguridad\Usuario;
 use IndieCinema\Nucleo\Uuid;
@@ -372,5 +374,86 @@ final class ServicioDeReservasTest extends TestCase
         $despuesDeSeisMeses = new DateTimeImmutable('2026-10-22 12:00:00', new DateTimeZone('UTC'));
         $tercera = $servicio->reservar($espectador, self::PROGRAMADA, 1, $despuesDeSeisMeses);
         self::assertSame(1, $tercera->cantidad);
+    }
+
+    public function testSoloQuienAlcanzaElUmbralAccedeAPreventaYCupones(): void
+    {
+        $configuracion = new Configuracion([
+            'base' => self::baseDePruebas(),
+            'conducta' => [
+                'umbral_beneficio' => 80,
+                'dias_preventa' => 7,
+            ],
+        ]);
+        $tito = new Usuario(Uuid::nuevo(), Rol::Espectador);
+        $eva = new Usuario(Uuid::nuevo(), Rol::Espectador);
+        $cupones = new class ($tito->id, $eva->id) extends CuponesDeRecaudacion {
+            public function __construct(private readonly string $tito, private readonly string $eva)
+            {
+                parent::__construct(new Configuracion([]), new Log('funciones', fopen('php://memory', 'w')));
+            }
+
+            public function buscar(string $codigo): ?array
+            {
+                return match ($codigo) {
+                    'TITO2345' => ['usuario_id' => $this->tito, 'porcentaje' => 20, 'vence_en' => new DateTimeImmutable('2030-01-01')],
+                    'EVA23456' => ['usuario_id' => $this->eva, 'porcentaje' => 20, 'vence_en' => new DateTimeImmutable('2030-01-01')],
+                    default => null,
+                };
+            }
+        };
+        $servicio = new ServicioDeReservas(
+            self::funcionesDeProgramacion(),
+            new RepositorioDeReservas($this->base),
+            conducta: new ServicioDeConducta(new RepositorioDeConducta($this->base), $configuracion),
+            cupones: $cupones,
+        );
+
+        // Tito queda con 55 puntos: 2 negativas (-20) + 5 ausencias (-25).
+        $pasada = Uuid::nuevo();
+        for ($i = 0; $i < 2; ++$i) {
+            $id = Uuid::nuevo();
+            $this->base->ejecutar(
+                "INSERT INTO reserva (id, funcion_id, usuario_id, codigo, cantidad, total, estado, creada_en) VALUES (?, ?, ?, ?, 1, '0.00', 'asistio', '2026-10-10 12:00:00')",
+                [$id, $pasada, $tito->id, strtoupper(substr(bin2hex(random_bytes(4)), 0, 8))],
+            );
+            $this->base->ejecutar(
+                "INSERT INTO conducta (reserva_id, usuario_id, organizador_id, positiva, motivo, creada_en) VALUES (?, ?, ?, 0, 'Falta', '2026-10-10 12:00:00')",
+                [$id, $tito->id, Uuid::nuevo()],
+            );
+        }
+        for ($i = 0; $i < 5; ++$i) {
+            $this->base->ejecutar(
+                "INSERT INTO reserva (id, funcion_id, usuario_id, codigo, cantidad, total, estado, creada_en) VALUES (?, ?, ?, ?, 1, '0.00', 'ausente', '2026-10-10 12:00:00')",
+                [Uuid::nuevo(), $pasada, $tito->id, strtoupper(substr(bin2hex(random_bytes(4)), 0, 8))],
+            );
+        }
+
+        // PROGRAMADA es 2026-10-24T20:30:00. A más de 7 días (2026-10-10) está en preventa exclusiva.
+        $enPreventa = new DateTimeImmutable('2026-10-10 12:00:00', new DateTimeZone('UTC'));
+        try {
+            $servicio->reservar($tito, self::PROGRAMADA, 1, $enPreventa);
+            self::fail('Permitió a alguien con 55 puntos reservar en preventa.');
+        } catch (ReglaIncumplida $error) {
+            self::assertStringContainsString('preventa', $error->getMessage());
+            self::assertStringContainsString('80 puntos', $error->getMessage());
+        }
+
+        // Eva (100 puntos >= 80) sí puede reservar en preventa y usar cupón.
+        $reservaEva = $servicio->reservar($eva, self::PROGRAMADA, 1, $enPreventa, cupon: 'EVA23456');
+        self::assertSame('2800.00', $reservaEva->total);
+
+        // Ya dentro de los últimos 7 días, Tito tampoco puede aplicar un cupón por su conducta (< 80).
+        $sinPreventa = new DateTimeImmutable('2026-10-20 12:00:00', new DateTimeZone('UTC'));
+        try {
+            $servicio->reservar($tito, self::PROGRAMADA, 1, $sinPreventa, cupon: 'TITO2345');
+            self::fail('Permitió usar cupón con menos de 80 puntos.');
+        } catch (ReglaIncumplida $error) {
+            self::assertStringContainsString('80 puntos para usar cupones de descuento', $error->getMessage());
+        }
+
+        // Sin cupón y fuera de preventa sí reserva normalmente (dentro de su tope).
+        $reservaTito = $servicio->reservar($tito, self::PROGRAMADA, 1, $sinPreventa);
+        self::assertSame('3500.00', $reservaTito->total);
     }
 }

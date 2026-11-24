@@ -9,6 +9,11 @@ el `docker-compose.yml` de este repositorio. Desde el 03/11 hay además un servi
 en otra EC2 (README, «Ramas y entornos»), con los mismos controles salvo lo que dice «El servidor
 de desarrollo», al final de «Sistema operativo».
 
+Repasado el 19/11/2026 con los cinco subsistemas de la entrega final (cuentas, programación,
+funciones, moderación y recaudación) y contra la tabla de seguridad por capa de la propuesta: la
+sección «Contra la propuesta», antes de «Por etapa», dice dónde está cada control prometido o por
+qué no se hizo (EF-18.1).
+
 ## Red
 
 | Control | Dónde | Cómo se comprueba |
@@ -24,7 +29,7 @@ de desarrollo», al final de «Sistema operativo».
 | Un solo punto de entrada: sólo nginx publica puertos. MySQL y los subsistemas quedan en la red interna del compose | `ports` de `docker-compose.yml` | en el servidor escuchan sólo el 22, el 80 y el 443 (`ss -tln`) |
 | El buzón de prueba (Mailpit), que simula el envío de correos, sólo escucha en la máquina | `127.0.0.1:8025` en `docker-compose.yml` | se ve con un túnel: `ssh -L 8025:127.0.0.1:8025 …` |
 | Las rutas `/interno/` (las APIs entre subsistemas) y el `auth_request` de la sesión no se alcanzan desde afuera | `nginx/templates/sitio.inc.template` | `nginx/comprobar-desde-afuera.sh https://indiecinema.duckdns.org`, que también corre la CI |
-| Límite de pedidos por IP al ingresar, registrarse, pedir una sala, reservar y buscar (la cartelera, su CSV y las obras). Quien se pasa lee que espere un minuto: en JSON si lo pidió el JavaScript, como la reserva, y en una página si no | `limit_req_zone` en `nginx/templates/indiecinema.conf.template`; `limit_req` y `error_page 429` en `nginx/templates/sitio.inc.template` | `nginx/comprobar-desde-afuera.sh`: superar el límite de la reserva o de la búsqueda responde 429 con el mensaje |
+| Límite de pedidos por IP al ingresar, registrarse, recuperar la contraseña, pedir una sala o un título, denunciar, reservar, votar (el título, la franja y la fecha del acuerdo) y buscar (la cartelera, su CSV, las obras y los pedidos). Quien se pasa lee que espere un minuto: en JSON si lo pidió el JavaScript, como la reserva y el voto, y en una página si no. El aviso de pago de Mercado Pago no tiene límite a propósito: llega desde pocas IP de Mercado Pago, que reintenta, y un límite descartaría avisos de verdad; lo cuidan la firma y que un aviso repetido no confirma dos veces (ver «Aplicación») | `limit_req_zone` en `nginx/templates/indiecinema.conf.template`; `limit_req` y `error_page 429` en `nginx/templates/sitio.inc.template` | `nginx/comprobar-desde-afuera.sh`: superar el límite de la reserva, del voto, del pedido de títulos o de la búsqueda responde 429 con el mensaje |
 | Los metadatos de la instancia (de donde saldrían credenciales de AWS) sólo con IMDSv2, que pide un token | configuración de la instancia en AWS | sin token, `curl http://169.254.169.254/latest/meta-data/` responde 401 |
 
 ## Sistema operativo
@@ -39,7 +44,11 @@ de desarrollo», al final de «Sistema operativo».
 | Los secretos no están en el repositorio, sólo los lee el usuario del despliegue, y gitleaks revisa cada pull request y cada push a `main` o a `dev`. Lo que necesita GitHub Actions está en los environments: la clave de cada servidor y, en `desarrollo`, las cuentas de las pruebas de punta a punta (el espectador en `E2E_CORREO` y `E2E_CLAVE`, y el organizador y el administrador en `E2E_ORGANIZADOR_*` y `E2E_ADMINISTRADOR_*`), que sólo existen en ese servidor | `.env` (600) y cada `config.ini` (640), que ignora `.gitignore`; `.gitleaks.toml` y la CI | `stat -c '%a %n' .env */config/config.ini` |
 | Cada subsistema corre como `www-data`, sin ninguna capacidad de root, sin poder ganar privilegios y con el sistema de archivos de sólo lectura | `php/Dockerfile` y `x-subsistema` en `docker-compose.yml` (`cap_drop: [ALL]`, `no-new-privileges`, `read_only`) | `docker compose exec programacion id` |
 | Un subsistema comprometido no lee el código ni los secretos de los otros: cada uno monta sólo su carpeta | `volumes` de cada subsistema en `docker-compose.yml` | — |
+| Los archivos que suben los usuarios viven en volúmenes de Docker, fuera del código y del webroot, y cada uno lo monta sólo su subsistema: `archivos-programacion` (fotos de salas y afiches) y `archivos-moderacion` (la documentación de las salas y las fotos de las solicitudes). nginx no monta ninguno: se sirven sólo por un controlador que mira el rol (ver «Aplicación»). Funciones y recaudación no reciben archivos y no tienen volumen | `volumes` de `programacion` y `moderacion` en `docker-compose.yml` | `docker volume ls` |
+| Cada subsistema tiene sus propios secretos: su clave de MySQL, su secreto con nginx y el token con que llama a los otros. El access token y la clave del webhook de Mercado Pago están sólo en el `config.ini` de funciones: recaudación pide lo cobrado por la API interna y nunca ve la credencial. Un subsistema nuevo se suma a un servidor en marcha con sus secretos al azar y sin tocar los de los otros | `.env` y el `config.ini` de cada subsistema; `herramientas/generar-secretos.sh` y `herramientas/sumar-subsistema.sh` | `php herramientas/comprobar-config.php`, que dice qué falta sin mostrar valores |
+| Las seis tareas programadas (vencer las reservas sin pagar, cerrar votaciones por fecha, finalizar funciones, recordar funciones, repartir y suspender salas con la documentación vencida) corren con `docker compose exec` en el contenedor de su subsistema: con su usuario de base y sus permisos, no como root ni con otro usuario de MySQL. Las instala el despliegue y reemplaza sólo sus líneas del crontab | `herramientas/crontab` y `instalar_tareas()` en `herramientas/desplegar.sh` | `crontab -l` en el servidor |
 | Docker aísla los contenedores con AppArmor y seccomp | perfiles por defecto de Docker | `docker info` |
+| Respaldo diario de la base (los cinco esquemas y `control_migraciones`) y de los volúmenes de archivos, cifrado con la clave pública del grupo: en el servidor no hay con qué descifrarlo, así que un respaldo filtrado no se lee. Quedan 14 días en el servidor y cada uno se copia afuera si el servidor tiene un destino configurado (un bucket de S3 o otra máquina por scp) (EF-18.5) | `herramientas/respaldar.sh`, su línea en `herramientas/crontab` y `~/.config/indiecinema/` en cada servidor (README, «Respaldos») | `~/respaldos/respaldar.log` y `ls ~/respaldos/diarios` |
 
 **El servidor de desarrollo**
 
@@ -63,7 +72,7 @@ por la red interna del compose.
 
 | Control | Dónde | Cómo se comprueba |
 |---|---|---|
-| Un esquema por subsistema, y un usuario por subsistema que sólo lee y escribe datos del suyo: sin crear, alterar ni borrar tablas, y sin ver los esquemas de los otros. Lo que un subsistema necesita de otro lo pide por la API interna | `mysql/init/01-esquemas-y-usuarios.sh` | `docker compose exec mysql bash /herramientas/comprobar-aislamiento.sh`: en el VPS, el 18/10, los 15 intentos dieron `command denied` |
+| Un esquema por subsistema (cuentas, programación, funciones, moderación y recaudación), y un usuario por subsistema que sólo lee y escribe datos del suyo: sin crear, alterar ni borrar tablas, y sin ver los esquemas de los otros. Lo que un subsistema necesita de otro lo pide por la API interna. En un servidor que ya tiene datos, el esquema de un subsistema nuevo se crea con los mismos permisos | `mysql/init/01-esquemas-y-usuarios.sh` y `mysql/herramientas/crear-esquema.sh` | `docker compose exec mysql bash /herramientas/comprobar-aislamiento.sh`: en el servidor de desarrollo, el 19/11, los 35 intentos (siete por subsistema) dieron `command denied` |
 | Las tablas las crea y las cambia sólo el usuario de migraciones, que la aplicación nunca usa. Ese usuario y root entran sólo desde adentro del contenedor de MySQL | `mysql/init/02-usuario-de-migraciones.sh` y `MYSQL_ROOT_HOST: localhost` en `docker-compose.yml` | `SELECT user, host FROM mysql.user`: `migraciones` y `root` en `localhost` |
 | El registro de las migraciones aplicadas está en un esquema que ningún subsistema ve, con la huella de cada archivo: la aplicación no puede hacer que una se repita, y una migración editada después de aplicarse se rechaza | `control_migraciones` y `mysql/herramientas/migrar.sh` | `MigracionesTest` de cada subsistema |
 | Las claves de los usuarios de MySQL salen de `.env` al crear la base: no están en el repositorio | variables `MYSQL_CLAVE_*` de `docker-compose.yml` | gitleaks en la CI |
@@ -73,7 +82,8 @@ por la red interna del compose.
 | El código que el espectador muestra en la puerta es único: dos reservas hechas a la vez no salen con el mismo | `UNIQUE INDEX reserva_por_codigo` en `funciones/migraciones/001_tabla_reserva.sql` | `MigracionesTest::testDosReservasNoTienenElMismoCodigo` (funciones) |
 | Un voto por usuario en cada acuerdo de fecha y uno por franja: cambiar el voto reemplaza el que había en lugar de sumar otro | los `UNIQUE INDEX` de `voto_acuerdo` en `funciones/migraciones/004…` y `005…` | `MigracionesTest::testUnUsuarioMarcaVariasFranjasPeroCadaUnaUnaSolaVez` (funciones) |
 | Una calificación por espectador y función, con el puntaje entre 1 y 5: dos envíos a la vez, o dos reservas de la misma función, no dejan dos (EF-04.2) | `UNIQUE INDEX calificacion_una_por_funcion` y `CHECK` del puntaje en `funciones/migraciones/012_tabla_calificacion.sql` | `CalificacionesTest::testConDosReservasDeLaMismaFuncionCalificaUnaSolaVez` (funciones) |
-| Cada cambio de estado de una reserva queda registrado con su autor y el estado anterior, y la base rechaza un cambio que no cambia nada | `funciones/migraciones/006_tabla_cambio_reserva.sql` | `RepositorioDeReservasTest::testCadaCambioQuedaEnElHistorialConSuAutor` |
+| Cada cambio de estado de una reserva queda registrado con su autor, su rol, el estado anterior y la hora, y la base rechaza un cambio que no cambia nada. Los automáticos (la que vence sin pagar, la que queda ausente al terminar la función, la que se cancela porque el pago llegó sin lugar) quedan como del sistema, no a nombre de una persona, y la base no deja un cambio del sistema con usuario ni uno de un usuario sin él (EF-18.6). El administrador ve el historial en el detalle de cada reserva | `funciones/migraciones/006_tabla_cambio_reserva.sql` y `020` a `022_cambio_reserva_autor_del_sistema.sql`; `/funcion/administracion/reservas/{id}` | `RepositorioDeReservasTest::testCadaCambioQuedaEnElHistorialConSuAutor`, `PanelDeReservasTest::testElRegistroAnotaCadaCambioConSuAutorTambienLosAutomaticos`, `MigracionesTest::testUnCambioDelSistemaNoTieneUsuarioYUnoDeUsuarioSi` (funciones) |
+| Restauración probada: un respaldo se descifra fuera del servidor, se carga en un MySQL limpio y se cuentan las filas de cada tabla contra las del servidor. El 19/11/2026, con el respaldo del servidor de desarrollo de ese día: las 37 tablas con las mismas filas, y los dos volúmenes legibles (19 y 17 archivos) | `herramientas/restaurar.sh` (README, «Respaldos») | correrlo con el respaldo del día y la clave privada del grupo |
 | El cupo no lo puede hacer cumplir la base: la función vive en programación y no hay fila que bloquear acá. Lo controla la aplicación (ver «Aplicación») | comentario de `funciones/migraciones/001_tabla_reserva.sql` | — |
 
 ## Aplicación
@@ -92,7 +102,7 @@ con `fetch` sin recargar la página. Lo que agregó esa entrega está en las fil
 | Validación en el backend de cada formulario, con las mismas reglas que el navegador: largos, rangos, formatos, fecha futura, cupo hasta la capacidad de la sala y obras que existen. Un campo que llega como arreglo o con UTF-8 inválido cuenta como vacío | `Formulario*` de cada subsistema (`cuentas/src/Controladores/`, `programacion/src/Controladores/`, `moderacion/src/Controladores/`) y los `Parametros*` de los listados | `SolicitudDeSalaTest::testElServidorRechazaLoMismoQueElNavegador`, `FormularioDeRegistroTest`, `FuncionesDelOrganizadorTest` |
 | Consultas parametrizadas: toda consulta pasa por un único `prepare`. Los filtros se arman con fragmentos fijos y `?`, y el texto buscado va como parámetro, con los comodines de `LIKE` escapados | `nucleo/src/BaseDeDatos.php` y los `Repositorio*` | `CarteleraTest::testUnaInyeccionEnLaBusquedaNoTraeNada` |
 | Contraseñas con Argon2id, de 8 a 128 caracteres, con letras y números. Al ingresar, el error no dice si falló el correo o la contraseña, y un correo inexistente también calcula un hash, así el tiempo no lo delata | `ServicioDeRegistro`, `ServicioDeIngreso` y `CredencialesInvalidas` en `cuentas/src/Servicios/` | `RegistroTest::testConTodoBienGuardaElUsuarioConArgon`, `IngresoTest::testElErrorNoDiceSiFallaElCorreoOLaContrasena` |
-| Control de rol en el servidor: cada ruta declara su rol mínimo, y se controla antes de llegar al controlador. Las rutas sin rol son sólo las públicas, y todas son GET | `rutas.php` de cada subsistema y `nucleo/src/Seguridad/ControlDeAcceso.php` | `PanelDeAdministracionTest` de cuentas, `PanelDelOrganizadorTest` de programación y la prueba de quién entra a la bandeja de solicitudes de moderación (`AdministracionDeSolicitudesTest`) |
+| Control de rol en el servidor: cada ruta declara su rol mínimo, y se controla antes de llegar al controlador. Las rutas sin rol son sólo las públicas. La matriz de permisos por rol y por ruta de los cinco subsistemas está en `docs/permisos.md`, y una prueba la compara con `rutas.php`: una ruta nueva o un rol cambiado no pasa sin anotarse ahí (EF-18.2) | `rutas.php` de cada subsistema, `nucleo/src/Seguridad/ControlDeAcceso.php` y `docs/permisos.md` | `AccesoPorRolTest` de cada subsistema: cada ruta con rol, sin sesión (401), con cada rol que no alcanza (403) y con el justo; además `PanelDeAdministracionTest` de cuentas y `PanelDelOrganizadorTest` de programación |
 | Quién es el usuario lo dice nginx, que lo pregunta a cuentas. Un subsistema sólo cree esas cabeceras si traen el secreto que comparte con nginx: otro contenedor de la red interna no puede hacerse pasar por un usuario | `nucleo/src/Seguridad/Identificacion.php` y `[nginx] secreto` en cada `config.ini` | `IdentificacionTest::testSinElSecretoIgnoraLasCabecerasYLoRegistra` |
 | Control de dueño: un organizador sólo ve y cambia sus salas y sus funciones. Lo ajeno responde 404, como lo que no existe, así no se averigua qué hay | `ServicioDeSalas` y `ServicioDeFuncionesDelOrganizador` en `programacion/src/Servicios/` | `SalasDelOrganizadorTest::testOtroOrganizadorNoVeNiGuardaLaSalaAjena`, `FuncionesDelOrganizadorTest::testFormularioEdicionDevuelve404SiNoExisteOEsAjena` |
 | Los id de la URL se validan como UUID antes de ir a la base | `nucleo/src/Uuid.php`, en cada servicio que busca por id | `CarteleraTest::testDetalleConIdInvalidoResponde` |
@@ -100,7 +110,7 @@ con `fetch` sin recargar la página. Lo que agregó esa entrega está en las fil
 | Sesión propia en la base de cuentas: el identificador son 32 bytes al azar en una cookie `HttpOnly`, `Secure` y `SameSite=Lax`, y al ingresar siempre es uno nuevo. Se cierra con dos horas sin uso y dura como mucho siete días. Cambiar el rol de un usuario o suspenderlo cierra sus sesiones | `cuentas/src/Modelo/Sesion.php` y `ServicioDeSesiones` | `SesionTest`, `SesionInternaTest::testDosHorasSinUsoLaCierran` y la cabecera del sitio publicado («Las cookies en producción», abajo) |
 | Token CSRF en todo pedido que cambia algo: va en una cookie y en el formulario, y tienen que coincidir. La cookie es `HttpOnly`, `Secure` y `SameSite=Lax`. Lo que el navegador manda con `fetch` sin recargar (E4) lleva el mismo token en la cabecera `X-CSRF-Token`: sin él no se reserva, y el error vuelve en JSON | `nucleo/src/Seguridad/ProteccionCsrf.php`, para todo el sitio | `AplicacionTest::testUnPostSinTokenCsrfSeRechaza`, `AplicacionTest::testElJavaScriptPuedeMandarElTokenEnUnaCabecera`, `ReservasTest::testEnJsonSinTokenElErrorVaEnJsonYNoSeReserva` y la prueba «sin el token» de cada formulario; la cabecera del sitio publicado («Las cookies en producción», abajo) |
 | El aviso de pago de Mercado Pago (X-01.4) es la única ruta que cambia algo sin sesión ni token CSRF (`Router::webhook()`), así que lo primero es la firma: el HMAC-SHA256 de `x-signature` con la clave secreta del webhook, sobre el id del pago, el `x-request-id` y el `ts`, comparado con `hash_equals`. Sin ella, 401 y no se le pregunta nada a nadie. Del aviso sólo se usa el id: el estado, el monto, la moneda y la reserva se le piden a la API de Mercado Pago, y la reserva se confirma sólo si el pago es por su total. `pago_id` es único y la confirmación sólo pasa de pendiente a confirmada, así que un aviso repetido o fuera de orden no confirma dos veces. Lo que se cobró de más (una reserva cancelada, un segundo pago, otro monto) se devuelve. La página de regreso sólo muestra lo que dice la base | `nucleo/src/Ruteo/Router.php`, `funciones/src/Servicios/FirmaDeMercadoPago.php`, `ServicioDePagos.php` y `Controladores/AvisosDePago.php`; el access token y la clave, sólo en el `config.ini` de funciones | `FirmaDeMercadoPagoTest`, `AvisosDePagoTest` (sin firma, con otra clave, la firma de otro pago, el aviso repetido, fuera de orden, otro monto, la reserva cancelada) y `PagoConMercadoPagoTest::testVolverConElPagoAprobadoEnLaDireccionNoConfirmaLaReserva` |
-| La foto de una sala y el afiche de una obra se aceptan por su contenido, no por el nombre ni por lo que dice el navegador: JPG, PNG o WebP, hasta 5 MB y 8000 píxeles de lado. Se guardan con un nombre nuevo y se sirven con el tipo de su extensión | `FormularioDeSala`, `ArchivosDeSalas` e `ImagenDeSala`; `FormularioDeObra` y `AfichesDeObras`, en `programacion/src/`; la de una solicitud de sala, `FormularioDeSala`, `ArchivosDeSolicitudes` y `FotoDeSolicitud`, en `moderacion/src/` | `SolicitudDeSalaTest::testUnaSalaNuevaNecesitaUnaFotoDeVerdad`, `FormularioDeObraTest::testVerificaAfichePorContenidoReal` |
+| La foto de una sala y el afiche de una obra se aceptan por su contenido, no por el nombre ni por lo que dice el navegador: JPG, PNG o WebP, hasta 5 MB y 8000 píxeles de lado. Se guardan con un nombre nuevo y se sirven con el tipo de su extensión. La documentación de las salas (PDF) y la foto de una solicitud viven en el volumen de moderación, que nginx no monta: sólo se bajan por el id, con un controlador que mira el rol y el dueño; por el nombre del archivo o con una ruta armada a mano (`../`) responde 404 | `FormularioDeSala`, `ArchivosDeSalas` e `ImagenDeSala`; `FormularioDeObra` y `AfichesDeObras`, en `programacion/src/`; la de una solicitud de sala, `FormularioDeSala`, `ArchivosDeSolicitudes` y `FotoDeSolicitud`, en `moderacion/src/` | `SolicitudDeSalaTest::testUnaSalaNuevaNecesitaUnaFotoDeVerdad`, `FormularioDeObraTest::testVerificaAfichePorContenidoReal`, `DocumentacionDeSalaTest::testElOrganizadorBajaSuRenovacionYOtroNo`, `SolicitudDeSalaTest::testLaFotoLaVenElSolicitanteElModeradorYElAdministrador` |
 | En el CSV de la cartelera, un texto que una planilla tomaría como fórmula va con un apóstrofo adelante | `programacion/src/Controladores/CsvDeCartelera.php` | `CsvDeCarteleraTest::testUnaFormulaSeEscribeComoTexto` |
 | En el CSV de reservas del organizador (E4), el nombre del espectador (cargado por una persona al registrarse) va con un apóstrofo adelante si empieza con `=`, `+`, `-`, `@`, tabulador o retorno de carro, para que una planilla no lo tome como fórmula | `funciones/src/Controladores/CsvDeReservas.php` | `PanelDeReservasTest::testUnaFormulaEnElNombreDelEspectadorSeEscribeComoTextoEnElCsv` |
 | Control de dueño de la reserva (E4): el espectador sólo ve y cancela las suyas, y el organizador sólo las de sus funciones. Lo ajeno responde 404, igual que lo que no existe | `funciones/src/Servicios/` y `rutas.php` de funciones | `ReservasTest::testLaReservaDeOtroEsUn404`, `ReservasTest::testLaReservaDeOtroNoSeCancela` |
@@ -111,6 +121,7 @@ con `fetch` sin recargar la página. Lo que agregó esa entrega está en las fil
 | La API interna (`/interno/`) sólo atiende a los subsistemas que declara cada ruta, cada uno con su token; en la configuración está sólo el SHA-256 del token | `$router->interna()` en cada `rutas.php` y `[llamadores]` en cada `config.ini` | `UsuariosInternosTest::testSoloLasLlamaProgramacionConSuToken`, `FuncionesInternasTest::testSoloLaPideFuncionesConSuToken` |
 | En producción, un error responde 500 sin el detalle, que queda en el log. Con algún valor de ejemplo en `config.ini` el subsistema no arranca | `nucleo/src/Aplicacion.php` y `entorno = "produccion"` | `AplicacionTest::testUnErrorEnProduccionNoMuestraElDetalleYQuedaEnElLog` |
 | Las dependencias se revisan contra los avisos de seguridad conocidos en cada pull request | `composer audit` en `.github/workflows/ci.yml` | la CI |
+| Auditoría: queda en el log quién cambió un rol, quién resolvió una solicitud de sala, un documento o una obra, quién suspendió una sala o levantó su suspensión y quién marcó una liquidación como transferida. Con los ids de quién y de qué, sin nombres, correos ni notas: los logs no llevan datos personales. La denuncia resuelta guarda en la base quién la resolvió y cuándo (`resuelta_por`, `resuelta_en`), y la suspensión que sale de ella queda además en el log | `log->notice` en `ServicioDeUsuarios` (cuentas), `ServicioDeSolicitudes`, `ServicioDeRenovaciones`, `ServicioDeObras` y `ServicioDeSuspensiones` (moderación), y `ServicioDeLiquidaciones` (recaudación); `moderacion/migraciones/011_tabla_denuncia.sql` | `docker compose logs`; `LiquidacionesTest::testElAdministradorMarcaUnaComoTransferidaConSuNota` |
 
 **Las cookies en producción**
 
@@ -199,7 +210,31 @@ la sección siguiente, que atacó el sitio con cada rol.
 
 ## Análisis con OWASP ZAP
 
-Hecho entre el 7 y el 8/11/2026 con la imagen `ghcr.io/zaproxy/zaproxy:stable` (ZAP 2.17), en
+**19/11/2026, con los cinco subsistemas (EF-18.4).** Escaneo activo con sesión contra el compose
+local, con moderación y recaudación y los datos de la demo: Eva (espectadora, 202 URL), Omar
+(organizador, 507) y Mora (moderadora, 242), con la receta del final de esta sección. Los informes
+están en `docs/zap/2026-11-19-activo-*.html`. El pasivo sin sesión lo sigue corriendo el CD después
+de cada publicación de `dev`, y pasa.
+
+**Ninguna alerta alta es real.** Las cuatro que aparecieron se reprodujeron a mano:
+
+| Alerta | Dónde | Tratamiento |
+|---|---|---|
+| SQL Injection (40018), alta | `GET /cartelera?precio_min=0' AND '1'='1' --` (organizador) | **Falso positivo**: las respuestas a las dos condiciones de ZAP son idénticas salvo el token CSRF de la página, que es nuevo en cada pedido sin cookie; un precio inválido se deja afuera del filtro, igual que «abc». ZAP comparó esa diferencia, o datos que otro escaneo cambiaba en el medio |
+| SQL Injection (40018), alta | `POST /funcion/organizador/funciones/{id}/conducta`, campo `motivo` | **Falso positivo**: el motivo va como parámetro de una sentencia preparada (`RepositorioDeConducta`). La respuesta cambia porque el primer envío califica y el siguiente responde que esa conducta ya fue calificada |
+| Path Traversal (6), alta | `GET /cartelera.csv?orden=cartelera.csv` (organizador) | **Falso positivo**: `orden` se compara con una lista de órdenes conocidos y uno que no está se deja afuera; no se abre ningún archivo con él |
+| Source Code Disclosure - File Inclusion (43), alta | `POST /funcion/reservar/{id}`, campo `cantidad` (espectadora) | **Falso positivo**: `cantidad` se lee con `filter_var` como entero entre 1 y el cupo; con otra cosa responde el error del campo. No se abre ningún archivo |
+
+Las medias son las de noviembre, con el mismo tratamiento (tabla de abajo): *Anti-CSRF Tokens
+Check* (20012: ZAP mira el buscador, que es GET, y el formulario de salir, que lleva el token),
+*Bypassing 403* (40038: nginx no usa `X-Original-URL`) y *HTTP Only Site* (10106: el compose local va
+por HTTP a propósito). Una baja nueva, *Private IP Disclosure* (2) en `/pedidos?pagina=2`, es dato
+que cargó el propio ZAP: el escaneo del organizador pidió títulos con su dirección de callback
+(`172.23.0.10`), que se muestran escapados (el `<script>` que mandó sale como texto).
+
+**Noviembre (7 y 8/11).**
+
+Hecho entre el 7 y el 8/11/2026, con los tres subsistemas de la Entrega 4, con la imagen `ghcr.io/zaproxy/zaproxy:stable` (ZAP 2.17), en
 tres partes:
 
 - **Pasivo (baseline), sin sesión**, contra https://indiecinema-dev.duckdns.org: recorre las páginas
@@ -251,11 +286,12 @@ plantilla (ver «Red»).
 prueba cargados, por cada cuenta: ingresar con `POST /cuenta/ingresar` (`email`, `password` y
 `_csrf`, igual a la cookie `csrf`), y pasarle a ZAP las cookies `csrf` y `sesion`. Son `Secure`,
 así que por HTTP hay que mandarlas a mano, con el reemplazo de cabeceras. Además, excluir
-`/cuenta/salir`, que le cerraría la sesión, y limitar la memoria de Java:
+`/cuenta/salir`, que le cerraría la sesión, y limitar la memoria de Java. Las reglas que se
+saltean están en `.zap/reglas.tsv`, con su porqué:
 
 ```
-echo -Xmx2g > zap-jvm.properties
-printf '40026\tIGNORE\n' > activo.tsv
+echo -Xmx3g > zap-jvm.properties
+cp .zap/reglas.tsv activo.tsv
 SESION='csrf=…;sesion=…'
 R='replacer.full_list(0)'
 OPCIONES="-config $R.description=sesion -config $R.enabled=true -config $R.matchtype=REQ_HEADER"
@@ -267,8 +303,41 @@ docker run --rm --network indiecinema_interna -m 4g -v "$PWD:/zap/wrk:rw" \
   zap-full-scan.py -t http://nginx/ -m 5 -I -c activo.tsv -r informe.html -z "$OPCIONES"
 ```
 
-`activo.tsv` saltea la regla 40026. Con 4 GB por contenedor entran dos a la vez, pero el del
+`activo.tsv` saltea la regla 40026. En el compose local la red se llama `<proyecto>_interna`. Con 4 GB por contenedor entran dos a la vez, pero el del
 administrador va solo, porque puede suspender a las otras cuentas o cambiarles el rol.
+
+## Contra la propuesta
+
+La tabla de seguridad por capa de la propuesta (Entrega 1, sección 3), control por control: si está
+hecho, dónde y cómo se comprueba, o por qué no. Lo hecho tiene su fila en las secciones de arriba.
+
+| Capa | Control prometido | Estado | Dónde, o por qué no |
+|---|---|---|---|
+| Red | HTTPS obligatorio con Let's Encrypt, redirección de HTTP y HSTS | Hecho | «Red» |
+| Red | Firewall con sólo el 80, el 443 y SSH; la base y los subsistemas en la red interna; nginx no publica `/interno/` y descarta las cabeceras `X-Usuario-*` que lleguen de afuera | Hecho | «Red»; las cabeceras se vacían en `sitio.inc.template` antes del `auth_request`, y un subsistema además las ignora sin el secreto de nginx («Aplicación») |
+| Red | Límite por IP al iniciar sesión, al registrarse, en los votos y en el webhook de pago | Hecho, salvo el webhook | «Red». El webhook queda sin límite a propósito: Mercado Pago avisa desde pocas IP y reintenta, y un límite descartaría avisos de verdad. Lo cuidan la firma y la idempotencia |
+| Red | Webhook aceptado sólo con la firma `x-signature` | Hecho | «Aplicación» |
+| Sistema operativo | Distribución LTS con actualizaciones de seguridad automáticas | Hecho | «Sistema operativo» |
+| Sistema operativo | Imágenes oficiales reconstruidas en cada entrega | Hecho | `docker compose up --build` en cada despliegue; las imágenes de base (`php:8.4-apache`, `nginx:stable-alpine`, `mysql:8.4`) son las oficiales |
+| Sistema operativo | SSH sólo con clave, sin root y con fail2ban | Hecho | «Sistema operativo» |
+| Sistema operativo | Cada contenedor sin privilegios y con sus volúmenes; la documentación de las salas en el volumen de moderación, fuera del webroot | Hecho | «Sistema operativo» |
+| Sistema operativo | Configuración fuera del repositorio, leída sólo por su servicio; la credencial de Mercado Pago sólo en funciones | Hecho | «Sistema operativo» |
+| Sistema operativo | Respaldos diarios de la base y de los archivos, cifrados y fuera del VPS | Hecho, salvo el destino afuera | «Sistema operativo»: diarios y cifrados con la clave pública del grupo. La copia fuera del VPS ya la hace el script, pero cada servidor necesita su destino (un bucket de S3 o una máquina por scp) y todavía no lo tiene: faltan las credenciales (EF-18.5, IC-622) |
+| Base de datos | Un usuario por subsistema con permisos sólo sobre su esquema | Hecho | «Base de datos» |
+| Base de datos | Lo que otro subsistema necesita leer, como vista de sólo lectura | No, se reemplazó | Se decidió en la arquitectura (Entrega 2): lo que un subsistema necesita de otro lo pide por la API interna, con un token por llamador. Una vista cruzaría esquemas y le daría al usuario de un subsistema acceso a tablas de otro, que es lo que la separación evita |
+| Base de datos | Sin permisos de estructura para la aplicación; las migraciones con otro usuario | Hecho | «Base de datos» |
+| Base de datos | MySQL sin escuchar fuera de la red interna | Hecho | «Red» y «Base de datos» |
+| Base de datos | Reglas en la base: un voto por usuario y función, un registro por identificador de pago | Hecho | «Base de datos»: `un_voto_por_usuario_y_funcion` (programación) y `pago_id` único (funciones) |
+| Base de datos | Restauración probada antes de cada entrega | Hecho | «Base de datos»: el 19/11/2026, con el respaldo del servidor de desarrollo |
+| Aplicación | Autenticación propia: Argon2id, cookie `HttpOnly`, `Secure` y `SameSite`, identificador nuevo al ingresar, recuperación con un token de un solo uso que vence | Hecho | «Aplicación»; el token de recuperación vence en una hora y se marca usado (`cuentas/migraciones/006_tabla_token_de_cuenta.sql`) |
+| Aplicación | Rol mínimo por ruta y dueño del recurso | Hecho | «Aplicación» y la matriz de `docs/permisos.md` (EF-18.2) |
+| Aplicación | Consultas preparadas, autoescape de Twig y token CSRF en todo formulario | Hecho | «Aplicación» |
+| Aplicación | Archivos validados por contenido y tamaño, renombrados al azar y entregados por un controlador que mira el rol | Hecho | «Aplicación» |
+| Aplicación | La reserva se confirma con el aviso más la consulta a la API de Mercado Pago, con el monto, nunca por el regreso | Hecho | «Aplicación» |
+| Aplicación | Correo verificado para votar y reservar; califica sólo quien asistió | Hecho | `Cartelera` (programación) y `Reservas` (funciones) piden el correo verificado; `Calificacion` acepta sólo una reserva con la asistencia registrada (funciones) |
+| Aplicación | Auditoría de los cambios de rol, las decisiones de moderación y las liquidaciones, sin datos personales en los logs | Hecho | «Aplicación». Las liquidaciones se sumaron con EF-18.1 |
+| Operación | Rotación de la credencial de Mercado Pago y de los tokens entre subsistemas | No automática | Se rota a mano: el token nuevo en el `config.ini` del subsistema y su SHA-256 en `[llamadores]` de los que lo llaman (`sumar-subsistema.sh` muestra el armado). No hubo un incidente que la pidiera, y automatizarla no entraba en el alcance |
+| Operación | Ante un incidente: suspender la cuenta o la sala, cerrar sus sesiones y rotar los secretos | Hecho, salvo suspender cuentas | La sala la suspende el moderador (EF-07); cambiar el rol de un usuario cierra sus sesiones. Suspender una cuenta es EF-14 (IC-582), todavía por hacer |
 
 ## Por etapa
 

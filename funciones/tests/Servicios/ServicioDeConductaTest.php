@@ -144,6 +144,8 @@ final class ServicioDeConductaTest extends TestCase
         $resumen = $servicio->actividadYConducta($usuario, $ahora);
         self::assertSame(85, $resumen['puntaje']);
         self::assertFalse($resumen['bajo_umbral']);
+        self::assertSame(80, $resumen['umbral_beneficio']);
+        self::assertTrue($resumen['tiene_beneficio']);
         self::assertSame(3, $resumen['asistencias']);
         self::assertSame(1, $resumen['ausencias']);
         self::assertSame(1, $resumen['conducta_positivas']);
@@ -173,6 +175,38 @@ final class ServicioDeConductaTest extends TestCase
             $normal => ['puntaje' => 100, 'bajo_umbral' => false, 'negativas' => 0, 'ausencias' => 0],
             $sinHistorial => ['puntaje' => 100, 'bajo_umbral' => false, 'negativas' => 0, 'ausencias' => 0],
         ], $varios);
+    }
+
+    public function testBeneficiosYPreventaRespetanElUmbralConfigurado(): void
+    {
+        $configuracion = new Configuracion([
+            'conducta' => [
+                'umbral_beneficio' => 80,
+                'dias_preventa' => 7,
+            ],
+        ]);
+        $servicio = new ServicioDeConducta(new RepositorioDeConducta($this->base), $configuracion);
+        $buenaConducta = Uuid::nuevo();
+        $bajaConducta = Uuid::nuevo();
+        $ahora = new DateTimeImmutable('2026-11-15 12:00:00');
+        $lejana = new DateTimeImmutable('2026-11-25 12:00:00');
+        $cercana = new DateTimeImmutable('2026-11-18 12:00:00');
+
+        // 2 negativas (-20) + 5 ausencias (-25) = 55 puntos (como Tito, debajo de 80).
+        for ($i = 0; $i < 2; ++$i) {
+            $this->insertarReservaYConducta($bajaConducta, Uuid::nuevo(), 'asistio', 0, 'Falta', '2026-11-01 20:00:00', Uuid::nuevo());
+        }
+        for ($i = 0; $i < 5; ++$i) {
+            $this->insertarReserva($bajaConducta, Uuid::nuevo(), 'ausente');
+        }
+
+        self::assertSame(80, $servicio->umbralBeneficio());
+        self::assertSame(7, $servicio->diasPreventa());
+        self::assertTrue($servicio->tieneBeneficio($buenaConducta, $ahora));
+        self::assertFalse($servicio->tieneBeneficio($bajaConducta, $ahora));
+        self::assertFalse($servicio->bloqueadoPorPreventa($buenaConducta, $lejana, $ahora));
+        self::assertTrue($servicio->bloqueadoPorPreventa($bajaConducta, $lejana, $ahora));
+        self::assertFalse($servicio->bloqueadoPorPreventa($bajaConducta, $cercana, $ahora));
     }
 
     private function insertarReserva(string $usuario, string $funcion, string $estado): string

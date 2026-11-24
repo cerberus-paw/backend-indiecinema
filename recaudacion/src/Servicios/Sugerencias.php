@@ -7,10 +7,15 @@ namespace IndieCinema\Recaudacion\Servicios;
 use IndieCinema\Recaudacion\Modelo\DatosDelReporte;
 use IndieCinema\Recaudacion\Modelo\DiaFlojo;
 use IndieCinema\Recaudacion\Modelo\FuncionFinalizada;
+use IndieCinema\Recaudacion\Modelo\FuncionParaProgramar;
+use IndieCinema\Recaudacion\Modelo\GeneroDeSala;
 use IndieCinema\Recaudacion\Modelo\ObraAgotada;
 use IndieCinema\Recaudacion\Modelo\PedidoDelPublico;
 use IndieCinema\Recaudacion\Modelo\PrecioDeLaEntrada;
+use IndieCinema\Recaudacion\Modelo\RecomendacionCombinada;
 use IndieCinema\Recaudacion\Modelo\RendimientoDeSala;
+use IndieCinema\Recaudacion\Modelo\ResultadoDeSala;
+use IndieCinema\Recaudacion\Modelo\SalaSinPromocion;
 use IndieCinema\Recaudacion\Modelo\TituloParaRepetir;
 use IndieCinema\Recaudacion\Modelo\Umbrales;
 use IndieCinema\Recaudacion\Modelo\VotantesSinReserva;
@@ -23,11 +28,46 @@ use IndieCinema\Recaudacion\Modelo\VotantesSinReserva;
  *
  * Las cuentas van en enteros: un porcentaje se compara multiplicando en cruz, así una sala que
  * vendió 36 de 40 lugares está en el 90 % justo y no en 89,999.
+ *
+ * Con lo que ganó cada sala (EF-22.1), a la que gana holgado no le sugiere promociones ni
+ * descuentos (EF-22.14): no los necesita. Sí le sigue sugiriendo lo que le suma, como otra función
+ * de lo que se agota o cambiar un horario.
  */
 final class Sugerencias
 {
-    public function __construct(private readonly Umbrales $umbrales)
+    private const DIAS = [1 => 'lunes', 2 => 'martes', 3 => 'miércoles', 4 => 'jueves', 5 => 'viernes', 6 => 'sábados', 7 => 'domingos'];
+
+    /** @var array<string, SalaSinPromocion> por id de sala */
+    private readonly array $sinPromocion;
+
+    /**
+     * @param list<ResultadoDeSala> $resultados si cada sala ganó o perdió en el período; sin ellos
+     *                                          (vacía) no se sabe quién gana y no se filtra nada
+     */
+    public function __construct(private readonly Umbrales $umbrales, array $resultados = [])
     {
+        $sinPromocion = [];
+        foreach ($resultados as $sala) {
+            $costo = $sala->costo();
+            // Sin costo no hay contra qué comparar: una sala que cargó 0 no gana «holgado», gana todo.
+            if ($costo > 0 && $sala->resultado() * 100 >= $this->umbrales->promocionGananciaMaxima * $costo) {
+                $sinPromocion[$sala->salaId] = new SalaSinPromocion($sala->salaId, $sala->salaNombre, $sala->resultado(), $costo, self::porcentaje($sala->resultado(), $costo));
+            }
+        }
+        $this->sinPromocion = $sinPromocion;
+    }
+
+    /**
+     * Las salas que ganan tanto que no se les sugiere promoción, para decir por qué no aparecen.
+     *
+     * @return list<SalaSinPromocion> de la que más gana sobre su costo a la que menos
+     */
+    public function sinPromocion(): array
+    {
+        $salas = array_values($this->sinPromocion);
+        usort($salas, static fn (SalaSinPromocion $a, SalaSinPromocion $b): int => [$b->sobreCosto, $a->salaNombre] <=> [$a->sobreCosto, $b->salaNombre]);
+
+        return $salas;
     }
 
     /**
@@ -39,9 +79,22 @@ final class Sugerencias
      * votó sin que ganara. Es de la sala y no de todas porque el que tiene que venir el miércoles
      * es su público, no el de otra.
      *
+     * No vienen los de las salas que ganan holgado (EF-22.14): una promoción no les hace falta.
+     *
      * @return list<DiaFlojo> de la ocupación más baja a la más alta
      */
     public function diasFlojos(DatosDelReporte $datos): array
+    {
+        return array_values(array_filter($this->todosLosDiasFlojos($datos), fn (DiaFlojo $dia): bool => !isset($this->sinPromocion[$dia->salaId])));
+    }
+
+    /**
+     * Los días flojos de todas las salas, también de las que ganan: las combinadas que no son una
+     * promoción (cambiar el horario, sumar lo que se agota) parten de ellos igual.
+     *
+     * @return list<DiaFlojo>
+     */
+    private function todosLosDiasFlojos(DatosDelReporte $datos): array
     {
         /** @var array<string, array<int, array{funciones: int, vendidas: int, cupo: int}>> $porSala */
         $porSala = [];
@@ -113,9 +166,11 @@ final class Sugerencias
             }
             $calificacion = $datos->calificacionDe($funcion->id);
             foreach ($funcion->elegidas() as $obra) {
-                $acumulado = $porObra[$obra->id] ?? ['titulo' => $obra->titulo, 'funciones' => 0, 'vendidas' => 0, 'cupo' => 0, 'asistentes' => 0, 'puntos' => 0.0, 'calificaciones' => 0];
+                $acumulado = $porObra[$obra->id] ?? ['titulo' => $obra->titulo, 'salas' => [], 'funciones' => 0, 'vendidas' => 0, 'cupo' => 0, 'asistentes' => 0, 'puntos' => 0.0, 'calificaciones' => 0];
+                $acumulado['salas'][$funcion->salaId] = ($acumulado['salas'][$funcion->salaId] ?? 0) + 1;
                 $porObra[$obra->id] = [
                     'titulo' => $obra->titulo,
+                    'salas' => $acumulado['salas'],
                     'funciones' => $acumulado['funciones'] + 1,
                     'vendidas' => $acumulado['vendidas'] + $ventas->vendidas,
                     'cupo' => $acumulado['cupo'] + $funcion->cupo,
@@ -144,6 +199,7 @@ final class Sugerencias
                 self::porcentaje($obra['vendidas'], $obra['cupo']),
                 self::porcentaje($obra['asistentes'], $obra['vendidas']),
                 $promedio,
+                self::laQueMas($obra['salas']),
             );
         }
         usort($titulos, static fn (TituloParaRepetir $a, TituloParaRepetir $b): int => [$b->ocupacion, $b->promedio, $a->titulo] <=> [$a->ocupacion, $a->promedio, $b->titulo]);
@@ -187,9 +243,11 @@ final class Sugerencias
                 if ($obra->elegida || $obra->votos === 0 || $obra->votos * 100 < $this->umbrales->pedidoVotosMinimos * $total) {
                     continue;
                 }
-                $acumulado = $porObra[$obra->id] ?? ['titulo' => $obra->titulo, 'votaciones' => 0, 'votos' => 0, 'total' => 0];
+                $acumulado = $porObra[$obra->id] ?? ['titulo' => $obra->titulo, 'salas' => [], 'votaciones' => 0, 'votos' => 0, 'total' => 0];
+                $acumulado['salas'][$funcion->salaId] = ($acumulado['salas'][$funcion->salaId] ?? 0) + $obra->votos;
                 $porObra[$obra->id] = [
                     'titulo' => $obra->titulo,
+                    'salas' => $acumulado['salas'],
                     'votaciones' => $acumulado['votaciones'] + 1,
                     'votos' => $acumulado['votos'] + $obra->votos,
                     'total' => $acumulado['total'] + $total,
@@ -200,7 +258,7 @@ final class Sugerencias
         $pedidos = [];
         foreach ($porObra as $obraId => $obra) {
             if (!isset($proyectadas[$obraId])) {
-                $pedidos[] = new PedidoDelPublico((string) $obraId, $obra['titulo'], $obra['votaciones'], $obra['votos'], self::porcentaje($obra['votos'], $obra['total']));
+                $pedidos[] = new PedidoDelPublico((string) $obraId, $obra['titulo'], $obra['votaciones'], $obra['votos'], self::porcentaje($obra['votos'], $obra['total']), self::laQueMas($obra['salas']));
             }
         }
         usort($pedidos, static fn (PedidoDelPublico $a, PedidoDelPublico $b): int => [$b->votos, $b->votaciones, $a->titulo] <=> [$a->votos, $a->votaciones, $b->titulo]);
@@ -211,7 +269,8 @@ final class Sugerencias
     /**
      * Las salas con gente que votó y no reservó nada (EF-09.5): personas, no porcentajes, porque
      * una promoción apunta a gente. Se cuenta en todo el período y no por función: quien votó una
-     * y reservó otra de la misma sala ya vino.
+     * y reservó otra de la misma sala ya vino. Sin las que ganan holgado, que no necesitan
+     * promoción (EF-22.14).
      *
      * @return list<VotantesSinReserva> de la que más gente tiene sin reservar a la que menos
      */
@@ -236,7 +295,7 @@ final class Sugerencias
         $salas = [];
         foreach ($porSala as $salaId => $sala) {
             $sinReserva = count(array_diff_key($sala['votantes'], $sala['compradores']));
-            if ($sinReserva >= $this->umbrales->votaronSinReservarMinimos) {
+            if ($sinReserva >= $this->umbrales->votaronSinReservarMinimos && !isset($this->sinPromocion[(string) $salaId])) {
                 $salas[] = new VotantesSinReserva((string) $salaId, $sala['nombre'], count($sala['votantes']), $sinReserva);
             }
         }
@@ -248,7 +307,8 @@ final class Sugerencias
     /**
      * Las salas que dieron funciones a la gorra y con precio, cuando la diferencia dice algo
      * (EF-09.5): si a la gorra llena bastante más, un descuento puede traer gente; si con precio
-     * llena lo mismo o más, se puede cobrar. En el medio no se sugiere nada.
+     * llena lo mismo o más, se puede cobrar. En el medio no se sugiere nada. A una sala que gana
+     * holgado no se le sugiere el descuento (EF-22.14), y así tampoco sale su combinada a la gorra.
      *
      * @return list<PrecioDeLaEntrada> de la mayor diferencia a la menor
      */
@@ -278,7 +338,7 @@ final class Sugerencias
             $gorra = self::porcentaje($vendidasGorra, $cupoGorra);
             $pagas = self::porcentaje($vendidasPagas, $cupoPagas);
             $sensible = $gorra - $pagas >= $this->umbrales->gorraDiferenciaMinima;
-            if (!$sensible && $pagas < $gorra) {
+            if ((!$sensible && $pagas < $gorra) || ($sensible && isset($this->sinPromocion[(string) $salaId]))) {
                 continue;
             }
             $salas[] = new PrecioDeLaEntrada((string) $salaId, $sala['nombre'], $funcionesGorra, $gorra, $funcionesPagas, $pagas, $sensible);
@@ -335,6 +395,440 @@ final class Sugerencias
             <=> [$a->agotadas, $a->ocupacion, $b->titulo, $b->salaNombre]);
 
         return $obras;
+    }
+
+    /**
+     * Las recomendaciones que cruzan varias variables (EF-22.3): las de arriba miran una sola cosa
+     * por vez, y el profe pidió el 18/11 «empezar a mezclar los ingredientes». Todas parten de un
+     * día flojo de una sala y le suman otra cosa que sabe el reporte de esa misma sala:
+     *
+     * - lo que su público votó y no vio, y que a la gorra llena más que con precio: dar ese
+     *   título a la gorra ese día, porque ya funcionó (no a la sala que gana holgado: es una
+     *   promoción, EF-22.14);
+     * - la franja horaria: si las de la noche llenan bastante más que las de la tarde (o al revés)
+     *   y el día flojo está en la que llena menos, cambiarle el horario;
+     * - lo que se agota y gusta: sumar una función de eso el día flojo;
+     * - el género que más llena en esa sala (EF-22.18): dar una obra de ese género el día flojo, la
+     *   que su público pidió o la que ya llenó.
+     *
+     * Cada una trae los datos que la justifican. Las reglas, con sus umbrales, están en
+     * docs/recomendaciones.md.
+     *
+     * @return list<RecomendacionCombinada> en el orden de los días flojos, de la ocupación más baja
+     */
+    public function combinadas(DatosDelReporte $datos): array
+    {
+        $flojos = $this->todosLosDiasFlojos($datos);
+        if ($flojos === []) {
+            return [];
+        }
+        $precios = [];
+        foreach ($this->precioDeLaEntrada($datos) as $precio) {
+            $precios[$precio->salaId] = $precio;
+        }
+        $agotadas = $this->obrasAgotadas($datos);
+        $promedios = self::promediosPorObra($datos);
+        $generos = [];
+        foreach ($this->generosPorSala($datos) as $genero) {
+            $generos[$genero->salaId][] = $genero;
+        }
+
+        $recomendaciones = [];
+        foreach ($flojos as $dia) {
+            // Las obras que ya se sugirieron para este día: el género no repite ninguna.
+            $titulos = [];
+            $nombre = self::DIAS[$dia->dia];
+            $elDiaFlojo = "Los {$nombre} se vendió el {$dia->ocupacion} % de los lugares"
+                . ($dia->ocupacionResto === null ? '' : ", contra el {$dia->ocupacionResto} % del resto de la semana")
+                . " ({$dia->funciones} funciones).";
+
+            $precio = $precios[$dia->salaId] ?? null;
+            if ($dia->paraDar !== null && $precio !== null && $precio->sensible) {
+                $pedido = $dia->paraDar;
+                $titulos[$pedido->obraId] = true;
+                $recomendaciones[] = new RecomendacionCombinada(
+                    RecomendacionCombinada::PEDIDO_A_LA_GORRA,
+                    $dia->salaId,
+                    $dia->salaNombre,
+                    "Los {$nombre}, dar «{$pedido->titulo}» a la gorra.",
+                    [
+                        $elDiaFlojo,
+                        "Su público lo votó y no lo vio: {$pedido->votos} " . self::plural($pedido->votos, 'voto', 'votos') . " en {$pedido->votaciones} " . self::plural($pedido->votaciones, 'votación', 'votaciones') . ", el {$pedido->porcentaje} %.",
+                        "A la gorra ya funcionó en esta sala: llenó el {$precio->ocupacionGorra} % en {$precio->funcionesGorra} funciones, contra el {$precio->ocupacionPagas} % con precio.",
+                    ],
+                    new FuncionParaProgramar($dia->salaId, [$pedido->obraId], $dia->dia, precio: 0),
+                );
+            }
+
+            $franjas = $this->franjas($datos, $dia->salaId, $dia->dia);
+            if ($franjas !== null) {
+                $corte = $this->umbrales->franjaCorteHora;
+                $hacia = $franjas['mejor'] === 'noche' ? "a la noche, desde las {$corte} h" : "a la tarde, antes de las {$corte} h";
+                $recomendaciones[] = new RecomendacionCombinada(
+                    RecomendacionCombinada::OTRO_HORARIO,
+                    $dia->salaId,
+                    $dia->salaNombre,
+                    "Los {$nombre}, pasar las funciones {$hacia}.",
+                    [
+                        $elDiaFlojo,
+                        "En esta sala, las de la {$franjas['mejor']} llenan el {$franjas['ocupacion_mejor']} % ({$franjas['funciones_mejor']} funciones) y las de la {$franjas['peor']}, el {$franjas['ocupacion_peor']} % ({$franjas['funciones_peor']}).",
+                        "De las {$dia->funciones} funciones de los {$nombre}, {$franjas['el_dia_en_la_peor']} fueron a la {$franjas['peor']}.",
+                    ],
+                    new FuncionParaProgramar($dia->salaId, [], $dia->dia, $franjas['mejor']),
+                );
+            }
+
+            foreach ($agotadas as $obra) {
+                $promedio = $promedios[$obra->obraId] ?? null;
+                if ($obra->salaId !== $dia->salaId || $promedio === null || $promedio < $this->umbrales->repetirPromedioMinimo) {
+                    continue;
+                }
+                $recomendaciones[] = new RecomendacionCombinada(
+                    RecomendacionCombinada::AGOTADA_EL_DIA_FLOJO,
+                    $dia->salaId,
+                    $dia->salaNombre,
+                    "Sumar una función de «{$obra->titulo}» los {$nombre}.",
+                    [
+                        "Se agotó en {$obra->agotadas} de sus {$obra->funciones} funciones en esta sala ({$obra->ocupacion} % de los lugares vendidos): hay gente que se quedó afuera.",
+                        'Gustó: ' . str_replace('.', ',', sprintf('%.1f', $promedio)) . ' de promedio.',
+                        $elDiaFlojo,
+                    ],
+                    new FuncionParaProgramar($dia->salaId, [$obra->obraId], $dia->dia),
+                );
+                $titulos[$obra->obraId] = true;
+                // Una por día: la que más se agotó, que es la primera.
+                break;
+            }
+
+            $genero = $this->generoParaElDiaFlojo($datos, $dia, $generos[$dia->salaId] ?? [], $titulos);
+            if ($genero !== null) {
+                $recomendaciones[] = $genero;
+            }
+        }
+
+        return $recomendaciones;
+    }
+
+    /**
+     * Cómo le va a cada género en cada sala (EF-22.18): la ocupación de las funciones que dieron
+     * alguna obra de ese género, el promedio de sus calificaciones y qué parte de los votos de la
+     * sala se llevaron las obras de ese género. Una obra con dos géneros cuenta en los dos. Sólo los
+     * géneros con `genero_funciones_minimas` funciones: con una sola no se sabe si fue el género o
+     * la obra.
+     *
+     * @return list<GeneroDeSala> por sala, en orden de nombre, y en cada una del género que más
+     *                            llena al que menos
+     */
+    public function generosPorSala(DatosDelReporte $datos): array
+    {
+        /** @var array<string, array{nombre: string, generos: array<string, array{int, int, int, float, int}>, votos: array<string, int>, total: int}> $porSala */
+        $porSala = [];
+        foreach ($datos->funciones as $funcion) {
+            $sala = $porSala[$funcion->salaId] ?? ['nombre' => $funcion->salaNombre, 'generos' => [], 'votos' => [], 'total' => 0];
+            $sala['total'] += $funcion->votos();
+            foreach ($funcion->obras as $obra) {
+                foreach (array_unique($obra->generos) as $genero) {
+                    $sala['votos'][$genero] = ($sala['votos'][$genero] ?? 0) + $obra->votos;
+                }
+            }
+            $ventas = $datos->ventasDe($funcion->id);
+            if ($ventas !== null) {
+                $calificacion = $datos->calificacionDe($funcion->id);
+                foreach (self::generosDe($funcion) as $genero) {
+                    [$funciones, $vendidas, $cupo, $puntos, $calificaciones] = $sala['generos'][$genero] ?? [0, 0, 0, 0.0, 0];
+                    $sala['generos'][$genero] = [
+                        $funciones + 1,
+                        $vendidas + $ventas->vendidas,
+                        $cupo + $funcion->cupo,
+                        $puntos + ($calificacion === null ? 0.0 : $calificacion->promedio * $calificacion->cantidad),
+                        $calificaciones + ($calificacion === null ? 0 : $calificacion->cantidad),
+                    ];
+                }
+            }
+            $porSala[$funcion->salaId] = $sala;
+        }
+        uasort($porSala, static fn (array $a, array $b): int => $a['nombre'] <=> $b['nombre']);
+
+        $resultado = [];
+        foreach ($porSala as $salaId => $sala) {
+            $deLaSala = [];
+            foreach ($sala['generos'] as $genero => [$funciones, $vendidas, $cupo, $puntos, $calificaciones]) {
+                if ($funciones < $this->umbrales->generoFuncionesMinimas) {
+                    continue;
+                }
+                $deLaSala[] = new GeneroDeSala(
+                    (string) $salaId,
+                    $sala['nombre'],
+                    (string) $genero,
+                    $funciones,
+                    self::porcentaje($vendidas, $cupo),
+                    $sala['total'] === 0 ? null : self::porcentaje($sala['votos'][$genero] ?? 0, $sala['total']),
+                    $calificaciones === 0 ? null : round($puntos / $calificaciones, 1),
+                );
+            }
+            usort($deLaSala, static fn (GeneroDeSala $a, GeneroDeSala $b): int => [$b->ocupacion, $b->funciones, $a->genero] <=> [$a->ocupacion, $a->funciones, $b->genero]);
+            array_push($resultado, ...$deLaSala);
+        }
+
+        return $resultado;
+    }
+
+    /**
+     * El día flojo con un género que llena bastante más que la sala en general (EF-22.18): dar una
+     * obra de ese género ese día. La obra es la que el público de la sala votó y no vio, si es de
+     * alguno de esos géneros; si no, la que más llenó del género que más llena.
+     *
+     * @param list<GeneroDeSala> $generos  los de la sala, del que más llena al que menos
+     * @param array<string, true> $yaDadas las obras que ya se sugirieron para este día
+     */
+    private function generoParaElDiaFlojo(DatosDelReporte $datos, DiaFlojo $dia, array $generos, array $yaDadas): ?RecomendacionCombinada
+    {
+        $funciones = array_values(array_filter($datos->funciones, static fn (FuncionFinalizada $f): bool => $f->salaId === $dia->salaId));
+        $sala = $this->rendimiento($datos, $funciones);
+        if ($sala === null) {
+            return null;
+        }
+        // Los géneros que llenan bastante más que la sala, del que más llena al que menos.
+        $candidatos = array_values(array_filter($generos, fn (GeneroDeSala $g): bool => $g->ocupacion - $sala->ocupacion >= $this->umbrales->generoDiferenciaMinima));
+
+        // Primero, lo que su público votó y no vio, de cualquiera de esos géneros: junta las tres
+        // cosas (el día, el género que llena y lo que piden). Si no hay, la obra que más llenó del
+        // género que más llena; si ésa ya se sugirió para el día, la del siguiente.
+        $mejor = null;
+        $obra = null;
+        $porQueLaObra = null;
+        $pedidos = $this->pedidos($datos, $dia->salaId);
+        foreach ($candidatos as $genero) {
+            foreach ($pedidos as $pedido) {
+                if (in_array($genero->genero, self::generosDeLaObra($datos, $pedido->obraId), true) && !isset($yaDadas[$pedido->obraId])) {
+                    [$mejor, $obra] = [$genero, [$pedido->obraId, $pedido->titulo]];
+                    $porQueLaObra = "«{$pedido->titulo}» es de {$genero->genero} y su público la votó sin verla: {$pedido->votos} " . self::plural($pedido->votos, 'voto', 'votos') . '.';
+                    break 2;
+                }
+            }
+        }
+        if ($obra === null) {
+            foreach ($candidatos as $genero) {
+                $laQueMasLleno = $this->laQueMasLlenoDelGenero($datos, $funciones, $genero->genero, $yaDadas);
+                if ($laQueMasLleno !== null) {
+                    [$obraId, $titulo, $ocupacion] = $laQueMasLleno;
+                    [$mejor, $obra] = [$genero, [$obraId, $titulo]];
+                    $porQueLaObra = "«{$titulo}» es de {$genero->genero} y en esta sala llenó el {$ocupacion} % de los lugares.";
+                    break;
+                }
+            }
+        }
+        if ($mejor === null || $obra === null || $porQueLaObra === null) {
+            return null;
+        }
+
+        $nombre = self::DIAS[$dia->dia];
+        $porque = [
+            "Los {$nombre} se vendió el {$dia->ocupacion} % de los lugares"
+                . ($dia->ocupacionResto === null ? '' : ", contra el {$dia->ocupacionResto} % del resto de la semana")
+                . " ({$dia->funciones} funciones).",
+            "En esta sala, las funciones de {$mejor->genero} llenan el {$mejor->ocupacion} % ({$mejor->funciones} funciones), contra el {$sala->ocupacion} % de todas."
+                . ($mejor->votos === null ? '' : " Su público le dio el {$mejor->votos} % de los votos."),
+        ];
+        // Qué se dio ese día, si fue otro género: es lo que explica que esté flojo.
+        $delDia = $this->generoDelDia($funciones, $dia->dia);
+        foreach ($generos as $otro) {
+            if ($delDia !== null && $otro->genero === $delDia && $delDia !== $mejor->genero) {
+                $porque[] = "Los {$nombre} se dio sobre todo {$otro->genero}, que en esta sala llena el {$otro->ocupacion} %.";
+            }
+        }
+        $porque[] = $porQueLaObra;
+
+        return new RecomendacionCombinada(
+            RecomendacionCombinada::GENERO_EL_DIA_FLOJO,
+            $dia->salaId,
+            $dia->salaNombre,
+            "Los {$nombre}, dar «{$obra[1]}» ({$mejor->genero}): es de lo que más llena en esta sala.",
+            $porque,
+            new FuncionParaProgramar($dia->salaId, [$obra[0]], $dia->dia),
+        );
+    }
+
+    /**
+     * La obra de ese género que más llenó en la sala, sin las que ya se sugirieron ese día.
+     *
+     * @param list<FuncionFinalizada> $funciones las de la sala
+     * @param array<string, true>     $yaDadas
+     *
+     * @return ?array{string, string, int} el id, el título y la ocupación
+     */
+    private function laQueMasLlenoDelGenero(DatosDelReporte $datos, array $funciones, string $genero, array $yaDadas): ?array
+    {
+        $porObra = [];
+        foreach ($funciones as $funcion) {
+            $ventas = $datos->ventasDe($funcion->id);
+            if ($ventas === null) {
+                continue;
+            }
+            foreach ($funcion->elegidas() as $obra) {
+                if (!in_array($genero, $obra->generos, true) || isset($yaDadas[$obra->id])) {
+                    continue;
+                }
+                [$titulo, $vendidas, $cupo] = $porObra[$obra->id] ?? [$obra->titulo, 0, 0];
+                $porObra[$obra->id] = [$titulo, $vendidas + $ventas->vendidas, $cupo + $funcion->cupo];
+            }
+        }
+        $mejor = null;
+        foreach ($porObra as $obraId => [$titulo, $vendidas, $cupo]) {
+            $ocupacion = self::porcentaje($vendidas, $cupo);
+            if ($mejor === null || [$ocupacion, $mejor[1]] > [$mejor[2], $titulo]) {
+                $mejor = [(string) $obraId, $titulo, $ocupacion];
+            }
+        }
+
+        return $mejor;
+    }
+
+    /**
+     * El género que más se dio ese día de la semana en la sala; ante un empate, el primero en orden
+     * alfabético.
+     *
+     * @param list<FuncionFinalizada> $funciones las de la sala
+     */
+    private function generoDelDia(array $funciones, int $dia): ?string
+    {
+        $cuantas = [];
+        foreach ($funciones as $funcion) {
+            if ((int) $funcion->fechaHora->format('N') === $dia) {
+                foreach (self::generosDe($funcion) as $genero) {
+                    $cuantas[$genero] = ($cuantas[$genero] ?? 0) + 1;
+                }
+            }
+        }
+        if ($cuantas === []) {
+            return null;
+        }
+        ksort($cuantas);
+        arsort($cuantas);
+
+        return (string) array_key_first($cuantas);
+    }
+
+    /**
+     * Los géneros de lo que se proyectó en la función, sin repetir.
+     *
+     * @return list<string>
+     */
+    private static function generosDe(FuncionFinalizada $funcion): array
+    {
+        $generos = [];
+        foreach ($funcion->elegidas() as $obra) {
+            foreach ($obra->generos as $genero) {
+                $generos[$genero] = true;
+            }
+        }
+
+        return array_map('strval', array_keys($generos));
+    }
+
+    /**
+     * @return list<string>
+     */
+    private static function generosDeLaObra(DatosDelReporte $datos, string $obraId): array
+    {
+        foreach ($datos->funciones as $funcion) {
+            foreach ($funcion->obras as $obra) {
+                if ($obra->id === $obraId) {
+                    return $obra->generos;
+                }
+            }
+        }
+
+        return [];
+    }
+
+    /**
+     * Cómo llenan en una sala las funciones de la tarde y las de la noche, si la diferencia dice
+     * algo y el día flojo está en la que llena menos. Null si no.
+     *
+     * @return ?array{mejor: string, peor: string, ocupacion_mejor: int, ocupacion_peor: int, funciones_mejor: int, funciones_peor: int, el_dia_en_la_peor: int}
+     */
+    private function franjas(DatosDelReporte $datos, string $salaId, int $dia): ?array
+    {
+        $franjas = ['tarde' => [0, 0, 0], 'noche' => [0, 0, 0]];
+        $elDia = ['tarde' => 0, 'noche' => 0];
+        foreach ($datos->funciones as $funcion) {
+            $ventas = $datos->ventasDe($funcion->id);
+            if ($funcion->salaId !== $salaId || $ventas === null) {
+                continue;
+            }
+            $franja = (int) $funcion->fechaHora->format('G') < $this->umbrales->franjaCorteHora ? 'tarde' : 'noche';
+            [$funciones, $vendidas, $cupo] = $franjas[$franja];
+            $franjas[$franja] = [$funciones + 1, $vendidas + $ventas->vendidas, $cupo + $funcion->cupo];
+            if ((int) $funcion->fechaHora->format('N') === $dia) {
+                ++$elDia[$franja];
+            }
+        }
+        if ($franjas['tarde'][0] < $this->umbrales->franjaFuncionesMinimas || $franjas['noche'][0] < $this->umbrales->franjaFuncionesMinimas) {
+            return null;
+        }
+        $ocupacion = [
+            'tarde' => self::porcentaje($franjas['tarde'][1], $franjas['tarde'][2]),
+            'noche' => self::porcentaje($franjas['noche'][1], $franjas['noche'][2]),
+        ];
+        [$mejor, $peor] = $ocupacion['noche'] >= $ocupacion['tarde'] ? ['noche', 'tarde'] : ['tarde', 'noche'];
+        if ($ocupacion[$mejor] - $ocupacion[$peor] < $this->umbrales->franjaDiferenciaMinima || $elDia[$peor] <= $elDia[$mejor]) {
+            return null;
+        }
+
+        return [
+            'mejor' => $mejor,
+            'peor' => $peor,
+            'ocupacion_mejor' => $ocupacion[$mejor],
+            'ocupacion_peor' => $ocupacion[$peor],
+            'funciones_mejor' => $franjas[$mejor][0],
+            'funciones_peor' => $franjas[$peor][0],
+            'el_dia_en_la_peor' => $elDia[$peor],
+        ];
+    }
+
+    /**
+     * El promedio de las calificaciones de cada obra en todas sus funciones del período.
+     *
+     * @return array<string, float> por id de obra; las que nadie calificó no están
+     */
+    private static function promediosPorObra(DatosDelReporte $datos): array
+    {
+        $porObra = [];
+        foreach ($datos->funciones as $funcion) {
+            $calificacion = $datos->calificacionDe($funcion->id);
+            if ($calificacion === null || $calificacion->cantidad === 0) {
+                continue;
+            }
+            foreach ($funcion->elegidas() as $obra) {
+                [$puntos, $cantidad] = $porObra[$obra->id] ?? [0.0, 0];
+                $porObra[$obra->id] = [$puntos + $calificacion->promedio * $calificacion->cantidad, $cantidad + $calificacion->cantidad];
+            }
+        }
+
+        return array_map(static fn (array $obra): float => round($obra[0] / $obra[1], 1), $porObra);
+    }
+
+    /**
+     * La clave con el número más alto; ante un empate, la primera que apareció.
+     *
+     * @param array<string|int, int> $cuantos
+     */
+    private static function laQueMas(array $cuantos): ?string
+    {
+        $mejor = null;
+        foreach ($cuantos as $clave => $cuanto) {
+            if ($mejor === null || $cuanto > $cuantos[$mejor]) {
+                $mejor = $clave;
+            }
+        }
+
+        return $mejor === null ? null : (string) $mejor;
+    }
+
+    private static function plural(int $cantidad, string $uno, string $varios): string
+    {
+        return $cantidad === 1 ? $uno : $varios;
     }
 
     /**

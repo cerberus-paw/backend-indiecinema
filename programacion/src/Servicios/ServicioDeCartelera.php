@@ -26,7 +26,8 @@ use RuntimeException;
 
 /**
  * La cartelera pública, para cualquiera, con o sin sesión: una página de las funciones filtradas,
- * del tamaño que dice config.ini, o todas para descargarlas, y las opciones de los filtros.
+ * del tamaño que dice config.ini, o todas para descargarlas, y las opciones de los filtros. Las
+ * funciones de las salas castigadas por las denuncias van al final (EF-22.11).
  */
 final class ServicioDeCartelera
 {
@@ -54,6 +55,8 @@ final class ServicioDeCartelera
         // Para ordenar por reputación (EF-04.4): los promedios viven en funciones.
         private readonly ?CalificacionesDeFunciones $calificaciones = null,
         private readonly ?RepositorioDeBloqueos $bloqueos = null,
+        // Las salas castigadas por las denuncias van al final (EF-22.11): las dice moderación.
+        private readonly ?CastigosDeModeracion $castigos = null,
     ) {
         $porPagina = $configuracion->obtener('cartelera.por_pagina', self::POR_PAGINA);
         if (!is_int($porPagina) || $porPagina < 1 || $porPagina > self::MAXIMO_POR_PAGINA) {
@@ -71,7 +74,7 @@ final class ServicioDeCartelera
      */
     public function pagina(FiltrosDeCartelera $filtros, int $numero): PaginaDeCartelera
     {
-        $pagina = $this->cartelera->pagina($filtros, $numero, $this->porPagina, reputacion: $this->reputacion($filtros));
+        $pagina = $this->cartelera->pagina($filtros, $numero, $this->porPagina, reputacion: $this->reputacion($filtros), castigadas: $this->castigos?->salas() ?? []);
         if (!$pagina->existe()) {
             throw ExcepcionHttp::noEncontrada();
         }
@@ -97,7 +100,7 @@ final class ServicioDeCartelera
      */
     public function todas(FiltrosDeCartelera $filtros): array
     {
-        return $this->cartelera->todas($filtros, reputacion: $this->reputacion($filtros));
+        return $this->cartelera->todas($filtros, reputacion: $this->reputacion($filtros), castigadas: $this->castigos?->salas() ?? []);
     }
 
     /**

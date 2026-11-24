@@ -182,6 +182,19 @@ location ~ ^/pedidos/nuevo/?$ {
     include conf.d/subsistema.inc;
 }
 
+# Los votos de la cartelera: el del título, el de la franja y el de la fecha del acuerdo. 20 por
+# minuto por IP: pasan 11 seguidos, que alcanzan para marcar varias franjas, y después uno cada 3
+# segundos. El aviso de pago de Mercado Pago no tiene límite a propósito: llega desde pocas IP de
+# Mercado Pago, que reintenta, y un límite descartaría avisos de verdad; lo cuidan la firma y que
+# un aviso repetido no confirma dos veces (docs/seguridad.md).
+location ~ ^/cartelera/[^/]+/(votar|votar-franja|acuerdo/votar)/?$ {
+    limit_req zone=voto burst=10 nodelay;
+    set $subsistema programacion;
+    set $secreto "${NGINX_SECRETO_PROGRAMACION}";
+    rewrite ^(.*)$ $1 break;
+    include conf.d/subsistema.inc;
+}
+
 # Los listados con búsqueda de programación: la cartelera, su CSV, las obras y los pedidos de
 # títulos. 120 por minuto por IP: pasan 61 seguidos y después dos por segundo (el porqué, en
 # indiecinema.conf). No entran la ficha de una función ni sus lugares, que la ficha pide cada 15 segundos.

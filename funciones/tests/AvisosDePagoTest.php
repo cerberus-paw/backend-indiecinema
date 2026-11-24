@@ -410,7 +410,7 @@ final class AvisosDePagoTest extends TestCase
         self::assertSame('cancelada', $this->base->valor('SELECT estado FROM reserva WHERE id = ?', [$reserva['id']]));
         self::assertSame([self::PAGO], self::reembolsosPedidos());
         self::assertSame(
-            [['estado_anterior' => 'pendiente_pago', 'estado_nuevo' => 'cancelada', 'autor_id' => self::EVA, 'autor_rol' => 'espectador', 'motivo' => 'Venció el plazo para pagar y el pago llegó cuando ya no quedaban lugares.']],
+            [['estado_anterior' => 'pendiente_pago', 'estado_nuevo' => 'cancelada', 'autor_id' => null, 'autor_rol' => 'sistema', 'motivo' => 'Venció el plazo para pagar y el pago llegó cuando ya no quedaban lugares.']],
             $this->historial($reserva['id']),
         );
         self::assertSame([], self::$correo->correos());

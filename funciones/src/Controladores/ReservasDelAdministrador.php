@@ -5,12 +5,15 @@ declare(strict_types=1);
 namespace IndieCinema\Funciones\Controladores;
 
 use DateTimeZone;
+use IndieCinema\Funciones\Modelo\AutorDelCambio;
+use IndieCinema\Funciones\Modelo\CambioDeReserva;
 use IndieCinema\Funciones\Modelo\EstadoReserva;
 use IndieCinema\Funciones\Modelo\FuncionDeProgramacion;
 use IndieCinema\Funciones\Modelo\ReglaIncumplida;
 use IndieCinema\Funciones\Modelo\Reserva;
 use IndieCinema\Funciones\Servicios\FuncionesDeProgramacion;
 use IndieCinema\Funciones\Servicios\ServicioDePanelDeReservas;
+use IndieCinema\Funciones\Servicios\UsuariosDeCuentas;
 use IndieCinema\Nucleo\Controlador;
 use IndieCinema\Nucleo\Http\ExcepcionHttp;
 use IndieCinema\Nucleo\Http\Peticion;
@@ -22,7 +25,7 @@ use RuntimeException;
 /**
  * Todas las reservas para el administrador (E4-03.3), con el armado de «Usuarios y roles»: la
  * barra lateral, el filtro por estado, la tabla y el paginado. Desde acá anula la que haga falta,
- * y sus lugares quedan libres.
+ * y sus lugares quedan libres. Cada una tiene su detalle con el historial de sus estados (EF-18.6).
  */
 final class ReservasDelAdministrador extends Controlador
 {
@@ -34,6 +37,7 @@ final class ReservasDelAdministrador extends Controlador
     public function __construct(
         private readonly ServicioDePanelDeReservas $servicio,
         private readonly FuncionesDeProgramacion $funciones,
+        private readonly UsuariosDeCuentas $usuarios,
         private readonly LoggerInterface $log,
     ) {
     }
@@ -47,6 +51,95 @@ final class ReservasDelAdministrador extends Controlador
         $anulada = $peticion->consulta('anulada');
 
         return $this->pantalla($peticion, anulada: is_string($anulada) ? $anulada : null);
+    }
+
+    /**
+     * GET /administracion/reservas/{id}: la reserva y su historial (EF-18.6), de la creación al
+     * último cambio, con quién hizo cada uno, también los del sistema, y la devolución del pago si
+     * la hubo. Es lo que se mira ante un reclamo: «yo no la cancelé».
+     *
+     * @throws ExcepcionHttp 404 si no existe
+     */
+    public function ver(Peticion $peticion): Respuesta
+    {
+        [$reserva, $historial] = $this->servicio->conSuHistorial((string) $peticion->parametro('id'));
+        $funciones = $this->funcionesDe([$reserva]);
+        $nombres = $this->usuarios->nombresDe(array_values(array_filter([
+            $reserva->usuarioId,
+            ...array_map(static fn (CambioDeReserva $cambio): ?string => $cambio->autorId, $historial),
+        ])));
+
+        return $this->vista('administracion_reserva.html.twig', [
+            'reserva' => [
+                ...self::fila($reserva, $funciones[$reserva->funcionId] ?? null),
+                'espectador' => $nombres[$reserva->usuarioId] ?? null,
+                'pago' => $reserva->pagoId,
+                'cupon' => $reserva->cupon,
+            ],
+            'historial' => self::historial($reserva, $historial, $nombres),
+        ]);
+    }
+
+    /**
+     * Las líneas del historial para la pantalla: primero la creación (con el estado en que nació,
+     * que es el anterior del primer cambio), después cada cambio y, si se devolvió el pago, la
+     * devolución, que no es un cambio de estado y queda en la reserva (EF-06.4).
+     *
+     * @param list<CambioDeReserva>  $cambios
+     * @param array<string, string>  $nombres id => nombre, de cuentas; vacío si no respondió
+     *
+     * @return list<array{fecha: string, estado: string, estado_etiqueta: string, anterior: ?string, quien: string, motivo: ?string}>
+     */
+    private static function historial(Reserva $reserva, array $cambios, array $nombres): array
+    {
+        $zona = new DateTimeZone(self::ZONA);
+        $inicial = $cambios === [] ? $reserva->estado : $cambios[0]->anterior;
+        $lineas = [[
+            'fecha' => TextoParaMostrar::fecha($reserva->creadaEn->setTimezone($zona)),
+            'estado' => $inicial->value,
+            'estado_etiqueta' => $inicial->etiqueta(),
+            'anterior' => null,
+            'quien' => self::quien('espectador', $reserva->usuarioId, $nombres),
+            'motivo' => 'La reservó.',
+        ]];
+        foreach ($cambios as $cambio) {
+            $lineas[] = [
+                'fecha' => TextoParaMostrar::fecha($cambio->hechoEn->setTimezone($zona)),
+                'estado' => $cambio->nuevo->value,
+                'estado_etiqueta' => $cambio->nuevo->etiqueta(),
+                'anterior' => $cambio->anterior->etiqueta(),
+                'quien' => self::quien($cambio->autorRol, $cambio->autorId, $nombres),
+                'motivo' => $cambio->motivo,
+            ];
+        }
+        if ($reserva->reembolsadaEn !== null) {
+            $lineas[] = [
+                'fecha' => TextoParaMostrar::fecha($reserva->reembolsadaEn->setTimezone($zona)),
+                'estado' => $reserva->estado->value,
+                'estado_etiqueta' => 'reembolsada',
+                'anterior' => null,
+                'quien' => self::quien(AutorDelCambio::SISTEMA, null, $nombres),
+                'motivo' => "Se devolvió el pago en Mercado Pago (reembolso {$reserva->reembolsoId}).",
+            ];
+        }
+
+        return $lineas;
+    }
+
+    /**
+     * Quién hizo un cambio, para leer: «El sistema», o el rol con el nombre si cuentas lo dio
+     * («Organizador · Ana Pérez»).
+     *
+     * @param array<string, string> $nombres
+     */
+    private static function quien(string $rol, ?string $id, array $nombres): string
+    {
+        if ($rol === AutorDelCambio::SISTEMA || $id === null) {
+            return 'El sistema';
+        }
+        $nombre = $nombres[$id] ?? null;
+
+        return ucfirst($rol) . ($nombre === null ? '' : " · {$nombre}");
     }
 
     /**

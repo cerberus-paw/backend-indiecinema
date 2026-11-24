@@ -364,4 +364,130 @@ final class PedidosDeTitulosTest extends TestCase
         self::assertStringContainsString("href=\"/obras/{$obraId}\"", $html->cuerpo());
         self::assertStringContainsString('Títulos pedidos que ya están en el catálogo', $html->cuerpo());
     }
+
+    /**
+     * EF-22.6 (IC-679): comparar sin mayúsculas, tildes, signos ni espacios de más, sin
+     * distinguir el año: pedir «superman» (de 1999 o sin año) cuando ya existe «Superman» (1998)
+     * lleva a sumarse al existente y no crea otro pedido.
+     */
+    public function testDetectaPedidoExistenteSinDistinguirAnioMayusculasTildesNiEspacios(): void
+    {
+        $this->pedir('POST', '/pedidos/nuevo', [
+            'titulo' => 'Superman',
+            'anio' => '1998',
+            'director' => 'Richard Donner',
+        ]);
+        $pedidoId = (string) $this->base->valor('SELECT id FROM pedido_titulo');
+        self::assertSame('superman', (string) $this->base->valor('SELECT titulo_normalizado FROM pedido_titulo WHERE id = ?', [$pedidoId]));
+
+        foreach ([
+            ['titulo' => 'superman', 'anio' => '1999', 'director' => 'Otro Director'],
+            ['titulo' => '  Súperman!  ', 'anio' => '', 'director' => 'Richard Donner'],
+        ] as $intento) {
+            $respuesta = $this->pedir('POST', '/pedidos/nuevo', $intento, usuario: self::OTRO_ESPECTADOR);
+            self::assertSame(200, $respuesta->estado());
+            self::assertSame(1, (int) $this->base->valor('SELECT COUNT(*) FROM pedido_titulo'));
+            self::assertStringContainsString('Ya lo pidieron', $respuesta->cuerpo());
+            self::assertStringContainsString("action=\"/pedidos/{$pedidoId}/sumarme\"", $respuesta->cuerpo());
+            self::assertStringContainsString('Sumarme', $respuesta->cuerpo());
+        }
+    }
+
+    /**
+     * EF-22.6 (IC-679): el año es opcional al pedir y no muestra paréntesis vacíos si falta.
+     */
+    public function testPermitePedirSinAnioYLoMuestraEnElRanking(): void
+    {
+        $alta = $this->pedir('POST', '/pedidos/nuevo', [
+            'titulo' => 'Historia de lo oculto',
+            'anio' => '',
+            'director' => 'Cristian Ponce',
+        ]);
+
+        self::assertSame(303, $alta->estado());
+        $fila = $this->base->fila('SELECT id, anio, titulo_normalizado FROM pedido_titulo');
+        self::assertNotNull($fila);
+        self::assertNull($fila['anio']);
+        self::assertSame('historia de lo oculto', $fila['titulo_normalizado']);
+
+        $confirmacion = $this->pedir('GET', (string) $alta->cabecera('Location'));
+        self::assertSame(200, $confirmacion->estado());
+        self::assertStringContainsString('Historia de lo oculto', $confirmacion->cuerpo());
+        self::assertStringNotContainsString('()', $confirmacion->cuerpo());
+
+        $ranking = $this->pedir('GET', '/pedidos', rol: null);
+        self::assertSame(200, $ranking->estado());
+        self::assertStringContainsString('Historia de lo oculto', $ranking->cuerpo());
+        self::assertStringNotContainsString('()', $ranking->cuerpo());
+    }
+
+    /**
+     * EF-22.6 (IC-679): si el título ya está como obra aprobada en el catálogo, enlaza a su ficha
+     * en vez de crear un pedido; una obra pendiente todavía no está en el catálogo público.
+     */
+    public function testNoCreaPedidoSiLaObraAprobadaYaEstaEnElCatalogo(): void
+    {
+        $aprobadaId = Uuid::nuevo();
+        $pendienteId = Uuid::nuevo();
+        $this->base->ejecutar(
+            "INSERT INTO obra (id, dueno_id, titulo, tipo, sinopsis, anio, director, duracion, origen_copia, estado)
+             VALUES (?, ?, 'La ciénaga', 'pelicula', 'Sinopsis.', 2001, 'Lucrecia Martel', 103, 'licencia_adquirida', 'aprobada')",
+            [$aprobadaId, self::OTRO_ESPECTADOR],
+        );
+        $this->base->ejecutar(
+            "INSERT INTO obra (id, dueno_id, titulo, tipo, sinopsis, anio, director, duracion, origen_copia, estado)
+             VALUES (?, ?, 'Obra En Revisión', 'pelicula', 'Sinopsis.', 2024, 'Directora', 90, 'obra_propia', 'pendiente')",
+            [$pendienteId, self::OTRO_ESPECTADOR],
+        );
+
+        $repetida = $this->pedir('POST', '/pedidos/nuevo', [
+            'titulo' => '  LA CIENAGA ',
+            'anio' => '',
+            'director' => 'Lucrecia Martel',
+        ]);
+        self::assertSame(200, $repetida->estado());
+        self::assertSame(0, (int) $this->base->valor('SELECT COUNT(*) FROM pedido_titulo'));
+        self::assertStringContainsString('Ya está en el catálogo', $repetida->cuerpo());
+        self::assertStringContainsString("href=\"/obras/{$aprobadaId}\"", $repetida->cuerpo());
+
+        $dePendiente = $this->pedir('POST', '/pedidos/nuevo', [
+            'titulo' => 'Obra En Revisión',
+            'anio' => '2024',
+            'director' => 'Directora',
+        ]);
+        self::assertSame(303, $dePendiente->estado());
+        self::assertSame(1, (int) $this->base->valor('SELECT COUNT(*) FROM pedido_titulo'));
+    }
+
+    /**
+     * EF-22.6 (IC-679): el autocompletado y /pedidos/sugerencias incluyen pedidos abiertos y obras
+     * aprobadas, comparando sin mayúsculas ni tildes.
+     */
+    public function testAutocompletadoMuestraPedidosYObrasDelCatalogo(): void
+    {
+        $this->pedir('POST', '/pedidos/nuevo', [
+            'titulo' => 'Superman',
+            'anio' => '1998',
+            'director' => 'Richard Donner',
+        ]);
+        $obraId = Uuid::nuevo();
+        $this->base->ejecutar(
+            "INSERT INTO obra (id, dueno_id, titulo, tipo, sinopsis, anio, director, duracion, origen_copia, estado)
+             VALUES (?, ?, 'Súperman: El regreso', 'pelicula', 'Sinopsis.', 2006, 'Bryan Singer', 154, 'licencia_adquirida', 'aprobada')",
+            [$obraId, self::OTRO_ESPECTADOR],
+        );
+
+        $pantalla = $this->pedir('GET', '/pedidos/nuevo');
+        self::assertSame(200, $pantalla->estado());
+        self::assertStringContainsString('<datalist id="sugerencias-titulos">', $pantalla->cuerpo());
+        self::assertStringContainsString('value="Superman"', $pantalla->cuerpo());
+        self::assertStringContainsString('value="Súperman: El regreso"', $pantalla->cuerpo());
+
+        $sugerencias = $this->pedir('GET', '/pedidos/nuevo?q=superman', json: true);
+        self::assertSame(200, $sugerencias->estado());
+        $datos = json_decode($sugerencias->cuerpo(), true);
+        $titulos = array_column($datos['sugerencias'] ?? [], 'titulo');
+        self::assertContains('Superman', $titulos);
+        self::assertContains('Súperman: El regreso', $titulos);
+    }
 }

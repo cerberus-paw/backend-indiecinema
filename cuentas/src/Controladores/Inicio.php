@@ -58,6 +58,10 @@ final class Inicio extends Controlador
                 'motivo' => $solicitud['motivo'],
                 'fecha' => $solicitud['fecha']->format('d/m/Y'),
             ];
+            // EF-22.10: la devuelta, hasta cuándo tiene para completarla.
+            if ($solicitud['vence'] !== null) {
+                $datos['solicitud_de_sala']['vence'] = $solicitud['vence']->format('d/m/Y');
+            }
         }
 
         $datos['seguidos'] = $this->seguidos($cuenta->id);

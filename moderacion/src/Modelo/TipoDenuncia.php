@@ -16,7 +16,7 @@ enum TipoDenuncia: string
     case Calificacion = 'calificacion';
 
     /**
-     * Las categorías que se ofrecen: «Seguridad del lugar» sólo tiene sentido donde hay un lugar.
+     * Los motivos que se ofrecen: los del lugar, sólo donde hay un lugar.
      *
      * @return list<CategoriaDenuncia>
      */
@@ -24,8 +24,16 @@ enum TipoDenuncia: string
     {
         return array_values(array_filter(
             CategoriaDenuncia::cases(),
-            fn (CategoriaDenuncia $categoria): bool => $categoria !== CategoriaDenuncia::Seguridad || in_array($this, [self::Sala, self::Funcion], true),
+            fn (CategoriaDenuncia $categoria): bool => !$categoria->delLugar() || $this->tieneLugar(),
         ));
+    }
+
+    /**
+     * Si lo denunciado pasa en una sala: sus denuncias tienen sala y cuentan para las reglas.
+     */
+    public function tieneLugar(): bool
+    {
+        return in_array($this, [self::Sala, self::Funcion], true);
     }
 
     public function etiqueta(): string

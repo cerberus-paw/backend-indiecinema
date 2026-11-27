@@ -201,6 +201,23 @@ final class LiquidacionesTest extends TestCase
         self::assertStringContainsString('href="/recaudacion/liquidaciones"', $cuerpo);
     }
 
+    /**
+     * F-03.6: lo que se reparte es lo cobrado menos la comisión de Mercado Pago, y la pantalla lo
+     * dice: en la bajada, y en el detalle con lo que se quedó Mercado Pago de cada función. Los
+     * repartos de antes de la comisión la tienen en 0.
+     */
+    public function testElDetalleMuestraLaComisionDeMercadoPago(): void
+    {
+        $this->base->ejecutar('UPDATE reparto SET comision = ? WHERE funcion_id = ?', ['761.00', '11111111-1111-4111-8111-111111111111']);
+
+        $cuerpo = $this->pedir('GET', self::MIAS)->cuerpo();
+
+        self::assertStringContainsString('Lo que se reparte es lo cobrado menos la comisión de Mercado Pago.', $cuerpo);
+        self::assertStringContainsString('<th scope="col">Comisión de Mercado Pago</th>', $cuerpo);
+        self::assertStringContainsString('<td data-columna="Comisión de Mercado Pago">$ 761</td>', $cuerpo);
+        self::assertStringContainsString('<td data-columna="Comisión de Mercado Pago">$ 0</td>', $cuerpo);
+    }
+
     public function testCadaUnoVeSoloLoSuyo(): void
     {
         $cuerpo = $this->pedir('GET', self::MIAS, usuario: self::DUENA)->cuerpo();

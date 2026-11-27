@@ -12,6 +12,12 @@ use DateTimeImmutable;
 final class AcuerdoFecha
 {
     /**
+     * Cuánto tiene el organizador para proponer otras franjas después de cerrar el acuerdo sin
+     * mínimo antes de la fecha límite: pasado, la tarea de programación cancela la función (F-03.4).
+     */
+    public const PLAZO_PARA_PROPONER_OTRAS = '+7 days';
+
+    /**
      * @param list<FranjaHoraria> $franjas
      */
     public function __construct(
@@ -96,6 +102,22 @@ final class AcuerdoFecha
         return $this->estaAbierto() && !$this->votacionAbierta($ahora) && !$this->alcanzoMinimo();
     }
 
+    /**
+     * Cuándo se cancela la función si el organizador no propone otras franjas: a los 7 días de
+     * cerrarlo sin mínimo, sólo si lo cerró a mano antes de la fecha límite (F-03.4). El que se
+     * cerró al vencer (al leerlo pasada la fecha límite) no tiene plazo: lo cancela la tarea en la
+     * próxima pasada. Null también si está abierto, confirmado o cancelado.
+     */
+    public function seCancelaEl(): ?DateTimeImmutable
+    {
+        $limite = $this->fechaLimite();
+        if ($this->estado !== EstadoAcuerdo::SinMinimo || $this->cerradoEn === null || $limite === null || $this->cerradoEn > $limite) {
+            return null;
+        }
+
+        return $this->cerradoEn->modify(self::PLAZO_PARA_PROPONER_OTRAS);
+    }
+
     public function franjaGanadora(): ?FranjaHoraria
     {
         if ($this->franjaGanadoraId === null) {
@@ -129,6 +151,7 @@ final class AcuerdoFecha
             'votacion_abierta' => $this->votacionAbierta(new DateTimeImmutable()),
             'creado_en' => $this->creadoEn?->format('Y-m-d H:i:s'),
             'cerrado_en' => $this->cerradoEn?->format('Y-m-d H:i:s'),
+            'se_cancela_el' => $this->seCancelaEl()?->format('Y-m-d H:i:s'),
             'franjas' => array_map(static fn (FranjaHoraria $f): array => $f->paraJson(), $this->franjas),
         ];
     }

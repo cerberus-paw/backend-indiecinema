@@ -406,6 +406,44 @@ final class AcuerdosInternosTest extends TestCase
         $leido = json_decode($this->pedirInterno('GET', '/interno/acuerdos/por-funcion/' . self::FUNCION_ID)->cuerpo(), true);
         self::assertSame('sin_minimo', $leido['estado']);
         self::assertFalse($leido['votacion_abierta']);
+        // El que vence lo cancela la tarea en su próxima pasada: no espera el plazo del cerrado a mano.
+        self::assertNull($leido['se_cancela_el']);
+    }
+
+    /**
+     * F-03.4: el que el organizador cerró sin mínimo antes de la fecha límite tiene 7 días para
+     * proponer otras franjas; pasados, la tarea de programación cancela la función. El abierto no
+     * tiene plazo.
+     */
+    public function testElCerradoAManoSinMinimoDiceCuandoSeCancela(): void
+    {
+        $acuerdo = json_decode($this->pedirInterno('POST', '/interno/acuerdos', [
+            'funcion_id' => self::FUNCION_ID,
+            'minimo_asistentes' => 2,
+            'franjas' => [['fecha_hora_inicio' => self::dentroDe(10, '20:00:00')]],
+        ])->cuerpo(), true);
+        self::assertNull($acuerdo['se_cancela_el']);
+
+        $this->pedirInterno('POST', "/interno/acuerdos/{$acuerdo['id']}/cerrar-sin-minimo");
+        $this->base->ejecutar('UPDATE acuerdo_fecha SET cerrado_en = ? WHERE id = ?', ['2026-01-10 18:30:00', $acuerdo['id']]);
+        $this->base->ejecutar(
+            'UPDATE acuerdo_franja SET fecha_hora_inicio = ? WHERE acuerdo_id = ?',
+            ['2026-01-20 20:00:00', $acuerdo['id']],
+        );
+
+        $leido = json_decode($this->pedirInterno('GET', '/interno/acuerdos/por-funcion/' . self::FUNCION_ID)->cuerpo(), true);
+        self::assertSame('2026-01-17 18:30:00', $leido['se_cancela_el']);
+
+        // Si propone otras franjas, el acuerdo de la función es el nuevo, abierto y sin plazo.
+        $this->base->ejecutar('UPDATE acuerdo_fecha SET creado_en = ? WHERE id = ?', ['2026-01-05 10:00:00', $acuerdo['id']]);
+        $this->pedirInterno('POST', '/interno/acuerdos', [
+            'funcion_id' => self::FUNCION_ID,
+            'minimo_asistentes' => 2,
+            'franjas' => [['fecha_hora_inicio' => self::dentroDe(12, '20:00:00')]],
+        ]);
+        $nuevo = json_decode($this->pedirInterno('GET', '/interno/acuerdos/por-funcion/' . self::FUNCION_ID)->cuerpo(), true);
+        self::assertSame('abierto', $nuevo['estado']);
+        self::assertNull($nuevo['se_cancela_el']);
     }
 
     /**

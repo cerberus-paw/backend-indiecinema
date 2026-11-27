@@ -1803,6 +1803,27 @@ final class CarteleraTest extends TestCase
     }
 
     /**
+     * F-03.4: en la ficha de la función sin quórum, el organizador ve hasta cuándo puede proponer
+     * otras franjas antes de que la tarea la cancele. Es para él: un espectador no lo ve.
+     */
+    public function testLaFichaSinQuorumLeDiceAlOrganizadorHastaCuandoProponer(): void
+    {
+        [$funcionId, $organizadorId] = $this->funcionEnAcuerdo();
+        file_put_contents(sys_get_temp_dir() . '/acuerdo_estado_global.txt', 'sin_minimo');
+        $aviso = 'Si no proponés otras franjas antes del 4 dic 18:30, la función se cancela.';
+
+        $organizador = $this->pedir("/cartelera/{$funcionId}", [], ['X-Nginx-Secreto' => self::SECRETO, 'X-Usuario-Id' => $organizadorId, 'X-Rol' => 'organizador']);
+        self::assertSame(200, $organizador->estado());
+        self::assertStringContainsString($aviso, $organizador->cuerpo());
+
+        self::assertStringNotContainsString($aviso, $this->pedir("/cartelera/{$funcionId}")->cuerpo());
+
+        file_put_contents(sys_get_temp_dir() . '/acuerdo_estado_global.txt', 'abierto');
+        $abierto = $this->pedir("/cartelera/{$funcionId}", [], ['X-Nginx-Secreto' => self::SECRETO, 'X-Usuario-Id' => $organizadorId, 'X-Rol' => 'organizador']);
+        self::assertStringNotContainsString('la función se cancela.', $abierto->cuerpo());
+    }
+
+    /**
      * E3-13.F9: si funciones no responde, la cartelera sale igual, con la tarjeta como antes.
      */
     public function testSinFuncionesLaCarteleraSaleIgual(): void

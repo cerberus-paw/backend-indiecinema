@@ -108,6 +108,8 @@ if ($metodo === 'GET' && str_starts_with($ruta, '/interno/acuerdos/por-funcion/'
         'alcanzo_minimo' => false,
         'fecha_limite' => $fechaLimite,
         'votacion_abierta' => $votacionAbierta,
+        // Como si el organizador lo hubiera cerrado a mano antes de la fecha límite (F-03.4).
+        'se_cancela_el' => $estado === 'sin_minimo' ? '2026-12-04 18:30:00' : null,
         'franjas_del_usuario' => ['franja-mock-0'],
         'franjas' => [
             ['id' => 'franja-mock-0', 'inicio' => "{$franja0} 20:00:00", 'fin' => "{$franja0} 22:30:00", 'votos' => ($estado === 'sin_minimo' ? 1 : 2)],

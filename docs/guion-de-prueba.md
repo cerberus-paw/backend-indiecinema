@@ -1,13 +1,14 @@
 # Guion de prueba
 
-El recorrido de lo que está hecho en las entregas 3 y 4. Pantalla → backend → base de
+El recorrido de IndieCinema 1.0.0, con los cinco subsistemas. Pantalla → backend → base de
 datos → pantalla, con cada rol. Se corre en el sitio de desarrollo (https://indiecinema-dev.duckdns.org)
 antes del PR de `dev` a `main`, y en el publicado (https://indiecinema.duckdns.org) antes de cada
 tag. Si un paso falla, se corrige y se vuelve a correr entero.
 
 Hacen falta dos ventanas del navegador, porque el organizador y los espectadores actúan a la vez:
 una normal, para el organizador y el administrador, y una privada, para los espectadores. También
-una foto cualquiera (jpg o png) para la solicitud de sala.
+una foto cualquiera (jpg o png) y un PDF cualquiera para las solicitudes de sala, que piden el
+seguro y la habilitación.
 
 | Rol | Correo | Contraseña |
 |---|---|---|
@@ -15,6 +16,9 @@ una foto cualquiera (jpg o png) para la solicitud de sala.
 | Espectadora | `eva@indiecinema.test` | en la entrega de Classroom |
 | Organizador | `organizador@indiecinema.test` | en la entrega de Classroom |
 | Administrador | `administrador@indiecinema.test` | en la entrega de Classroom |
+
+El administrador también hace todo lo del moderador: en producción no hay una cuenta de moderador
+de prueba.
 
 Las salas, las obras y las funciones de la demo son del organizador. Las dos funciones que se
 crean en el guion (pasos 14 y 16) se cancelan al final, así no quedan en la cartelera.
@@ -92,6 +96,47 @@ crean en el guion (pasos 14 y 16) se cancelan al final, así no quedan en la car
 | 37 | Abrir la ficha de una película | El afiche, la dirección, la duración, los géneros, la sinopsis y sus próximas funciones, cada una con el enlace a su ficha |
 | 38 | Abrir «Mi cuenta» desde el menú de la cuenta | «Mis datos»: el nombre, el correo y los roles, y el enlace a «Mis reservas» |
 
+## Moderación
+
+| Paso | Qué hacer | Qué se tiene que ver |
+|---|---|---|
+| 39 | (Privada) Como Eva, «Abrir una sala» con la foto y el PDF como seguro y como habilitación | La solicitud queda pendiente |
+| 40 | (Normal) Como administrador, en «Solicitudes de sala» (`/moderacion/solicitudes`), abrir la de Eva y tratar de aprobarla sin tildar los cuatro requisitos | No deja: aprobar pide el checklist completo (seguro vigente, habilitación, capacidad y condiciones) |
+| 41 | Devolverla marcando en «Qué falta, si la devolvés» el seguro, con un motivo | Pasa a «Esperando al solicitante». A Eva le llega al buzón un correo con lo que falta y el plazo, 15 días |
+| 42 | (Privada) Como Eva, abrir otra vez «Abrir una sala» | Dice qué falta y hasta cuándo. Subir el PDF y reenviarla |
+| 43 | (Normal) Abrirla, tildar los cuatro requisitos y aprobarla con un motivo | La sala aparece en «Salas» y Eva pasa a organizadora: en su ventana, al recargar, tiene el menú del organizador y la sala en «Mis salas» |
+| 44 | Como organizador, cargar una obra nueva en «Mis obras». Después, como administrador, abrir «Obras» (`/moderacion/obras`) y aprobarla | Hasta que se aprueba no está en «Películas» ni se puede programar. Aprobada, aparece en el catálogo |
+| 45 | (Privada) Como Eva, en la ficha de Espacio Cultural La Trocha, «Denunciar», elegir «Seguridad del lugar» y «Enviar la denuncia» | La denuncia queda registrada. Es un motivo de gravedad alta |
+| 46 | (Normal) Como administrador, abrir «Denuncias» (`/moderacion/denuncias`) | La Trocha figura «Para suspender», con la denuncia de Eva |
+| 47 | Elegirla, marcar «Suspender la sala» con un motivo y «Enviar resolución» | La Trocha sale de «Salas» y aparece en «Salas suspendidas por denuncia». Lo que ya tenía programado sigue en pie |
+| 48 | En esa lista, «Levantar la suspensión» con un motivo | La Trocha vuelve a «Salas» |
+
+## Mercado Pago
+
+Sólo con el cobro prendido (`[mercadopago] activo = true` en funciones, como en el sitio de
+desarrollo). Con el cobro apagado, una función paga se confirma sin cobrar, como en el paso 24, y
+estos pasos se saltean. Se paga con la sesión del comprador de prueba de Mercado Pago, nunca con
+una cuenta de verdad: titular `APRO` para un pago aprobado y `OTHE` para uno rechazado, con una de
+las tarjetas de prueba de Checkout Pro.
+
+| Paso | Qué hacer | Qué se tiene que ver |
+|---|---|---|
+| 49 | (Privada) Como Eva, reservar 1 lugar en una función paga de la demo, a más de 24 horas | Antes de confirmar, la política de cancelación. Después, la reserva queda pendiente de pago, retiene el lugar y lleva a Mercado Pago |
+| 50 | Pagar con titular `APRO` | Vuelve al comprobante con la reserva confirmada: la confirma el aviso de Mercado Pago, no la vuelta del navegador. Al buzón llega el correo de la reserva confirmada |
+| 51 | En «Mis reservas», cancelarla | Queda cancelada y reembolsada, con la fecha, y el lugar vuelve a estar libre |
+| 52 | Reservar otra vez y pagar con titular `OTHE` | Mercado Pago lo rechaza y la reserva sigue pendiente. A los 15 minutos vence y su lugar se libera (la tarea `liberar-vencidas`, cada 5 minutos, la pasa a cancelada) |
+
+## Recaudación
+
+| Paso | Qué hacer | Qué se tiene que ver |
+|---|---|---|
+| 53 | (Privada) Como Eva, abrir «Mis puntos» (`/recaudacion/puntos`) y «Beneficios» (`/recaudacion/beneficios`) | El saldo: 10 puntos por cada asistencia registrada en la puerta. Con 100 o más, «Canjear» da un cupón del 20 % que vence a los 60 días y se carga al reservar. Beneficios lista los comercios adheridos |
+| 54 | (Normal) Como administrador, abrir «Reparto» (`/recaudacion/administracion/reparto`) y cargar un cambio que no sume 100 % | El reparto vigente (70 % la sala, 15 % los dueños de las obras y 15 % la plataforma) y su historial. El cambio no se guarda: los tres tienen que sumar 100 %. En producción, no guardar uno válido |
+| 55 | Abrir «Liquidaciones» (`/recaudacion/administracion/liquidaciones`) y elegir un mes con funciones pagas finalizadas | Lo que le toca a cada organizador y a cada dueño en el mes. «Marcar transferida», con una nota, la pasa a transferida con la fecha |
+| 56 | Como organizador, abrir «Mis liquidaciones» (`/recaudacion/liquidaciones`) | Lo liquidado y lo que falta transferir, mes por mes, con lo que se cobró en cada función y su parte. El reparto se hace después de descontar la comisión de Mercado Pago |
+| 57 | Abrir «Reportes» (`/recaudacion/reportes`) y recorrer las pestañas. Después, «Descargar CSV» de las funciones | Gráficos de lo vendido, la plata de cada sala contra su costo, el embudo de conversión y el ranking del público. Cada recomendación dice por qué la da, y «Programarla» abre el alta de la función ya cargada. El CSV suma lo mismo que el resumen |
+| 58 | Como administrador, en «Comercios» (`/recaudacion/administracion/comercios`), dar de alta uno y después desactivarlo | Activo, aparece en «Beneficios». Desactivado, deja de aparecer |
+
 ## Al terminar
 
 - Como organizador, cancelar las funciones de los pasos 14 y 16, con su confirmación: salen de la
@@ -99,5 +144,5 @@ crean en el guion (pasos 14 y 16) se cancelan al final, así no quedan en la car
   confirmadas, y a cada espectador le llega el aviso por correo. La reserva con asistencia queda
   como está.
 - Como administrador, retirar la sala del paso 11 desde «Solicitudes de sala» («Retirar del
-  sitio») y dejar al usuario del paso 8 como espectador. Así el sitio queda con los datos de la
-  demo.
+  sitio») y dejar al usuario del paso 8 como espectador. Lo mismo con la sala de Eva (paso 43): se
+  retira y Eva vuelve a espectadora. Así el sitio queda con los datos de la demo.

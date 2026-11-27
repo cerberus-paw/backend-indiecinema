@@ -1378,6 +1378,23 @@ final class CarteleraTest extends TestCase
         self::assertSame($obras[1]['id'], (string) $this->base->valor("SELECT obra_id FROM voto WHERE funcion_id = ? AND usuario_id = ?", [$funcionId, $espectadorId]));
     }
 
+    /**
+     * F-03.2: obra_id o franja_id como lista (obra_id[]=…) es un pedido mal armado: 400 y sin
+     * voto, no un 500.
+     */
+    public function testVotarConUnaListaDa400(): void
+    {
+        [$funcionId, $obras] = $this->votacionQueCierra('+1 day');
+        $obraId = (string) $obras[0]['id'];
+        $espectadorId = Uuid::nuevo();
+
+        foreach (['obra_id', 'franja_id'] as $campo) {
+            $respuesta = $this->post("/cartelera/{$funcionId}/votar", [$campo => [$obraId]], $espectadorId);
+            self::assertSame(400, $respuesta->estado(), $campo);
+        }
+        self::assertSame(0, (int) $this->base->valor('SELECT COUNT(*) FROM voto WHERE usuario_id = ?', [$espectadorId]));
+    }
+
     public function testNoSePuedeVotarEnFuncionQueNoEstaEnVotacion(): void
     {
         $this->cargarDatosDePrueba();

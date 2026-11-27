@@ -398,6 +398,13 @@ final class Cartelera extends Controlador
         }
 
         $cuerpo = $peticion->cuerpo();
+        // Con obra_id[]=… PHP arma una lista y el (string) de abajo cortaba con un 500. Un pedido
+        // así no sale del formulario: se rechaza como mal armado, antes de tocar nada.
+        foreach (['obra_id', 'franja_id', 'quitar'] as $campo) {
+            if (isset($cuerpo[$campo]) && !is_scalar($cuerpo[$campo])) {
+                throw ExcepcionHttp::solicitudInvalida('El voto no es válido.');
+            }
+        }
         $franjaId = (string) ($cuerpo['franja_id'] ?? '');
         $obraId = (string) ($cuerpo['obra_id'] ?? '');
 

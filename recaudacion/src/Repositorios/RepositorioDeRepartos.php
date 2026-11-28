@@ -133,11 +133,12 @@ final class RepositorioDeRepartos
                 $fila['sala_nombre'] === null ? null : (string) $fila['sala_nombre'],
                 $fila['titulos'] === null ? null : (string) $fila['titulos'],
                 Monto::centavos((string) $fila['cobrado']),
+                Monto::centavos((string) $fila['comision']),
                 RolDelReparto::from((string) $fila['rol']),
                 Monto::centavos((string) $fila['monto']),
             ),
             $this->base->filas(
-                'SELECT r.funcion_id, r.funcion_fecha_hora, r.sala_nombre, r.titulos, r.cobrado, p.rol, p.monto
+                'SELECT r.funcion_id, r.funcion_fecha_hora, r.sala_nombre, r.titulos, r.cobrado, r.comision, p.rol, p.monto
                  FROM reparto_parte p
                  JOIN reparto r ON r.id = p.reparto_id
                  WHERE p.beneficiario_id = ? AND r.finalizada_en >= ? AND r.finalizada_en < ?

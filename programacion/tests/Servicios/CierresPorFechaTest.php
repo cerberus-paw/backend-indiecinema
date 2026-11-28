@@ -269,11 +269,11 @@ final class CierresPorFechaTest extends TestCase
 
     /**
      * Un acuerdo como lo responde funciones: mínimo 2, franjas mañana y pasado, la fecha límite
-     * y los votos que se pidan.
+     * y los votos que se pidan. $seCancelaEl es el plazo del cerrado a mano sin mínimo (F-03.4).
      *
      * @return array<string, mixed>
      */
-    private static function acuerdo(string $estado, string $limite, int $votos, ?string $cerradoEn = null): array
+    private static function acuerdo(string $estado, string $limite, int $votos, ?string $cerradoEn = null, ?string $seCancelaEl = null): array
     {
         $manana = (new DateTimeImmutable('+1 day'))->format('Y-m-d');
         $pasado = (new DateTimeImmutable('+2 days'))->format('Y-m-d');
@@ -284,6 +284,7 @@ final class CierresPorFechaTest extends TestCase
             'estado' => $estado,
             'fecha_limite' => (new DateTimeImmutable($limite))->format('Y-m-d H:i:s'),
             'cerrado_en' => $cerradoEn === null ? null : (new DateTimeImmutable($cerradoEn))->format('Y-m-d H:i:s'),
+            'se_cancela_el' => $seCancelaEl === null ? null : (new DateTimeImmutable($seCancelaEl))->format('Y-m-d H:i:s'),
             'franja_ganadora' => $estado === 'confirmado' ? ['id' => 'franja-1', 'inicio' => "{$manana} 20:00:00"] : null,
             'franjas' => [
                 ['id' => 'franja-1', 'inicio' => "{$manana} 20:00:00", 'votos' => $votos],
@@ -454,22 +455,50 @@ final class CierresPorFechaTest extends TestCase
 
     /**
      * El que el organizador cerró sin mínimo antes de la fecha límite es para proponer otras
-     * franjas (E3-13.F8): no se cancela. Y el que todavía no venció, ni el que no tiene franjas,
-     * no se tocan.
+     * franjas (E3-13.F8): mientras no pase su plazo (F-03.4), no se cancela. Y el que todavía no
+     * venció, ni el que no tiene franjas, no se tocan.
      */
-    public function testNoTocaLosQueNoVencieronNiElCerradoAManoAntesDelLimite(): void
+    public function testNoTocaLosQueNoVencieronNiElCerradoAManoDentroDelPlazo(): void
     {
         $abierto = $this->enAcuerdo();
         $cerradoAMano = $this->enAcuerdo();
         $sinFranjas = $this->enAcuerdo();
         $acuerdos = $this->acuerdos();
         $acuerdos->porFuncion[$abierto] = self::acuerdo('abierto', '+1 hour', 2);
-        $acuerdos->porFuncion[$cerradoAMano] = self::acuerdo('sin_minimo', '-1 hour', 0, cerradoEn: '-2 hours');
+        $acuerdos->porFuncion[$cerradoAMano] = self::acuerdo('sin_minimo', '-1 hour', 0, cerradoEn: '-2 hours', seCancelaEl: '+7 days -2 hours');
 
         self::assertSame(['programadas' => 0, 'canceladas' => 0], $this->cierresConAcuerdos($acuerdos)->cerrarAcuerdos());
 
         self::assertSame(['en_acuerdo_fecha', 'en_acuerdo_fecha', 'en_acuerdo_fecha'], array_map($this->estadoDe(...), [$abierto, $cerradoAMano, $sinFranjas]));
         self::assertSame([], $acuerdos->pedidos);
+    }
+
+    /**
+     * F-03.4: el organizador lo cerró sin mínimo antes de la fecha límite y en 7 días no propuso
+     * otras franjas ni la canceló. La tarea la cancela y avisa como a la que vence sin mínimo; si
+     * funciones no responde, la función sigue en acuerdo y la próxima pasada lo reintenta.
+     */
+    public function testElCerradoAManoSinMinimoSeCancelaPasadoElPlazo(): void
+    {
+        $id = $this->enAcuerdo();
+        $acuerdos = $this->acuerdos();
+        $acuerdos->porFuncion[$id] = self::acuerdo('sin_minimo', '+3 days', 1, cerradoEn: '-7 days -1 hour', seCancelaEl: '-1 hour');
+        $acuerdos->caido = true;
+
+        try {
+            $this->cierresConAcuerdos($acuerdos)->cerrarAcuerdos();
+            self::fail('Tenía que cortar la pasada.');
+        } catch (\RuntimeException) {
+        }
+        self::assertSame('en_acuerdo_fecha', $this->estadoDe($id));
+
+        $acuerdos->caido = false;
+        self::assertSame(['programadas' => 0, 'canceladas' => 1], $this->cierresConAcuerdos($acuerdos)->cerrarAcuerdos());
+
+        self::assertSame('cancelada', $this->estadoDe($id));
+        self::assertSame([['avisar-cancelacion', 'acuerdo-1', 'Zama']], $acuerdos->pedidos);
+        // Cancelada, ya no está en acuerdo: otra pasada no la vuelve a tocar.
+        self::assertSame(['programadas' => 0, 'canceladas' => 0], $this->cierresConAcuerdos($acuerdos)->cerrarAcuerdos());
     }
 
     /**

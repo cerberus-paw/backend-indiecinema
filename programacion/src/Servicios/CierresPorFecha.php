@@ -25,7 +25,10 @@ use RuntimeException;
  *   organizador (EF-03.1, EF-05.1);
  * - el acuerdo de fecha que pasó su fecha límite confirma la franja que llegó al mínimo y la
  *   función queda programada; si ninguna llegó, la función se cancela y se les avisa a los que
- *   marcaron «Me sirve» (EF-03.2).
+ *   marcaron «Me sirve» (EF-03.2);
+ * - el acuerdo que el organizador cerró sin mínimo antes de la fecha límite, y que en 7 días no
+ *   reemplazó con otras franjas, cancela la función y avisa igual (F-03.4). El plazo lo calcula
+ *   funciones y lo manda como se_cancela_el.
  *
  * El cierre a mano sigue andando: la tarea sólo toma lo que pasó su fecha y sigue abierto, así que
  * correrla de más, o después de que el organizador cerró, no hace nada.
@@ -259,10 +262,16 @@ final class CierresPorFecha
             $estado = 'sin_minimo';
         }
 
-        // Sólo el que cerró sin mínimo por vencer: el que el organizador cerró a mano antes de la
-        // fecha límite es para proponer otras franjas (E3-13.F8), y ése no se cancela.
+        // El que cerró sin mínimo por vencer se cancela ya. El que el organizador cerró a mano antes
+        // de la fecha límite es para proponer otras franjas (E3-13.F8): se cancela recién cuando
+        // pasa su plazo, que funciones manda como se_cancela_el (F-03.4).
+        if ($estado !== 'sin_minimo') {
+            return null;
+        }
         $cerrado = self::fecha($acuerdo['cerrado_en'] ?? null);
-        if ($estado !== 'sin_minimo' || $limite === null || $limite >= $ahora || ($cerrado !== null && $cerrado <= $limite)) {
+        $seCancelaEl = self::fecha($acuerdo['se_cancela_el'] ?? null);
+        $vencio = $limite !== null && $limite < $ahora && ($cerrado === null || $cerrado > $limite);
+        if (!$vencio && ($seCancelaEl === null || $seCancelaEl > $ahora)) {
             return null;
         }
         $acuerdos->avisarCancelacion((string) $acuerdo['id'], $this->titulosDe($funcionId), $this->motivoDeCancelacion($funcion, $leido));

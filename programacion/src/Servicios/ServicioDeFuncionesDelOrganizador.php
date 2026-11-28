@@ -460,6 +460,7 @@ final class ServicioDeFuncionesDelOrganizador
     /**
      * Cierra el acuerdo de fecha cuando no alcanza el mínimo de asistentes (E3-13.5 / IC-157).
      * La función NO se programa y permanece disponible para que el organizador decida si propone nuevas franjas o la cancela.
+     * Tiene 7 días: si no hace ninguna de las dos, la tarea de los cierres por fecha la cancela (F-03.4).
      *
      * @return array<string, mixed>
      *

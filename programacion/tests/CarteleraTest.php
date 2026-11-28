@@ -1378,6 +1378,23 @@ final class CarteleraTest extends TestCase
         self::assertSame($obras[1]['id'], (string) $this->base->valor("SELECT obra_id FROM voto WHERE funcion_id = ? AND usuario_id = ?", [$funcionId, $espectadorId]));
     }
 
+    /**
+     * F-03.2: obra_id o franja_id como lista (obra_id[]=…) es un pedido mal armado: 400 y sin
+     * voto, no un 500.
+     */
+    public function testVotarConUnaListaDa400(): void
+    {
+        [$funcionId, $obras] = $this->votacionQueCierra('+1 day');
+        $obraId = (string) $obras[0]['id'];
+        $espectadorId = Uuid::nuevo();
+
+        foreach (['obra_id', 'franja_id'] as $campo) {
+            $respuesta = $this->post("/cartelera/{$funcionId}/votar", [$campo => [$obraId]], $espectadorId);
+            self::assertSame(400, $respuesta->estado(), $campo);
+        }
+        self::assertSame(0, (int) $this->base->valor('SELECT COUNT(*) FROM voto WHERE usuario_id = ?', [$espectadorId]));
+    }
+
     public function testNoSePuedeVotarEnFuncionQueNoEstaEnVotacion(): void
     {
         $this->cargarDatosDePrueba();
@@ -1783,6 +1800,27 @@ final class CarteleraTest extends TestCase
         $cuerpo = $this->pedir('/cartelera?pagina=2')->cuerpo();
         self::assertStringContainsString('ACUERDO SIN MÍNIMO', $cuerpo);
         self::assertStringNotContainsString('Votar fecha', $cuerpo);
+    }
+
+    /**
+     * F-03.4: en la ficha de la función sin quórum, el organizador ve hasta cuándo puede proponer
+     * otras franjas antes de que la tarea la cancele. Es para él: un espectador no lo ve.
+     */
+    public function testLaFichaSinQuorumLeDiceAlOrganizadorHastaCuandoProponer(): void
+    {
+        [$funcionId, $organizadorId] = $this->funcionEnAcuerdo();
+        file_put_contents(sys_get_temp_dir() . '/acuerdo_estado_global.txt', 'sin_minimo');
+        $aviso = 'Si no proponés otras franjas antes del 4 dic 18:30, la función se cancela.';
+
+        $organizador = $this->pedir("/cartelera/{$funcionId}", [], ['X-Nginx-Secreto' => self::SECRETO, 'X-Usuario-Id' => $organizadorId, 'X-Rol' => 'organizador']);
+        self::assertSame(200, $organizador->estado());
+        self::assertStringContainsString($aviso, $organizador->cuerpo());
+
+        self::assertStringNotContainsString($aviso, $this->pedir("/cartelera/{$funcionId}")->cuerpo());
+
+        file_put_contents(sys_get_temp_dir() . '/acuerdo_estado_global.txt', 'abierto');
+        $abierto = $this->pedir("/cartelera/{$funcionId}", [], ['X-Nginx-Secreto' => self::SECRETO, 'X-Usuario-Id' => $organizadorId, 'X-Rol' => 'organizador']);
+        self::assertStringNotContainsString('la función se cancela.', $abierto->cuerpo());
     }
 
     /**

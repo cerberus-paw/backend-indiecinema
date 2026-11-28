@@ -288,7 +288,7 @@ final class AvisosDeReservas
         return implode("\n", [
             "Hola, {$nombre}:",
             '',
-            "Marcaste que te servía una fecha para «{$titulo}», pero al llegar la fecha límite ninguna franja juntó el mínimo de {$asistentes}.",
+            "Marcaste que te servía una fecha para «{$titulo}», pero ninguna franja juntó el mínimo de {$asistentes}.",
             'La función se canceló: no se programa y no tenés que hacer nada.',
             '',
             'En la cartelera de IndieCinema podés elegir otra función.',

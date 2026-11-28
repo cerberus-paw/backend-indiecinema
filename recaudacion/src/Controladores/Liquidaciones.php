@@ -110,6 +110,7 @@ final class Liquidaciones extends Controlador
             'sala' => $parte->salaNombre,
             'titulos' => $parte->titulos,
             'cobrado' => Monto::comoPesos($parte->cobradoCentavos),
+            'comision' => Monto::comoPesos($parte->comisionCentavos),
             'rol' => $parte->rol->comoTexto(),
             'monto' => Monto::comoPesos($parte->centavos),
         ];

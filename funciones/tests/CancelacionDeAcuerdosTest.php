@@ -123,7 +123,10 @@ final class CancelacionDeAcuerdosTest extends TestCase
         self::assertCount(2, $correos);
         self::assertEqualsCanonicalizing(['<' . self::EVA . '@ejemplo.test>', '<' . self::ELIAS . '@ejemplo.test>'], array_merge(...array_column($correos, 'para')));
         [, $cuerpo] = explode("\r\n\r\n", $correos[0]['mensaje'], 2);
-        self::assertStringContainsString('el mínimo de 20 asistentes', (string) base64_decode(str_replace("\r\n", '', $cuerpo), true));
+        $texto = (string) base64_decode(str_replace("\r\n", '', $cuerpo), true);
+        // Vale para el que venció y para el que el organizador cerró antes de la fecha límite.
+        self::assertStringContainsString('ninguna franja juntó el mínimo de 20 asistentes', $texto);
+        self::assertStringNotContainsString('al llegar la fecha límite', $texto);
     }
 
     /**

@@ -345,6 +345,10 @@ final class AcuerdosInternosTest extends TestCase
         $primero = json_decode($this->pedirInterno('POST', '/interno/acuerdos', $propuesta)->cuerpo(), true);
         $this->pedirInterno('POST', "/interno/acuerdos/{$primero['id']}/votar", ['franja_id' => $primero['franjas'][0]['id'], 'usuario_id' => self::USUARIO_EVA]);
         $this->pedirInterno('POST', "/interno/acuerdos/{$primero['id']}/cerrar-sin-minimo");
+        // El acuerdo de la función es el de creado_en más nuevo, que se guarda al segundo: creados
+        // en el mismo segundo, cualquiera de los dos podía salir primero. De verdad no pasa, porque
+        // entre uno y otro el organizador llena el formulario.
+        $this->base->ejecutar('UPDATE acuerdo_fecha SET creado_en = creado_en - INTERVAL 1 HOUR WHERE id = ?', [$primero['id']]);
 
         $segundo = json_decode($this->pedirInterno('POST', '/interno/acuerdos', $propuesta)->cuerpo(), true);
         $nueva = $segundo['franjas'][1]['id'];

@@ -993,7 +993,10 @@ final class SolicitudDeSalaTest extends TestCase
     {
         $this->enviar();
         $id = $this->devolverLaUltima(['seguro']);
-        $this->base->ejecutar('UPDATE solicitud_sala SET devolucion_vence = ? WHERE id = ?', [self::dentroDe('-1 day'), $id]);
+        // Ayer en Argentina, que es donde se compara el plazo (Devolucion::ZONA): con el ayer de UTC,
+        // entre las 21 y las 24 de acá todavía era hoy y la solicitud se completaba.
+        $ayer = new DateTimeImmutable('yesterday', new \DateTimeZone('America/Argentina/Buenos_Aires'))->format('Y-m-d');
+        $this->base->ejecutar('UPDATE solicitud_sala SET devolucion_vence = ? WHERE id = ?', [$ayer, $id]);
 
         $respuesta = $this->completar();
 

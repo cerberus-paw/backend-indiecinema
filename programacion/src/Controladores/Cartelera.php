@@ -173,6 +173,10 @@ final class Cartelera extends Controlador
                 // Hasta cuándo se marca «Me sirve» (E3-13.F8): pasada, la ficha no ofrece marcar.
                 $limite = is_string($acuerdo['fecha_limite'] ?? null) ? DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $acuerdo['fecha_limite']) : false;
                 $datosFuncion['fecha_limite'] = $limite !== false ? TarjetaDeFuncion::diaMesYHora($limite) : null;
+                // Hasta cuándo puede proponer otras franjas el organizador que lo cerró sin mínimo:
+                // pasado, la tarea cancela la función (F-03.4). Null si no tiene plazo.
+                $seCancela = is_string($acuerdo['se_cancela_el'] ?? null) ? DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $acuerdo['se_cancela_el']) : false;
+                $datosFuncion['se_cancela_el'] = $seCancela !== false ? TarjetaDeFuncion::diaMesYHora($seCancela) : null;
                 $datosFuncion['votacion_abierta'] = ($acuerdo['votacion_abierta'] ?? true) === true;
                 // Las que marcó quien mira: pueden ser varias (E3-13.F7).
                 $franjasDelUsuario = is_array($acuerdo['franjas_del_usuario'] ?? null) ? $acuerdo['franjas_del_usuario'] : [];
